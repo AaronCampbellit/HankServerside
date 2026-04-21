@@ -51,8 +51,10 @@ docker compose version
 
 ## Files Used
 
-- `.env.cloud`
-- `.env.agent`
+- `configs/cloud.compose.env.example`
+- `configs/agent.compose.env.example`
+- optional `/.env.cloud`
+- optional `/.env.agent`
 - `docker-compose.yml`
 
 ## Environment
@@ -100,14 +102,16 @@ mkdir -p data/postgres data/files data/notes
 
 If the repo already exists on the server, just `cd` into it and ensure those directories exist.
 
-## 2. Create the env files
+## 2. Review the default env files
 
-```bash
-cp configs/cloud.compose.env.example .env.cloud
-cp configs/agent.compose.env.example .env.agent
-```
+The Compose stack already loads checked-in defaults from:
 
-### `.env.cloud`
+- `configs/cloud.compose.env.example`
+- `configs/agent.compose.env.example`
+
+Create `/.env.cloud` or `/.env.agent` only when you need to override server-specific values.
+
+### Default cloud env
 
 Use the default shape, but replace the PostgreSQL credentials with real values for the server:
 
@@ -133,7 +137,15 @@ Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
 
 Do not change `HANK_REMOTE_AGENT_CLOUD_URL` for the single-host Compose deployment. The agent still connects to `ws://cloud:8080/ws/agent` on the internal Docker network.
 
-### `.env.agent`
+If you need to override those defaults on one server, create `/.env.cloud` with only the keys you want to replace, for example:
+
+```env
+HANK_REMOTE_CLOUD_HOST_PORT=18080
+POSTGRES_PASSWORD=replace-with-real-db-password
+HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-real-db-password@postgres:5432/hankremote?sslmode=disable
+```
+
+### Default agent env
 
 Keep the cloud URL exactly like this for the Compose deployment:
 
@@ -153,11 +165,12 @@ HANK_REMOTE_HA_TOKEN=<home-assistant-token>
 
 Notes:
 
-- leave `HANK_REMOTE_AGENT_TOKEN` blank for the first boot
+- the checked-in default leaves the token as a placeholder until you override it locally
 - the raw token is issued by the dashboard after the first admin account is created
 - if you are not using SMB, leave all `HANK_REMOTE_SMB_*` values empty
 - if SMB is not configured, the agent uses the mounted `./data/files` folder
 - note storage uses the mounted `./data/notes` folder unless you change the mounted root
+- for real deployment secrets and server-specific tokens, create `/.env.agent` with only the keys you want to replace
 
 ## 3. Start the stack
 
@@ -223,7 +236,7 @@ If registration works but later calls report that the target home agent is offli
 
 ## 6. Install the issued agent token
 
-Put the raw token from the dashboard into `.env.agent`:
+Put the raw token from the dashboard into `/.env.agent`:
 
 ```env
 HANK_REMOTE_AGENT_TOKEN=<issued-token>
@@ -326,8 +339,8 @@ docker compose up --build -d
 Back up at least:
 
 - `data/postgres`
-- `.env.cloud`
-- `.env.agent`
+- optional `/.env.cloud`
+- optional `/.env.agent`
 
 Also back up any real content stored under:
 
@@ -339,9 +352,9 @@ Agent-side files and notes live in the mounted host directories and need host-le
 
 ## 11. Security notes
 
-- keep `.env.cloud` and `.env.agent` readable only by the service user
+- keep any local `/.env.cloud` and `/.env.agent` override files readable only by the service user
 - never share raw agent tokens, session tokens, Home Assistant tokens, or SMB credentials
-- rotate agent tokens by issuing a new token, updating `.env.agent`, restarting the agent, then revoking the old token
+- rotate agent tokens by issuing a new token, updating `/.env.agent`, restarting the agent, then revoking the old token
 - do not expose the cloud container directly on a public interface; keep the bind on `127.0.0.1` with your chosen host port
 - do not mount Docker control sockets into the public cloud container
 

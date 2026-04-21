@@ -22,8 +22,10 @@ This deployment is singleton-only:
 
 ## Files Used
 
-- `.env.cloud`
-- `.env.agent`
+- `configs/cloud.compose.env.example`
+- `configs/agent.compose.env.example`
+- optional `/.env.cloud`
+- optional `/.env.agent`
 - `docker-compose.yml`
 
 ## 1. Prepare the workspace
@@ -33,11 +35,9 @@ cd /srv
 git clone <your-hankserverside-repo-url> hank-remote
 cd /srv/hank-remote
 mkdir -p data/postgres data/files data/notes
-cp configs/cloud.compose.env.example .env.cloud
-cp configs/agent.compose.env.example .env.agent
 ```
 
-## 2. Review `.env.cloud`
+## 2. Review the default cloud env
 
 Use the normal single-host shape:
 
@@ -56,7 +56,9 @@ HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
 If host port `8080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example `18080`.
 Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
 
-## 3. Fill in `.env.agent`
+If you need server-specific overrides, create `/.env.cloud` with only the keys you want to replace.
+
+## 3. Review the default agent env
 
 Keep this value unchanged:
 
@@ -76,8 +78,8 @@ HANK_REMOTE_HA_TOKEN=<ha-token>
 
 Notes:
 
-- leave `HANK_REMOTE_AGENT_TOKEN` blank before first bootstrap
-- fill it after you issue a token from the dashboard
+- the checked-in default keeps the token as a placeholder before first bootstrap
+- for real deployment values, create `/.env.agent` with only the keys you want to replace
 - leave SMB variables blank unless you are actually using SMB
 
 ## 4. Start the stack
@@ -116,7 +118,7 @@ Do not look for a separate Home creation step. The Home is created automatically
 
 ## 7. Activate the agent token
 
-Add the raw token to `.env.agent`:
+Add the raw token to `/.env.agent`:
 
 ```env
 HANK_REMOTE_AGENT_TOKEN=<issued-token>
@@ -184,5 +186,5 @@ docker compose up --build -d
 - the public hostname should come through Cloudflare Tunnel, not a direct public bind
 - the agent should keep using `ws://cloud:8080/ws/agent`
 - this version supports only one Home per deployment
-- deployment changes happen by editing `.env.agent` or `.env.cloud` and restarting services
+- deployment changes happen by editing optional `/.env.agent` or `/.env.cloud` override files and restarting services
 - the public cloud container should not control Docker on the host

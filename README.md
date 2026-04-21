@@ -162,25 +162,30 @@ After that, repo-local commands like `docker compose up --build` will prefer the
 
 This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud binds only to loopback on the host, defaulting to `127.0.0.1:8080`, and Cloudflare Tunnel exposes that service externally.
 
-1. Copy the compose env examples:
+1. The Compose stack already loads checked-in default env files from:
+
+- `configs/cloud.compose.env.example`
+- `configs/agent.compose.env.example`
+
+Create local override files only if you need to replace defaults with server-specific values:
 
 ```bash
-cp configs/cloud.compose.env.example .env.cloud
-cp configs/agent.compose.env.example .env.agent
 mkdir -p data/postgres data/files data/notes
 ```
 
-2. Keep the internal agent cloud URL in `.env.agent`:
+2. Keep the internal agent cloud URL as:
 
 ```env
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-If host port `8080` is already taken, change `.env.cloud` instead of the agent URL:
+If host port `8080` is already taken, create `.env.cloud` and change that instead of the agent URL:
 
 ```env
 HANK_REMOTE_CLOUD_HOST_PORT=18080
 ```
+
+If you need to override agent values such as the issued token or Home Assistant token, create `.env.agent` with only the keys you want to replace.
 
 3. Build and start both services:
 
@@ -190,7 +195,7 @@ docker compose up --build -d
 
 4. Point Cloudflare Tunnel at your chosen host bind, for example `http://127.0.0.1:18080`.
 5. Open the public URL, register the first admin account, and issue an agent token.
-6. Put the issued token into `.env.agent` as `HANK_REMOTE_AGENT_TOKEN`, then restart the `agent` service:
+6. If you do not already have a local override file, create `.env.agent`, add the issued token as `HANK_REMOTE_AGENT_TOKEN`, then restart the `agent` service:
 
 ```bash
 docker compose up -d --no-deps agent

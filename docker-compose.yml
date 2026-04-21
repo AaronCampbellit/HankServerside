@@ -2,7 +2,10 @@ services:
   postgres:
     image: postgres:17-alpine
     env_file:
-      - .env.cloud
+      - path: ./configs/cloud.compose.env.example
+        required: true
+      - path: ./.env.cloud
+        required: false
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +21,10 @@ services:
       context: .
       dockerfile: Dockerfile.server
     env_file:
-      - .env.cloud
+      - path: ./configs/cloud.compose.env.example
+        required: true
+      - path: ./.env.cloud
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,7 +36,10 @@ services:
   agent:
     image: hankserverside
     env_file:
-      - .env.agent
+      - path: ./configs/agent.compose.env.example
+        required: true
+      - path: ./.env.agent
+        required: false
     depends_on:
       - cloud
     volumes:
