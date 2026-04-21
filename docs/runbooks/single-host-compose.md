@@ -5,7 +5,7 @@ Use this runbook for the supported real deployment shape:
 - one machine
 - one Docker Compose stack
 - `cloud`, `agent`, and `postgres` together
-- Cloudflare Tunnel exposing `http://127.0.0.1:8080`
+- Cloudflare Tunnel exposing your configured host bind, for example `http://127.0.0.1:8080`
 
 This deployment is singleton-only:
 
@@ -18,7 +18,7 @@ This deployment is singleton-only:
 - Docker Engine and Docker Compose are installed
 - the repo is present on the server
 - the server can reach the local services the agent needs
-- a Cloudflare Tunnel is ready to proxy to `http://127.0.0.1:8080`
+- a Cloudflare Tunnel is ready to proxy to your configured host bind, for example `http://127.0.0.1:8080`
 
 ## Files Used
 
@@ -43,6 +43,8 @@ Use the normal single-host shape:
 
 ```env
 HANK_REMOTE_CLOUD_ADDR=:8080
+HANK_REMOTE_CLOUD_HOST_BIND=127.0.0.1
+HANK_REMOTE_CLOUD_HOST_PORT=8080
 HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-db-password@postgres:5432/hankremote?sslmode=disable
 POSTGRES_DB=hankremote
 POSTGRES_USER=hankremote
@@ -50,6 +52,9 @@ POSTGRES_PASSWORD=replace-with-db-password
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
 ```
+
+If host port `8080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example `18080`.
+Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
 
 ## 3. Fill in `.env.agent`
 
@@ -81,8 +86,8 @@ Notes:
 cd /srv/hank-remote
 docker compose up --build -d
 docker compose ps
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:<host-port>/healthz
+curl http://127.0.0.1:<host-port>/readyz
 ```
 
 ## 5. Configure Cloudflare Tunnel
@@ -90,7 +95,7 @@ curl http://127.0.0.1:8080/readyz
 Forward the public hostname to:
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:<host-port>
 ```
 
 Make sure WebSocket upgrades work for:
@@ -136,9 +141,9 @@ Dashboard:
 API:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/readyz
-curl http://127.0.0.1:8080/metrics | head
+curl http://127.0.0.1:<host-port>/healthz
+curl http://127.0.0.1:<host-port>/readyz
+curl http://127.0.0.1:<host-port>/metrics | head
 ```
 
 App behavior:
@@ -175,7 +180,7 @@ docker compose up --build -d
 
 ## 10. Important constraints
 
-- the cloud stays on `127.0.0.1:8080`
+- the cloud stays on `127.0.0.1:<host-port>` on the host, while the container still listens on `:8080`
 - the public hostname should come through Cloudflare Tunnel, not a direct public bind
 - the agent should keep using `ws://cloud:8080/ws/agent`
 - this version supports only one Home per deployment

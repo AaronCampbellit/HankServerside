@@ -160,7 +160,7 @@ After that, repo-local commands like `docker compose up --build` will prefer the
 
 ## Docker Compose
 
-This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud binds only to `127.0.0.1:8080`, and Cloudflare Tunnel exposes that service externally.
+This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud binds only to loopback on the host, defaulting to `127.0.0.1:8080`, and Cloudflare Tunnel exposes that service externally.
 
 1. Copy the compose env examples:
 
@@ -176,13 +176,19 @@ mkdir -p data/postgres data/files data/notes
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
+If host port `8080` is already taken, change `.env.cloud` instead of the agent URL:
+
+```env
+HANK_REMOTE_CLOUD_HOST_PORT=18080
+```
+
 3. Build and start both services:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Point Cloudflare Tunnel at `http://127.0.0.1:8080`.
+4. Point Cloudflare Tunnel at your chosen host bind, for example `http://127.0.0.1:18080`.
 5. Open the public URL, register the first admin account, and issue an agent token.
 6. Put the issued token into `.env.agent` as `HANK_REMOTE_AGENT_TOKEN`, then restart the `agent` service:
 

@@ -21,7 +21,8 @@ This is a singleton deployment now:
 iPhone App -> Cloudflare Tunnel -> Hank Remote Cloud -> internal Docker network -> Hank Remote Agent
 ```
 
-The cloud binds only to `127.0.0.1:8080`.
+The cloud should bind only to loopback on the host.
+By default that host bind is `127.0.0.1:8080`, but the host port is configurable in `.env.cloud`.
 External traffic should come through Cloudflare Tunnel.
 
 ## Prerequisites
@@ -31,7 +32,7 @@ External traffic should come through Cloudflare Tunnel.
   - Home Assistant
   - SMB share, if used
   - local file and note storage
-- a Cloudflare Tunnel that can proxy HTTP and WebSocket traffic to `http://127.0.0.1:8080`
+- a Cloudflare Tunnel that can proxy HTTP and WebSocket traffic to your configured host bind, for example `http://127.0.0.1:8080`
 - a fresh or already-consolidated database
   - this version supports only one Home per deployment
   - if the database already contains more than one row in `homes`, startup will fail until you consolidate it
@@ -59,6 +60,8 @@ docker compose version
 Cloud:
 
 - `HANK_REMOTE_CLOUD_ADDR`
+- `HANK_REMOTE_CLOUD_HOST_BIND`
+- `HANK_REMOTE_CLOUD_HOST_PORT`
 - `HANK_REMOTE_CLOUD_DATABASE_URL`
 - `POSTGRES_DB`
 - `POSTGRES_USER`
@@ -110,6 +113,8 @@ Use the default shape, but replace the PostgreSQL credentials with real values f
 
 ```env
 HANK_REMOTE_CLOUD_ADDR=:8080
+HANK_REMOTE_CLOUD_HOST_BIND=127.0.0.1
+HANK_REMOTE_CLOUD_HOST_PORT=8080
 HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-db-password@postgres:5432/hankremote?sslmode=disable
 POSTGRES_DB=hankremote
 POSTGRES_USER=hankremote
@@ -117,6 +122,16 @@ POSTGRES_PASSWORD=replace-with-db-password
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
 ```
+
+If host port `8080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example:
+
+```env
+HANK_REMOTE_CLOUD_HOST_PORT=18080
+```
+
+Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
+
+Do not change `HANK_REMOTE_AGENT_CLOUD_URL` for the single-host Compose deployment. The agent still connects to `ws://cloud:8080/ws/agent` on the internal Docker network.
 
 ### `.env.agent`
 
@@ -155,9 +170,9 @@ docker compose ps
 Check local health:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/readyz
-curl http://127.0.0.1:8080/metrics | head
+curl http://127.0.0.1:<host-port>/healthz
+curl http://127.0.0.1:<host-port>/readyz
+curl http://127.0.0.1:<host-port>/metrics | head
 ```
 
 Expected result:
@@ -174,7 +189,7 @@ The `agent` may be running without a valid token yet, which is expected on first
 Configure the public hostname to forward to:
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:<host-port>
 ```
 
 The tunnel must allow WebSocket upgrades for:
@@ -187,7 +202,7 @@ If you manage Cloudflare Tunnel with a config file, the ingress shape is usually
 ```yaml
 ingress:
   - hostname: hank.example.com
-    service: http://127.0.0.1:8080
+    service: http://127.0.0.1:<host-port>
   - service: http_status:404
 ```
 
@@ -327,12 +342,12 @@ Agent-side files and notes live in the mounted host directories and need host-le
 - keep `.env.cloud` and `.env.agent` readable only by the service user
 - never share raw agent tokens, session tokens, Home Assistant tokens, or SMB credentials
 - rotate agent tokens by issuing a new token, updating `.env.agent`, restarting the agent, then revoking the old token
-- do not expose the cloud container directly on a public interface; keep the bind on `127.0.0.1:8080`
+- do not expose the cloud container directly on a public interface; keep the bind on `127.0.0.1` with your chosen host port
 - do not mount Docker control sockets into the public cloud container
 
 ## 12. Troubleshooting pointers
 
-- If `/healthz` or `/readyz` fail, inspect `docker compose logs -f cloud postgres`.
+- If `/healthz` or `/readyz` fail, inspect `docker compose logs -f cloud postgres` and confirm the chosen `HANK_REMOTE_CLOUD_HOST_PORT` is actually free on the host.
 - If login works but the agent stays offline, inspect `docker compose logs -f agent` and recheck `HANK_REMOTE_AGENT_TOKEN` plus `HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent`.
 - If Home Assistant actions fail, recheck `HANK_REMOTE_HA_BASE_URL` and `HANK_REMOTE_HA_TOKEN`.
 - If file browsing fails, decide whether the deployment is supposed to use SMB or the mounted `./data/files` fallback, then verify only that path.
