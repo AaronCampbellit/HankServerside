@@ -1,0 +1,96 @@
+package config
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestLoadCloudDefaults(t *testing.T) {
+	t.Setenv("HANK_REMOTE_CLOUD_ADDR", "")
+	t.Setenv("HANK_REMOTE_CLOUD_DATABASE_URL", "")
+	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "")
+	t.Setenv("HANK_REMOTE_REQUEST_TIMEOUT_SECONDS", "")
+
+	cfg, err := LoadCloud()
+	if err != nil {
+		t.Fatalf("LoadCloud error: %v", err)
+	}
+
+	if cfg.Addr != ":8080" {
+		t.Fatalf("Addr = %q, want %q", cfg.Addr, ":8080")
+	}
+	if !strings.Contains(cfg.DatabaseURL, "postgres://") {
+		t.Fatalf("DatabaseURL = %q, want default postgres URL", cfg.DatabaseURL)
+	}
+	if cfg.SessionTTL != 7*24*time.Hour {
+		t.Fatalf("SessionTTL = %s, want %s", cfg.SessionTTL, 7*24*time.Hour)
+	}
+	if cfg.RequestTimeout != 30*time.Second {
+		t.Fatalf("RequestTimeout = %s, want %s", cfg.RequestTimeout, 30*time.Second)
+	}
+}
+
+func TestLoadCloudRejectsInvalidDuration(t *testing.T) {
+	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "0")
+
+	_, err := LoadCloud()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_SESSION_TTL_SECONDS") {
+		t.Fatalf("LoadCloud error = %v, want session ttl validation error", err)
+	}
+}
+
+func TestLoadAgentRequiresIdentityAndToken(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_ID", "")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "")
+
+	_, err := LoadAgent()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_AGENT_ID") {
+		t.Fatalf("LoadAgent error = %v, want missing agent id error", err)
+	}
+
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+
+	_, err = LoadAgent()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_AGENT_TOKEN") {
+		t.Fatalf("LoadAgent error = %v, want missing agent token error", err)
+	}
+}
+
+func TestLoadAgentParsesValidConfig(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_CLOUD_URL", "ws://cloud.example/ws/agent")
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_AGENT_HOME_NAME", "Campbell Home")
+	t.Setenv("HANK_REMOTE_HA_BASE_URL", "http://127.0.0.1:8123")
+	t.Setenv("HANK_REMOTE_HA_TOKEN", "ha-token")
+	t.Setenv("HANK_REMOTE_HA_TIMEOUT_SECONDS", "12")
+	t.Setenv("HANK_REMOTE_SMB_HOST", "192.168.1.20")
+	t.Setenv("HANK_REMOTE_SMB_SHARE", "media")
+	t.Setenv("HANK_REMOTE_SMB_USERNAME", "aaron")
+	t.Setenv("HANK_REMOTE_SMB_PASSWORD", "secret")
+	t.Setenv("HANK_REMOTE_SMB_DOMAIN", "WORKGROUP")
+	t.Setenv("HANK_REMOTE_AGENT_FILES_ROOT", "/srv/hank/files")
+	t.Setenv("HANK_REMOTE_AGENT_NOTES_ROOT", "/srv/hank/notes")
+
+	cfg, err := LoadAgent()
+	if err != nil {
+		t.Fatalf("LoadAgent error: %v", err)
+	}
+
+	if cfg.CloudURL != "ws://cloud.example/ws/agent" {
+		t.Fatalf("CloudURL = %q", cfg.CloudURL)
+	}
+	if cfg.AgentID != "home-main" || cfg.Token != "secret-token" {
+		t.Fatalf("agent identity = %#v", cfg)
+	}
+	if cfg.HA.Timeout != 12*time.Second {
+		t.Fatalf("HA.Timeout = %s, want %s", cfg.HA.Timeout, 12*time.Second)
+	}
+	if cfg.SMB.Host != "192.168.1.20" || cfg.SMB.Share != "media" || cfg.SMB.Username != "aaron" || cfg.SMB.Password != "secret" || cfg.SMB.Domain != "WORKGROUP" {
+		t.Fatalf("SMB config = %#v", cfg.SMB)
+	}
+	if cfg.FilesRoot != "/srv/hank/files" || cfg.NotesRoot != "/srv/hank/notes" {
+		t.Fatalf("roots = files:%q notes:%q", cfg.FilesRoot, cfg.NotesRoot)
+	}
+}

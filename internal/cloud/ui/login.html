@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Login</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+  </head>
+  <body>
+    <div class="shell auth-shell">
+      <header class="hero auth-hero">
+        <div>
+          <p class="eyebrow">Hank Remote</p>
+          <h1>Sign In</h1>
+          <p class="lede">Use your existing Hank profile credentials to access the remote management console.</p>
+        </div>
+        <div class="hero-card">
+          <div class="status-row">
+            <span class="status-dot"></span>
+            <span>Protected Console</span>
+          </div>
+          <p>Successful login creates an HTTP-only session cookie and redirects you to the dashboard.</p>
+        </div>
+      </header>
+
+      <main class="auth-grid">
+        <section class="panel auth-card">
+          <div class="panel-head">
+            <h2>Account Access</h2>
+            <span class="pill">Same credentials</span>
+          </div>
+          <form id="auth-form" class="stack">
+            <label>
+              <span>Email</span>
+              <input id="email" type="email" placeholder="name@example.com" required autocomplete="username">
+            </label>
+            <label>
+              <span>Password</span>
+              <input id="password" type="password" placeholder="At least 8 characters" required autocomplete="current-password">
+            </label>
+            <div class="actions">
+              <button type="button" id="login-button">Log In</button>
+              <button type="button" id="register-button" class="secondary">Register</button>
+            </div>
+          </form>
+          <p class="hint">Registration creates the same cloud profile used by the Hank app.</p>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/login.js" defer></script>
+  </body>
+</html>

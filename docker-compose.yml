@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    env_file:
+      - .env.cloud
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  cloud:
+    image: hankserverside
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    env_file:
+      - .env.cloud
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    command: ["/usr/local/bin/hank-remote-cloud"]
+    restart: unless-stopped
+
+  agent:
+    image: hankserverside
+    env_file:
+      - .env.agent
+    depends_on:
+      - cloud
+    volumes:
+      - ./data/files:/srv/hank/files
+      - ./data/notes:/srv/hank/notes
+    command: ["/usr/local/bin/hank-remote-agent"]
+    restart: unless-stopped

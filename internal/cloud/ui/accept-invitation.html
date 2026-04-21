@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Accept Invitation</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Hank Remote</p>
+          <h1>Accept Invitation</h1>
+          <p class="lede">Accept a home invitation in the browser while signed in as the invited Hank profile.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Loading session</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank profile session.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections">
+        <a class="tab-link" href="/dashboard">Console</a>
+        <a class="tab-link" href="/dashboard/home-users">Home Users</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Service Profiles</a>
+        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
+        <a class="tab-link" href="/dashboard/profile-notes">Profile Notes</a>
+        <a class="tab-link" href="/dashboard/file-transfers">File Transfers</a>
+        <a class="tab-link active" href="/dashboard/accept-invitation">Accept Invitation</a>
+      </nav>
+
+      <main class="grid">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Invitation Token</h2>
+            <span class="pill">Home Membership</span>
+          </div>
+          <label>
+            <span>Token</span>
+            <input id="token" type="text" placeholder="Paste invitation token">
+          </label>
+          <div class="actions wrap">
+            <button id="accept-button" type="button">Accept Invitation</button>
+          </div>
+          <div id="result" class="card-list empty-state">Enter a token to accept a pending home invitation.</div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/accept-invitation.js" defer></script>
+  </body>
+</html>

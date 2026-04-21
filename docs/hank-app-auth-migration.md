@@ -1,0 +1,90 @@
+# Hank App Auth Migration
+
+This document describes the next app-side auth change for Hank.
+
+## Goal
+
+Move the iPhone app away from putting long-lived `session_token` values into `/ws/app` URLs.
+
+The new model is:
+
+- HTTP API calls: keep using `Authorization: Bearer <session_token>`
+- App WebSocket: first request a short-lived app WebSocket ticket, then connect to `/ws/app?app_ticket=...`
+- Dashboard: cookie-only browser auth, already migrated on the server side
+
+This keeps the app stable while tightening the public browser surface and reducing token exposure in logs, history, and copied URLs.
+
+## New Server Endpoint
+
+The app should call:
+
+- `POST /v1/ws/app-ticket`
+
+Auth:
+
+- `Authorization: Bearer <session_token>`
+
+Response shape:
+
+```json
+{
+  "ticket": "raw-short-lived-ticket",
+  "expires_at": "2026-04-14T18:30:00Z",
+  "websocket_path": "/ws/app?app_ticket=raw-short-lived-ticket"
+}
+```
+
+Behavior:
+
+- the ticket is short-lived
+- the ticket is single-use
+- the server validates the underlying app session before accepting it
+
+## Hank App Changes
+
+1. Keep the existing login flow.
+   The app can keep using `POST /v1/auth/login` and storing the returned `session_token`.
+
+2. Keep Bearer auth for HTTP.
+   Continue sending `Authorization: Bearer <session_token>` for authenticated HTTP endpoints.
+
+3. Change WebSocket connection setup.
+   Before opening `/ws/app`, request a WebSocket ticket:
+
+```http
+POST /v1/ws/app-ticket
+Authorization: Bearer <session_token>
+```
+
+4. Open the socket with the returned ticket.
+
+```text
+wss://<cloud-host>/ws/app?app_ticket=<ticket>
+```
+
+5. Treat ticket issuance as disposable.
+   If the socket fails before opening, fetch a new ticket and retry.
+
+6. Do not reuse tickets.
+   A ticket is intentionally single-use.
+
+## Recommended Rollout Order
+
+1. Add ticket fetch support in the app.
+2. Use tickets for all new `/ws/app` connections.
+3. Leave existing Bearer HTTP calls unchanged.
+4. After the app release is deployed, remove use of `session_token` query auth from the app.
+5. Only then remove legacy `session_token` query support from the cloud service.
+
+## Current Compatibility
+
+The server still accepts legacy `session_token` query auth on `/ws/app` for backward compatibility during migration.
+
+That path should be considered deprecated.
+
+## Why This Is Better
+
+- avoids putting long-lived session tokens into WebSocket URLs
+- reduces credential leakage risk through copied URLs and logs
+- keeps browser and app auth models separated cleanly
+- allows the dashboard to stay cookie-only without forcing an app rewrite

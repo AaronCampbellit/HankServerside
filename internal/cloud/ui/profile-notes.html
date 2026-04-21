@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Profile Notes</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Hank Remote</p>
+          <h1>Profile Notes</h1>
+          <p class="lede">Manage profile-owned notes through the direct HTTP backend instead of the general dashboard tool panel.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Loading session</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank profile session.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections">
+        <a class="tab-link" href="/dashboard">Console</a>
+        <a class="tab-link" href="/dashboard/home-users">Home Users</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Service Profiles</a>
+        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
+        <a class="tab-link active" href="/dashboard/profile-notes">Profile Notes</a>
+        <a class="tab-link" href="/dashboard/file-transfers">File Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Accept Invitation</a>
+      </nav>
+
+      <main class="grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Your Notes</h2>
+            <span id="note-count" class="pill">0 notes</span>
+          </div>
+          <div class="actions wrap">
+            <button id="refresh-button" type="button">Refresh Notes</button>
+            <button id="new-button" type="button" class="secondary">New Note</button>
+          </div>
+          <div id="note-list" class="card-list empty-state">Loading notes.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Editor</h2>
+            <span class="pill">Profile HTTP API</span>
+          </div>
+          <div class="two-up">
+            <label>
+              <span>Title</span>
+              <input id="note-title" type="text" placeholder="Untitled">
+            </label>
+            <label>
+              <span>Note ID</span>
+              <input id="note-id" type="text" placeholder="auto-generated on save">
+            </label>
+          </div>
+          <label>
+            <span>Content</span>
+            <textarea id="note-content" rows="14" placeholder="# note body"></textarea>
+          </label>
+          <div class="actions wrap">
+            <button id="save-button" type="button">Save Note</button>
+            <button id="delete-button" type="button" class="ghost">Delete Note</button>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/profile-notes.js" defer></script>
+  </body>
+</html>

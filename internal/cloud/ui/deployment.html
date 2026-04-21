@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Deployment Guide</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Hank Remote</p>
+          <h1>Deployment Guide</h1>
+          <p class="lede">Run the cloud and agent together on the same machine under one Docker Compose stack, then expose the cloud service externally through Cloudflare Tunnel.</p>
+        </div>
+        <div class="hero-card">
+          <div class="status-row">
+            <span class="status-dot"></span>
+            <span>Production Notes</span>
+          </div>
+          <p>Keep TLS in front of the cloud service, persist PostgreSQL on durable storage, and rotate agent tokens with overlap instead of hard cutovers.</p>
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="panel">
+          <h2>Topology</h2>
+          <p class="meta">iPhone App → HTTPS/WebSocket → Hank Remote Cloud → outbound WebSocket → Hank Remote Agent</p>
+          <p>The cloud is the only public entrypoint. The agent stays inside the home network and connects outbound.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Required Cloud Environment</h2>
+          <div class="card-list">
+            <article class="card"><strong>HANK_REMOTE_CLOUD_ADDR</strong><div class="meta">Bind address for the cloud server.</div></article>
+            <article class="card"><strong>HANK_REMOTE_CLOUD_DATABASE_URL</strong><div class="meta">PostgreSQL connection URL for the cloud service.</div></article>
+            <article class="card"><strong>HANK_REMOTE_SESSION_TTL_SECONDS</strong><div class="meta">App-session lifetime.</div></article>
+            <article class="card"><strong>HANK_REMOTE_REQUEST_TIMEOUT_SECONDS</strong><div class="meta">Relay timeout for app commands.</div></article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Required Agent Environment</h2>
+          <div class="card-list">
+            <article class="card"><strong>HANK_REMOTE_AGENT_CLOUD_URL</strong><div class="meta">Public ws:// or wss:// /ws/agent URL.</div></article>
+            <article class="card"><strong>HANK_REMOTE_AGENT_ID</strong><div class="meta">Stable agent identity.</div></article>
+            <article class="card"><strong>HANK_REMOTE_AGENT_TOKEN</strong><div class="meta">Issued agent token.</div></article>
+            <article class="card"><strong>HANK_REMOTE_AGENT_HOME_NAME</strong><div class="meta">Friendly name shown in registration.</div></article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Smoke Checklist</h2>
+          <div class="card-list">
+            <article class="card">1. <code>/healthz</code> returns 200.</article>
+            <article class="card">2. <code>/readyz</code> reports storage ready.</article>
+            <article class="card">3. <code>/metrics</code> exposes Prometheus text.</article>
+            <article class="card">4. One app session authenticates and creates a home.</article>
+            <article class="card">5. One agent registers and appears online.</article>
+            <article class="card">6. One <code>system.ping</code> round-trip succeeds.</article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

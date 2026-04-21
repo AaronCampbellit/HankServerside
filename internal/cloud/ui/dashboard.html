@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Console</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Hank Remote</p>
+          <h1>Remote Console</h1>
+          <p class="lede">Manage homes, agents, Home Assistant, files, and notes from one authenticated dashboard.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Loading session</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank profile session.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections">
+        <a class="tab-link active" href="/dashboard">Console</a>
+        <a class="tab-link" href="/dashboard/home-users">Home Users</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Service Profiles</a>
+        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
+        <a class="tab-link" href="/dashboard/profile-notes">Profile Notes</a>
+        <a class="tab-link" href="/dashboard/file-transfers">File Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Accept Invitation</a>
+      </nav>
+
+      <main class="grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Home</h2>
+            <span id="home-count" class="pill">0 homes</span>
+          </div>
+          <form id="home-form" class="inline-form">
+            <input id="home-name" type="text" placeholder="Rename the deployment home" required>
+            <button type="submit">Update Home</button>
+          </form>
+          <div id="home-list" class="card-list empty-state">Loading home.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Agents</h2>
+            <span id="agent-count" class="pill">0 online</span>
+          </div>
+          <div id="agent-list" class="card-list empty-state">Agent presence appears here.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Agent Tokens</h2>
+            <span class="pill">Rotatable</span>
+          </div>
+          <form id="token-form" class="stack compact">
+            <label>
+              <span>Home</span>
+              <select id="token-home" required></select>
+            </label>
+            <label>
+              <span>Agent ID</span>
+              <input id="token-agent-id" type="text" placeholder="Auto-generated from home name" required>
+            </label>
+            <label>
+              <span>Display Name</span>
+              <input id="token-name" type="text" placeholder="Auto-generated as &lt;Home Name&gt; Agent">
+            </label>
+            <label>
+              <span>Expires In Seconds</span>
+              <input id="token-expiry" type="number" min="0" step="1" placeholder="0 means no expiry">
+            </label>
+            <button type="submit">Issue Token</button>
+          </form>
+          <div id="token-created" class="token-output" hidden></div>
+          <div id="token-list" class="card-list empty-state">Select a home to inspect tokens.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Operations</h2>
+            <span class="pill">Hardened</span>
+          </div>
+          <div class="ops-grid">
+            <a class="ops-card" href="/healthz" target="_blank" rel="noreferrer">Health</a>
+            <a class="ops-card" href="/readyz" target="_blank" rel="noreferrer">Readiness</a>
+            <a class="ops-card" href="/metrics" target="_blank" rel="noreferrer">Metrics</a>
+            <a class="ops-card" href="/docs/deployment" target="_blank" rel="noreferrer">Deployment Guide</a>
+          </div>
+          <p class="hint">The admin tools below use the same cloud auth, WebSocket relay, and transfer paths as the app-facing remote stack.</p>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Agent Runtime</h2>
+            <span class="pill">Single Host</span>
+          </div>
+          <p class="hint">The cloud and agent always run together on this same machine under one Docker Compose stack. Use the dashboard to issue tokens, then update <code>.env.agent</code> and restart the <code>agent</code> service.</p>
+          <div class="card-list">
+            <article class="card">
+              <h3>Runtime Shape</h3>
+              <p>The public cloud service listens on <code>127.0.0.1:8080</code> and is exposed through Cloudflare Tunnel. The local agent connects to <code>ws://cloud:8080/ws/agent</code> over the internal Docker network.</p>
+            </article>
+            <article class="card">
+              <h3>Agent Config</h3>
+              <p>Fill in Home Assistant and SMB values in <code>.env.agent</code>. Leave the SMB settings blank to keep using the mounted local files directory at <code>/srv/hank/files</code>.</p>
+            </article>
+            <article class="card">
+              <h3>Apply Changes</h3>
+              <p>After issuing a new token or editing <code>.env.agent</code>, restart only the agent container with <code>docker compose up -d --no-deps agent</code>.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Home Assistant</h2>
+            <span class="pill">Remote Admin</span>
+          </div>
+          <p class="hint">Inspect HA health and states, then call services through the same routed command bus the Hank app uses.</p>
+          <div class="tool-shell">
+            <div class="tool-actions">
+              <button type="button" id="ha-health-button" class="secondary">Check Health</button>
+              <button type="button" id="ha-states-button">Fetch States</button>
+            </div>
+            <div class="three-up">
+              <label>
+                <span>Entity ID</span>
+                <input id="ha-entity-id" type="text" placeholder="light.kitchen">
+              </label>
+              <label>
+                <span>Domain</span>
+                <input id="ha-service-domain" type="text" placeholder="light">
+              </label>
+              <label>
+                <span>Service</span>
+                <input id="ha-service-name" type="text" placeholder="turn_on">
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="button" id="ha-entity-button">Fetch Entity</button>
+              <button type="button" id="ha-service-button">Call Service</button>
+            </div>
+            <label>
+              <span>Service JSON Body</span>
+              <textarea id="ha-service-body" rows="5" placeholder='{"entity_id":"light.kitchen"}'></textarea>
+            </label>
+            <div id="ha-output" class="card-list empty-state">Choose a home to run Home Assistant commands.</div>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Files</h2>
+            <span class="pill">Remote Browser</span>
+          </div>
+          <p class="hint">Browse the remote file backend, upload files, create folders, and download content through resumable cloud-managed transfers.</p>
+          <div class="tool-shell">
+            <div class="three-up">
+              <label>
+                <span>Current Path</span>
+                <input id="files-path" type="text" placeholder="/">
+              </label>
+              <label>
+                <span>Create Directory</span>
+                <input id="files-new-directory" type="text" placeholder="new-folder">
+              </label>
+              <label>
+                <span>Upload File</span>
+                <input id="files-upload" type="file">
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="button" id="files-refresh-button">Browse</button>
+              <button type="button" id="files-up-button" class="secondary">Up One Level</button>
+              <button type="button" id="files-create-directory-button">Create Directory</button>
+              <button type="button" id="files-upload-button">Upload File</button>
+            </div>
+            <div id="files-output" class="card-list empty-state">Choose a home to browse files.</div>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Notes</h2>
+            <span class="pill">Remote Notes</span>
+          </div>
+          <p class="hint">Browse note metadata, run remote search and tag rollups, and edit text or kanban-backed notes through the notes command domain.</p>
+          <div class="tool-shell">
+            <div class="three-up">
+              <label>
+                <span>Search Notes</span>
+                <input id="notes-search-query" type="text" placeholder="Find text in notes">
+              </label>
+              <label>
+                <span>Tag Rollup</span>
+                <input id="notes-tag-query" type="text" placeholder="todo">
+              </label>
+              <label>
+                <span>Page Type</span>
+                <select id="notes-page-type">
+                  <option value="text">text</option>
+                  <option value="kanban">kanban</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="button" id="notes-list-button">List Notes</button>
+              <button type="button" id="notes-search-button" class="secondary">Search</button>
+              <button type="button" id="notes-tags-button">List Tags</button>
+              <button type="button" id="notes-tag-rollup-button">Tag Rollup</button>
+              <button type="button" id="notes-new-button">New Note</button>
+            </div>
+            <div id="notes-results" class="card-list empty-state">Choose a home to inspect notes.</div>
+            <div class="two-up">
+              <label>
+                <span>Note Title</span>
+                <input id="notes-title" type="text" placeholder="Untitled">
+              </label>
+              <label>
+                <span>Note ID</span>
+                <input id="notes-id" type="text" placeholder="auto-generated on save">
+              </label>
+            </div>
+            <label>
+              <span>Note Content</span>
+              <textarea id="notes-content" rows="10" placeholder="# note body"></textarea>
+            </label>
+            <label>
+              <span>Kanban Board JSON</span>
+              <textarea id="notes-board-json" rows="8" placeholder='{"columns":[]}'></textarea>
+            </label>
+            <div class="actions wrap">
+              <button type="button" id="notes-fetch-button">Fetch Note</button>
+              <button type="button" id="notes-save-button">Save Note</button>
+              <button type="button" id="notes-delete-button" class="ghost">Delete Note</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/dashboard.js" defer></script>
+  </body>
+</html>

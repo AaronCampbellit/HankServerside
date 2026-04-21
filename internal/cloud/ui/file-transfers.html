@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote File Transfers</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Hank Remote</p>
+          <h1>File Transfers</h1>
+          <p class="lede">Use the raw cloud-managed upload and download transfer backend directly, including the issued transfer URLs and status snapshots.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Loading session</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank profile session.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections">
+        <a class="tab-link" href="/dashboard">Console</a>
+        <a class="tab-link" href="/dashboard/home-users">Home Users</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Service Profiles</a>
+        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
+        <a class="tab-link" href="/dashboard/profile-notes">Profile Notes</a>
+        <a class="tab-link active" href="/dashboard/file-transfers">File Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Accept Invitation</a>
+      </nav>
+
+      <main class="grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Select Home</h2>
+            <span class="pill">Transfer API</span>
+          </div>
+          <label>
+            <span>Home</span>
+            <select id="home-select"></select>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Last Transfer</h2>
+            <span class="pill">Issued URL</span>
+          </div>
+          <div id="transfer-output" class="card-list empty-state">Run an upload or download to see the issued transfer details.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Download</h2>
+            <span class="pill">GET</span>
+          </div>
+          <label>
+            <span>Remote Path</span>
+            <input id="download-path" type="text" placeholder="/Documents/report.pdf">
+          </label>
+          <div class="actions wrap">
+            <button id="download-button" type="button">Start Download</button>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Upload</h2>
+            <span class="pill">PUT</span>
+          </div>
+          <div class="two-up">
+            <label>
+              <span>Remote Path</span>
+              <input id="upload-path" type="text" placeholder="/Uploads/example.txt">
+            </label>
+            <label>
+              <span>File</span>
+              <input id="upload-file" type="file">
+            </label>
+          </div>
+          <div class="actions wrap">
+            <button id="upload-button" type="button">Start Upload</button>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/file-transfers.js" defer></script>
+  </body>
+</html>
