@@ -10,6 +10,7 @@ const state = {
   requestCounter: 0,
   currentFilesPath: "/",
   currentNoteRevision: "",
+  lastAgentEnvFile: "",
 };
 
 const els = {
@@ -118,6 +119,34 @@ function safeJSONString(value) {
   } catch {
     return String(value);
   }
+}
+
+function dotenvValue(value) {
+  return `"${String(value || "").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function agentEnvFile(payload, home) {
+  return [
+    "HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent",
+    `HANK_REMOTE_AGENT_ID=${dotenvValue(payload.agent_id || agentIDFromHomeName(home?.name))}`,
+    `HANK_REMOTE_AGENT_TOKEN=${dotenvValue(payload.token)}`,
+    `HANK_REMOTE_AGENT_HOME_NAME=${dotenvValue(home?.name || "Home")}`,
+    "",
+    "# Optional Home Assistant connection.",
+    "HANK_REMOTE_HA_BASE_URL=http://homeassistant:8123",
+    "HANK_REMOTE_HA_TOKEN=replace-with-home-assistant-token",
+    "HANK_REMOTE_HA_TIMEOUT_SECONDS=10",
+    "",
+    "# Optional SMB connection. Leave blank to use the Docker files volume.",
+    "HANK_REMOTE_SMB_HOST=",
+    "HANK_REMOTE_SMB_SHARE=",
+    "HANK_REMOTE_SMB_USERNAME=",
+    "HANK_REMOTE_SMB_PASSWORD=",
+    "HANK_REMOTE_SMB_DOMAIN=",
+    "",
+    "HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files",
+    "HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes",
+  ].join("\n");
 }
 
 function selectedHome() {
@@ -835,10 +864,18 @@ async function issueToken(event) {
       expires_in_seconds: Number.parseInt(els.tokenExpiry.value || "0", 10) || 0,
     }),
   });
+  const envFile = agentEnvFile(payload, home);
+  state.lastAgentEnvFile = envFile;
   els.tokenCreated.hidden = false;
-  els.tokenCreated.innerHTML = `<strong>Issued token for ${escapeHTML(payload.agent_name)}</strong><div class="token-meta">Copy it now. The raw token is only shown once. Put it into <code>.env.agent</code> as <code>HANK_REMOTE_AGENT_TOKEN</code>, then restart the <code>agent</code> service.</div><code>${escapeHTML(payload.token)}</code>`;
+  els.tokenCreated.innerHTML = `
+    <strong>Issued token for ${escapeHTML(payload.agent_name)}</strong>
+    <div class="token-meta">Copy this generated file into <code>.env.agent</code>. The raw token is only shown once.</div>
+    <button type="button" class="secondary" data-copy-agent-env>Copy .env.agent</button>
+    <pre>${escapeHTML(envFile)}</pre>
+    <div class="token-meta">Then start the agent profile:</div>
+    <code>docker compose --profile agent up -d agent</code>`;
   await Promise.all([loadAgents(), loadTokens(homeID)]);
-  showToast("Agent token issued.");
+  showToast("Agent token issued. Copy the generated .env.agent file.");
 }
 
 async function revokeToken(homeID, tokenID) {
@@ -876,8 +913,20 @@ async function hydrate() {
 els.logoutButton.addEventListener("click", logout);
 els.homeForm.addEventListener("submit", createHome);
 els.tokenForm.addEventListener("submit", (event) => issueToken(event).catch((error) => showToast(error.message, true)));
+els.tokenCreated.addEventListener("click", async (event) => {
+  if (!event.target.closest("[data-copy-agent-env]") || !state.lastAgentEnvFile) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(state.lastAgentEnvFile);
+    showToast(".env.agent copied.");
+  } catch (_) {
+    showToast("Select and copy the generated .env.agent block.", true);
+  }
+});
 els.tokenHome.addEventListener("change", async (event) => {
   els.tokenCreated.hidden = true;
+  state.lastAgentEnvFile = "";
   const home = state.homes.find((item) => item.id === event.target.value);
   if (home) {
     els.tokenAgentID.value = agentIDFromHomeName(home.name);

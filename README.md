@@ -160,18 +160,14 @@ After that, repo-local commands like `docker compose up --build` will prefer the
 
 ## Docker Compose
 
-This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud binds only to loopback on the host, defaulting to `127.0.0.1:8080`, and Cloudflare Tunnel exposes that service externally.
+This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud publishes on `0.0.0.0:18080` by default so the server IP can reach it directly; put a firewall, reverse proxy, or Cloudflare Tunnel in front of it for external access.
 
 1. The Compose stack already loads checked-in default env files from:
 
 - `configs/cloud.compose.env.example`
 - `configs/agent.compose.env.example`
 
-Create local override files only if you need to replace defaults with server-specific values:
-
-```bash
-mkdir -p data/postgres data/files data/notes
-```
+Docker creates the default persistent volumes automatically for PostgreSQL, local files, and notes. Create local override files only if you need to replace defaults with server-specific values.
 
 2. Keep the internal agent cloud URL as:
 
@@ -179,26 +175,26 @@ mkdir -p data/postgres data/files data/notes
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-If host port `8080` is already taken, create `.env.cloud` and change that instead of the agent URL:
+If host port `18080` is already taken, create `.env.cloud` and change that instead of the agent URL:
 
 ```env
-HANK_REMOTE_CLOUD_HOST_PORT=18080
+HANK_REMOTE_CLOUD_HOST_PORT=18081
 ```
 
-If you need to override agent values such as the issued token or Home Assistant token, create `.env.agent` with only the keys you want to replace.
+The agent service is behind the `agent` Compose profile, so it does not start until you issue a real token.
 
-3. Build and start both services:
+3. Build and start the first-boot services:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Point Cloudflare Tunnel at your chosen host bind, for example `http://127.0.0.1:18080`.
+4. Point Cloudflare Tunnel or your reverse proxy at your chosen host bind, for example `http://127.0.0.1:18080` or `http://<server-ip>:18080`.
 5. Open the public URL, register the first admin account, and issue an agent token.
-6. If you do not already have a local override file, create `.env.agent`, add the issued token as `HANK_REMOTE_AGENT_TOKEN`, then restart the `agent` service:
+6. Copy the generated `.env.agent` block from the dashboard into `.env.agent`, adjust Home Assistant or SMB values if needed, then start the agent profile:
 
 ```bash
-docker compose up -d --no-deps agent
+docker compose --profile agent up -d agent
 ```
 
 ## Current Notes
@@ -206,14 +202,15 @@ docker compose up -d --no-deps agent
 - file upload and download now use resumable HTTP streaming endpoints coordinated by the cloud over the agent WebSocket; retries can reopen the same transfer with an `offset` query parameter
 - Home Assistant, file, and notes access stay on the home agent; the cloud never needs those local credentials
 - agent and app auth are separate
-- the cloud and agent always run together on the same machine under one Compose stack
-- the dashboard issues tokens, but deployment changes are applied by editing `.env.agent` and restarting the `agent` service
-- file access can use either the local `./data/files` folder or a direct SMB connection configured in the dashboard
+- the cloud and agent run on the same machine under one Compose stack, but the agent starts only after a token exists
+- the dashboard issues tokens and generates the `.env.agent` file content; deployment changes are applied by editing `.env.agent` and refreshing the `agent` profile
+- file access can use either the Docker-managed `hank_agent_files` volume or a direct SMB connection configured in the dashboard
 - remote notes now expose additive metadata for `page_type`, preview text, extracted tags, remote search, tag rollups, and kanban board payloads
 
 ## Operations Docs
 
 - deployment guide: `docs/deployment.md`
+- first-time deployment: `docs/first-time-deployment.md`
 - runbooks:
   - `docs/runbooks/agent-offline.md`
   - `docs/runbooks/auth-failures.md`

@@ -21,9 +21,9 @@ This is a singleton deployment now:
 iPhone App -> Cloudflare Tunnel -> Hank Remote Cloud -> internal Docker network -> Hank Remote Agent
 ```
 
-The cloud should bind only to loopback on the host.
-By default that host bind is `127.0.0.1:8080`, but the host port is configurable in `.env.cloud`.
-External traffic should come through Cloudflare Tunnel.
+The cloud publishes on `0.0.0.0:18080` by default so the server IP can reach it directly.
+The host bind and port are configurable in `.env.cloud`.
+External traffic should still come through a firewall, reverse proxy, or Cloudflare Tunnel rather than exposing the service broadly without controls.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ External traffic should come through Cloudflare Tunnel.
   - Home Assistant
   - SMB share, if used
   - local file and note storage
-- a Cloudflare Tunnel that can proxy HTTP and WebSocket traffic to your configured host bind, for example `http://127.0.0.1:8080`
+- a Cloudflare Tunnel or reverse proxy that can proxy HTTP and WebSocket traffic to your configured host bind, for example `http://127.0.0.1:18080` or `http://<server-ip>:18080`
 - a fresh or already-consolidated database
   - this version supports only one Home per deployment
   - if the database already contains more than one row in `homes`, startup will fail until you consolidate it
@@ -97,10 +97,9 @@ Optional agent environment:
 mkdir -p /srv/hank-remote
 cd /srv/hank-remote
 git clone <your-hankserverside-repo-url> .
-mkdir -p data/postgres data/files data/notes
 ```
 
-If the repo already exists on the server, just `cd` into it and ensure those directories exist.
+If the repo already exists on the server, just `cd` into it. Docker creates the default persistent volumes for PostgreSQL, local files, and notes automatically.
 
 ## 2. Review the default env files
 
@@ -109,7 +108,8 @@ The Compose stack already loads checked-in defaults from:
 - `configs/cloud.compose.env.example`
 - `configs/agent.compose.env.example`
 
-Create `/.env.cloud` or `/.env.agent` only when you need to override server-specific values.
+Create `/.env.cloud` only when you need to override server-specific cloud values.
+Create `/.env.agent` after the dashboard issues an agent token.
 
 ### Default cloud env
 
@@ -117,8 +117,8 @@ Use the default shape, but replace the PostgreSQL credentials with real values f
 
 ```env
 HANK_REMOTE_CLOUD_ADDR=:8080
-HANK_REMOTE_CLOUD_HOST_BIND=127.0.0.1
-HANK_REMOTE_CLOUD_HOST_PORT=8080
+HANK_REMOTE_CLOUD_HOST_BIND=0.0.0.0
+HANK_REMOTE_CLOUD_HOST_PORT=18080
 HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-db-password@postgres:5432/hankremote?sslmode=disable
 POSTGRES_DB=hankremote
 POSTGRES_USER=hankremote
@@ -127,10 +127,10 @@ HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
 ```
 
-If host port `8080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example:
+If host port `18080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example:
 
 ```env
-HANK_REMOTE_CLOUD_HOST_PORT=18080
+HANK_REMOTE_CLOUD_HOST_PORT=18081
 ```
 
 Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
@@ -145,7 +145,7 @@ POSTGRES_PASSWORD=replace-with-real-db-password
 HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-real-db-password@postgres:5432/hankremote?sslmode=disable
 ```
 
-### Default agent env
+### Agent env
 
 Keep the cloud URL exactly like this for the Compose deployment:
 
@@ -153,11 +153,13 @@ Keep the cloud URL exactly like this for the Compose deployment:
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-Fill in the rest with your real values:
+The agent service is behind the `agent` Compose profile, so first boot does not start it without a token.
+After the dashboard issues a token, it generates the full `.env.agent` file for you.
+The generated file has this shape:
 
 ```env
 HANK_REMOTE_AGENT_ID=home-main
-HANK_REMOTE_AGENT_TOKEN=
+HANK_REMOTE_AGENT_TOKEN=<issued-token>
 HANK_REMOTE_AGENT_HOME_NAME=Home
 HANK_REMOTE_HA_BASE_URL=http://<home-assistant-host>:8123
 HANK_REMOTE_HA_TOKEN=<home-assistant-token>
@@ -165,12 +167,12 @@ HANK_REMOTE_HA_TOKEN=<home-assistant-token>
 
 Notes:
 
-- the checked-in default leaves the token as a placeholder until you override it locally
+- the checked-in default leaves the token empty and the agent profile disabled for first boot
 - the raw token is issued by the dashboard after the first admin account is created
+- the dashboard-generated `.env.agent` block includes the token, agent ID, Home name, optional Home Assistant fields, optional SMB fields, and mounted file/note roots
 - if you are not using SMB, leave all `HANK_REMOTE_SMB_*` values empty
-- if SMB is not configured, the agent uses the mounted `./data/files` folder
-- note storage uses the mounted `./data/notes` folder unless you change the mounted root
-- for real deployment secrets and server-specific tokens, create `/.env.agent` with only the keys you want to replace
+- if SMB is not configured, the agent uses the Docker-managed `hank_agent_files` volume
+- note storage uses the Docker-managed `hank_agent_notes` volume unless you change the mounted root
 
 ## 3. Start the stack
 
@@ -179,6 +181,9 @@ cd /srv/hank-remote
 docker compose up --build -d
 docker compose ps
 ```
+
+This starts `postgres` and `cloud`.
+It intentionally does not start `agent` until you create `.env.agent` from the issued token.
 
 Check local health:
 
@@ -195,7 +200,7 @@ Expected result:
 - `/metrics` returns Prometheus text
 
 At this point the `cloud` and `postgres` services should be healthy.
-The `agent` may be running without a valid token yet, which is expected on first boot.
+The `agent` is not expected to be running yet.
 
 ## 4. Point Cloudflare Tunnel at the cloud service
 
@@ -234,19 +239,24 @@ You no longer create a Home manually for a normal deployment.
 
 If registration works but later calls report that the target home agent is offline, the bootstrap/auth path is already correct and the remaining issue is the agent connection, token, or `/ws/agent` path.
 
-## 6. Install the issued agent token
+## 6. Install the generated agent env file
 
-Put the raw token from the dashboard into `/.env.agent`:
-
-```env
-HANK_REMOTE_AGENT_TOKEN=<issued-token>
-```
-
-Then restart only the agent:
+After issuing the token, the dashboard shows a generated `.env.agent` block.
+Copy that whole block into `/.env.agent`:
 
 ```bash
 cd /srv/hank-remote
-docker compose up -d --no-deps agent
+nano .env.agent
+```
+
+Edit the Home Assistant and SMB values in that file if you need them.
+Leave the SMB values blank to use the Docker-managed files volume.
+
+Then start the agent profile:
+
+```bash
+cd /srv/hank-remote
+docker compose --profile agent up -d agent
 ```
 
 ## 7. Verify the agent connection
@@ -255,7 +265,7 @@ Check logs:
 
 ```bash
 docker compose logs -f cloud
-docker compose logs -f agent
+docker compose --profile agent logs -f agent
 ```
 
 Verify in the dashboard:
@@ -282,8 +292,9 @@ Use this checklist for a real deployment validation pass.
 ### Agent
 
 1. Issue one agent token.
-2. Restart the agent with the issued token.
-3. Confirm `GET /v1/home/agent` shows an online agent.
+2. Copy the generated `.env.agent` block.
+3. Start the agent profile with `docker compose --profile agent up -d agent`.
+4. Confirm `GET /v1/home/agent` shows an online agent.
 
 ### Home Assistant
 
@@ -295,7 +306,7 @@ Use this checklist for a real deployment validation pass.
 
 1. Browse files from the app or dashboard flow.
 2. If SMB is configured, confirm the agent can see the target share.
-3. If SMB is not configured, confirm file operations work against `./data/files`.
+3. If SMB is not configured, confirm file operations work against the Docker-managed files volume.
 4. Test one upload and one download.
 
 ### Notes
@@ -314,16 +325,22 @@ Important current behavior:
 
 ## 9. Routine operations
 
-Restart everything:
+Restart first-boot services:
 
 ```bash
 docker compose restart
 ```
 
+Restart everything after the agent is active:
+
+```bash
+docker compose --profile agent restart
+```
+
 Restart only the agent:
 
 ```bash
-docker compose restart agent
+docker compose --profile agent restart agent
 ```
 
 Rebuild after code changes:
@@ -331,36 +348,36 @@ Rebuild after code changes:
 ```bash
 cd /srv/hank-remote
 git pull
-docker compose up --build -d
+docker compose --profile agent up --build -d
 ```
 
 ## 10. Backups
 
 Back up at least:
 
-- `data/postgres`
+- Docker volume `hank_postgres_data`
 - optional `/.env.cloud`
 - optional `/.env.agent`
 
 Also back up any real content stored under:
 
-- `data/files`
-- `data/notes`
+- Docker volume `hank_agent_files`
+- Docker volume `hank_agent_notes`
 
 The service stores cloud metadata in PostgreSQL.
-Agent-side files and notes live in the mounted host directories and need host-level backup coverage.
+Agent-side files and notes live in Docker volumes by default and need volume backup coverage.
 
 ## 11. Security notes
 
 - keep any local `/.env.cloud` and `/.env.agent` override files readable only by the service user
 - never share raw agent tokens, session tokens, Home Assistant tokens, or SMB credentials
-- rotate agent tokens by issuing a new token, updating `/.env.agent`, restarting the agent, then revoking the old token
-- do not expose the cloud container directly on a public interface; keep the bind on `127.0.0.1` with your chosen host port
+- rotate agent tokens by issuing a new token, copying the generated `.env.agent` block, refreshing the agent profile, then revoking the old token
+- do not expose the cloud container broadly without a firewall, reverse proxy, or Cloudflare Tunnel; set `HANK_REMOTE_CLOUD_HOST_BIND=127.0.0.1` if this server should only accept local proxy traffic
 - do not mount Docker control sockets into the public cloud container
 
 ## 12. Troubleshooting pointers
 
 - If `/healthz` or `/readyz` fail, inspect `docker compose logs -f cloud postgres` and confirm the chosen `HANK_REMOTE_CLOUD_HOST_PORT` is actually free on the host.
-- If login works but the agent stays offline, inspect `docker compose logs -f agent` and recheck `HANK_REMOTE_AGENT_TOKEN` plus `HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent`.
+- If login works but the agent stays offline, inspect `docker compose --profile agent logs -f agent` and recheck `HANK_REMOTE_AGENT_TOKEN` plus `HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent`.
 - If Home Assistant actions fail, recheck `HANK_REMOTE_HA_BASE_URL` and `HANK_REMOTE_HA_TOKEN`.
-- If file browsing fails, decide whether the deployment is supposed to use SMB or the mounted `./data/files` fallback, then verify only that path.
+- If file browsing fails, decide whether the deployment is supposed to use SMB or the Docker-managed files volume fallback, then verify only that path.

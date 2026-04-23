@@ -7,7 +7,7 @@ services:
       - path: ./.env.cloud
         required: false
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - hank_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -29,12 +29,14 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${HANK_REMOTE_CLOUD_HOST_BIND:-127.0.0.1}:${HANK_REMOTE_CLOUD_HOST_PORT:-8080}:8080"
+      - "${HANK_REMOTE_CLOUD_HOST_BIND:-0.0.0.0}:${HANK_REMOTE_CLOUD_HOST_PORT:-18080}:8080"
     command: ["/usr/local/bin/hank-remote-cloud"]
     restart: unless-stopped
 
   agent:
     image: hankserverside
+    profiles:
+      - agent
     env_file:
       - path: ./configs/agent.compose.env.example
         required: true
@@ -43,7 +45,12 @@ services:
     depends_on:
       - cloud
     volumes:
-      - ./data/files:/srv/hank/files
-      - ./data/notes:/srv/hank/notes
+      - hank_agent_files:/srv/hank/files
+      - hank_agent_notes:/srv/hank/notes
     command: ["/usr/local/bin/hank-remote-agent"]
     restart: unless-stopped
+
+volumes:
+  hank_postgres_data:
+  hank_agent_files:
+  hank_agent_notes:

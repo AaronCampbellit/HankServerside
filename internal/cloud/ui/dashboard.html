@@ -104,19 +104,19 @@
             <h2>Agent Runtime</h2>
             <span class="pill">Single Host</span>
           </div>
-          <p class="hint">The cloud and agent always run together on this same machine under one Docker Compose stack. Use the dashboard to issue tokens, then update <code>.env.agent</code> and restart the <code>agent</code> service.</p>
+          <p class="hint">The cloud and agent run on this same machine under one Docker Compose stack. The agent is not started until you issue a token and start the agent profile.</p>
           <div class="card-list">
             <article class="card">
               <h3>Runtime Shape</h3>
-              <p>The public cloud service listens on <code>127.0.0.1:8080</code> and is exposed through Cloudflare Tunnel. The local agent connects to <code>ws://cloud:8080/ws/agent</code> over the internal Docker network.</p>
+              <p>The public cloud service publishes on <code>0.0.0.0:18080</code> by default. The local agent connects to <code>ws://cloud:8080/ws/agent</code> over the internal Docker network.</p>
             </article>
             <article class="card">
               <h3>Agent Config</h3>
-              <p>Fill in Home Assistant and SMB values in <code>.env.agent</code>. Leave the SMB settings blank to keep using the mounted local files directory at <code>/srv/hank/files</code>.</p>
+              <p>After issuing a token, copy the generated <code>.env.agent</code> block. Fill in Home Assistant and SMB values only when you need them.</p>
             </article>
             <article class="card">
               <h3>Apply Changes</h3>
-              <p>After issuing a new token or editing <code>.env.agent</code>, restart only the agent container with <code>docker compose up -d --no-deps agent</code>.</p>
+              <p>After issuing a new token or editing <code>.env.agent</code>, start or refresh the agent with <code>docker compose --profile agent up -d agent</code>.</p>
             </article>
           </div>
         </section>

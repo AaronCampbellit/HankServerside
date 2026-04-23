@@ -347,7 +347,8 @@ button.ghost {
   font-weight: 700;
 }
 
-.token-output code {
+.token-output code,
+.token-output pre {
   display: block;
   margin-top: 8px;
   padding: 8px 9px;
@@ -355,6 +356,7 @@ button.ghost {
   background: #140f0b;
   color: #f7ede1;
   overflow-x: auto;
+  white-space: pre-wrap;
 }
 
 .empty-state {
