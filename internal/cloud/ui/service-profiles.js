@@ -122,7 +122,7 @@ function profileByType(serviceType) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function renderHomes() {
@@ -130,7 +130,7 @@ function renderHomes() {
   if (!state.homes.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No homes available";
+    option.textContent = "No home yet";
     els.homeSelect.appendChild(option);
     els.homeRole.textContent = "No home";
     els.homeMeta.textContent = "Create or join a home first.";
@@ -153,8 +153,8 @@ function renderHomes() {
 function renderSummary() {
   const home = selectedHome();
   const membership = currentMembership();
-  els.homeRole.textContent = membership ? `You are ${membership.role}` : "No membership";
-  els.homeMeta.textContent = home ? `${home.name} · ${home.id}` : "Choose a home to inspect service profiles.";
+  els.homeRole.textContent = membership ? `Your role: ${membership.role}` : "No access";
+  els.homeMeta.textContent = home ? `${home.name}` : "Choose a home to see its connections.";
 
   const owner = isOwner();
   els.haForm.querySelectorAll("input, textarea, button").forEach((element) => {
@@ -166,15 +166,15 @@ function renderSummary() {
 
   if (!home) {
     els.profilesSummary.className = "card-list empty-state";
-    els.profilesSummary.textContent = "Choose a home to inspect service profiles.";
+    els.profilesSummary.textContent = "Choose a home to see its connections.";
     return;
   }
 
   if (!state.profiles.length) {
     els.profilesSummary.className = "card-list empty-state";
     els.profilesSummary.textContent = owner
-      ? "No service profiles saved for this home yet."
-      : "No service profiles are visible for this home yet.";
+      ? "No connections saved for this home yet."
+      : "No connections are visible for this home yet.";
     return;
   }
 
@@ -283,7 +283,7 @@ async function saveProfile(serviceType) {
       els.smbSecrets.value = "";
     }
     await loadProfiles();
-    showToast(`${serviceType} profile saved.`);
+    showToast(`${serviceType} connection saved.`);
   } catch (error) {
     showToast(error.message, true);
   }

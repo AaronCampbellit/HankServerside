@@ -210,7 +210,7 @@ function handleSocketMessage(event) {
   if (!pending) return;
   state.pendingRequests.delete(envelope.request_id);
   if (envelope.type === "app.error" || envelope.error) {
-    pending.reject(new Error(envelope.error?.message || "Unknown relay error"));
+    pending.reject(new Error(envelope.error?.message || "The home connector did not return a result."));
     return;
   }
   pending.resolve(envelope.payload ?? null);
@@ -271,7 +271,7 @@ async function sendCommand(command, body = {}) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function renderHomes() {
@@ -279,9 +279,9 @@ function renderHomes() {
   els.tokenHome.innerHTML = "";
   if (!state.homes.length) {
     els.homeList.className = "card-list empty-state";
-    els.homeList.textContent = "No home is available for this deployment.";
+    els.homeList.textContent = "No home has been created yet.";
     const option = document.createElement("option");
-    option.textContent = "No home available";
+    option.textContent = "No home yet";
     option.value = "";
     els.tokenHome.appendChild(option);
     return;
@@ -296,12 +296,12 @@ function renderHomes() {
       <div class="card-head">
         <div>
           <div class="card-title">${escapeHTML(home.name)}</div>
-          <div class="meta">${escapeHTML(home.id)}</div>
+          <div class="meta">This is the home the Hank app connects to.</div>
         </div>
         <span class="pill">Created ${formatDate(home.created_at)}</span>
       </div>
       <div class="item-actions">
-        <a class="ops-card manage-link" href="/dashboard/home-users">Manage Users</a>
+        <a class="ops-card manage-link" href="/dashboard/home-users">Manage People</a>
       </div>
     `;
     els.homeList.appendChild(card);
@@ -319,7 +319,7 @@ function renderAgents() {
   els.agentCount.textContent = `${online} online`;
   if (!state.agents.length) {
     els.agentList.className = "card-list empty-state";
-    els.agentList.textContent = "No agents registered yet.";
+    els.agentList.textContent = "The home connector has not been set up yet.";
     return;
   }
   els.agentList.className = "card-list";
@@ -332,12 +332,12 @@ function renderAgents() {
       <div class="card-head">
         <div>
           <div class="card-title">${escapeHTML(agent.name || agent.agent_id || agent.id)}</div>
-          <div class="meta">${escapeHTML(agent.home_name || agent.home_id || "")}</div>
+          <div class="meta">${escapeHTML(agent.home_name || "Home connector")}</div>
         </div>
         <span class="status-chip ${isOnline ? "" : "offline"}">${isOnline ? "Online" : "Offline"}</span>
       </div>
-      <div class="meta">Agent ID: ${escapeHTML(agent.agent_id || agent.id || "unknown")}</div>
-      <div class="meta">Last seen: ${formatDate(agent.last_seen_at)}</div>
+      <div class="meta">Connector ID: ${escapeHTML(agent.agent_id || agent.id || "unknown")}</div>
+      <div class="meta">Last online: ${formatDate(agent.last_seen_at)}</div>
     `;
     els.agentList.appendChild(card);
   });
@@ -347,12 +347,12 @@ function renderTokens(homeID) {
   const tokens = state.tokensByHome.get(homeID) || [];
   if (!homeID) {
     els.tokenList.className = "card-list empty-state";
-    els.tokenList.textContent = "Select a home to inspect tokens.";
+    els.tokenList.textContent = "Choose a home to see setup files.";
     return;
   }
   if (!tokens.length) {
     els.tokenList.className = "card-list empty-state";
-    els.tokenList.textContent = "No tokens issued for this home yet.";
+    els.tokenList.textContent = "No setup files have been created for this home yet.";
     return;
   }
   els.tokenList.className = "card-list";
@@ -365,19 +365,19 @@ function renderTokens(homeID) {
       <div class="card-head">
         <div>
           <div class="card-title">${escapeHTML(token.agent_id)}</div>
-          <div class="meta">${escapeHTML(token.id)}</div>
+          <div class="meta">Used by the home connector.</div>
         </div>
-        <span class="status-chip ${revoked ? "revoked" : ""}">${revoked ? "Revoked" : "Active"}</span>
+        <span class="status-chip ${revoked ? "revoked" : ""}">${revoked ? "Disabled" : "Active"}</span>
       </div>
       <div class="token-meta">Created: ${formatDate(token.created_at)}</div>
       <div class="token-meta">Expires: ${formatDate(token.expires_at)}</div>
-      <div class="token-meta">Revoked: ${formatDate(token.revoked_at)}</div>
+      <div class="token-meta">Disabled: ${formatDate(token.revoked_at)}</div>
     `;
     if (!revoked) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "danger-link";
-      button.textContent = "Revoke token";
+      button.textContent = "Disable setup file";
       button.addEventListener("click", () => revokeToken(homeID, token.id));
       wrapper.appendChild(button);
     }
@@ -413,7 +413,7 @@ function renderHAOutput(html, empty = false) {
 async function runHAHealth() {
   try {
     const payload = await sendCommand("homeassistant.health");
-    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">Home Assistant Health</div></div><span class="status-chip">${payload.ok ? "Healthy" : "Unknown"}</span></div><div class="meta">Checked at ${formatDate(payload.checked_at)}</div></article>`);
+    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">Home Assistant Check</div></div><span class="status-chip">${payload.ok ? "Working" : "Unknown"}</span></div><div class="meta">Checked at ${formatDate(payload.checked_at)}</div></article>`);
   } catch (error) {
     showToast(error.message, true);
   }
@@ -437,7 +437,7 @@ async function runHAFetchStates() {
 async function runHAFetchEntity() {
   const entityID = els.haEntityID.value.trim();
   if (!entityID) {
-    showToast("Enter an entity ID first.", true);
+    showToast("Enter a device ID first.", true);
     return;
   }
   try {
@@ -461,13 +461,13 @@ async function runHAServiceCall() {
     try {
       body = JSON.parse(raw);
     } catch (error) {
-      showToast(`Invalid service JSON: ${error.message}`, true);
+      showToast(`Command details are not valid JSON: ${error.message}`, true);
       return;
     }
   }
   try {
     const payload = await sendCommand("homeassistant.call_service", { domain, service, body });
-    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">${escapeHTML(`${domain}.${service}`)}</div><div class="meta">Service call completed</div></div><span class="status-chip">OK</span></div><pre>${escapeHTML(safeJSONString(payload.result || {}))}</pre></article>`);
+    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">${escapeHTML(`${domain}.${service}`)}</div><div class="meta">Command completed</div></div><span class="status-chip">OK</span></div><pre>${escapeHTML(safeJSONString(payload.result || {}))}</pre></article>`);
   } catch (error) {
     showToast(error.message, true);
   }
@@ -498,7 +498,7 @@ function parentPath(path) {
 function renderFiles(items) {
   if (!items.length) {
     els.filesOutput.className = "card-list empty-state";
-    els.filesOutput.textContent = "This directory is empty.";
+    els.filesOutput.textContent = "This folder is empty.";
     return;
   }
   els.filesOutput.className = "tableish";
@@ -506,7 +506,7 @@ function renderFiles(items) {
   items.forEach((item) => {
     const row = document.createElement("article");
     row.className = "tableish-row";
-    row.innerHTML = `<div><div class="title">${escapeHTML(item.name)}</div><div class="meta">${escapeHTML(item.path)}</div></div><div><div class="meta">${item.is_directory ? "Directory" : formatBytes(item.size)}</div><div class="meta">${formatDate(item.modified_at)}</div></div><div class="item-actions"></div>`;
+    row.innerHTML = `<div><div class="title">${escapeHTML(item.name)}</div><div class="meta">${escapeHTML(item.path)}</div></div><div><div class="meta">${item.is_directory ? "Folder" : formatBytes(item.size)}</div><div class="meta">${formatDate(item.modified_at)}</div></div><div class="item-actions"></div>`;
     const actions = row.querySelector(".item-actions");
     if (item.is_directory) {
       const open = document.createElement("button");
@@ -552,14 +552,14 @@ async function browseFiles(path = state.currentFilesPath) {
 async function createDirectory() {
   const name = els.filesNewDirectory.value.trim();
   if (!name) {
-    showToast("Enter a directory name first.", true);
+    showToast("Enter a folder name first.", true);
     return;
   }
   try {
     await sendCommand("files.create_directory", { path: joinPath(state.currentFilesPath, name) });
     els.filesNewDirectory.value = "";
     await browseFiles(state.currentFilesPath);
-    showToast("Directory created.");
+    showToast("Folder created.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -770,7 +770,7 @@ async function saveNote() {
     try {
       board = JSON.parse(rawBoard);
     } catch (error) {
-      showToast(`Invalid kanban JSON: ${error.message}`, true);
+      showToast(`Board details are not valid JSON: ${error.message}`, true);
       return;
     }
   }
@@ -869,20 +869,20 @@ async function issueToken(event) {
   els.tokenCreated.hidden = false;
   els.tokenCreated.innerHTML = `
     <strong>Issued token for ${escapeHTML(payload.agent_name)}</strong>
-    <div class="token-meta">Copy this generated file into <code>.env.agent</code>. The raw token is only shown once.</div>
+    <div class="token-meta">Copy this setup file into <code>.env.agent</code>. It is only shown once.</div>
     <button type="button" class="secondary" data-copy-agent-env>Copy .env.agent</button>
     <pre>${escapeHTML(envFile)}</pre>
-    <div class="token-meta">Then start the agent profile:</div>
+    <div class="token-meta">Then start the home connector:</div>
     <code>docker compose --profile agent up -d agent</code>`;
   await Promise.all([loadAgents(), loadTokens(homeID)]);
-  showToast("Agent token issued. Copy the generated .env.agent file.");
+  showToast("Setup file created. Copy it into .env.agent.");
 }
 
 async function revokeToken(homeID, tokenID) {
   try {
     await api(`/v1/home/agent/tokens/${encodeURIComponent(tokenID)}`, { method: "DELETE" });
     await loadTokens(homeID);
-    showToast("Agent token revoked.");
+    showToast("Setup file disabled.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -921,7 +921,7 @@ els.tokenCreated.addEventListener("click", async (event) => {
     await navigator.clipboard.writeText(state.lastAgentEnvFile);
     showToast(".env.agent copied.");
   } catch (_) {
-    showToast("Select and copy the generated .env.agent block.", true);
+    showToast("Select and copy the generated .env.agent setup file.", true);
   }
 });
 els.tokenHome.addEventListener("change", async (event) => {

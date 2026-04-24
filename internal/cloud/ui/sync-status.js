@@ -73,7 +73,7 @@ function syncURL(homeID) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function renderHomes() {
@@ -81,7 +81,7 @@ function renderHomes() {
   if (!state.homes.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No homes available";
+    option.textContent = "No home yet";
     els.homeSelect.appendChild(option);
     return;
   }
@@ -103,12 +103,12 @@ function renderSync() {
   const notes = state.sync?.notes || {};
   const entries = Object.entries(profiles);
 
-  els.profileCount.textContent = `${entries.length} profile${entries.length === 1 ? "" : "s"}`;
+  els.profileCount.textContent = `${entries.length} saved`;
   els.notesStatus.textContent = notes.status || "Unknown";
 
   if (!entries.length) {
     els.profilesOutput.className = "card-list empty-state";
-    els.profilesOutput.textContent = "No profile status has been recorded for this home yet.";
+    els.profilesOutput.textContent = "No saved connections have reported status yet.";
   } else {
     els.profilesOutput.className = "card-list";
     els.profilesOutput.innerHTML = "";
@@ -123,8 +123,8 @@ function renderSync() {
           </div>
           <span class="status-chip ${profile.status === "healthy" ? "" : "offline"}">${escapeHTML(profile.status || "unknown")}</span>
         </div>
-        <div class="meta">Applied version: ${escapeHTML(profile.applied_version)}</div>
-        <div class="meta">Secret version: ${escapeHTML(profile.secret_version)}</div>
+        <div class="meta">Saved version: ${escapeHTML(profile.applied_version)}</div>
+        <div class="meta">Private version: ${escapeHTML(profile.secret_version)}</div>
         <div class="meta">Last backup: ${escapeHTML(formatDate(profile.last_backup_at))}</div>
         <div class="meta">Last error: ${escapeHTML(profile.last_error || "None")}</div>
       `;
@@ -200,7 +200,7 @@ els.homeSelect.addEventListener("change", async () => {
 els.refreshButton.addEventListener("click", async () => {
   try {
     await loadSync();
-    showToast("Sync state refreshed.");
+    showToast("Status refreshed.");
   } catch (error) {
     showToast(error.message, true);
   }

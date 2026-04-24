@@ -11,54 +11,54 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Hank Remote</p>
-          <h1>Deployment Guide</h1>
-          <p class="lede">Run the cloud and agent together on the same machine under one Docker Compose stack, then expose the cloud service externally through Cloudflare Tunnel.</p>
+          <h1>Setup Guide</h1>
+          <p class="lede">Run Hank Remote on one server and point the Hank app at it.</p>
         </div>
         <div class="hero-card">
           <div class="status-row">
             <span class="status-dot"></span>
-            <span>Production Notes</span>
+            <span>Live Server</span>
           </div>
-          <p>Keep TLS in front of the cloud service, persist PostgreSQL on durable storage, and rotate agent tokens with overlap instead of hard cutovers.</p>
+          <p>Use a reverse proxy or Cloudflare Tunnel for the public address.</p>
         </div>
       </header>
 
       <main class="grid">
         <section class="panel">
-          <h2>Topology</h2>
-          <p class="meta">iPhone App → HTTPS/WebSocket → Hank Remote Cloud → outbound WebSocket → Hank Remote Agent</p>
-          <p>The cloud is the only public entrypoint. The agent stays inside the home network and connects outbound.</p>
+          <h2>Simple Picture</h2>
+          <p class="meta">Hank app -> Hank Remote server -> Home connector</p>
+          <p>The app talks to the server. The home connector keeps your local Home Assistant, files, and notes reachable.</p>
         </section>
 
         <section class="panel">
-          <h2>Required Cloud Environment</h2>
+          <h2>Server Settings</h2>
           <div class="card-list">
-            <article class="card"><strong>HANK_REMOTE_CLOUD_ADDR</strong><div class="meta">Bind address for the cloud server.</div></article>
-            <article class="card"><strong>HANK_REMOTE_CLOUD_DATABASE_URL</strong><div class="meta">PostgreSQL connection URL for the cloud service.</div></article>
-            <article class="card"><strong>HANK_REMOTE_SESSION_TTL_SECONDS</strong><div class="meta">App-session lifetime.</div></article>
-            <article class="card"><strong>HANK_REMOTE_REQUEST_TIMEOUT_SECONDS</strong><div class="meta">Relay timeout for app commands.</div></article>
+            <article class="card"><strong>Address</strong><div class="meta">Where the Hank Remote server listens.</div></article>
+            <article class="card"><strong>Database</strong><div class="meta">Where accounts and setup data are stored.</div></article>
+            <article class="card"><strong>Login Lifetime</strong><div class="meta">How long app sessions stay signed in.</div></article>
+            <article class="card"><strong>Request Timeout</strong><div class="meta">How long the server waits for the home connector.</div></article>
           </div>
         </section>
 
         <section class="panel">
-          <h2>Required Agent Environment</h2>
+          <h2>Home Connector Settings</h2>
           <div class="card-list">
-            <article class="card"><strong>HANK_REMOTE_AGENT_CLOUD_URL</strong><div class="meta">Public ws:// or wss:// /ws/agent URL.</div></article>
-            <article class="card"><strong>HANK_REMOTE_AGENT_ID</strong><div class="meta">Stable agent identity.</div></article>
-            <article class="card"><strong>HANK_REMOTE_AGENT_TOKEN</strong><div class="meta">Issued agent token.</div></article>
-            <article class="card"><strong>HANK_REMOTE_AGENT_HOME_NAME</strong><div class="meta">Friendly name shown in registration.</div></article>
+            <article class="card"><strong>Server Link</strong><div class="meta">The connector uses this to reach Hank Remote.</div></article>
+            <article class="card"><strong>Connector ID</strong><div class="meta">The name used to recognize this connector.</div></article>
+            <article class="card"><strong>Setup Token</strong><div class="meta">The private token created by the dashboard.</div></article>
+            <article class="card"><strong>Home Name</strong><div class="meta">The friendly name shown in the dashboard.</div></article>
           </div>
         </section>
 
         <section class="panel">
-          <h2>Smoke Checklist</h2>
+          <h2>First Checks</h2>
           <div class="card-list">
-            <article class="card">1. <code>/healthz</code> returns 200.</article>
-            <article class="card">2. <code>/readyz</code> reports storage ready.</article>
-            <article class="card">3. <code>/metrics</code> exposes Prometheus text.</article>
-            <article class="card">4. One app session authenticates and creates a home.</article>
-            <article class="card">5. One agent registers and appears online.</article>
-            <article class="card">6. One <code>system.ping</code> round-trip succeeds.</article>
+            <article class="card">1. Server running returns OK.</article>
+            <article class="card">2. Database ready returns OK.</article>
+            <article class="card">3. First account can sign in.</article>
+            <article class="card">4. The home connector shows online.</article>
+            <article class="card">5. The Hank app can log in.</article>
+            <article class="card">6. Files, notes, or Home Assistant load from the app.</article>
           </div>
         </section>
       </main>

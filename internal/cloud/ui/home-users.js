@@ -92,7 +92,7 @@ function syncURL(homeID) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function renderHomes() {
@@ -100,10 +100,10 @@ function renderHomes() {
   if (!state.homes.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No homes available";
+    option.textContent = "No home yet";
     els.homeSelect.appendChild(option);
     els.homeRole.textContent = "No home";
-    els.homeMeta.textContent = "Create a home from the dashboard first.";
+    els.homeMeta.textContent = "Create the home from Overview first.";
     return;
   }
 
@@ -124,15 +124,15 @@ function renderMembers() {
   const owner = isOwner();
   els.memberCount.textContent = `${state.members.length} member${state.members.length === 1 ? "" : "s"}`;
   const membership = currentMembership();
-  els.homeRole.textContent = membership ? `You are ${membership.role}` : "No membership";
+  els.homeRole.textContent = membership ? `Your role: ${membership.role}` : "No access";
   const home = selectedHome();
-  els.homeMeta.textContent = home ? `${home.name} · ${home.id}` : "Pick a home to inspect members and invitations.";
+  els.homeMeta.textContent = home ? `${home.name}` : "Pick a home to see who has access.";
   els.inviteForm.hidden = !owner;
   els.inviteDisabled.hidden = owner;
 
   if (!state.members.length) {
     els.memberList.className = "card-list empty-state";
-    els.memberList.textContent = "No members found for this home.";
+    els.memberList.textContent = "No people have access yet.";
     return;
   }
 
@@ -158,7 +158,7 @@ function renderMembers() {
       const removeButton = document.createElement("button");
       removeButton.type = "button";
       removeButton.className = "ghost";
-      removeButton.textContent = "Remove User";
+      removeButton.textContent = "Remove Person";
       removeButton.addEventListener("click", () => removeMember(member));
       actions.appendChild(removeButton);
       card.appendChild(actions);
@@ -171,12 +171,12 @@ function renderInvitations() {
   els.invitationCount.textContent = `${state.invitations.length} pending`;
   if (!isOwner()) {
     els.invitationList.className = "card-list empty-state";
-    els.invitationList.textContent = "Only admins can inspect pending invitations.";
+    els.invitationList.textContent = "Only admins can see pending invites.";
     return;
   }
   if (!state.invitations.length) {
     els.invitationList.className = "card-list empty-state";
-    els.invitationList.textContent = "No pending invitations for this home.";
+    els.invitationList.textContent = "No pending invites.";
     return;
   }
 
@@ -201,7 +201,7 @@ function renderInvitations() {
     const revokeButton = document.createElement("button");
     revokeButton.type = "button";
     revokeButton.className = "ghost";
-    revokeButton.textContent = "Revoke Invitation";
+    revokeButton.textContent = "Cancel Invite";
     revokeButton.addEventListener("click", () => revokeInvitation(invitation));
     actions.appendChild(revokeButton);
     card.appendChild(actions);
@@ -268,9 +268,9 @@ async function createInvitation(event) {
     els.inviteEmail.value = "";
     els.inviteRole.value = "member";
     els.inviteOutput.hidden = false;
-    els.inviteOutput.innerHTML = `<strong>Invitation created for ${escapeHTML(payload.email)}</strong><div class="token-meta">The raw token is only shown once. Share it with the invited user so they can accept it.</div><code>${escapeHTML(payload.token)}</code>`;
+    els.inviteOutput.innerHTML = `<strong>Invite created for ${escapeHTML(payload.email)}</strong><div class="token-meta">This code is only shown once. Share it with this person so they can join.</div><code>${escapeHTML(payload.token)}</code>`;
     await loadInvitations();
-    showToast("Invitation created.");
+    showToast("Invite created.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -279,13 +279,13 @@ async function createInvitation(event) {
 async function revokeInvitation(invitation) {
   const home = selectedHome();
   if (!home) return;
-  if (!window.confirm(`Revoke the invitation for ${invitation.email}?`)) return;
+  if (!window.confirm(`Cancel the invite for ${invitation.email}?`)) return;
   try {
     await api(`/v1/home/members/invitations/${encodeURIComponent(invitation.id)}`, {
       method: "DELETE",
     });
     await loadInvitations();
-    showToast("Invitation revoked.");
+    showToast("Invite cancelled.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -300,7 +300,7 @@ async function removeMember(member) {
       method: "DELETE",
     });
     await refreshHomeUsers();
-    showToast("User removed from home.");
+    showToast("Person removed from home.");
   } catch (error) {
     showToast(error.message, true);
   }

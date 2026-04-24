@@ -96,10 +96,11 @@ Optional agent environment:
 ```bash
 mkdir -p /srv/hank-remote
 cd /srv/hank-remote
-git clone <your-hankserverside-repo-url> .
+git clone <your-hankserverside-repo-url> HankServerside
+cd /srv/hank-remote/HankServerside
 ```
 
-If the repo already exists on the server, just `cd` into it. Docker creates the default persistent volumes for PostgreSQL, local files, and notes automatically.
+If the repo already exists on the server, just `cd /srv/hank-remote/HankServerside`. Docker creates the default persistent volumes for PostgreSQL, local files, and notes automatically.
 
 ## 2. Review the default env files
 
@@ -177,7 +178,7 @@ Notes:
 ## 3. Start the stack
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 docker compose up --build -d
 docker compose ps
 ```
@@ -245,7 +246,7 @@ After issuing the token, the dashboard shows a generated `.env.agent` block.
 Copy that whole block into `/.env.agent`:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 nano .env.agent
 ```
 
@@ -255,7 +256,7 @@ Leave the SMB values blank to use the Docker-managed files volume.
 Then start the agent profile:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 docker compose --profile agent up -d agent
 ```
 
@@ -346,7 +347,7 @@ docker compose --profile agent restart agent
 Rebuild after code changes:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 git pull
 docker compose --profile agent up --build -d
 ```
@@ -377,6 +378,7 @@ Agent-side files and notes live in Docker volumes by default and need volume bac
 
 ## 12. Troubleshooting pointers
 
+- If Docker reports `port is already allocated`, run `sudo ss -ltnp | grep ':<host-port>'` and `docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep <host-port>`, then either stop the old service or set a different `HANK_REMOTE_CLOUD_HOST_PORT` in `.env.cloud`.
 - If `/healthz` or `/readyz` fail, inspect `docker compose logs -f cloud postgres` and confirm the chosen `HANK_REMOTE_CLOUD_HOST_PORT` is actually free on the host.
 - If login works but the agent stays offline, inspect `docker compose --profile agent logs -f agent` and recheck `HANK_REMOTE_AGENT_TOKEN` plus `HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent`.
 - If Home Assistant actions fail, recheck `HANK_REMOTE_HA_BASE_URL` and `HANK_REMOTE_HA_TOKEN`.

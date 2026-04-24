@@ -54,13 +54,13 @@ function formatDate(value) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function renderResult(payload) {
   if (!payload?.home) {
     els.result.className = "card-list empty-state";
-    els.result.textContent = "Enter a token to accept a pending home invitation.";
+    els.result.textContent = "Enter an invite code to join a home.";
     return;
   }
 
@@ -75,7 +75,7 @@ function renderResult(payload) {
         <span class="pill">Joined</span>
       </div>
       <div class="meta">Created ${escapeHTML(formatDate(payload.home.created_at))}</div>
-      <div class="meta">Use the dashboard tabs to manage this home now.</div>
+      <div class="meta">You can now use this home in Hank Remote.</div>
     </article>
   `;
 }
@@ -83,7 +83,7 @@ function renderResult(payload) {
 async function acceptInvitation() {
   const token = els.token.value.trim();
   if (!token) {
-    showToast("Enter an invitation token.", true);
+    showToast("Enter an invite code.", true);
     return;
   }
   try {
@@ -92,7 +92,7 @@ async function acceptInvitation() {
       body: JSON.stringify({ token }),
     });
     renderResult(payload);
-    showToast("Invitation accepted.");
+    showToast("Home joined.");
   } catch (error) {
     showToast(error.message, true);
   }

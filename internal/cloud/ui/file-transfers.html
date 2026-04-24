@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote File Transfers</title>
+    <title>Hank Remote Transfers</title>
     <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
   </head>
   <body>
@@ -11,36 +11,36 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Hank Remote</p>
-          <h1>File Transfers</h1>
-          <p class="lede">Use the raw cloud-managed upload and download transfer backend directly, including the issued transfer URLs and status snapshots.</p>
+          <h1>Transfers</h1>
+          <p class="lede">Upload and download files through Hank Remote.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
             <div class="status-row">
               <span class="status-dot"></span>
-              <span id="session-state">Loading session</span>
+              <span id="session-state">Checking login</span>
             </div>
             <button id="logout-button" class="ghost">Log Out</button>
           </div>
-          <p id="session-meta">Checking your Hank profile session.</p>
+          <p id="session-meta">Checking your Hank account.</p>
         </div>
       </header>
 
       <nav class="tab-strip" aria-label="Dashboard Sections">
-        <a class="tab-link" href="/dashboard">Console</a>
-        <a class="tab-link" href="/dashboard/home-users">Home Users</a>
-        <a class="tab-link" href="/dashboard/service-profiles">Service Profiles</a>
-        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
-        <a class="tab-link" href="/dashboard/profile-notes">Profile Notes</a>
-        <a class="tab-link active" href="/dashboard/file-transfers">File Transfers</a>
-        <a class="tab-link" href="/dashboard/accept-invitation">Accept Invitation</a>
+        <a class="tab-link" href="/dashboard">Overview</a>
+        <a class="tab-link" href="/dashboard/home-users">People</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
+        <a class="tab-link" href="/dashboard/sync-status">Status</a>
+        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
+        <a class="tab-link active" href="/dashboard/file-transfers">Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
       <main class="grid">
         <section class="panel">
           <div class="panel-head">
-            <h2>Select Home</h2>
-            <span class="pill">Transfer API</span>
+            <h2>Home</h2>
+            <span class="pill">Files</span>
           </div>
           <label>
             <span>Home</span>
@@ -50,19 +50,19 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Last Transfer</h2>
-            <span class="pill">Issued URL</span>
+            <h2>Last File Move</h2>
+            <span class="pill">Result</span>
           </div>
-          <div id="transfer-output" class="card-list empty-state">Run an upload or download to see the issued transfer details.</div>
+          <div id="transfer-output" class="card-list empty-state">Upload or download a file to see the result.</div>
         </section>
 
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Download</h2>
-            <span class="pill">GET</span>
+            <span class="pill">From Server</span>
           </div>
           <label>
-            <span>Remote Path</span>
+            <span>File Path</span>
             <input id="download-path" type="text" placeholder="/Documents/report.pdf">
           </label>
           <div class="actions wrap">
@@ -73,11 +73,11 @@
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Upload</h2>
-            <span class="pill">PUT</span>
+            <span class="pill">To Server</span>
           </div>
           <div class="two-up">
             <label>
-              <span>Remote Path</span>
+              <span>Save As</span>
               <input id="upload-path" type="text" placeholder="/Uploads/example.txt">
             </label>
             <label>

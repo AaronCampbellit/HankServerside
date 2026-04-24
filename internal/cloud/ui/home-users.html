@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote Home Users</title>
+    <title>Hank Remote People</title>
     <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
   </head>
   <body>
@@ -11,48 +11,48 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Hank Remote</p>
-          <h1>Home Users</h1>
-          <p class="lede">Create and manage the users in a home, issue invitations, and remove members from one dedicated page.</p>
+          <h1>People</h1>
+          <p class="lede">Choose who can use this Hank Remote home.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
             <div class="status-row">
               <span class="status-dot"></span>
-              <span id="session-state">Loading session</span>
+              <span id="session-state">Checking login</span>
             </div>
             <button id="logout-button" class="ghost">Log Out</button>
           </div>
-          <p id="session-meta">Checking your Hank profile session.</p>
+          <p id="session-meta">Checking your Hank account.</p>
         </div>
       </header>
 
       <nav class="tab-strip" aria-label="Dashboard Sections">
-        <a class="tab-link" href="/dashboard">Console</a>
-        <a class="tab-link active" href="/dashboard/home-users">Home Users</a>
-        <a class="tab-link" href="/dashboard/service-profiles">Service Profiles</a>
-        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
-        <a class="tab-link" href="/dashboard/profile-notes">Profile Notes</a>
-        <a class="tab-link" href="/dashboard/file-transfers">File Transfers</a>
-        <a class="tab-link" href="/dashboard/accept-invitation">Accept Invitation</a>
+        <a class="tab-link" href="/dashboard">Overview</a>
+        <a class="tab-link active" href="/dashboard/home-users">People</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
+        <a class="tab-link" href="/dashboard/sync-status">Status</a>
+        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
+        <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
       <main class="grid">
         <section class="panel">
           <div class="panel-head">
-            <h2>Select Home</h2>
+            <h2>Home</h2>
             <span id="home-role" class="pill">Loading</span>
           </div>
           <label>
             <span>Home</span>
             <select id="home-select"></select>
           </label>
-          <p id="home-meta" class="hint">Pick a home to inspect members and invitations.</p>
+          <p id="home-meta" class="hint">Pick a home to see who has access.</p>
         </section>
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Invite User</h2>
-            <span class="pill">Admin Only</span>
+            <h2>Invite Someone</h2>
+            <span class="pill">Admin</span>
           </div>
           <form id="invite-form" class="stack compact">
             <label>
@@ -65,15 +65,15 @@
                 <option value="member">member</option>
               </select>
             </label>
-            <button type="submit">Create Invitation</button>
+            <button type="submit">Create Invite</button>
           </form>
           <div id="invite-output" class="token-output" hidden></div>
-          <p id="invite-disabled" class="hint" hidden>You are not an admin in this home, so invitation management is disabled.</p>
+          <p id="invite-disabled" class="hint" hidden>Only admins can invite people.</p>
         </section>
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Current Members</h2>
+            <h2>People With Access</h2>
             <span id="member-count" class="pill">0 members</span>
           </div>
           <div id="member-list" class="card-list empty-state">Loading members.</div>
@@ -81,7 +81,7 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Pending Invitations</h2>
+            <h2>Pending Invites</h2>
             <span id="invitation-count" class="pill">0 pending</span>
           </div>
           <div id="invitation-list" class="card-list empty-state">Loading invitations.</div>

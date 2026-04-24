@@ -63,7 +63,7 @@ function formatDate(value) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function clearEditor() {
@@ -79,7 +79,7 @@ function renderNotes() {
   els.noteCount.textContent = `${state.notes.length} note${state.notes.length === 1 ? "" : "s"}`;
   if (!state.notes.length) {
     els.noteList.className = "card-list empty-state";
-    els.noteList.textContent = "No profile notes yet.";
+    els.noteList.textContent = "No notes yet.";
     return;
   }
 

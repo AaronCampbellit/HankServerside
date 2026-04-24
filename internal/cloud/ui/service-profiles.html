@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote Service Profiles</title>
+    <title>Hank Remote Connections</title>
     <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
   </head>
   <body>
@@ -11,94 +11,94 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Hank Remote</p>
-          <h1>Service Profiles</h1>
-          <p class="lede">Manage Home Assistant and SMB configuration profiles for a home and push secret updates through the cloud-to-agent path.</p>
+          <h1>Connections</h1>
+          <p class="lede">Connect Hank Remote to Home Assistant and your file share.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
             <div class="status-row">
               <span class="status-dot"></span>
-              <span id="session-state">Loading session</span>
+              <span id="session-state">Checking login</span>
             </div>
             <button id="logout-button" class="ghost">Log Out</button>
           </div>
-          <p id="session-meta">Checking your Hank profile session.</p>
+          <p id="session-meta">Checking your Hank account.</p>
         </div>
       </header>
 
       <nav class="tab-strip" aria-label="Dashboard Sections">
-        <a class="tab-link" href="/dashboard">Console</a>
-        <a class="tab-link" href="/dashboard/home-users">Home Users</a>
-        <a class="tab-link active" href="/dashboard/service-profiles">Service Profiles</a>
-        <a class="tab-link" href="/dashboard/sync-status">Sync Status</a>
-        <a class="tab-link" href="/dashboard/profile-notes">Profile Notes</a>
-        <a class="tab-link" href="/dashboard/file-transfers">File Transfers</a>
-        <a class="tab-link" href="/dashboard/accept-invitation">Accept Invitation</a>
+        <a class="tab-link" href="/dashboard">Overview</a>
+        <a class="tab-link" href="/dashboard/home-users">People</a>
+        <a class="tab-link active" href="/dashboard/service-profiles">Connections</a>
+        <a class="tab-link" href="/dashboard/sync-status">Status</a>
+        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
+        <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
       <main class="grid">
         <section class="panel">
           <div class="panel-head">
-            <h2>Select Home</h2>
+            <h2>Home</h2>
             <span id="home-role" class="pill">Loading</span>
           </div>
           <label>
             <span>Home</span>
             <select id="home-select"></select>
           </label>
-          <p id="home-meta" class="hint">Choose a home to inspect or update service profiles.</p>
+          <p id="home-meta" class="hint">Choose the home these connections belong to.</p>
         </section>
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Current Status</h2>
-            <span class="pill">Readback</span>
+            <h2>Connection Status</h2>
+            <span class="pill">Current</span>
           </div>
-          <div id="profiles-summary" class="card-list empty-state">Loading service profiles.</div>
+          <div id="profiles-summary" class="card-list empty-state">Loading connections.</div>
         </section>
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Home Assistant Profile</h2>
-            <span class="pill">Config Apply</span>
+            <h2>Home Assistant</h2>
+            <span class="pill">Lights and Sensors</span>
           </div>
           <form id="ha-form" class="stack">
             <label>
-              <span>Public Config JSON</span>
+              <span>Home Assistant Address</span>
               <textarea id="ha-public-config" rows="6" placeholder='{"base_url":"http://homeassistant.local:8123"}'></textarea>
             </label>
             <label>
-              <span>Secrets JSON</span>
+              <span>Home Assistant Token</span>
               <textarea id="ha-secrets" rows="6" placeholder='{"token":"replace-with-home-assistant-token"}'></textarea>
             </label>
             <label>
-              <span><input id="ha-persist" type="checkbox" checked> Persist secrets on the agent</span>
+              <span><input id="ha-persist" type="checkbox" checked> Save this on the home connector</span>
             </label>
             <div class="actions wrap">
-              <button type="submit">Save Home Assistant Profile</button>
+              <button type="submit">Save Home Assistant</button>
             </div>
           </form>
         </section>
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>SMB Profile</h2>
-            <span class="pill">Config Apply</span>
+            <h2>File Share</h2>
+            <span class="pill">NAS or SMB</span>
           </div>
           <form id="smb-form" class="stack">
             <label>
-              <span>Public Config JSON</span>
+              <span>Share Address</span>
               <textarea id="smb-public-config" rows="6" placeholder='{"host":"192.168.1.20","share":"media","domain":"WORKGROUP"}'></textarea>
             </label>
             <label>
-              <span>Secrets JSON</span>
+              <span>Share Login</span>
               <textarea id="smb-secrets" rows="6" placeholder='{"username":"aaron","password":"replace-me"}'></textarea>
             </label>
             <label>
-              <span><input id="smb-persist" type="checkbox" checked> Persist secrets on the agent</span>
+              <span><input id="smb-persist" type="checkbox" checked> Save this on the home connector</span>
             </label>
             <div class="actions wrap">
-              <button type="submit">Save SMB Profile</button>
+              <button type="submit">Save File Share</button>
             </div>
           </form>
         </section>

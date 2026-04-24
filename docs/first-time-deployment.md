@@ -29,7 +29,8 @@ docker compose version
 sudo mkdir -p /srv/hank-remote
 sudo chown "$USER":"$USER" /srv/hank-remote
 cd /srv/hank-remote
-git clone <your-hankserverside-repo-url> .
+git clone <your-hankserverside-repo-url> HankServerside
+cd /srv/hank-remote/HankServerside
 ```
 
 You do not need to create `data/postgres`, `data/files`, or `data/notes`.
@@ -56,10 +57,19 @@ If port `18080` is already used, create `.env.cloud`:
 HANK_REMOTE_CLOUD_HOST_PORT=18081
 ```
 
+If Docker reports `port is already allocated`, confirm what owns the port:
+
+```bash
+sudo ss -ltnp | grep ':18080'
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep 18080
+```
+
+Then either stop the old service using that port or keep it running and use a different `HANK_REMOTE_CLOUD_HOST_PORT`.
+
 ## 4. Start First Boot
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 docker compose up --build -d
 docker compose ps
 ```
@@ -74,8 +84,8 @@ The `agent` should not be running yet.
 Check the cloud:
 
 ```bash
-curl http://127.0.0.1:18080/healthz
-curl http://127.0.0.1:18080/readyz
+curl http://127.0.0.1:<host-port>/healthz
+curl http://127.0.0.1:<host-port>/readyz
 ```
 
 Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
@@ -117,7 +127,7 @@ After the token is issued, the dashboard shows a generated `.env.agent` file.
 Use the copy button and paste the full block into:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 nano .env.agent
 ```
 
@@ -132,7 +142,7 @@ Leave SMB blank to use the Docker-managed files volume.
 ## 8. Start the Agent
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 docker compose --profile agent up -d agent
 docker compose --profile agent ps
 ```
@@ -150,7 +160,7 @@ In the dashboard, the agent should show as `online`.
 After the agent has been activated, use the agent profile during updates:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 git pull
 docker compose --profile agent up --build -d
 ```
@@ -172,5 +182,5 @@ docker volume ls | grep hank
 
 Also back up local override files:
 
-- `/srv/hank-remote/.env.cloud`
-- `/srv/hank-remote/.env.agent`
+- `/srv/hank-remote/HankServerside/.env.cloud`
+- `/srv/hank-remote/HankServerside/.env.agent`

@@ -74,7 +74,7 @@ function syncURL(homeID) {
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
-  els.sessionMeta.textContent = `User ID ${state.user?.id || ""}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
 function renderHomes() {
@@ -82,7 +82,7 @@ function renderHomes() {
   if (!state.homes.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No homes available";
+    option.textContent = "No home yet";
     els.homeSelect.appendChild(option);
     return;
   }
@@ -102,7 +102,7 @@ function renderHomes() {
 function renderLastTransfer() {
   if (!state.lastTransfer) {
     els.transferOutput.className = "card-list empty-state";
-    els.transferOutput.textContent = "Run an upload or download to see the issued transfer details.";
+    els.transferOutput.textContent = "Upload or download a file to see the result.";
     return;
   }
 
@@ -122,7 +122,7 @@ function renderLastTransfer() {
         <div class="kv-row"><div class="kv-label">Expires</div><div>${escapeHTML(formatDate(transfer.expires_at))}</div></div>
         <div class="kv-row"><div class="kv-label">Next Offset</div><div>${escapeHTML(transfer.next_offset ?? 0)}</div></div>
         <div class="kv-row"><div class="kv-label">Resume Count</div><div>${escapeHTML(transfer.resume_count ?? 0)}</div></div>
-        <div class="kv-row"><div class="kv-label">Issued URL</div><div>${escapeHTML(transfer.url || "")}</div></div>
+        <div class="kv-row"><div class="kv-label">Temporary Link</div><div>${escapeHTML(transfer.url || "")}</div></div>
         <div class="kv-row"><div class="kv-label">Result</div><div>${escapeHTML(transfer.result || "pending")}</div></div>
       </div>
       <pre class="mono-block">${escapeHTML(JSON.stringify(transfer, null, 2))}</pre>
@@ -148,7 +148,7 @@ async function startDownload() {
     return;
   }
   if (!remotePath) {
-    showToast("Enter a remote download path.", true);
+    showToast("Enter the file path to download.", true);
     return;
   }
 
@@ -193,7 +193,7 @@ async function startUpload() {
     return;
   }
   if (!remotePath) {
-    showToast("Enter a remote upload path.", true);
+    showToast("Enter where the file should be saved.", true);
     return;
   }
   if (!file) {

@@ -32,8 +32,10 @@ This deployment is singleton-only:
 
 ```bash
 cd /srv
-git clone <your-hankserverside-repo-url> hank-remote
+mkdir -p hank-remote
 cd /srv/hank-remote
+git clone <your-hankserverside-repo-url> HankServerside
+cd /srv/hank-remote/HankServerside
 ```
 
 Docker creates the default persistent volumes for PostgreSQL, local files, and notes automatically.
@@ -58,6 +60,15 @@ If host port `18080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT
 Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
 
 If you need server-specific overrides, create `/.env.cloud` with only the keys you want to replace.
+
+If Docker reports `port is already allocated`, confirm what owns the port:
+
+```bash
+sudo ss -ltnp | grep ':<host-port>'
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep <host-port>
+```
+
+Then either stop the old service using that port or keep it running and choose another `HANK_REMOTE_CLOUD_HOST_PORT`.
 
 ## 3. Review the agent env shape
 
@@ -87,7 +98,7 @@ Notes:
 ## 4. Start the stack
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 docker compose up --build -d
 docker compose ps
 curl http://127.0.0.1:<host-port>/healthz
@@ -126,7 +137,7 @@ Do not look for a separate Home creation step. The Home is created automatically
 Copy the generated `.env.agent` block from the dashboard into `/.env.agent`:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 nano .env.agent
 ```
 
@@ -134,7 +145,7 @@ Edit Home Assistant or SMB values if you need them.
 Then start the agent profile:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 docker compose --profile agent up -d agent
 ```
 
@@ -193,7 +204,7 @@ docker compose --profile agent restart agent
 Rebuild after pulling changes:
 
 ```bash
-cd /srv/hank-remote
+cd /srv/hank-remote/HankServerside
 git pull
 docker compose --profile agent up --build -d
 ```
