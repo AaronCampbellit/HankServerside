@@ -207,6 +207,21 @@ async function hydrate() {
   }
 }
 
+function editorHasFocus() {
+  return [els.noteTitle, els.noteID, els.noteContent].includes(document.activeElement);
+}
+
+async function refreshLiveNotes() {
+  if (document.hidden || editorHasFocus()) {
+    return;
+  }
+  const selectedNoteID = state.selectedNoteID;
+  await loadNotes();
+  if (selectedNoteID && state.notes.some((note) => note.id === selectedNoteID)) {
+    await loadNote(selectedNoteID);
+  }
+}
+
 els.logoutButton.addEventListener("click", logout);
 els.refreshButton.addEventListener("click", async () => {
   try {
@@ -224,3 +239,6 @@ els.saveButton.addEventListener("click", saveNote);
 els.deleteButton.addEventListener("click", deleteNote);
 
 hydrate();
+window.setInterval(() => {
+  refreshLiveNotes().catch(() => {});
+}, 2000);
