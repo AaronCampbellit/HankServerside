@@ -59,6 +59,14 @@ func serveDeploymentGuide(w http.ResponseWriter, r *http.Request) {
 	serveUIFile(w, r, "deployment.html", "text/html; charset=utf-8")
 }
 
+func serveUIFavicon(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/favicon.ico" {
+		http.NotFound(w, r)
+		return
+	}
+	serveUIFile(w, r, "favicon.ico", "image/png")
+}
+
 func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	name := path.Clean(strings.TrimPrefix(r.URL.Path, "/assets/"))
 	switch name {
@@ -66,6 +74,10 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
 	case "login.js", "dashboard.js", "home-users.js", "service-profiles.js", "sync-status.js", "profile-notes.js", "file-transfers.js", "accept-invitation.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
+	case "site.webmanifest":
+		serveUIFile(w, r, name, "application/manifest+json; charset=utf-8")
+	case "favicon.ico", "favicon.png", "hank-icon.png", "hank-icon-192.png", "hank-icon-512.png", "apple-touch-icon.png":
+		serveUIFile(w, r, name, "image/png")
 	default:
 		http.NotFound(w, r)
 	}

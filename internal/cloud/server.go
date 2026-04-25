@@ -88,6 +88,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/file-transfers", server.handleFileTransfersPage)
 	mux.HandleFunc("/dashboard/accept-invitation", server.handleAcceptInvitationPage)
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)
+	mux.HandleFunc("/favicon.ico", serveUIFavicon)
 	mux.HandleFunc("/assets/", serveUIAsset)
 	mux.HandleFunc("/healthz", server.handleHealthz)
 	mux.HandleFunc("/readyz", server.handleReadyz)
