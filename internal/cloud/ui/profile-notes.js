@@ -3,6 +3,12 @@ const state = {
   notes: [],
   selectedNoteID: "",
   currentRevision: "",
+  appSocket: null,
+  appSocketPromise: null,
+  pendingRequests: new Map(),
+  requestCounter: 0,
+  liveRefreshPending: false,
+  reconnectTimer: null,
 };
 
 const els = {
@@ -58,6 +64,126 @@ function escapeHTML(value) {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
+}
+
+function preferredAppSocketURL() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws/app`;
+}
+
+function nextRequestID() {
+  state.requestCounter += 1;
+  if (window.crypto?.randomUUID) return `notes-${window.crypto.randomUUID()}`;
+  return `notes-${Date.now()}-${state.requestCounter}`;
+}
+
+function closeAppSocket(scheduleReconnect = true) {
+  if (state.appSocket) {
+    try {
+      state.appSocket.close();
+    } catch (_) {
+    }
+  }
+  state.appSocket = null;
+  state.appSocketPromise = null;
+  for (const { reject } of state.pendingRequests.values()) {
+    reject(new Error("Live notes connection closed."));
+  }
+  state.pendingRequests.clear();
+  if (scheduleReconnect && !document.hidden && !state.reconnectTimer) {
+    state.reconnectTimer = window.setTimeout(() => {
+      state.reconnectTimer = null;
+      connectLiveNotes().catch(() => {});
+    }, 1500);
+  }
+}
+
+function handleSocketMessage(event) {
+  let envelope;
+  try {
+    envelope = JSON.parse(event.data);
+  } catch (_) {
+    return;
+  }
+
+  const pending = state.pendingRequests.get(envelope.request_id);
+  if (pending) {
+    state.pendingRequests.delete(envelope.request_id);
+    if (envelope.type === "app.error" || envelope.error) {
+      pending.reject(new Error(envelope.error?.message || "Live notes command failed."));
+      return;
+    }
+    pending.resolve(envelope.payload ?? null);
+    return;
+  }
+
+  if (envelope.type !== "app.event") {
+    return;
+  }
+  const appEvent = envelope.payload || {};
+  if (appEvent.topic === "notes.profile" && ["notes.changed", "notes.deleted"].includes(appEvent.event)) {
+    scheduleLiveRefresh();
+  }
+}
+
+function sendSocketCommand(command, body = {}) {
+  const socket = state.appSocket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error("Live notes connection is not open."));
+  }
+  const requestID = nextRequestID();
+  const envelope = {
+    version: "v1",
+    type: "app.command",
+    request_id: requestID,
+    timestamp: new Date().toISOString(),
+    payload: { command, body },
+  };
+  return new Promise((resolve, reject) => {
+    state.pendingRequests.set(requestID, { resolve, reject });
+    try {
+      socket.send(JSON.stringify(envelope));
+    } catch (error) {
+      state.pendingRequests.delete(requestID);
+      reject(error);
+    }
+  });
+}
+
+async function connectLiveNotes() {
+  if (state.appSocket?.readyState === WebSocket.OPEN) {
+    return state.appSocket;
+  }
+  if (state.appSocketPromise) {
+    return state.appSocketPromise;
+  }
+
+  state.appSocketPromise = new Promise((resolve, reject) => {
+    const socket = new WebSocket(preferredAppSocketURL());
+    state.appSocket = socket;
+    socket.addEventListener("open", async () => {
+      state.appSocketPromise = null;
+      try {
+        await sendSocketCommand("app.subscribe", { topics: ["notes.profile"] });
+        resolve(socket);
+      } catch (error) {
+        reject(error);
+      }
+    }, { once: true });
+    socket.addEventListener("message", handleSocketMessage);
+    socket.addEventListener("close", () => {
+      if (state.appSocket === socket) {
+        closeAppSocket();
+      }
+    });
+    socket.addEventListener("error", () => {
+      if (state.appSocket === socket) {
+        closeAppSocket();
+      }
+      reject(new Error("Live notes connection failed."));
+    }, { once: true });
+  });
+  return state.appSocketPromise;
 }
 
 function renderSession() {
@@ -213,13 +339,22 @@ function editorHasFocus() {
 
 async function refreshLiveNotes() {
   if (document.hidden || editorHasFocus()) {
+    state.liveRefreshPending = true;
     return;
   }
+  state.liveRefreshPending = false;
   const selectedNoteID = state.selectedNoteID;
   await loadNotes();
   if (selectedNoteID && state.notes.some((note) => note.id === selectedNoteID)) {
     await loadNote(selectedNoteID);
   }
+}
+
+function scheduleLiveRefresh() {
+  window.clearTimeout(scheduleLiveRefresh.timeoutID);
+  scheduleLiveRefresh.timeoutID = window.setTimeout(() => {
+    refreshLiveNotes().catch(() => {});
+  }, 120);
 }
 
 els.logoutButton.addEventListener("click", logout);
@@ -239,6 +374,24 @@ els.saveButton.addEventListener("click", saveNote);
 els.deleteButton.addEventListener("click", deleteNote);
 
 hydrate();
+connectLiveNotes().catch(() => {});
 window.setInterval(() => {
   refreshLiveNotes().catch(() => {});
-}, 2000);
+}, 10000);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    closeAppSocket(false);
+    return;
+  }
+  connectLiveNotes().catch(() => {});
+  refreshLiveNotes().catch(() => {});
+});
+
+[els.noteTitle, els.noteID, els.noteContent].forEach((field) => {
+  field.addEventListener("blur", () => {
+    if (state.liveRefreshPending) {
+      refreshLiveNotes().catch(() => {});
+    }
+  });
+});

@@ -499,6 +499,74 @@ func TestNotesCommandsUseCloudStoreWhenAgentOffline(t *testing.T) {
 	}
 }
 
+func TestProfileNoteHTTPWriteBroadcastsRealtimeEvent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_live", Email: "live@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_live", UserID: user.ID, TokenHash: hashToken("live-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, session))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=live-token"), nil)
+	if err != nil {
+		t.Fatalf("app websocket dial: %v", err)
+	}
+	defer appConn.Close(websocket.StatusNormalClosure, "done")
+
+	subscribe, err := protocol.NewEnvelope(protocol.TypeAppCommand, "req_subscribe_profile_notes", "", "", protocol.RoutedCommand{
+		Command: "app.subscribe",
+		Body:    mustEncodeBody(t, protocol.AppSubscribeRequest{Topics: []string{"notes.profile"}}),
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope subscribe: %v", err)
+	}
+	if err := wsjson.Write(ctx, appConn, subscribe); err != nil {
+		t.Fatalf("subscribe write: %v", err)
+	}
+	subscribeResponse := readUntilRequestID(t, ctx, appConn, "req_subscribe_profile_notes")
+	if subscribeResponse.Type != protocol.TypeAppResponse {
+		t.Fatalf("subscribe response type = %q, want %q", subscribeResponse.Type, protocol.TypeAppResponse)
+	}
+
+	requestJSON(t, testServer, "live-token", http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":   "live-note",
+		"title":     "Live Note",
+		"content":   "from app",
+		"page_type": "text",
+	}, nil)
+
+	eventEnvelope := readUntilEvent(t, ctx, appConn, "notes.changed")
+	event, err := protocol.DecodePayload[protocol.AppEvent](eventEnvelope)
+	if err != nil {
+		t.Fatalf("DecodePayload event: %v", err)
+	}
+	if event.Topic != "notes.profile" {
+		t.Fatalf("event topic = %q, want notes.profile", event.Topic)
+	}
+	var body struct {
+		UserID string `json:"user_id"`
+		NoteID string `json:"note_id"`
+	}
+	if err := json.Unmarshal(event.Body, &body); err != nil {
+		t.Fatalf("decode event body: %v", err)
+	}
+	if body.UserID != user.ID || body.NoteID != "live-note" {
+		t.Fatalf("event body = %+v, want user_id=%q note_id=live-note", body, user.ID)
+	}
+}
+
 func requestJSONStatus(t *testing.T, server *httptest.Server, sessionToken string, method string, path string, body any, wantStatus int) *http.Response {
 	t.Helper()
 
