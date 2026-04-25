@@ -393,6 +393,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		_ = s.store.SetAgentStatus(context.Background(), record.Agent.ID, domain.AgentStatusOffline, &now)
 		s.markHomeSyncOffline(record.Home.ID, record.Agent.ID)
+		s.emitHomeStatus(context.Background(), record.Home.ID, map[string]any{"home_id": record.Home.ID, "agent_id": record.Agent.ID, "status": domain.AgentStatusOffline})
 		s.logger.Info("agent websocket disconnected", "request_id", requestIDFromContext(r.Context()), "agent_id", record.Agent.ID, "home_id", record.Home.ID)
 	}()
 
@@ -431,6 +432,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			s.router.RegisterAgent(record.Home.ID, agent, peer, nil)
 			s.metrics.SetOnlineAgents(s.router.AgentCount())
+			s.emitHomeStatus(ctx, record.Home.ID, map[string]any{"home_id": record.Home.ID, "agent_id": agent.ID, "status": domain.AgentStatusOnline})
 
 			reply, err := protocol.NewEnvelope(protocol.TypeAgentRegistered, "", agent.ID, record.Home.ID, protocol.AgentRegistered{
 				AcceptedAt: now,
@@ -464,6 +466,9 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 					s.scheduleHomeSync(record.Home, record.Agent.ID)
 				}
 			}
+
+		case protocol.TypeAgentEvent:
+			s.handleAgentEvent(ctx, record.Home.ID, envelope)
 
 		case protocol.TypeCloudResponse:
 			s.handleAgentResponse(ctx, envelope)
@@ -554,6 +559,10 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		envelope.HomeID = home.ID
 
+		if s.handleRealtimeCommand(ctx, appConn, appPeer, envelope, command) {
+			continue
+		}
+
 		if feature := featureForCommand(command.Command); feature != "" {
 			if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, feature); err != nil {
 				code := "permission_denied"
@@ -642,6 +651,7 @@ func (s *Server) handleAgentResponse(ctx context.Context, envelope protocol.Enve
 		Payload:   envelope.Payload,
 	}
 	_ = pending.app.peer.Write(ctx, response)
+	s.emitCommandSideEffect(ctx, pending.command, envelope.Payload)
 }
 
 func (s *Server) handlePendingTimeout(ctx context.Context, pending *pendingRequest) {

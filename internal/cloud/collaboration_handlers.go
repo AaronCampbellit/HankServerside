@@ -203,6 +203,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "invitation_created"})
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"invitation_id": invitation.ID,
 			"home_id":       invitation.HomeID,
@@ -227,6 +228,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "invitation_deleted"})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return true
 	}
@@ -268,6 +270,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 		_ = s.store.RemoveNoteSharesForHomeUser(r.Context(), home.ID, targetUserID)
 		s.markHomeNotesDirty(r.Context(), home.ID, "")
 		s.evictCollaborator(home.ID, targetUserID, "membership_revoked")
+		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "member_removed", "user_id": targetUserID})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return true
 	}
@@ -323,6 +326,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "member_role_changed", "user_id": targetUserID})
 		writeJSON(w, http.StatusOK, updated)
 		return true
 	}
@@ -393,6 +397,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				if removedLast {
 					s.markHomeNotesDirty(r.Context(), home.ID, "")
 				}
+				s.emitHomeNotesChanged(r.Context(), "notes.share_changed", map[string]any{"home_id": home.ID, "note_id": note.NoteID})
 				writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 				return true
 			}
@@ -429,6 +434,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			if firstShare {
 				s.markHomeNotesDirty(r.Context(), home.ID, "")
 			}
+			s.emitHomeNotesChanged(r.Context(), "notes.share_changed", map[string]any{"home_id": home.ID, "note_id": note.NoteID})
 			writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "note_id": note.NoteID})
 			return true
 		}
@@ -465,6 +471,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				return true
 			}
 			s.markHomeNotesDirty(r.Context(), home.ID, "")
+			s.emitHomeNotesChanged(r.Context(), "notes.changed", map[string]any{"home_id": home.ID, "note_id": noteID})
 			writeJSON(w, http.StatusOK, response)
 			return true
 
@@ -478,6 +485,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				return true
 			}
 			s.markHomeNotesDirty(r.Context(), home.ID, "")
+			s.emitHomeNotesChanged(r.Context(), "notes.deleted", map[string]any{"home_id": home.ID, "note_id": noteID})
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return true
 		}
@@ -521,6 +529,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 			writeJSON(w, http.StatusCreated, response)
 			return
 		default:
@@ -559,6 +568,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodDelete:
 		if err := s.notes.DeleteProfile(r.Context(), auth.User.ID, noteID); err != nil {
@@ -569,6 +579,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.broadcastAppEvent(r.Context(), topicNotesProfile, "notes.deleted", map[string]any{"user_id": auth.User.ID, "note_id": noteID})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -789,6 +800,7 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.emitSettingsChanged(r.Context(), "service_profiles.changed", map[string]any{"home_id": home.ID, "service_type": serviceType})
 		writeJSON(w, http.StatusOK, profile)
 		return true
 	}
@@ -844,6 +856,7 @@ func (s *Server) handleHomePermissions(w http.ResponseWriter, r *http.Request, h
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.emitPermissionsChanged(r.Context(), map[string]any{"home_id": home.ID})
 		writeJSON(w, http.StatusOK, current)
 		return true
 	default:
@@ -899,6 +912,7 @@ func (s *Server) handleHomeMemberPermissions(w http.ResponseWriter, r *http.Requ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.emitPermissionsChanged(r.Context(), map[string]any{"home_id": home.ID, "user_id": targetUserID})
 		writeJSON(w, http.StatusOK, permissions)
 		return true
 	default:

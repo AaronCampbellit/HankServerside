@@ -203,6 +203,8 @@ func (s *Server) reconcileHomeNotes(ctx context.Context, home domain.Home, agent
 		state.Status = domain.SyncStatusDegraded
 	}
 	_ = s.store.UpsertHomeNoteSyncState(ctx, state)
+	s.emitSyncStatus(ctx, home.ID)
+	s.emitHomeNotesChanged(ctx, "notes.changed", map[string]any{"home_id": home.ID})
 }
 
 func (s *Server) pushDelete(ctx context.Context, homeID string, noteID string) error {
@@ -326,6 +328,7 @@ func (s *Server) markHomeSyncOffline(homeID string, agentID string) {
 	state.LastError = "agent offline"
 	state.LastManifestAt = &now
 	_ = s.store.UpsertHomeNoteSyncState(context.Background(), state)
+	s.emitSyncStatus(context.Background(), homeID)
 }
 
 func (s *Server) markHomeNotesDirty(ctx context.Context, homeID string, agentID string) {
@@ -352,4 +355,11 @@ func (s *Server) markHomeNotesDirty(ctx context.Context, homeID string, agentID 
 	now := time.Now().UTC()
 	state.LastManifestAt = &now
 	_ = s.store.UpsertHomeNoteSyncState(ctx, state)
+	s.emitSyncStatus(ctx, homeID)
+	s.emitHomeNotesChanged(ctx, "notes.changed", map[string]any{"home_id": homeID})
+	if agentConn, ok := s.router.GetAgent(homeID); ok {
+		if home, err := s.store.GetHomeByID(ctx, homeID); err == nil {
+			go s.scheduleHomeSync(home, agentConn.agent.ID)
+		}
+	}
 }

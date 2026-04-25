@@ -235,7 +235,7 @@ func (h *noteCollaborationHub) revokeUser(homeID string, userID string, reason s
 	h.mu.Unlock()
 
 	for _, session := range revoked {
-		_ = writeAppEvent(context.Background(), session.app.peer, "notes.collab.revoked", protocol.NoteCollaborationRevokedEvent{
+		_ = writeAppEvent(context.Background(), session.app.peer, "notes.collab.revoked", noteCollabTopic(session.noteKey), protocol.NoteCollaborationRevokedEvent{
 			NoteID: session.noteKey,
 			Reason: reason,
 		})
@@ -259,7 +259,7 @@ func (h *noteCollaborationHub) revokeNoteUser(noteInternalID string, userID stri
 	h.mu.Unlock()
 
 	for _, session := range revoked {
-		_ = writeAppEvent(context.Background(), session.app.peer, "notes.collab.revoked", protocol.NoteCollaborationRevokedEvent{
+		_ = writeAppEvent(context.Background(), session.app.peer, "notes.collab.revoked", noteCollabTopic(session.noteKey), protocol.NoteCollaborationRevokedEvent{
 			NoteID: session.noteKey,
 			Reason: reason,
 		})
@@ -367,7 +367,7 @@ func (h *noteCollaborationHub) snapshot(note domain.UserNote, presence []protoco
 
 func (h *noteCollaborationHub) broadcastPresence(ctx context.Context, peers []*appConnection, noteID string, presence []protocol.NoteCollaborationPresenceUser) {
 	for _, peer := range peers {
-		_ = writeAppEvent(ctx, peer.peer, "notes.collab.presence", protocol.NoteCollaborationPresenceEvent{
+		_ = writeAppEvent(ctx, peer.peer, "notes.collab.presence", noteCollabTopic(noteID), protocol.NoteCollaborationPresenceEvent{
 			NoteID:   noteID,
 			Presence: presence,
 		})
@@ -376,7 +376,7 @@ func (h *noteCollaborationHub) broadcastPresence(ctx context.Context, peers []*a
 
 func (h *noteCollaborationHub) broadcastOps(ctx context.Context, peers []*appConnection, noteID string, revision string, version int64, ops []protocol.NoteCollaborationAppliedOp) {
 	for _, peer := range peers {
-		_ = writeAppEvent(ctx, peer.peer, "notes.collab.ops", protocol.NoteCollaborationOpsEvent{
+		_ = writeAppEvent(ctx, peer.peer, "notes.collab.ops", noteCollabTopic(noteID), protocol.NoteCollaborationOpsEvent{
 			NoteID:         noteID,
 			AppliedVersion: version,
 			Revision:       revision,
@@ -385,7 +385,7 @@ func (h *noteCollaborationHub) broadcastOps(ctx context.Context, peers []*appCon
 	}
 }
 
-func writeAppEvent(ctx context.Context, peer *wsPeer, event string, payload any) error {
+func writeAppEvent(ctx context.Context, peer *wsPeer, event string, topic string, payload any) error {
 	body, err := protocol.EncodeBody(payload)
 	if err != nil {
 		return err
@@ -394,12 +394,12 @@ func writeAppEvent(ctx context.Context, peer *wsPeer, event string, payload any)
 		Version:   protocol.Version,
 		Type:      protocol.TypeAppEvent,
 		Timestamp: nowUTC(),
-		Payload:   mustEventBody(event, body),
+		Payload:   mustEventBody(event, topic, body),
 	})
 }
 
-func mustEventBody(event string, body json.RawMessage) json.RawMessage {
-	encoded, _ := json.Marshal(protocol.AppEvent{Event: event, Body: body})
+func mustEventBody(event string, topic string, body json.RawMessage) json.RawMessage {
+	encoded, _ := json.Marshal(protocol.AppEvent{Event: event, Topic: topic, Body: body})
 	return encoded
 }
 

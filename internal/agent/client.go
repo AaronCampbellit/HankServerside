@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -110,11 +111,15 @@ func (c *Client) runOnce(ctx context.Context) error {
 
 	heartbeatTicker := time.NewTicker(15 * time.Second)
 	defer heartbeatTicker.Stop()
+	monitorCtx, stopMonitors := context.WithCancel(ctx)
+	defer stopMonitors()
 
 	readErr := make(chan error, 1)
 	go func() {
 		readErr <- c.readLoop(ctx, conn)
 	}()
+	go c.emitHomeAssistantChanges(monitorCtx, conn)
+	go c.emitFileDirectoryChanges(monitorCtx, conn, "/")
 
 	for {
 		select {
@@ -307,4 +312,91 @@ func (c *Client) writeJSON(ctx context.Context, conn *websocket.Conn, payload an
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	return wsjson.Write(ctx, conn, payload)
+}
+
+func (c *Client) emitHomeAssistantChanges(ctx context.Context, conn *websocket.Conn) {
+	if !c.dispatcher.ha.Enabled() {
+		return
+	}
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	seen := map[string]string{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			states, err := c.dispatcher.ha.FetchStates(ctx)
+			if err != nil {
+				c.logger.Debug("home assistant realtime poll failed", "agent_id", c.agentID, "error", err)
+				continue
+			}
+			for _, state := range states {
+				hash := stableJSONHash(state)
+				if previous, ok := seen[state.EntityID]; ok && previous == hash {
+					continue
+				}
+				seen[state.EntityID] = hash
+				if err := c.sendAgentEvent(ctx, conn, "homeassistant.state_changed", "homeassistant.states", map[string]any{"state": state}); err != nil {
+					c.logger.Debug("home assistant realtime event failed", "agent_id", c.agentID, "error", err)
+					return
+				}
+			}
+		}
+	}
+}
+
+func (c *Client) emitFileDirectoryChanges(ctx context.Context, conn *websocket.Conn, path string) {
+	if !c.dispatcher.files.Enabled() {
+		return
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var previous string
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			items, err := c.dispatcher.files.List(ctx, path)
+			if err != nil {
+				c.logger.Debug("file realtime poll failed", "agent_id", c.agentID, "path", path, "error", err)
+				continue
+			}
+			hash := stableJSONHash(items)
+			if previous == hash {
+				continue
+			}
+			previous = hash
+			if err := c.sendAgentEvent(ctx, conn, "files.directory_changed", "files.directory:"+path, map[string]any{"path": path, "items": items}); err != nil {
+				c.logger.Debug("file realtime event failed", "agent_id", c.agentID, "path", path, "error", err)
+				return
+			}
+		}
+	}
+}
+
+func (c *Client) sendAgentEvent(ctx context.Context, conn *websocket.Conn, event string, topic string, payload any) error {
+	body, err := protocol.EncodeBody(payload)
+	if err != nil {
+		return err
+	}
+	envelope, err := protocol.NewEnvelope(protocol.TypeAgentEvent, "", c.agentID, "", protocol.AgentEvent{
+		Event: event,
+		Topic: topic,
+		Body:  body,
+	})
+	if err != nil {
+		return err
+	}
+	return c.writeJSON(ctx, conn, envelope)
+}
+
+func stableJSONHash(value any) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }

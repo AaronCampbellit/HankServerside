@@ -11,6 +11,7 @@ const (
 	TypeAgentRegister        = "agent.register"
 	TypeAgentRegistered      = "agent.registered"
 	TypeAgentHeartbeat       = "agent.heartbeat"
+	TypeAgentEvent           = "agent.event"
 	TypeAgentError           = "agent.error"
 	TypeAppCommand           = "app.command"
 	TypeAppResponse          = "app.response"
@@ -69,6 +70,26 @@ type AgentHeartbeat struct {
 type RoutedCommand struct {
 	Command string          `json:"command"`
 	Body    json.RawMessage `json:"body,omitempty"`
+}
+
+type AppSubscribeRequest struct {
+	Topics []string `json:"topics"`
+}
+
+type AppSubscribeResponse struct {
+	Topics []string `json:"topics"`
+}
+
+type AppEvent struct {
+	Event string          `json:"event"`
+	Topic string          `json:"topic,omitempty"`
+	Body  json.RawMessage `json:"body,omitempty"`
+}
+
+type AgentEvent struct {
+	Event string          `json:"event"`
+	Topic string          `json:"topic,omitempty"`
+	Body  json.RawMessage `json:"body,omitempty"`
 }
 
 type RoutedResponse struct {

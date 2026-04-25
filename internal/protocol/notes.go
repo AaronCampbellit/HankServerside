@@ -154,11 +154,6 @@ type NotesShareCreateRequest struct {
 	UserID string `json:"user_id"`
 }
 
-type AppEvent struct {
-	Event string          `json:"event"`
-	Body  json.RawMessage `json:"body,omitempty"`
-}
-
 type NoteCollaborationJoinRequest struct {
 	NoteID    string `json:"note_id"`
 	SessionID string `json:"session_id"`

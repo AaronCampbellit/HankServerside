@@ -19,11 +19,12 @@ type agentConnection struct {
 }
 
 type appConnection struct {
-	sessionID string
-	userID    string
-	peer      *wsPeer
-	mu        sync.Mutex
-	inFlight  int
+	sessionID     string
+	userID        string
+	peer          *wsPeer
+	mu            sync.Mutex
+	inFlight      int
+	subscriptions map[string]struct{}
 }
 
 type pendingRequest struct {
@@ -95,12 +96,26 @@ func (r *Router) RegisterApp(sessionID string, userID string, peer *wsPeer) *app
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	connection := &appConnection{
-		sessionID: sessionID,
-		userID:    userID,
-		peer:      peer,
+		sessionID:     sessionID,
+		userID:        userID,
+		peer:          peer,
+		subscriptions: make(map[string]struct{}),
 	}
 	r.appsBySession[sessionID] = connection
 	return connection
+}
+
+func (r *Router) AppsForTopic(topic string) []*appConnection {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	apps := make([]*appConnection, 0)
+	for _, app := range r.appsBySession {
+		if app.isSubscribed(topic) {
+			apps = append(apps, app)
+		}
+	}
+	return apps
 }
 
 func (r *Router) UnregisterApp(sessionID string) {
@@ -226,4 +241,42 @@ func (c *appConnection) release() {
 	if c.inFlight > 0 {
 		c.inFlight--
 	}
+}
+
+func (c *appConnection) subscribe(topics []string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.subscriptions == nil {
+		c.subscriptions = make(map[string]struct{})
+	}
+	for _, topic := range topics {
+		if topic != "" {
+			c.subscriptions[topic] = struct{}{}
+		}
+	}
+	return c.subscriptionListLocked()
+}
+
+func (c *appConnection) unsubscribe(topics []string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, topic := range topics {
+		delete(c.subscriptions, topic)
+	}
+	return c.subscriptionListLocked()
+}
+
+func (c *appConnection) isSubscribed(topic string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.subscriptions[topic]
+	return ok
+}
+
+func (c *appConnection) subscriptionListLocked() []string {
+	topics := make([]string, 0, len(c.subscriptions))
+	for topic := range c.subscriptions {
+		topics = append(topics, topic)
+	}
+	return topics
 }
