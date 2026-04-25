@@ -511,6 +511,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			s.logger.Info("profile notes list served", "user_id", auth.User.ID, "note_count", len(notes))
 			writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 			return
 		case http.MethodPost:
@@ -529,6 +530,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			s.logger.Info("profile note saved via http create", "user_id", auth.User.ID, "note_id", response.NoteID, "revision", response.Revision)
 			s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 			writeJSON(w, http.StatusCreated, response)
 			return
@@ -550,6 +552,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.logger.Info("profile note fetched", "user_id", auth.User.ID, "note_id", noteID, "revision", note.Revision)
 		writeJSON(w, http.StatusOK, note)
 	case http.MethodPut:
 		var body protocol.NotesSaveRequest
@@ -568,6 +571,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.logger.Info("profile note saved via http update", "user_id", auth.User.ID, "note_id", response.NoteID, "revision", response.Revision)
 		s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodDelete:
@@ -579,6 +583,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.logger.Info("profile note deleted via http", "user_id", auth.User.ID, "note_id", noteID)
 		s.broadcastAppEvent(r.Context(), topicNotesProfile, "notes.deleted", map[string]any{"user_id": auth.User.ID, "note_id": noteID})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:

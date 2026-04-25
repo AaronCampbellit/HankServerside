@@ -27,6 +27,10 @@ const els = {
   toast: document.getElementById("toast"),
 };
 
+function logLive(message, detail = {}) {
+  console.info("[Hank Remote Notes]", message, detail);
+}
+
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (!headers.has("Content-Type") && options.body && !(options.body instanceof Blob)) {
@@ -78,6 +82,7 @@ function nextRequestID() {
 }
 
 function closeAppSocket(scheduleReconnect = true) {
+  logLive("closing live notes socket", { scheduleReconnect });
   if (state.appSocket) {
     try {
       state.appSocket.close();
@@ -91,6 +96,7 @@ function closeAppSocket(scheduleReconnect = true) {
   }
   state.pendingRequests.clear();
   if (scheduleReconnect && !document.hidden && !state.reconnectTimer) {
+    logLive("scheduling live notes reconnect");
     state.reconnectTimer = window.setTimeout(() => {
       state.reconnectTimer = null;
       connectLiveNotes().catch(() => {});
@@ -121,6 +127,7 @@ function handleSocketMessage(event) {
     return;
   }
   const appEvent = envelope.payload || {};
+  logLive("received live notes event", { event: appEvent.event, topic: appEvent.topic });
   if (appEvent.topic === "notes.profile" && ["notes.changed", "notes.deleted"].includes(appEvent.event)) {
     scheduleLiveRefresh();
   }
@@ -131,6 +138,7 @@ function sendSocketCommand(command, body = {}) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error("Live notes connection is not open."));
   }
+  logLive("sending live notes command", { command, topics: body.topics || [] });
   const requestID = nextRequestID();
   const envelope = {
     version: "v1",
@@ -159,24 +167,30 @@ async function connectLiveNotes() {
   }
 
   state.appSocketPromise = new Promise((resolve, reject) => {
+    logLive("opening live notes socket", { url: preferredAppSocketURL() });
     const socket = new WebSocket(preferredAppSocketURL());
     state.appSocket = socket;
     socket.addEventListener("open", async () => {
       state.appSocketPromise = null;
       try {
+        logLive("live notes socket opened");
         await sendSocketCommand("app.subscribe", { topics: ["notes.profile"] });
+        logLive("subscribed live notes topics", { topics: ["notes.profile"] });
         resolve(socket);
       } catch (error) {
+        logLive("live notes subscribe failed", { error: error.message });
         reject(error);
       }
     }, { once: true });
     socket.addEventListener("message", handleSocketMessage);
     socket.addEventListener("close", () => {
+      logLive("live notes socket closed");
       if (state.appSocket === socket) {
         closeAppSocket();
       }
     });
     socket.addEventListener("error", () => {
+      logLive("live notes socket error");
       if (state.appSocket === socket) {
         closeAppSocket();
       }
@@ -247,6 +261,7 @@ function fillEditor(note) {
 }
 
 async function loadNotes() {
+  logLive("loading profile notes list");
   state.notes = (await api("/v1/me/notes")).notes || [];
   if (state.selectedNoteID && !state.notes.some((note) => note.id === state.selectedNoteID)) {
     clearEditor();
@@ -256,6 +271,7 @@ async function loadNotes() {
 
 async function loadNote(noteID) {
   try {
+    logLive("loading profile note", { noteID });
     const note = await api(`/v1/me/notes/${encodeURIComponent(noteID)}`);
     fillEditor(note);
   } catch (error) {
@@ -276,11 +292,13 @@ async function saveNote() {
 
     let response;
     if (state.selectedNoteID) {
+      logLive("saving existing profile note", { noteID: state.selectedNoteID });
       response = await api(`/v1/me/notes/${encodeURIComponent(state.selectedNoteID)}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
     } else {
+      logLive("creating profile note", { noteID });
       response = await api("/v1/me/notes", {
         method: "POST",
         body: JSON.stringify(payload),
@@ -304,6 +322,7 @@ async function deleteNote() {
     return;
   }
   try {
+    logLive("deleting profile note", { noteID: state.selectedNoteID });
     await api(`/v1/me/notes/${encodeURIComponent(state.selectedNoteID)}`, { method: "DELETE" });
     clearEditor();
     await loadNotes();
@@ -339,10 +358,12 @@ function editorHasFocus() {
 
 async function refreshLiveNotes() {
   if (document.hidden || editorHasFocus()) {
+    logLive("deferring live notes refresh", { hidden: document.hidden, editorFocused: editorHasFocus() });
     state.liveRefreshPending = true;
     return;
   }
   state.liveRefreshPending = false;
+  logLive("refreshing notes from live event");
   const selectedNoteID = state.selectedNoteID;
   await loadNotes();
   if (selectedNoteID && state.notes.some((note) => note.id === selectedNoteID)) {

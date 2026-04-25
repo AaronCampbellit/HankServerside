@@ -48,6 +48,7 @@ func (s *Server) handleRealtimeCommand(ctx context.Context, app *appConnection, 
 		} else {
 			current = app.unsubscribe(topics)
 		}
+		s.logger.Info("app realtime subscription changed", "session_id", app.sessionID, "user_id", app.userID, "command", command.Command, "topics", strings.Join(topics, ","), "current_topics", strings.Join(current, ","))
 		_ = writeAppResponse(ctx, peer, envelope, protocol.AppSubscribeResponse{Topics: current})
 		return true
 	default:
@@ -73,7 +74,11 @@ func cleanTopics(topics []string) []string {
 }
 
 func (s *Server) broadcastAppEvent(ctx context.Context, topic string, event string, payload any) {
-	for _, app := range s.router.AppsForTopic(topic) {
+	apps := s.router.AppsForTopic(topic)
+	if strings.HasPrefix(topic, "notes.") {
+		s.logger.Info("broadcasting notes realtime event", "topic", topic, "event", event, "subscriber_count", len(apps))
+	}
+	for _, app := range apps {
 		_ = writeAppEvent(ctx, app.peer, event, topic, payload)
 	}
 }
