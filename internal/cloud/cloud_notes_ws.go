@@ -63,14 +63,14 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		var request protocol.NoteCollaborationJoinRequest
 		request, err = decodeBody[protocol.NoteCollaborationJoinRequest](command.Body)
 		if err == nil {
-			payload, err = s.collaboration.join(ctx, envelope.HomeID, request.NoteID, request.SessionID, appPeerConnection(appPeer, auth))
+			payload, err = s.collaboration.join(ctx, request.Scope, envelope.HomeID, request.NoteID, request.SessionID, appPeerConnection(appPeer, auth))
 		}
 
 	case "notes.collab.leave":
 		var request protocol.NoteCollaborationLeaveRequest
 		request, err = decodeBody[protocol.NoteCollaborationLeaveRequest](command.Body)
 		if err == nil {
-			err = s.collaboration.leave(ctx, envelope.HomeID, request.NoteID, request.SessionID, appPeerConnection(appPeer, auth))
+			err = s.collaboration.leave(ctx, request.Scope, envelope.HomeID, request.NoteID, request.SessionID, appPeerConnection(appPeer, auth))
 			payload = protocol.EmptyResponse{OK: err == nil}
 		}
 
@@ -78,7 +78,7 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		var request protocol.NoteCollaborationSyncRequest
 		request, err = decodeBody[protocol.NoteCollaborationSyncRequest](command.Body)
 		if err == nil {
-			payload, err = s.collaboration.sync(ctx, envelope.HomeID, request.NoteID, auth.User.ID, request.AfterVersion, request.MaxOperations)
+			payload, err = s.collaboration.sync(ctx, request.Scope, envelope.HomeID, request.NoteID, auth.User.ID, request.AfterVersion, request.MaxOperations)
 		}
 
 	case "notes.collab.submit_ops":
@@ -87,9 +87,11 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		if err == nil {
 			payload, err = s.collaboration.submitOps(ctx, envelope.HomeID, request, appPeerConnection(appPeer, auth))
 			if err == nil {
-				if note, noteErr := s.store.GetHomeNoteVisibleToUser(ctx, envelope.HomeID, auth.User.ID, request.NoteID); noteErr == nil {
-					if shareCount, shareErr := s.store.CountNoteShares(ctx, note.ID); shareErr == nil && shareCount > 0 {
-						s.markHomeNotesDirty(ctx, envelope.HomeID, "")
+				if normalizeCollabScope(request.Scope) == "home" {
+					if note, noteErr := s.store.GetHomeNoteVisibleToUser(ctx, envelope.HomeID, auth.User.ID, request.NoteID); noteErr == nil {
+						if shareCount, shareErr := s.store.CountNoteShares(ctx, note.ID); shareErr == nil && shareCount > 0 {
+							s.markHomeNotesDirty(ctx, envelope.HomeID, "")
+						}
 					}
 				}
 			}

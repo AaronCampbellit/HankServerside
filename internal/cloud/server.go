@@ -41,6 +41,7 @@ type Server struct {
 	collaboration  *noteCollaborationHub
 	agentRequests  *agentRequestRegistry
 	syncs          *homeSyncController
+	realtimeCancel context.CancelFunc
 	sessionTTL     time.Duration
 	requestTimeout time.Duration
 }
@@ -61,6 +62,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		requestTimeout = 30 * time.Second
 	}
 
+	realtimeCtx, realtimeCancel := context.WithCancel(context.Background())
 	server := &Server{
 		addr:           addr,
 		store:          db,
@@ -74,6 +76,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		collaboration:  newNoteCollaborationHub(db),
 		agentRequests:  newAgentRequestRegistry(),
 		syncs:          newHomeSyncController(),
+		realtimeCancel: realtimeCancel,
 		sessionTTL:     sessionTTL,
 		requestTimeout: requestTimeout,
 	}
@@ -99,6 +102,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/me", server.handleMe)
 	mux.HandleFunc("/v1/me/notes", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/notes/", server.handleProfileNotesHTTP)
+	mux.HandleFunc("/v1/me/profile", server.handleProfileSettingsHTTP)
+	mux.HandleFunc("/v1/me/profile-secret-vault", server.handleProfileSecretVaultHTTP)
 	mux.HandleFunc("/v1/me/profile-backup", server.handleProfileBackupHTTP)
 	mux.HandleFunc("/v1/ws/app-ticket", server.handleAppWebSocketTicket)
 	mux.HandleFunc("/v1/home", server.handleHome)
@@ -114,6 +119,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	go server.forwardStoreNotifications(realtimeCtx)
+
 	return server
 }
 
@@ -127,6 +134,9 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.realtimeCancel != nil {
+		s.realtimeCancel()
+	}
 	return s.http.Shutdown(ctx)
 }
 

@@ -15,7 +15,8 @@ var ErrConflict = errors.New("conflict")
 var ErrUnsupportedMultiHome = errors.New("multiple homes are no longer supported in a single deployment")
 
 type Store struct {
-	db *sql.DB
+	db          *sql.DB
+	databaseURL string
 }
 
 type AgentTokenRecord struct {
@@ -30,7 +31,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, err
 	}
 
-	store := &Store{db: db}
+	store := &Store{db: db, databaseURL: databaseURL}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -160,8 +161,12 @@ func (s *Store) migrate(ctx context.Context) error {
 			note_id TEXT NOT NULL,
 			owner_user_id TEXT NOT NULL,
 			home_id TEXT NULL,
+			parent_id TEXT NULL,
+			sort_order INTEGER NOT NULL DEFAULT 0,
 			title TEXT NOT NULL,
 			content TEXT NOT NULL,
+			body_markdown TEXT NOT NULL DEFAULT '',
+			body_format TEXT NOT NULL DEFAULT 'markdown',
 			page_type TEXT NOT NULL,
 			board_json TEXT NOT NULL DEFAULT '',
 			revision TEXT NOT NULL,
@@ -201,6 +206,23 @@ func (s *Store) migrate(ctx context.Context) error {
 			PRIMARY KEY(note_id, op_id),
 			FOREIGN KEY(note_id) REFERENCES user_notes(id),
 			FOREIGN KEY(actor_user_id) REFERENCES users(id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS user_profile_settings (
+			user_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL DEFAULT 0,
+			settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS user_profile_secret_vaults (
+			user_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL DEFAULT 0,
+			key_id TEXT NOT NULL DEFAULT '',
+			vault_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id)
 		);`,
 		`CREATE TABLE IF NOT EXISTS home_note_sync_state (
 			home_id TEXT PRIMARY KEY,
@@ -317,6 +339,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_user_notes_home_updated_at ON user_notes(home_id, updated_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_note_shares_home_user ON note_shares(home_id, target_user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_note_operations_note_version ON note_operations(note_id, applied_version);`,
+		`ALTER TABLE user_notes ADD COLUMN IF NOT EXISTS parent_id TEXT NULL;`,
+		`ALTER TABLE user_notes ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;`,
+		`ALTER TABLE user_notes ADD COLUMN IF NOT EXISTS body_markdown TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE user_notes ADD COLUMN IF NOT EXISTS body_format TEXT NOT NULL DEFAULT 'markdown';`,
+		`UPDATE user_notes SET body_markdown = content WHERE body_markdown = '';`,
+		`UPDATE user_notes SET body_format = 'markdown' WHERE body_format = '';`,
+		`CREATE INDEX IF NOT EXISTS idx_user_notes_owner_parent_order ON user_notes(owner_user_id, parent_id, sort_order);`,
+		`CREATE INDEX IF NOT EXISTS idx_user_notes_home_parent_order ON user_notes(home_id, parent_id, sort_order) WHERE home_id IS NOT NULL;`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_notes_owner_note_id ON user_notes(owner_user_id, note_id);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_notes_home_note_id ON user_notes(home_id, note_id) WHERE home_id IS NOT NULL;`,
 		`CREATE INDEX IF NOT EXISTS idx_assistant_sessions_user_updated ON assistant_sessions(user_id, updated_at DESC);`,

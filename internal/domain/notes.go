@@ -7,8 +7,12 @@ type UserNote struct {
 	NoteID        string     `json:"note_id"`
 	OwnerUserID   string     `json:"owner_user_id"`
 	HomeID        string     `json:"home_id,omitempty"`
+	ParentID      string     `json:"parent_id,omitempty"`
+	SortOrder     int        `json:"sort_order"`
 	Title         string     `json:"title"`
 	Content       string     `json:"content"`
+	BodyMarkdown  string     `json:"body_markdown,omitempty"`
+	BodyFormat    string     `json:"body_format,omitempty"`
 	PageType      string     `json:"page_type"`
 	BoardJSON     string     `json:"board_json,omitempty"`
 	Revision      string     `json:"revision"`

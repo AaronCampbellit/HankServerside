@@ -591,6 +591,118 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+func (s *Server) handleProfileSettingsHTTP(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		record, err := s.store.GetUserProfileSettings(r.Context(), auth.User.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"revision":   0,
+					"updated_at": nil,
+					"settings":   map[string]any{},
+				})
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"revision":   record.Revision,
+			"updated_at": record.UpdatedAt,
+			"settings":   record.Settings,
+		})
+	case http.MethodPut:
+		var body struct {
+			ExpectedRevision *int            `json:"expected_revision"`
+			Settings         json.RawMessage `json:"settings"`
+		}
+		if err := parseJSON(w, r, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		record, err := s.store.SaveUserProfileSettings(r.Context(), auth.User.ID, body.ExpectedRevision, body.Settings)
+		if err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "conflict"})
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"revision":   record.Revision,
+			"updated_at": record.UpdatedAt,
+			"settings":   record.Settings,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleProfileSecretVaultHTTP(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		record, err := s.store.GetUserProfileSecretVault(r.Context(), auth.User.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"revision":   0,
+					"key_id":     "",
+					"updated_at": nil,
+					"vault":      map[string]any{},
+				})
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"revision":   record.Revision,
+			"key_id":     record.KeyID,
+			"updated_at": record.UpdatedAt,
+			"vault":      record.Vault,
+		})
+	case http.MethodPut:
+		var body struct {
+			ExpectedRevision *int            `json:"expected_revision"`
+			KeyID            string          `json:"key_id"`
+			Vault            json.RawMessage `json:"vault"`
+		}
+		if err := parseJSON(w, r, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		record, err := s.store.SaveUserProfileSecretVault(r.Context(), auth.User.ID, body.ExpectedRevision, body.KeyID, body.Vault)
+		if err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "conflict"})
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"revision":   record.Revision,
+			"key_id":     record.KeyID,
+			"updated_at": record.UpdatedAt,
+			"vault":      record.Vault,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) handleProfileBackupHTTP(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireAuth(w, r)
 	if !ok {

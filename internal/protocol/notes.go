@@ -34,15 +34,20 @@ type KanbanBoard struct {
 }
 
 type NoteSummary struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Revision   string    `json:"revision"`
-	Size       int64     `json:"size"`
-	StorageKey string    `json:"storage_key,omitempty"`
-	PageType   string    `json:"page_type,omitempty"`
-	Preview    string    `json:"preview,omitempty"`
-	Tags       []string  `json:"tags,omitempty"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Revision    string    `json:"revision"`
+	Size        int64     `json:"size"`
+	StorageKey  string    `json:"storage_key,omitempty"`
+	PageType    string    `json:"page_type,omitempty"`
+	ParentID    string    `json:"parent_id,omitempty"`
+	SortOrder   int       `json:"sort_order"`
+	BodyFormat  string    `json:"body_format,omitempty"`
+	OwnerUserID string    `json:"owner_user_id,omitempty"`
+	Shared      bool      `json:"shared,omitempty"`
+	Preview     string    `json:"preview,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
 }
 
 type NotesListResponse struct {
@@ -54,23 +59,33 @@ type NotesFetchRequest struct {
 }
 
 type NotesFetchResponse struct {
-	NoteID    string       `json:"note_id"`
-	Title     string       `json:"title"`
-	Content   string       `json:"content"`
-	Revision  string       `json:"revision"`
-	UpdatedAt time.Time    `json:"updated_at"`
-	PageType  string       `json:"page_type,omitempty"`
-	Preview   string       `json:"preview,omitempty"`
-	Tags      []string     `json:"tags,omitempty"`
-	Board     *KanbanBoard `json:"board,omitempty"`
+	NoteID       string       `json:"note_id"`
+	Title        string       `json:"title"`
+	Content      string       `json:"content"`
+	BodyMarkdown string       `json:"body_markdown,omitempty"`
+	BodyFormat   string       `json:"body_format,omitempty"`
+	Revision     string       `json:"revision"`
+	UpdatedAt    time.Time    `json:"updated_at"`
+	PageType     string       `json:"page_type,omitempty"`
+	ParentID     string       `json:"parent_id,omitempty"`
+	SortOrder    int          `json:"sort_order"`
+	OwnerUserID  string       `json:"owner_user_id,omitempty"`
+	Shared       bool         `json:"shared,omitempty"`
+	Preview      string       `json:"preview,omitempty"`
+	Tags         []string     `json:"tags,omitempty"`
+	Board        *KanbanBoard `json:"board,omitempty"`
 }
 
 type NotesSaveRequest struct {
 	NoteID           string       `json:"note_id"`
 	Title            string       `json:"title"`
 	Content          string       `json:"content"`
+	BodyMarkdown     string       `json:"body_markdown,omitempty"`
+	BodyFormat       string       `json:"body_format,omitempty"`
 	ExpectedRevision string       `json:"expected_revision,omitempty"`
 	PageType         string       `json:"page_type,omitempty"`
+	ParentID         *string      `json:"parent_id,omitempty"`
+	SortOrder        *int         `json:"sort_order,omitempty"`
 	Board            *KanbanBoard `json:"board,omitempty"`
 }
 
@@ -157,16 +172,19 @@ type NotesShareCreateRequest struct {
 type NoteCollaborationJoinRequest struct {
 	NoteID    string `json:"note_id"`
 	SessionID string `json:"session_id"`
+	Scope     string `json:"scope,omitempty"`
 }
 
 type NoteCollaborationLeaveRequest struct {
 	NoteID    string `json:"note_id"`
 	SessionID string `json:"session_id"`
+	Scope     string `json:"scope,omitempty"`
 }
 
 type NoteCollaborationSyncRequest struct {
 	NoteID        string `json:"note_id"`
 	SessionID     string `json:"session_id"`
+	Scope         string `json:"scope,omitempty"`
 	AfterVersion  int64  `json:"after_version,omitempty"`
 	MaxOperations int    `json:"max_operations,omitempty"`
 }
@@ -187,6 +205,7 @@ type NoteCollaborationOperation struct {
 type NoteCollaborationSubmitOpsRequest struct {
 	NoteID      string                       `json:"note_id"`
 	SessionID   string                       `json:"session_id"`
+	Scope       string                       `json:"scope,omitempty"`
 	BaseVersion int64                        `json:"base_version"`
 	Ops         []NoteCollaborationOperation `json:"ops"`
 }

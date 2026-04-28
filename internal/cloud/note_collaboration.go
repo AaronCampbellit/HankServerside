@@ -23,6 +23,7 @@ type noteCollaborationHub struct {
 
 type noteCollabSession struct {
 	app             *appConnection
+	scope           string
 	homeID          string
 	noteInternalID  string
 	noteKey         string
@@ -37,8 +38,9 @@ func newNoteCollaborationHub(db *store.Store) *noteCollaborationHub {
 	}
 }
 
-func (h *noteCollaborationHub) join(ctx context.Context, homeID string, noteKey string, collabSessionID string, app *appConnection) (protocol.NoteCollaborationSnapshot, error) {
-	note, err := h.store.GetHomeNoteVisibleToUser(ctx, homeID, app.userID, noteKey)
+func (h *noteCollaborationHub) join(ctx context.Context, scope string, homeID string, noteKey string, collabSessionID string, app *appConnection) (protocol.NoteCollaborationSnapshot, error) {
+	scope = normalizeCollabScope(scope)
+	note, err := h.resolveNote(ctx, scope, homeID, app.userID, noteKey)
 	if err != nil {
 		return protocol.NoteCollaborationSnapshot{}, err
 	}
@@ -48,6 +50,7 @@ func (h *noteCollaborationHub) join(ctx context.Context, homeID string, noteKey 
 
 	session := &noteCollabSession{
 		app:             app,
+		scope:           scope,
 		homeID:          homeID,
 		noteInternalID:  note.ID,
 		noteKey:         note.NoteID,
@@ -69,12 +72,13 @@ func (h *noteCollaborationHub) join(ctx context.Context, homeID string, noteKey 
 	if err != nil {
 		return protocol.NoteCollaborationSnapshot{}, err
 	}
-	h.broadcastPresence(ctx, peers, note.NoteID, presence)
+	h.broadcastPresence(ctx, peers, scope, note.NoteID, presence)
 	return snapshot, nil
 }
 
-func (h *noteCollaborationHub) leave(ctx context.Context, homeID string, noteKey string, collabSessionID string, app *appConnection) error {
-	note, err := h.store.GetHomeNoteVisibleToUser(ctx, homeID, app.userID, noteKey)
+func (h *noteCollaborationHub) leave(ctx context.Context, scope string, homeID string, noteKey string, collabSessionID string, app *appConnection) error {
+	scope = normalizeCollabScope(scope)
+	note, err := h.resolveNote(ctx, scope, homeID, app.userID, noteKey)
 	if err != nil {
 		return err
 	}
@@ -89,12 +93,13 @@ func (h *noteCollaborationHub) leave(ctx context.Context, homeID string, noteKey
 	presence := h.presenceLocked(note.ID)
 	peers := h.notePeersLocked(note.ID)
 	h.mu.Unlock()
-	h.broadcastPresence(ctx, peers, note.NoteID, presence)
+	h.broadcastPresence(ctx, peers, scope, note.NoteID, presence)
 	return nil
 }
 
-func (h *noteCollaborationHub) sync(ctx context.Context, homeID string, noteKey string, userID string, afterVersion int64, maxOperations int) (any, error) {
-	note, err := h.store.GetHomeNoteVisibleToUser(ctx, homeID, userID, noteKey)
+func (h *noteCollaborationHub) sync(ctx context.Context, scope string, homeID string, noteKey string, userID string, afterVersion int64, maxOperations int) (any, error) {
+	scope = normalizeCollabScope(scope)
+	note, err := h.resolveNote(ctx, scope, homeID, userID, noteKey)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +135,8 @@ func (h *noteCollaborationHub) sync(ctx context.Context, homeID string, noteKey 
 }
 
 func (h *noteCollaborationHub) submitOps(ctx context.Context, homeID string, req protocol.NoteCollaborationSubmitOpsRequest, app *appConnection) (protocol.NoteCollaborationAck, error) {
-	note, err := h.store.GetHomeNoteVisibleToUser(ctx, homeID, app.userID, req.NoteID)
+	scope := normalizeCollabScope(req.Scope)
+	note, err := h.resolveNote(ctx, scope, homeID, app.userID, req.NoteID)
 	if err != nil {
 		return protocol.NoteCollaborationAck{}, err
 	}
@@ -207,7 +213,7 @@ func (h *noteCollaborationHub) submitOps(ctx context.Context, homeID string, req
 	}
 
 	peers := h.notePeers(updated.ID)
-	h.broadcastOps(ctx, peers, updated.NoteID, updated.Revision, updated.CollabVersion, appliedOps)
+	h.broadcastOps(ctx, peers, scope, updated.NoteID, updated.Revision, updated.CollabVersion, appliedOps)
 
 	return protocol.NoteCollaborationAck{
 		NoteID:         updated.NoteID,
@@ -268,11 +274,15 @@ func (h *noteCollaborationHub) revokeNoteUser(noteInternalID string, userID stri
 
 func (h *noteCollaborationHub) removeApp(appSessionID string) {
 	h.mu.Lock()
-	affected := map[string]string{}
+	type affectedNote struct {
+		noteKey string
+		scope   string
+	}
+	affected := map[string]affectedNote{}
 	for noteID, sessions := range h.byNote {
 		for key, session := range sessions {
 			if session.app.sessionID == appSessionID {
-				affected[noteID] = session.noteKey
+				affected[noteID] = affectedNote{noteKey: session.noteKey, scope: session.scope}
 				delete(sessions, key)
 			}
 		}
@@ -283,14 +293,16 @@ func (h *noteCollaborationHub) removeApp(appSessionID string) {
 	type presenceBroadcast struct {
 		noteID   string
 		noteKey  string
+		scope    string
 		peers    []*appConnection
 		presence []protocol.NoteCollaborationPresenceUser
 	}
 	var broadcasts []presenceBroadcast
-	for noteID, noteKey := range affected {
+	for noteID, affected := range affected {
 		broadcasts = append(broadcasts, presenceBroadcast{
 			noteID:   noteID,
-			noteKey:  noteKey,
+			noteKey:  affected.noteKey,
+			scope:    affected.scope,
 			peers:    h.notePeersLocked(noteID),
 			presence: h.presenceLocked(noteID),
 		})
@@ -298,7 +310,7 @@ func (h *noteCollaborationHub) removeApp(appSessionID string) {
 	h.mu.Unlock()
 
 	for _, broadcast := range broadcasts {
-		h.broadcastPresence(context.Background(), broadcast.peers, broadcast.noteKey, broadcast.presence)
+		h.broadcastPresence(context.Background(), broadcast.peers, broadcast.scope, broadcast.noteKey, broadcast.presence)
 	}
 }
 
@@ -365,24 +377,49 @@ func (h *noteCollaborationHub) snapshot(note domain.UserNote, presence []protoco
 	}, nil
 }
 
-func (h *noteCollaborationHub) broadcastPresence(ctx context.Context, peers []*appConnection, noteID string, presence []protocol.NoteCollaborationPresenceUser) {
+func (h *noteCollaborationHub) broadcastPresence(ctx context.Context, peers []*appConnection, scope string, noteID string, presence []protocol.NoteCollaborationPresenceUser) {
 	for _, peer := range peers {
-		_ = writeAppEvent(ctx, peer.peer, "notes.collab.presence", noteCollabTopic(noteID), protocol.NoteCollaborationPresenceEvent{
+		_ = writeAppEvent(ctx, peer.peer, "notes.collab.presence", scopedNoteCollabTopic(scope, noteID), protocol.NoteCollaborationPresenceEvent{
 			NoteID:   noteID,
 			Presence: presence,
 		})
+		if normalizeCollabScope(scope) == "home" {
+			_ = writeAppEvent(ctx, peer.peer, "notes.collab.presence", noteCollabTopic(noteID), protocol.NoteCollaborationPresenceEvent{
+				NoteID:   noteID,
+				Presence: presence,
+			})
+		}
 	}
 }
 
-func (h *noteCollaborationHub) broadcastOps(ctx context.Context, peers []*appConnection, noteID string, revision string, version int64, ops []protocol.NoteCollaborationAppliedOp) {
+func (h *noteCollaborationHub) broadcastOps(ctx context.Context, peers []*appConnection, scope string, noteID string, revision string, version int64, ops []protocol.NoteCollaborationAppliedOp) {
 	for _, peer := range peers {
-		_ = writeAppEvent(ctx, peer.peer, "notes.collab.ops", noteCollabTopic(noteID), protocol.NoteCollaborationOpsEvent{
+		payload := protocol.NoteCollaborationOpsEvent{
 			NoteID:         noteID,
 			AppliedVersion: version,
 			Revision:       revision,
 			Ops:            ops,
-		})
+		}
+		_ = writeAppEvent(ctx, peer.peer, "notes.collab.ops", scopedNoteCollabTopic(scope, noteID), payload)
+		if normalizeCollabScope(scope) == "home" {
+			_ = writeAppEvent(ctx, peer.peer, "notes.collab.ops", noteCollabTopic(noteID), payload)
+		}
 	}
+}
+
+func (h *noteCollaborationHub) resolveNote(ctx context.Context, scope string, homeID string, userID string, noteKey string) (domain.UserNote, error) {
+	if normalizeCollabScope(scope) == "profile" {
+		return h.store.GetProfileNote(ctx, userID, noteKey)
+	}
+	return h.store.GetHomeNoteVisibleToUser(ctx, homeID, userID, noteKey)
+}
+
+func normalizeCollabScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "profile" {
+		return "profile"
+	}
+	return "home"
 }
 
 func writeAppEvent(ctx context.Context, peer *wsPeer, event string, topic string, payload any) error {
@@ -426,16 +463,36 @@ func applyCollaborationOperation(state collabState, userID string, operation pro
 	nextVersion := state.CollabVersion + 1
 	switch operation.Type {
 	case "set_field":
-		var value string
-		if err := json.Unmarshal(operation.Value, &value); err != nil {
-			return state, err
-		}
 		switch operation.Field {
 		case "title":
+			var value string
+			if err := json.Unmarshal(operation.Value, &value); err != nil {
+				return state, err
+			}
 			state.Title = collabScalar{Value: value, Version: nextVersion, UserID: userID}
 		case "page_type":
+			var value string
+			if err := json.Unmarshal(operation.Value, &value); err != nil {
+				return state, err
+			}
 			state.PageType = collabScalar{Value: normalizePageType(value), Version: nextVersion, UserID: userID}
+		case "parent_id":
+			var value string
+			if err := json.Unmarshal(operation.Value, &value); err != nil {
+				return state, err
+			}
+			state.ParentID = collabScalar{Value: strings.TrimSpace(value), Version: nextVersion, UserID: userID}
+		case "sort_order":
+			var value int
+			if err := json.Unmarshal(operation.Value, &value); err != nil {
+				return state, err
+			}
+			state.SortOrder = value
 		case "content":
+			var value string
+			if err := json.Unmarshal(operation.Value, &value); err != nil {
+				return state, err
+			}
 			state.Content = value
 		default:
 			return state, errors.New("unsupported field")

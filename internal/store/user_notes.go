@@ -20,6 +20,10 @@ type migratedNoteState struct {
 	CollabVersion int64  `json:"collab_version"`
 }
 
+const userNoteColumns = `id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by`
+
+const userNoteColumnsWithUN = `un.id, un.note_id, un.owner_user_id, un.home_id, un.parent_id, un.sort_order, un.title, un.content, un.body_markdown, un.body_format, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by`
+
 func (s *Store) migrateLegacyHomeNotes(ctx context.Context) error {
 	rows, err := s.query(ctx, `SELECT
 			hn.home_id,
@@ -119,15 +123,19 @@ func (s *Store) migrateLegacyHomeNotes(ctx context.Context) error {
 			}
 
 			if _, err := tx.ExecContext(ctx, `INSERT INTO user_notes (
-					id, note_id, owner_user_id, home_id, title, content, page_type, board_json,
+					id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
 					revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				internalID,
 				noteID,
 				legacy.OwnerUserID,
 				legacy.HomeID,
+				nil,
+				0,
 				legacy.Title,
 				legacy.Content,
+				legacy.Content,
+				"markdown",
 				legacy.PageType,
 				legacy.BoardJSON,
 				legacy.Revision,
@@ -227,7 +235,7 @@ func txRecordExists(ctx context.Context, tx *dbTx, query string, args ...any) (b
 }
 
 func (s *Store) ListProfileNotes(ctx context.Context, ownerUserID string, includeDeleted bool) ([]domain.UserNote, error) {
-	query := `SELECT id, note_id, owner_user_id, home_id, title, content, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
+	query := `SELECT ` + userNoteColumns + `
 		FROM user_notes
 		WHERE owner_user_id = ?`
 	if !includeDeleted {
@@ -252,7 +260,7 @@ func (s *Store) ListProfileNotes(ctx context.Context, ownerUserID string, includ
 }
 
 func (s *Store) ListVisibleHomeNotes(ctx context.Context, homeID string, userID string, includeDeleted bool) ([]domain.UserNote, error) {
-	query := `SELECT DISTINCT un.id, un.note_id, un.owner_user_id, un.home_id, un.title, un.content, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by
+	query := `SELECT DISTINCT ` + userNoteColumnsWithUN + `
 		FROM user_notes un
 		LEFT JOIN note_shares ns ON ns.note_id = un.id AND ns.target_user_id = ?
 		WHERE un.home_id = ?
@@ -280,7 +288,7 @@ func (s *Store) ListVisibleHomeNotes(ctx context.Context, homeID string, userID 
 }
 
 func (s *Store) ListSyncedHomeNotes(ctx context.Context, homeID string, includeDeleted bool) ([]domain.UserNote, error) {
-	query := `SELECT DISTINCT un.id, un.note_id, un.owner_user_id, un.home_id, un.title, un.content, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by
+	query := `SELECT DISTINCT ` + userNoteColumnsWithUN + `
 		FROM user_notes un
 		WHERE un.home_id = ?
 			AND EXISTS (SELECT 1 FROM note_shares ns WHERE ns.note_id = un.id)`
@@ -306,21 +314,21 @@ func (s *Store) ListSyncedHomeNotes(ctx context.Context, homeID string, includeD
 }
 
 func (s *Store) GetUserNoteByID(ctx context.Context, noteID string) (domain.UserNote, error) {
-	row := s.queryRow(ctx, `SELECT id, note_id, owner_user_id, home_id, title, content, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
+	row := s.queryRow(ctx, `SELECT `+userNoteColumns+`
 		FROM user_notes
 		WHERE id = ?`, noteID)
 	return scanUserNote(row)
 }
 
 func (s *Store) GetProfileNote(ctx context.Context, ownerUserID string, noteKey string) (domain.UserNote, error) {
-	row := s.queryRow(ctx, `SELECT id, note_id, owner_user_id, home_id, title, content, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
+	row := s.queryRow(ctx, `SELECT `+userNoteColumns+`
 		FROM user_notes
 		WHERE owner_user_id = ? AND note_id = ?`, ownerUserID, noteKey)
 	return scanUserNote(row)
 }
 
 func (s *Store) GetHomeNoteVisibleToUser(ctx context.Context, homeID string, userID string, noteKey string) (domain.UserNote, error) {
-	row := s.queryRow(ctx, `SELECT DISTINCT un.id, un.note_id, un.owner_user_id, un.home_id, un.title, un.content, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by
+	row := s.queryRow(ctx, `SELECT DISTINCT `+userNoteColumnsWithUN+`
 		FROM user_notes un
 		LEFT JOIN note_shares ns ON ns.note_id = un.id AND ns.target_user_id = ?
 		WHERE un.home_id = ? AND un.note_id = ?
@@ -330,14 +338,14 @@ func (s *Store) GetHomeNoteVisibleToUser(ctx context.Context, homeID string, use
 }
 
 func (s *Store) GetHomeNoteByKey(ctx context.Context, homeID string, noteKey string) (domain.UserNote, error) {
-	row := s.queryRow(ctx, `SELECT id, note_id, owner_user_id, home_id, title, content, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
+	row := s.queryRow(ctx, `SELECT `+userNoteColumns+`
 		FROM user_notes
 		WHERE home_id = ? AND note_id = ?`, homeID, noteKey)
 	return scanUserNote(row)
 }
 
 func (s *Store) GetOwnedHomeNote(ctx context.Context, homeID string, ownerUserID string, noteKey string) (domain.UserNote, error) {
-	row := s.queryRow(ctx, `SELECT id, note_id, owner_user_id, home_id, title, content, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
+	row := s.queryRow(ctx, `SELECT `+userNoteColumns+`
 		FROM user_notes
 		WHERE home_id = ? AND owner_user_id = ? AND note_id = ?`, homeID, ownerUserID, noteKey)
 	return scanUserNote(row)
@@ -345,15 +353,19 @@ func (s *Store) GetOwnedHomeNote(ctx context.Context, homeID string, ownerUserID
 
 func (s *Store) UpsertUserNote(ctx context.Context, note domain.UserNote) error {
 	_, err := s.exec(ctx, `INSERT INTO user_notes (
-			id, note_id, owner_user_id, home_id, title, content, page_type, board_json,
+			id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
 			revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			note_id = excluded.note_id,
 			owner_user_id = excluded.owner_user_id,
 			home_id = excluded.home_id,
+			parent_id = excluded.parent_id,
+			sort_order = excluded.sort_order,
 			title = excluded.title,
 			content = excluded.content,
+			body_markdown = excluded.body_markdown,
+			body_format = excluded.body_format,
 			page_type = excluded.page_type,
 			board_json = excluded.board_json,
 			revision = excluded.revision,
@@ -367,8 +379,12 @@ func (s *Store) UpsertUserNote(ctx context.Context, note domain.UserNote) error 
 		note.NoteID,
 		note.OwnerUserID,
 		nullableText(note.HomeID),
+		nullableText(note.ParentID),
+		note.SortOrder,
 		note.Title,
 		note.Content,
+		noteBodyMarkdown(note),
+		noteBodyFormat(note),
 		note.PageType,
 		note.BoardJSON,
 		note.Revision,
@@ -391,15 +407,19 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_notes (
-				id, note_id, owner_user_id, home_id, title, content, page_type, board_json,
+				id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
 				revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				note_id = excluded.note_id,
 				owner_user_id = excluded.owner_user_id,
 				home_id = excluded.home_id,
+				parent_id = excluded.parent_id,
+				sort_order = excluded.sort_order,
 				title = excluded.title,
 				content = excluded.content,
+				body_markdown = excluded.body_markdown,
+				body_format = excluded.body_format,
 				page_type = excluded.page_type,
 				board_json = excluded.board_json,
 				revision = excluded.revision,
@@ -413,8 +433,12 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 		note.NoteID,
 		note.OwnerUserID,
 		nullableText(note.HomeID),
+		nullableText(note.ParentID),
+		note.SortOrder,
 		note.Title,
 		note.Content,
+		noteBodyMarkdown(note),
+		noteBodyFormat(note),
 		note.PageType,
 		note.BoardJSON,
 		note.Revision,
@@ -445,6 +469,10 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 		); err != nil {
 			return err
 		}
+	}
+
+	if err := txNotifyNoteChanged(ctx, tx, note, "notes.changed"); err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -568,14 +596,19 @@ func (s *Store) HasNoteOperation(ctx context.Context, noteID string, opID string
 func scanUserNote(scanner interface{ Scan(dest ...any) error }) (domain.UserNote, error) {
 	var note domain.UserNote
 	var homeID sql.NullString
+	var parentID sql.NullString
 	var deletedAt sql.NullTime
 	err := scanner.Scan(
 		&note.ID,
 		&note.NoteID,
 		&note.OwnerUserID,
 		&homeID,
+		&parentID,
+		&note.SortOrder,
 		&note.Title,
 		&note.Content,
+		&note.BodyMarkdown,
+		&note.BodyFormat,
 		&note.PageType,
 		&note.BoardJSON,
 		&note.Revision,
@@ -596,6 +629,15 @@ func scanUserNote(scanner interface{ Scan(dest ...any) error }) (domain.UserNote
 	if homeID.Valid {
 		note.HomeID = homeID.String
 	}
+	if parentID.Valid {
+		note.ParentID = parentID.String
+	}
+	if note.BodyMarkdown == "" {
+		note.BodyMarkdown = note.Content
+	}
+	if note.BodyFormat == "" {
+		note.BodyFormat = "markdown"
+	}
 	if deletedAt.Valid {
 		note.DeletedAt = &deletedAt.Time
 	}
@@ -608,6 +650,20 @@ func nullableText(value string) any {
 		return nil
 	}
 	return value
+}
+
+func noteBodyMarkdown(note domain.UserNote) string {
+	if note.BodyMarkdown != "" {
+		return note.BodyMarkdown
+	}
+	return note.Content
+}
+
+func noteBodyFormat(note domain.UserNote) string {
+	if strings.TrimSpace(note.BodyFormat) != "" {
+		return note.BodyFormat
+	}
+	return "markdown"
 }
 
 func scanNoteShareMember(scanner interface{ Scan(dest ...any) error }) (domain.NoteShareMember, error) {

@@ -32,6 +32,8 @@ type collabScalar struct {
 type collabState struct {
 	Title         collabScalar          `json:"title"`
 	PageType      collabScalar          `json:"page_type"`
+	ParentID      collabScalar          `json:"parent_id"`
+	SortOrder     int                   `json:"sort_order"`
 	Content       string                `json:"content"`
 	Board         *protocol.KanbanBoard `json:"board,omitempty"`
 	CollabVersion int64                 `json:"collab_version"`
@@ -166,6 +168,8 @@ func (s *cloudNotesService) deleteNote(ctx context.Context, note domain.UserNote
 		return err
 	}
 	note.Content = ""
+	note.BodyMarkdown = ""
+	note.BodyFormat = "markdown"
 	note.BoardJSON = ""
 	note.Revision = revisionBytes(operationBody)
 	note.Checksum = ""
@@ -372,6 +376,9 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 		return protocol.NotesSaveResponse{}, err
 	}
 	content := request.Content
+	if request.BodyMarkdown != "" {
+		content = request.BodyMarkdown
+	}
 	if pageType == protocol.NotePageTypeKanban && content == "" && board != nil {
 		content = kanbanMarkdown(request.Title, *board)
 	}
@@ -388,9 +395,17 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 	state := collabState{
 		Title:         collabScalar{Value: title, Version: existing.CollabVersion + 1, UserID: actorUserID},
 		PageType:      collabScalar{Value: pageType, Version: existing.CollabVersion + 1, UserID: actorUserID},
+		ParentID:      collabScalar{Value: existing.ParentID, Version: existing.CollabVersion, UserID: actorUserID},
+		SortOrder:     existing.SortOrder,
 		Content:       content,
 		Board:         board,
 		CollabVersion: existing.CollabVersion + 1,
+	}
+	if request.ParentID != nil {
+		state.ParentID = collabScalar{Value: strings.TrimSpace(*request.ParentID), Version: state.CollabVersion, UserID: actorUserID}
+	}
+	if request.SortOrder != nil {
+		state.SortOrder = *request.SortOrder
 	}
 	now := nowUTC()
 	updated, operationJSON, err := materializeNoteFromState(existing, state, actorUserID, now)
@@ -473,15 +488,20 @@ func noteSummaries(notes []domain.UserNote) []protocol.NoteSummary {
 
 func noteSummary(note domain.UserNote) protocol.NoteSummary {
 	return protocol.NoteSummary{
-		ID:         note.NoteID,
-		Title:      note.Title,
-		UpdatedAt:  note.UpdatedAt,
-		Revision:   note.Revision,
-		Size:       int64(len(note.Content)),
-		StorageKey: note.NoteID,
-		PageType:   note.PageType,
-		Preview:    previewFromContent(note.Content),
-		Tags:       extractTags(note.Content),
+		ID:          note.NoteID,
+		Title:       note.Title,
+		UpdatedAt:   note.UpdatedAt,
+		Revision:    note.Revision,
+		Size:        int64(len(noteBodyText(note))),
+		StorageKey:  note.NoteID,
+		PageType:    note.PageType,
+		ParentID:    note.ParentID,
+		SortOrder:   note.SortOrder,
+		BodyFormat:  noteBodyFormat(note),
+		OwnerUserID: note.OwnerUserID,
+		Shared:      note.HomeID != "",
+		Preview:     previewFromContent(noteBodyText(note)),
+		Tags:        extractTags(noteBodyText(note)),
 	}
 }
 
@@ -495,16 +515,36 @@ func noteFetch(note domain.UserNote) (protocol.NotesFetchResponse, error) {
 		board = &decoded
 	}
 	return protocol.NotesFetchResponse{
-		NoteID:    note.NoteID,
-		Title:     note.Title,
-		Content:   note.Content,
-		Revision:  note.Revision,
-		UpdatedAt: note.UpdatedAt,
-		PageType:  note.PageType,
-		Preview:   previewFromContent(note.Content),
-		Tags:      extractTags(note.Content),
-		Board:     board,
+		NoteID:       note.NoteID,
+		Title:        note.Title,
+		Content:      noteBodyText(note),
+		BodyMarkdown: noteBodyText(note),
+		BodyFormat:   noteBodyFormat(note),
+		Revision:     note.Revision,
+		UpdatedAt:    note.UpdatedAt,
+		PageType:     note.PageType,
+		ParentID:     note.ParentID,
+		SortOrder:    note.SortOrder,
+		OwnerUserID:  note.OwnerUserID,
+		Shared:       note.HomeID != "",
+		Preview:      previewFromContent(noteBodyText(note)),
+		Tags:         extractTags(noteBodyText(note)),
+		Board:        board,
 	}, nil
+}
+
+func noteBodyText(note domain.UserNote) string {
+	if note.BodyMarkdown != "" {
+		return note.BodyMarkdown
+	}
+	return note.Content
+}
+
+func noteBodyFormat(note domain.UserNote) string {
+	if strings.TrimSpace(note.BodyFormat) != "" {
+		return note.BodyFormat
+	}
+	return "markdown"
 }
 
 func decodeCollabState(note domain.UserNote) (collabState, error) {
@@ -514,11 +554,17 @@ func decodeCollabState(note domain.UserNote) (collabState, error) {
 			if state.PageType.Value == "" {
 				state.PageType.Value = normalizePageType(note.PageType)
 			}
+			if state.ParentID.Value == "" {
+				state.ParentID.Value = note.ParentID
+			}
 			if state.Title.Value == "" {
 				state.Title.Value = note.Title
 			}
 			if state.Content == "" {
-				state.Content = note.Content
+				state.Content = noteBodyText(note)
+			}
+			if state.SortOrder == 0 {
+				state.SortOrder = note.SortOrder
 			}
 			if state.Board == nil && strings.TrimSpace(note.BoardJSON) != "" {
 				var board protocol.KanbanBoard
@@ -542,7 +588,9 @@ func decodeCollabState(note domain.UserNote) (collabState, error) {
 	return collabState{
 		Title:         collabScalar{Value: note.Title, Version: note.CollabVersion},
 		PageType:      collabScalar{Value: normalizePageType(note.PageType), Version: note.CollabVersion},
-		Content:       note.Content,
+		ParentID:      collabScalar{Value: note.ParentID, Version: note.CollabVersion},
+		SortOrder:     note.SortOrder,
+		Content:       noteBodyText(note),
 		Board:         board,
 		CollabVersion: note.CollabVersion,
 	}, nil
@@ -574,7 +622,11 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 	if base.Title == "" {
 		base.Title = titleFromNoteID(base.NoteID)
 	}
+	base.ParentID = strings.TrimSpace(state.ParentID.Value)
+	base.SortOrder = state.SortOrder
 	base.Content = content
+	base.BodyMarkdown = content
+	base.BodyFormat = "markdown"
 	base.PageType = pageType
 	base.BoardJSON = boardJSON
 	base.Revision = revision
@@ -587,11 +639,14 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 		base.CreatedAt = updatedAt
 	}
 	operationJSON, err := json.Marshal(map[string]any{
-		"type":      "replace_snapshot",
-		"title":     base.Title,
-		"content":   base.Content,
-		"page_type": base.PageType,
-		"board":     state.Board,
+		"type":          "replace_snapshot",
+		"title":         base.Title,
+		"content":       base.Content,
+		"body_markdown": base.BodyMarkdown,
+		"page_type":     base.PageType,
+		"parent_id":     base.ParentID,
+		"sort_order":    base.SortOrder,
+		"board":         state.Board,
 	})
 	if err != nil {
 		return domain.UserNote{}, "", err

@@ -91,6 +91,9 @@ func (s *Store) SaveUserProfileBackup(
 		return domain.UserProfileBackup{}, err
 	}
 
+	if err := txNotifyProfileChanged(ctx, tx, userID, "profile.backup_changed", existing.Revision); err != nil {
+		return domain.UserProfileBackup{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.UserProfileBackup{}, err
 	}

@@ -99,6 +99,23 @@ type AppSession struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+type UserProfileSettings struct {
+	UserID    string          `json:"user_id"`
+	Revision  int             `json:"revision"`
+	Settings  json.RawMessage `json:"settings"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type UserProfileSecretVault struct {
+	UserID    string          `json:"user_id"`
+	Revision  int             `json:"revision"`
+	KeyID     string          `json:"key_id"`
+	Vault     json.RawMessage `json:"vault"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
 type HomeNote struct {
 	HomeID    string     `json:"home_id"`
 	NoteID    string     `json:"note_id"`

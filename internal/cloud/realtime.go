@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/protocol"
+	"github.com/dropfile/hankremote/internal/store"
 )
 
 const (
@@ -29,6 +30,86 @@ func fileDirectoryTopic(path string) string {
 
 func noteCollabTopic(noteID string) string {
 	return "notes.collab:" + strings.TrimSpace(noteID)
+}
+
+func scopedNoteCollabTopic(scope string, noteID string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return noteCollabTopic(noteID)
+	}
+	return "notes.collab:" + scope + ":" + strings.TrimSpace(noteID)
+}
+
+func (s *Server) forwardStoreNotifications(ctx context.Context) {
+	notifications, err := s.store.Listen(ctx, store.NotificationChannelNotes, store.NotificationChannelProfiles)
+	if err != nil {
+		s.logger.Warn("postgres realtime listener unavailable", "error", err)
+		return
+	}
+	for notification := range notifications {
+		switch notification.Channel {
+		case store.NotificationChannelNotes:
+			s.forwardNoteNotification(ctx, notification.Payload)
+		case store.NotificationChannelProfiles:
+			s.forwardProfileNotification(ctx, notification.Payload)
+		}
+	}
+}
+
+func (s *Server) forwardNoteNotification(ctx context.Context, payload json.RawMessage) {
+	var event struct {
+		Event         string `json:"event"`
+		NoteID        string `json:"note_id"`
+		HomeID        string `json:"home_id"`
+		OwnerUserID   string `json:"owner_user_id"`
+		UpdatedBy     string `json:"updated_by"`
+		CollabVersion int64  `json:"collab_version"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		s.logger.Warn("bad note notification payload", "error", err)
+		return
+	}
+	if strings.TrimSpace(event.Event) == "" {
+		event.Event = "notes.changed"
+	}
+	body := map[string]any{
+		"note_id":        event.NoteID,
+		"home_id":        event.HomeID,
+		"user_id":        event.OwnerUserID,
+		"owner_user_id":  event.OwnerUserID,
+		"updated_by":     event.UpdatedBy,
+		"collab_version": event.CollabVersion,
+	}
+	s.broadcastAppEvent(ctx, topicNotesProfile, event.Event, body)
+	if event.HomeID != "" {
+		s.broadcastAppEvent(ctx, topicNotesHome, event.Event, body)
+		s.broadcastAppEvent(ctx, scopedNoteCollabTopic("home", event.NoteID), event.Event, body)
+	}
+	s.broadcastAppEvent(ctx, noteCollabTopic(event.NoteID), event.Event, body)
+	s.broadcastAppEvent(ctx, scopedNoteCollabTopic("profile", event.NoteID), event.Event, body)
+}
+
+func (s *Server) forwardProfileNotification(ctx context.Context, payload json.RawMessage) {
+	var event struct {
+		Event    string `json:"event"`
+		UserID   string `json:"user_id"`
+		Revision int    `json:"revision"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		s.logger.Warn("bad profile notification payload", "error", err)
+		return
+	}
+	if strings.TrimSpace(event.Event) == "" {
+		event.Event = "profile.changed"
+	}
+	topic := "profile.settings"
+	if event.Event == "profile.secret_vault_changed" {
+		topic = "profile.secret_vault"
+	}
+	s.broadcastAppEvent(ctx, topic, event.Event, map[string]any{
+		"user_id":  event.UserID,
+		"revision": event.Revision,
+	})
 }
 
 func (s *Server) handleRealtimeCommand(ctx context.Context, app *appConnection, peer *wsPeer, envelope protocol.Envelope, command protocol.RoutedCommand) bool {
