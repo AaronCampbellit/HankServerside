@@ -9,10 +9,14 @@ import (
 )
 
 type Cloud struct {
-	Addr           string
-	DatabaseURL    string
-	SessionTTL     time.Duration
-	RequestTimeout time.Duration
+	Addr               string
+	DatabaseURL        string
+	SessionTTL         time.Duration
+	RequestTimeout     time.Duration
+	OpenAIClientID     string
+	OpenAIClientSecret string
+	OpenAIRedirectURI  string
+	OpenAIScopes       string
 }
 
 type Agent struct {
@@ -53,10 +57,14 @@ func LoadCloud() (Cloud, error) {
 	}
 
 	return Cloud{
-		Addr:           envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
-		DatabaseURL:    envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
-		SessionTTL:     sessionTTL,
-		RequestTimeout: requestTimeout,
+		Addr:               envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
+		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
+		SessionTTL:         sessionTTL,
+		RequestTimeout:     requestTimeout,
+		OpenAIClientID:     strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_ID")),
+		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
+		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
+		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
 	}, nil
 }
 
