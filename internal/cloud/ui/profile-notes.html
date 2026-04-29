@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote My Notes</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+    <title>Hank Remote Notes</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260428-notes-workspace">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <link rel="manifest" href="/assets/site.webmanifest">
   </head>
-  <body>
+  <body class="notes-page">
     <div class="shell">
       <header class="hero">
         <div>
@@ -18,8 +18,7 @@
             <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
             <p class="eyebrow">Hank Remote</p>
           </div>
-          <h1>My Notes</h1>
-          <p class="lede">View and edit notes that belong to your Hank account.</p>
+          <h1>Notes</h1>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -43,42 +42,46 @@
         <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
-      <main class="grid">
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Notes</h2>
-            <span id="note-count" class="pill">0 notes</span>
+      <main class="notes-workspace">
+        <section class="notes-tab-panel" aria-label="Notes">
+          <div class="notes-topbar">
+            <div class="notes-search-wrap">
+              <input id="note-search" type="search" placeholder="Find notes">
+              <span id="note-count" class="pill">0 notes</span>
+            </div>
+            <div class="actions wrap">
+              <button id="refresh-button" type="button" class="secondary">Refresh</button>
+              <button id="new-button" type="button">New Note</button>
+            </div>
           </div>
-          <div class="actions wrap">
-            <button id="refresh-button" type="button">Refresh</button>
-            <button id="new-button" type="button" class="secondary">New Note</button>
-          </div>
-          <div id="note-list" class="card-list empty-state">Loading notes.</div>
+          <div id="note-tabs" class="note-tabs empty-state">Loading notes.</div>
         </section>
 
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Editor</h2>
-            <span class="pill">Edit</span>
+        <section class="document-panel" aria-label="Note editor">
+          <div class="document-head">
+            <input id="note-title" class="document-title" type="text" placeholder="Untitled">
+            <div class="document-meta">
+              <span id="save-state" class="save-state">Saved</span>
+              <span id="last-saved">Not saved yet</span>
+              <button id="delete-button" type="button" class="ghost">Delete</button>
+            </div>
           </div>
-          <div class="two-up">
-            <label>
-              <span>Title</span>
-              <input id="note-title" type="text" placeholder="Untitled">
-            </label>
-            <label>
-              <span>Note Key</span>
-              <input id="note-id" type="text" placeholder="auto-generated on save">
-            </label>
+
+          <div class="formatting-toolbar" role="toolbar" aria-label="Formatting">
+            <button type="button" data-format="bold" title="Bold" aria-label="Bold"><strong>B</strong></button>
+            <button type="button" data-format="italic" title="Italic" aria-label="Italic"><em>I</em></button>
+            <button type="button" data-format="underline" title="Underline" aria-label="Underline"><u>U</u></button>
+            <button type="button" data-format="decrease" title="Smaller Heading" aria-label="Smaller Heading">A-</button>
+            <button type="button" data-format="increase" title="Larger Heading" aria-label="Larger Heading">A+</button>
+            <button type="button" data-format="heading" title="Heading" aria-label="Heading">H</button>
+            <button type="button" data-format="bullet" title="Bullets" aria-label="Bullets">-</button>
+            <button type="button" data-format="number" title="Numbers" aria-label="Numbers">1.</button>
+            <button type="button" data-format="checklist" title="Checklist" aria-label="Checklist">[ ]</button>
+            <button type="button" data-format="tag" title="Tag" aria-label="Tag">#</button>
+            <button type="button" data-format="link" title="Link" aria-label="Link">Link</button>
           </div>
-          <label>
-            <span>Content</span>
-            <textarea id="note-content" rows="14" placeholder="# note body"></textarea>
-          </label>
-          <div class="actions wrap">
-            <button id="save-button" type="button">Save Note</button>
-            <button id="delete-button" type="button" class="ghost">Delete Note</button>
-          </div>
+
+          <textarea id="note-content" class="document-editor" rows="24" spellcheck="true" placeholder="Start writing"></textarea>
         </section>
       </main>
 

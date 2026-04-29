@@ -199,58 +199,10 @@
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Notes</h2>
-            <span class="pill">Browse</span>
+            <span class="pill">Workspace</span>
           </div>
-          <p class="hint">Browse and edit notes through Hank Remote.</p>
           <div class="tool-shell">
-            <div class="three-up">
-              <label>
-                <span>Search Notes</span>
-                <input id="notes-search-query" type="text" placeholder="Find text in notes">
-              </label>
-              <label>
-                <span>Tag</span>
-                <input id="notes-tag-query" type="text" placeholder="todo">
-              </label>
-              <label>
-                <span>Page Type</span>
-                <select id="notes-page-type">
-                  <option value="text">Text</option>
-                  <option value="kanban">Board</option>
-                </select>
-              </label>
-            </div>
-            <div class="actions wrap">
-              <button type="button" id="notes-list-button">List Notes</button>
-              <button type="button" id="notes-search-button" class="secondary">Search</button>
-              <button type="button" id="notes-tags-button">List Tags</button>
-              <button type="button" id="notes-tag-rollup-button">Open Tag</button>
-              <button type="button" id="notes-new-button">New Note</button>
-            </div>
-            <div id="notes-results" class="card-list empty-state">Choose a home to inspect notes.</div>
-            <div class="two-up">
-              <label>
-                <span>Note Title</span>
-                <input id="notes-title" type="text" placeholder="Untitled">
-              </label>
-              <label>
-                <span>Note Key</span>
-                <input id="notes-id" type="text" placeholder="auto-generated on save">
-              </label>
-            </div>
-            <label>
-              <span>Note Content</span>
-              <textarea id="notes-content" rows="10" placeholder="# note body"></textarea>
-            </label>
-            <label>
-              <span>Board Details</span>
-              <textarea id="notes-board-json" rows="8" placeholder='{"columns":[]}'></textarea>
-            </label>
-            <div class="actions wrap">
-              <button type="button" id="notes-fetch-button">Fetch Note</button>
-              <button type="button" id="notes-save-button">Save Note</button>
-              <button type="button" id="notes-delete-button" class="ghost">Delete Note</button>
-            </div>
+            <a class="manage-link" href="/dashboard/profile-notes">Open Notes</a>
           </div>
         </section>
       </main>

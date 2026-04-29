@@ -942,13 +942,13 @@ els.filesRefreshButton.addEventListener("click", () => browseFiles(els.filesPath
 els.filesUpButton.addEventListener("click", () => browseFiles(parentPath(state.currentFilesPath)));
 els.filesCreateDirectoryButton.addEventListener("click", createDirectory);
 els.filesUploadButton.addEventListener("click", uploadFile);
-els.notesListButton.addEventListener("click", listNotes);
-els.notesSearchButton.addEventListener("click", searchNotes);
-els.notesTagsButton.addEventListener("click", listTags);
-els.notesTagRollupButton.addEventListener("click", tagRollup);
-els.notesNewButton.addEventListener("click", clearNoteEditor);
-els.notesFetchButton.addEventListener("click", () => fetchNote());
-els.notesSaveButton.addEventListener("click", saveNote);
-els.notesDeleteButton.addEventListener("click", deleteNote);
+els.notesListButton?.addEventListener("click", listNotes);
+els.notesSearchButton?.addEventListener("click", searchNotes);
+els.notesTagsButton?.addEventListener("click", listTags);
+els.notesTagRollupButton?.addEventListener("click", tagRollup);
+els.notesNewButton?.addEventListener("click", clearNoteEditor);
+els.notesFetchButton?.addEventListener("click", () => fetchNote());
+els.notesSaveButton?.addEventListener("click", saveNote);
+els.notesDeleteButton?.addEventListener("click", deleteNote);
 
 hydrate();
