@@ -565,3 +565,18 @@ For now, the assistant should only expose tools the current user is already allo
 - keep the agent focused on notes/files capability execution
 - keep EventKit operations in the Hank app through a client-tool bridge
 - launch with hybrid retrieval from the start so we do not need a schema migration later
+
+## Hank iOS Integration Checklist (Implementation Sync)
+
+The current cloud implementation expects the iOS app to support:
+
+1. Assistant session lifecycle APIs (`/v1/home/assistant/sessions*`).
+2. Run-state handling for:
+   - `completed`
+   - `waiting_confirmation`
+   - `waiting_client_tool`
+3. Client-tool execution for EventKit-backed calendar actions and tool-result POST back to cloud.
+4. Periodic calendar index uploads via `PUT /v1/home/assistant/calendar-index`.
+5. Optional OpenAI account link flow via `GET /v1/oauth/openai/start` with server callback `GET /v1/oauth/openai/callback`.
+
+If these are missing in Hank iOS, assistant flows will appear incomplete even when cloud/agent are healthy.
