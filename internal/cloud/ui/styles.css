@@ -485,8 +485,8 @@ button.ghost {
 }
 
 .note-tab.active {
-  background: #fbfaf6;
-  color: #1e2733;
+  background: var(--brand);
+  color: #08111c;
   border-color: transparent;
 }
 
@@ -507,7 +507,7 @@ button.ghost {
 }
 
 .note-tab.active .note-tab-meta {
-  color: #667085;
+  color: rgba(8, 17, 28, 0.72);
 }
 
 .document-panel {
@@ -515,8 +515,8 @@ button.ghost {
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
-  background: #fbfaf6;
-  color: #1e2733;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .document-head {
@@ -525,7 +525,7 @@ button.ghost {
   gap: 12px;
   align-items: center;
   padding: 16px 18px 12px;
-  border-bottom: 1px solid rgba(30, 39, 51, 0.1);
+  border-bottom: 1px solid var(--line);
 }
 
 .document-title {
@@ -534,7 +534,7 @@ button.ghost {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: #1e2733;
+  color: var(--ink);
   font-family: ui-serif, Georgia, "Times New Roman", serif;
   font-size: 1.7rem;
   font-weight: 700;
@@ -550,7 +550,7 @@ button.ghost {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  color: #667085;
+  color: var(--muted);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 0.76rem;
 }
@@ -559,8 +559,8 @@ button.ghost {
   min-height: 34px;
   padding: 7px 10px;
   border-radius: 8px;
-  color: #1e2733;
-  background: rgba(30, 39, 51, 0.06);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .save-state {
@@ -590,8 +590,8 @@ button.ghost {
   gap: 6px;
   overflow-x: auto;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(30, 39, 51, 0.1);
-  background: #f0f2f5;
+  border-bottom: 1px solid var(--line);
+  background: rgba(23, 28, 41, 0.92);
 }
 
 .formatting-toolbar button {
@@ -599,16 +599,16 @@ button.ghost {
   min-width: 36px;
   min-height: 34px;
   padding: 6px 9px;
-  border: 1px solid rgba(30, 39, 51, 0.12);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
-  color: #1e2733;
+  background: #293345;
+  color: var(--ink);
   box-shadow: none;
 }
 
 .formatting-toolbar button:hover {
   transform: none;
-  background: #e9edf2;
+  background: #344057;
 }
 
 .document-editor {
@@ -618,8 +618,8 @@ button.ghost {
   padding: 22px 24px 48px;
   border: 0;
   border-radius: 0;
-  background: #fbfaf6;
-  color: #1e2733;
+  background: var(--surface-strong);
+  color: var(--ink);
   font-family: ui-serif, Georgia, "Times New Roman", serif;
   font-size: 1.04rem;
   line-height: 1.65;

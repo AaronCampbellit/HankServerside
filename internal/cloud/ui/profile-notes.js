@@ -26,7 +26,7 @@ const els = {
   noteSearch: document.getElementById("note-search"),
   refreshButton: document.getElementById("refresh-button"),
   newButton: document.getElementById("new-button"),
-  noteTabs: document.getElementById("note-tabs"),
+  noteTabs: document.getElementById("note-tabs") || document.getElementById("note-list"),
   noteTitle: document.getElementById("note-title"),
   noteContent: document.getElementById("note-content"),
   saveState: document.getElementById("save-state"),
