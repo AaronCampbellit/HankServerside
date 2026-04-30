@@ -309,6 +309,26 @@ func (s *Store) migrate(ctx context.Context) error {
 			FOREIGN KEY(session_id) REFERENCES assistant_sessions(id),
 			FOREIGN KEY(message_id) REFERENCES assistant_messages(id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS openai_accounts (
+			user_id TEXT PRIMARY KEY,
+			provider_user_id TEXT NOT NULL DEFAULT '',
+			access_token TEXT NOT NULL DEFAULT '',
+			refresh_token TEXT NOT NULL DEFAULT '',
+			token_type TEXT NOT NULL DEFAULT '',
+			scope TEXT NOT NULL DEFAULT '',
+			expires_at TIMESTAMP NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS openai_oauth_states (
+			state_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			code_verifier TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			expires_at TIMESTAMP NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id)
+		);`,
 		`CREATE TABLE IF NOT EXISTS assistant_calendar_entries (
 			id TEXT PRIMARY KEY,
 			home_id TEXT NOT NULL,

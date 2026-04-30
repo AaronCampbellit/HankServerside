@@ -232,3 +232,23 @@ type AssistantCalendarEntry struct {
 	MetadataJSON    string    `json:"metadata_json"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
+
+type OpenAIAccount struct {
+	UserID         string     `json:"user_id"`
+	ProviderUserID string     `json:"provider_user_id"`
+	AccessToken    string     `json:"-"`
+	RefreshToken   string     `json:"-"`
+	TokenType      string     `json:"token_type"`
+	Scope          string     `json:"scope"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type OpenAIOAuthState struct {
+	StateHash    string    `json:"-"`
+	UserID       string    `json:"user_id"`
+	CodeVerifier string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}

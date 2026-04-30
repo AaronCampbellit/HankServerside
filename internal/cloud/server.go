@@ -28,22 +28,26 @@ const maxHTTPBodyBytes = 1 << 20
 const maxWSMessageBytes = 2 << 20
 
 type Server struct {
-	addr           string
-	store          *store.Store
-	router         *Router
-	logger         *slog.Logger
-	http           *http.Server
-	metrics        *observability.Metrics
-	limiter        *rateLimiter
-	transfers      *transferRegistry
-	appTickets     *appWebSocketTicketRegistry
-	notes          *cloudNotesService
-	collaboration  *noteCollaborationHub
-	agentRequests  *agentRequestRegistry
-	syncs          *homeSyncController
-	realtimeCancel context.CancelFunc
-	sessionTTL     time.Duration
-	requestTimeout time.Duration
+	addr               string
+	store              *store.Store
+	router             *Router
+	logger             *slog.Logger
+	http               *http.Server
+	metrics            *observability.Metrics
+	limiter            *rateLimiter
+	transfers          *transferRegistry
+	appTickets         *appWebSocketTicketRegistry
+	notes              *cloudNotesService
+	collaboration      *noteCollaborationHub
+	agentRequests      *agentRequestRegistry
+	syncs              *homeSyncController
+	realtimeCancel     context.CancelFunc
+	sessionTTL         time.Duration
+	requestTimeout     time.Duration
+	openAIClientID     string
+	openAIClientSecret string
+	openAIRedirectURI  string
+	openAIScopes       string
 }
 
 type authContext struct {
@@ -100,6 +104,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("/v1/auth/logout", server.handleAuthLogout)
 	mux.HandleFunc("/v1/me", server.handleMe)
+	mux.HandleFunc("/v1/oauth/openai/start", server.handleOpenAIOAuthStart)
+	mux.HandleFunc("/v1/oauth/openai/callback", server.handleOpenAIOAuthCallback)
 	mux.HandleFunc("/v1/me/notes", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/notes/", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/profile", server.handleProfileSettingsHTTP)
@@ -124,6 +130,12 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	return server
 }
 
+func (s *Server) ConfigureOpenAI(clientID, clientSecret, redirectURI, scopes string) {
+	s.openAIClientID = strings.TrimSpace(clientID)
+	s.openAIClientSecret = strings.TrimSpace(clientSecret)
+	s.openAIRedirectURI = strings.TrimSpace(redirectURI)
+	s.openAIScopes = strings.TrimSpace(scopes)
+}
 func (s *Server) ListenAndServe() error {
 	s.logger.Info("starting Hank Remote cloud service", "addr", s.addr)
 	err := s.http.ListenAndServe()

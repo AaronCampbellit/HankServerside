@@ -88,3 +88,30 @@ That path should be considered deprecated.
 - reduces credential leakage risk through copied URLs and logs
 - keeps browser and app auth models separated cleanly
 - allows the dashboard to stay cookie-only without forcing an app rewrite
+
+## OpenAI Account Linking (New)
+
+To enable subscription-backed ChatGPT usage inside Hank Assistant, the app should support the OpenAI OAuth link flow.
+
+### Endpoints
+
+- `GET /v1/oauth/openai/start`
+- `GET /v1/oauth/openai/callback` (cloud callback endpoint)
+
+### App Flow
+
+1. Ensure the user is authenticated with normal Hank session auth (`Authorization: Bearer <session_token>`).
+2. Call `GET /v1/oauth/openai/start`.
+3. Read `authorization_url` from response and open it in an in-app browser (or external browser with app return handling).
+4. User completes OpenAI sign-in/consent.
+5. OpenAI redirects to server callback (`/v1/oauth/openai/callback`) where token exchange and linking are finalized server-side.
+6. App should refresh linked-account state and show success/failure status in Assistant settings.
+
+### UX Requirements
+
+- Add an Assistant settings card:
+  - linked/not linked status
+  - "Link OpenAI" action
+  - "Relink" if link fails/expired
+- Show actionable error copy if link fails (invalid state, expired state, provider failure).
+- If not linked, Assistant tab should still work for local flows where available, but clearly indicate ChatGPT subscription-backed features require linking.

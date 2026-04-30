@@ -31,6 +31,7 @@ func main() {
 	defer db.Close()
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
+	server.ConfigureOpenAI(cfg.OpenAIClientID, cfg.OpenAIClientSecret, cfg.OpenAIRedirectURI, cfg.OpenAIScopes)
 
 	errCh := make(chan error, 1)
 	go func() {

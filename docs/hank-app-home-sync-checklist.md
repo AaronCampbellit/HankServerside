@@ -284,3 +284,49 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Hank uses `admin/member` terminology consistently.
 - Hank has no Remote home picker or selected-home dependency.
 - Hank can manage members, roles, permissions, sync status, service profiles, files, and shared notes through the singleton `/v1/home` contract.
+
+## Workstream 8: Hank Assistant + OpenAI Link UX
+
+### Assistant Session API Integration
+
+Add app client support for assistant routes:
+- `GET /v1/home/assistant/sessions`
+- `POST /v1/home/assistant/sessions`
+- `GET /v1/home/assistant/sessions/{sessionID}`
+- `GET /v1/home/assistant/sessions/{sessionID}/messages`
+- `POST /v1/home/assistant/sessions/{sessionID}/messages`
+- `GET /v1/home/assistant/runs/{runID}`
+- `POST /v1/home/assistant/runs/{runID}/confirm`
+- `POST /v1/home/assistant/runs/{runID}/client-tool-results`
+- `PUT /v1/home/assistant/calendar-index`
+
+### Client Tool Bridge (Calendar)
+
+For `waiting_client_tool` runs:
+- execute requested EventKit tool locally (initially `calendar.create_event`)
+- post normalized tool result to `/v1/home/assistant/runs/{runID}/client-tool-results`
+- poll `/v1/home/assistant/runs/{runID}` until completed or next action required
+
+### Confirmation UX
+
+For `waiting_confirmation` runs:
+- present clear approve/cancel UI with mutation details
+- call `/v1/home/assistant/runs/{runID}/confirm` with explicit decision
+
+### OpenAI OAuth Linking
+
+Add app-side account linking UX wired to:
+- `GET /v1/oauth/openai/start`
+- server callback route `GET /v1/oauth/openai/callback`
+
+Expected behavior:
+- open `authorization_url`
+- complete provider login/consent
+- return to Hank and refresh assistant link status
+
+### Validation Additions
+
+- Verify assistant sessions list/create/send/reload works over app restarts.
+- Verify a calendar-create prompt enters `waiting_client_tool`, executes EventKit call, and resumes to completion.
+- Verify mutation confirmation flow blocks execution until user confirms.
+- Verify OpenAI link flow completes and linked status persists across relaunch.
