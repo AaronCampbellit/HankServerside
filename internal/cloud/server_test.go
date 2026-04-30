@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -278,6 +280,63 @@ func TestLoginPageIsServed(t *testing.T) {
 	}
 }
 
+func TestRegistrationDisabledAfterFirstAdminBootstrap(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	firstBody := strings.NewReader(`{"email":"first@example.com","password":"change-me-123"}`)
+	firstRequest, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/register", firstBody)
+	if err != nil {
+		t.Fatalf("first register request: %v", err)
+	}
+	firstRequest.Header.Set("Content-Type", "application/json")
+
+	firstResponse, err := http.DefaultClient.Do(firstRequest)
+	if err != nil {
+		t.Fatalf("first register response: %v", err)
+	}
+	defer firstResponse.Body.Close()
+	if firstResponse.StatusCode != http.StatusCreated {
+		data, _ := io.ReadAll(firstResponse.Body)
+		t.Fatalf("first register status = %d, want %d body=%s", firstResponse.StatusCode, http.StatusCreated, string(data))
+	}
+	if _, err := db.GetSingletonHomeForUser(ctx, mustRegisteredUserID(t, firstResponse)); err != nil {
+		t.Fatalf("first registered user should have singleton home membership: %v", err)
+	}
+
+	secondBody := strings.NewReader(`{"email":"second@example.com","password":"change-me-123"}`)
+	secondRequest, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/register", secondBody)
+	if err != nil {
+		t.Fatalf("second register request: %v", err)
+	}
+	secondRequest.Header.Set("Content-Type", "application/json")
+
+	secondResponse, err := http.DefaultClient.Do(secondRequest)
+	if err != nil {
+		t.Fatalf("second register response: %v", err)
+	}
+	defer secondResponse.Body.Close()
+	if secondResponse.StatusCode != http.StatusForbidden {
+		data, _ := io.ReadAll(secondResponse.Body)
+		t.Fatalf("second register status = %d, want %d body=%s", secondResponse.StatusCode, http.StatusForbidden, string(data))
+	}
+	for _, cookie := range secondResponse.Cookies() {
+		if cookie.Name == sessionCookieName && cookie.Value != "" {
+			t.Fatalf("second registration unexpectedly set a session cookie")
+		}
+	}
+	if _, err := db.GetUserByEmail(ctx, "second@example.com"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second user lookup error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 	t.Parallel()
 
@@ -298,6 +357,7 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/home-users",
 		"/dashboard/service-profiles",
 		"/dashboard/sync-status",
+		"/dashboard/storage",
 		"/dashboard/profile-notes",
 		"/dashboard/file-transfers",
 		"/dashboard/accept-invitation",
@@ -316,6 +376,129 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		if location := response.Header.Get("Location"); location != "/" {
 			t.Fatalf("%s redirect location = %q, want %q", routePath, location, "/")
 		}
+	}
+}
+
+func TestDashboardPagesRequireHomeMembership(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	admin := domain.User{ID: "usr_admin", Email: "admin@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_member", Email: "member@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	outsider := domain.User{ID: "usr_outsider", Email: "outsider@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_1", UserID: admin.ID, Name: "Family Home", CreatedAt: now, UpdatedAt: now}
+
+	must(t, db.CreateUser(ctx, admin))
+	must(t, db.CreateUser(ctx, member))
+	must(t, db.CreateUser(ctx, outsider))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.AddHomeMembership(ctx, domain.HomeMembership{
+		HomeID:    home.ID,
+		UserID:    member.ID,
+		Role:      domain.HomeRoleMember,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_member", UserID: member.ID, TokenHash: hashToken("member-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_outsider", UserID: outsider.ID, TokenHash: hashToken("outsider-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	normalPages := []string{
+		"/dashboard",
+		"/dashboard/home-users",
+		"/dashboard/service-profiles",
+		"/dashboard/sync-status",
+		"/dashboard/profile-notes",
+		"/dashboard/file-transfers",
+	}
+
+	for _, routePath := range normalPages {
+		response := requestDashboardPage(t, testServer, routePath, "member-token")
+		if response.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("member %s status = %d, want %d body=%s", routePath, response.StatusCode, http.StatusOK, string(data))
+		}
+		response.Body.Close()
+	}
+
+	for _, routePath := range normalPages {
+		response := requestDashboardPage(t, testServer, routePath, "outsider-token")
+		if response.StatusCode != http.StatusForbidden {
+			data, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("outsider %s status = %d, want %d body=%s", routePath, response.StatusCode, http.StatusForbidden, string(data))
+		}
+		response.Body.Close()
+	}
+
+	acceptResponse := requestDashboardPage(t, testServer, "/dashboard/accept-invitation", "outsider-token")
+	if acceptResponse.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(acceptResponse.Body)
+		acceptResponse.Body.Close()
+		t.Fatalf("outsider accept-invitation status = %d, want %d body=%s", acceptResponse.StatusCode, http.StatusOK, string(data))
+	}
+	acceptResponse.Body.Close()
+
+	storageResponse := requestDashboardPage(t, testServer, "/dashboard/storage", "member-token")
+	if storageResponse.StatusCode != http.StatusForbidden {
+		data, _ := io.ReadAll(storageResponse.Body)
+		storageResponse.Body.Close()
+		t.Fatalf("member storage status = %d, want %d body=%s", storageResponse.StatusCode, http.StatusForbidden, string(data))
+	}
+	storageResponse.Body.Close()
+}
+
+func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
+	t.Parallel()
+
+	pages := []string{
+		"dashboard.html",
+		"home-users.html",
+		"service-profiles.html",
+		"sync-status.html",
+		"storage.html",
+		"profile-notes.html",
+		"file-transfers.html",
+		"accept-invitation.html",
+	}
+	for _, page := range pages {
+		data, err := fs.ReadFile(uiAssets, "ui/"+page)
+		if err != nil {
+			t.Fatalf("%s read: %v", page, err)
+		}
+		body := string(data)
+		storageLinks := strings.Count(body, `href="/dashboard/storage"`)
+		if storageLinks == 0 {
+			t.Fatalf("%s has no storage dashboard link", page)
+		}
+		adminOnlyLinks := strings.Count(body, `href="/dashboard/storage" data-admin-only="true" hidden`)
+		if adminOnlyLinks != storageLinks {
+			t.Fatalf("%s storage admin-only links = %d, want %d", page, adminOnlyLinks, storageLinks)
+		}
+		if !strings.Contains(body, `src="/assets/admin-nav.js" defer`) {
+			t.Fatalf("%s missing admin nav visibility script", page)
+		}
+	}
+
+	if _, err := fs.ReadFile(uiAssets, "ui/admin-nav.js"); err != nil {
+		t.Fatalf("admin-nav.js read: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/assets/admin-nav.js", nil)
+	response := httptest.NewRecorder()
+	serveUIAsset(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("admin-nav.js asset status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
+		t.Fatalf("admin-nav.js content-type = %q", contentType)
 	}
 }
 
@@ -1076,7 +1259,12 @@ func requestJSON(t *testing.T, server *httptest.Server, sessionToken string, met
 	request.Header.Set("Authorization", "Bearer "+sessionToken)
 	request.Header.Set("Content-Type", "application/json")
 
-	response, err := http.DefaultClient.Do(request)
+	client := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1092,4 +1280,54 @@ func requestJSON(t *testing.T, server *httptest.Server, sessionToken string, met
 			t.Fatal(err)
 		}
 	}
+}
+
+func requestDashboardPage(t *testing.T, server *httptest.Server, path string, sessionToken string) *http.Response {
+	t.Helper()
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionToken != "" {
+		request.AddCookie(&http.Cookie{
+			Name:  sessionCookieName,
+			Value: sessionToken,
+			Path:  "/",
+		})
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func mustRegisteredUserID(t *testing.T, response *http.Response) string {
+	t.Helper()
+
+	var payload struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+		SessionID    string    `json:"session_id"`
+		SessionToken string    `json:"session_token"`
+		ExpiresAt    time.Time `json:"expires_at"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.User.ID == "" {
+		t.Fatal("registered response missing user ID")
+	}
+	if payload.SessionID == "" || payload.SessionToken == "" || payload.ExpiresAt.IsZero() {
+		t.Fatalf("registered response missing session fields: %#v", payload)
+	}
+	return payload.User.ID
 }

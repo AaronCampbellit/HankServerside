@@ -4,7 +4,7 @@ Use this runbook for the supported real deployment shape:
 
 - one machine
 - one Docker Compose stack
-- `cloud`, `agent`, and `postgres` together
+- `cloud`, `db-ops`, `agent`, and `postgres` together
 - Cloudflare Tunnel or a reverse proxy exposing your configured host bind, for example `http://127.0.0.1:18080` or `http://<server-ip>:18080`
 
 This deployment is singleton-only:
@@ -54,12 +54,15 @@ POSTGRES_USER=hankremote
 POSTGRES_PASSWORD=replace-with-db-password
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
+HANK_REMOTE_DB_OPS_INTENT_SECRET=replace-with-real-db-ops-secret
+HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS=replace-with-real-backup-encryption-passphrase
 ```
 
 If host port `18080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example `18081`.
 Replace `<host-port>` below with that `HANK_REMOTE_CLOUD_HOST_PORT` value.
 
-If you need server-specific overrides, create `/.env.cloud` with only the keys you want to replace.
+Create `/.env.cloud` at least for the real db-ops secret and backup encryption passphrase.
+If you need other server-specific overrides, keep them in the same file.
 
 If Docker reports `port is already allocated`, confirm what owns the port:
 
@@ -105,7 +108,7 @@ curl http://127.0.0.1:<host-port>/healthz
 curl http://127.0.0.1:<host-port>/readyz
 ```
 
-This starts `postgres` and `cloud`.
+This starts `postgres`, `db-ops`, and `cloud`.
 It intentionally does not start `agent` until a token exists.
 
 ## 5. Configure Cloudflare Tunnel
@@ -157,6 +160,7 @@ Dashboard:
 - no Home picker is present
 - the Home agent card shows one online agent
 - sync status loads
+- storage status loads and shows checksum/backup state
 
 API:
 
@@ -214,6 +218,10 @@ docker compose --profile agent up --build -d
 - the cloud publishes on `0.0.0.0:<host-port>` on the host by default, while the container still listens on `:8080`
 - set `HANK_REMOTE_CLOUD_HOST_BIND=127.0.0.1` if only a local proxy or tunnel should reach the service
 - the public hostname should come through Cloudflare Tunnel, not a direct public bind
+- Postgres traffic stays on internal Docker networks; `postgres` is not port-published
+- `postgres-restore` is profile-gated and is reachable only by `db-ops` during restore validation
+- pgBackRest backups are encrypted with `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`
+- replace old unencrypted pgBackRest repositories with a fresh encrypted full backup before relying on restore
 - the agent should keep using `ws://cloud:8080/ws/agent`
 - the agent is profile-gated and starts only when you use `docker compose --profile agent ...`
 - this version supports only one Home per deployment

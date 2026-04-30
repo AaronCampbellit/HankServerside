@@ -1,19 +1,40 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: hank-postgres
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     env_file:
       - path: ./configs/cloud.compose.env.example
         required: true
       - path: ./.env.cloud
         required: false
+    environment:
+      POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - hank_postgres_data:/var/lib/postgresql/data
+      - hank_pgbackrest_repo:/var/lib/pgbackrest
+      - hank_pgbackrest_logs:/var/log/pgbackrest
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10
+    command:
+      - "postgres"
+      - "-c"
+      - "archive_mode=on"
+      - "-c"
+      - "archive_command=pgbackrest --stanza=hank --repo1-cipher-type=aes-256-cbc --repo1-cipher-pass=\"$${HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS}\" archive-push %p"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=3"
+      - "-c"
+      - "unix_socket_directories=/var/run/postgresql,/var/lib/postgresql/data"
     restart: unless-stopped
+    networks:
+      - hank_db
 
   cloud:
     image: hankserverside
@@ -30,8 +51,79 @@ services:
         condition: service_healthy
     ports:
       - "${HANK_REMOTE_CLOUD_HOST_BIND:-0.0.0.0}:${HANK_REMOTE_CLOUD_HOST_PORT:-18080}:8080"
+    volumes:
+      - hank_db_ops_state:/var/lib/hank/db-ops/state
+      - hank_db_ops_logs:/var/log/hank/db-ops
     command: ["/usr/local/bin/hank-remote-cloud"]
     restart: unless-stopped
+    networks:
+      - hank_app
+      - hank_db
+
+  db-ops:
+    image: hank-db-ops
+    build:
+      context: .
+      dockerfile: Dockerfile.dbops
+    env_file:
+      - path: ./configs/cloud.compose.env.example
+        required: true
+      - path: ./.env.cloud
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hankserverside}
+      HANK_REMOTE_CLOUD_HOST_BIND: ${HANK_REMOTE_CLOUD_HOST_BIND:-0.0.0.0}
+      HANK_REMOTE_CLOUD_HOST_PORT: ${HANK_REMOTE_CLOUD_HOST_PORT:-18080}
+    volumes:
+      - hank_postgres_data:/var/lib/postgresql/data
+      - hank_postgres_restore_data:/var/lib/postgresql/restore
+      - hank_pgbackrest_repo:/var/lib/pgbackrest
+      - hank_db_ops_state:/var/lib/hank/db-ops/state
+      - hank_db_ops_logs:/var/log/hank/db-ops
+      - hank_pgbackrest_logs:/var/log/pgbackrest
+      - ${HANK_REMOTE_DB_OPS_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ./:/workspace:ro
+    command: ["/usr/local/bin/hank-db-ops"]
+    restart: unless-stopped
+    networks:
+      - hank_db
+      - hank_restore
+
+  postgres-restore:
+    image: hank-postgres
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    profiles:
+      - restore
+    env_file:
+      - path: ./configs/cloud.compose.env.example
+        required: true
+      - path: ./.env.cloud
+        required: false
+    environment:
+      PGDATA: /var/lib/postgresql/restore
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - hank_postgres_restore_data:/var/lib/postgresql/restore
+      - hank_pgbackrest_repo:/var/lib/pgbackrest:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - "postgres"
+      - "-c"
+      - "archive_mode=off"
+      - "-c"
+      - "unix_socket_directories=/var/run/postgresql,/var/lib/postgresql/restore"
+    restart: "no"
+    networks:
+      - hank_restore
 
   agent:
     image: hankserverside
@@ -49,8 +141,22 @@ services:
       - hank_agent_notes:/srv/hank/notes
     command: ["/usr/local/bin/hank-remote-agent"]
     restart: unless-stopped
+    networks:
+      - hank_app
 
 volumes:
   hank_postgres_data:
+  hank_postgres_restore_data:
+  hank_pgbackrest_repo:
+  hank_pgbackrest_logs:
+  hank_db_ops_state:
+  hank_db_ops_logs:
   hank_agent_files:
   hank_agent_notes:
+
+networks:
+  hank_app:
+  hank_db:
+    internal: true
+  hank_restore:
+    internal: true

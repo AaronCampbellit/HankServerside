@@ -1,0 +1,17 @@
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hank-db-ops ./cmd/hank-db-ops
+
+FROM postgres:17-alpine
+RUN apk add --no-cache pgbackrest docker-cli docker-cli-compose bash tar
+WORKDIR /app
+COPY --from=build /out/hank-db-ops /usr/local/bin/hank-db-ops
+COPY configs/pgbackrest.conf /etc/pgbackrest/pgbackrest.conf
+RUN chmod 755 /usr/local/bin/hank-db-ops \
+	&& chmod 644 /etc/pgbackrest/pgbackrest.conf
+CMD ["/usr/local/bin/hank-db-ops"]

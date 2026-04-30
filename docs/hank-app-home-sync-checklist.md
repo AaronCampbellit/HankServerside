@@ -64,6 +64,14 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Move service-profile loading and saves to:
   - `GET /v1/home/service-profiles`
   - `PUT /v1/home/service-profiles/{serviceType}`
+- Add admin-only server-storage clients if Hank exposes server operations:
+  - `GET /v1/home/storage/status`
+  - `GET /v1/home/storage/config`
+  - `PUT /v1/home/storage/config`
+  - `GET /v1/home/storage/events`
+  - `POST /v1/home/storage/backup`
+  - `POST /v1/home/storage/restore-test`
+  - `POST /v1/home/storage/restore-primary`
 
 ### WebSocket Relay
 
@@ -330,3 +338,66 @@ Expected behavior:
 - Verify a calendar-create prompt enters `waiting_client_tool`, executes EventKit call, and resumes to completion.
 - Verify mutation confirmation flow blocks execution until user confirms.
 - Verify OpenAI link flow completes and linked status persists across relaunch.
+
+## Workstream 9: Server Storage Health
+
+### Storage Status
+
+- Load server storage health from `GET /v1/home/storage/status`.
+- Show checksum state:
+  - enabled or not enabled
+  - last checksum check
+  - last `pg_amcheck`
+  - corruption flag
+  - last error
+- Highlight corruption when `checksum.corruption_detected == true`.
+- Show recent failures from the `failures` list.
+
+### Backup Configuration
+
+- Treat storage configuration as admin-only.
+- Do not show storage pages, schedule controls, backup controls, or restore controls to non-admin members.
+- Show and edit:
+  - backup target type/path
+  - full backup schedule
+  - differential backup schedule
+  - checksum check interval
+  - restore verification schedule
+  - retained full backup count
+- Keep the app model target-typed so future external targets can be added without replacing the UI contract.
+
+### Backup And Restore Actions
+
+- Let admins request:
+  - manual full/differential backup
+  - restore test
+  - primary restore
+- Require the server-provided confirmation phrase before calling `POST /v1/home/storage/restore-primary`.
+- Present primary restore as destructive and server-wide.
+
+### Storage Notifications
+
+- Subscribe to `storage.health` when the storage screen is active.
+- Display only redacted event summary fields:
+  - event id
+  - operation
+  - status
+  - severity
+  - message
+  - backup label
+- Never display storage notification details that include command output, database URLs, passwords, tokens, or backup encryption values.
+- Handle these event names:
+  - `storage.health.changed`
+  - `storage.backup.failed`
+  - `storage.checksum.corruption`
+  - `storage.restore.started`
+  - `storage.restore.completed`
+  - `storage.restore.failed`
+
+### Validation Additions
+
+- Verify members cannot access storage routes.
+- Verify members cannot open or use storage restore controls.
+- Verify admins see checksum and backup logs.
+- Verify corruption and backup failures are visually prominent.
+- Verify restore-primary cannot be called unless the confirmation phrase matches.

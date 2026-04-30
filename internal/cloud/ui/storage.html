@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Storage</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260418-dark-compact">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <link rel="manifest" href="/assets/site.webmanifest">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Storage</h1>
+          <p class="lede">Check database backups, checksum health, and restore options.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections">
+        <a class="tab-link" href="/dashboard">Overview</a>
+        <a class="tab-link" href="/dashboard/home-users">People</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
+        <a class="tab-link" href="/dashboard/sync-status">Status</a>
+        <a class="tab-link active" href="/dashboard/storage" data-admin-only="true" hidden>Storage</a>
+        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
+        <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
+      </nav>
+
+      <main class="grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Checksum Health</h2>
+            <span id="checksum-pill" class="pill">Unknown</span>
+          </div>
+          <div id="checksum-output" class="kv-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Backup Target</h2>
+            <span id="backup-pill" class="pill">Local</span>
+          </div>
+          <form id="config-form" class="stack compact">
+            <label>
+              <span>Target Path</span>
+              <input id="target-path" type="text" placeholder="/var/lib/pgbackrest">
+            </label>
+            <div class="two-up">
+              <label>
+                <span>Full Backup</span>
+                <input id="full-cron" type="text" placeholder="0 2 * * 0">
+              </label>
+              <label>
+                <span>Diff Backup</span>
+                <input id="diff-cron" type="text" placeholder="0 2 * * 1-6">
+              </label>
+            </div>
+            <div class="two-up">
+              <label>
+                <span>Checksum Seconds</span>
+                <input id="checksum-seconds" type="number" min="60" step="60">
+              </label>
+              <label>
+                <span>Full Backups Kept</span>
+                <input id="retention-full" type="number" min="1" max="30" step="1">
+              </label>
+            </div>
+            <div class="two-up">
+              <label>
+                <span>Deep Check</span>
+                <input id="amcheck-cron" type="text" placeholder="30 3 * * 0">
+              </label>
+              <label>
+                <span>Restore Test</span>
+                <input id="restore-verification-cron" type="text" placeholder="0 4 * * 0">
+              </label>
+            </div>
+            <button type="submit">Save Backup Settings</button>
+          </form>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Backups</h2>
+            <span id="backup-count" class="pill">0 backups</span>
+          </div>
+          <div class="actions wrap">
+            <button id="refresh-button" type="button" class="secondary">Refresh</button>
+            <button id="backup-diff-button" type="button">Run Diff Backup</button>
+            <button id="backup-full-button" type="button">Run Full Backup</button>
+            <button id="restore-test-button" type="button" class="secondary">Test Restore</button>
+          </div>
+          <div id="backup-output" class="card-list empty-state">No backups reported yet.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Primary Restore</h2>
+            <span class="pill">Admin Only</span>
+          </div>
+          <form id="restore-form" class="stack compact">
+            <div class="two-up">
+              <label>
+                <span>Backup Label</span>
+                <select id="restore-label"></select>
+              </label>
+              <label>
+                <span>Confirmation Phrase</span>
+                <input id="restore-confirmation" type="text" autocomplete="off">
+              </label>
+            </div>
+            <button type="submit" class="danger-link">Request Primary Restore</button>
+          </form>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Failure Log</h2>
+            <span id="failure-count" class="pill">0 failures</span>
+          </div>
+          <div id="failure-output" class="card-list empty-state">No backup or checksum failures reported.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Recent Log</h2>
+            <span class="pill">Latest</span>
+          </div>
+          <div id="events-output" class="card-list empty-state">No storage events reported.</div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/storage.js" defer></script>
+    <script src="/assets/admin-nav.js" defer></script>
+  </body>
+</html>

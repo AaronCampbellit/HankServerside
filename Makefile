@@ -1,6 +1,6 @@
 APP_NAME := hank-remote
 
-.PHONY: tidy fmt build run-cloud run-agent
+.PHONY: tidy fmt build run-cloud run-agent run-db-ops
 
 tidy:
 	go mod tidy
@@ -16,3 +16,6 @@ run-cloud:
 
 run-agent:
 	go run ./cmd/hank-remote-agent
+
+run-db-ops:
+	go run ./cmd/hank-db-ops

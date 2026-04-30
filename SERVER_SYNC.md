@@ -19,6 +19,94 @@ If a change is app-only, do not add it here.
 - `ready_to_ship`
 - `shipped`
 
+## [Storage Health, Backups, And Restore]
+
+- Status: in_progress
+- Date Opened: 2026-04-30
+- Owner: shared
+- Related Ticket/PR: pg-integrity-backups-restore
+
+### Summary
+
+HankServerside now exposes database integrity and backup state to Hank. The server runs checksum monitoring, pgBackRest backups, restore testing, and admin-triggered primary restore through the private `db-ops` service.
+
+### Contract Update
+
+- New admin-only singleton routes:
+  - `GET /v1/home/storage/status`
+  - `GET /v1/home/storage/config`
+  - `PUT /v1/home/storage/config`
+  - `GET /v1/home/storage/events`
+  - `POST /v1/home/storage/backup`
+  - `POST /v1/home/storage/restore-test`
+  - `POST /v1/home/storage/restore-primary`
+- Storage websocket topic:
+  - subscribe with `app.subscribe` topic `storage.health`
+- Storage websocket events:
+  - `storage.health.changed`
+  - `storage.backup.failed`
+  - `storage.checksum.corruption`
+  - `storage.restore.started`
+  - `storage.restore.completed`
+  - `storage.restore.failed`
+
+### Response Shape
+
+`GET /v1/home/storage/status` returns:
+
+- `config`: target, schedules, retention, and restore confirmation settings
+- `checksum`: enabled state, last check timestamps, failure count, corruption flag, and last error
+- `backup`: target, backup list, last successful backup, and failure count
+- `restore`: last restore-test/primary-restore timestamps and pending intents
+- `events`: recent storage log events
+- `failures`: recent backup/checksum/restore failures
+
+Each event has:
+
+- `id`
+- `time`
+- `severity`: `info`, `warning`, `error`, or `critical`
+- `operation`: `checksum`, `amcheck`, `backup`, `restore_test`, `primary_restore`, or `config`
+- `status`: `pending`, `started`, `success`, or `failed`
+- `message`
+- optional `backup_label`
+- optional redacted `details`
+
+### Storage Security
+
+- Postgres traffic stays on private Docker networks:
+  - `postgres`, `cloud`, and `db-ops` share the internal database network.
+  - `postgres-restore` and `db-ops` share a separate internal restore network.
+  - only `cloud` publishes a host port.
+- pgBackRest repositories are encrypted with `repo1-cipher-type=aes-256-cbc` and `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`.
+- Backup repository ownership is intentionally narrow:
+  - `postgres` writes WAL through encrypted pgBackRest archive-push
+  - `db-ops` writes backups, restore state, and validation results
+  - `postgres-restore` gets read-only backup-repo access
+  - `cloud` and `agent` do not mount the backup repository
+- Restore validation checks expected Hank tables and compares non-system login role attributes between the main and restore databases.
+- Storage events and websocket payloads must not expose passwords, tokens, database URLs with passwords, cipher pass values, or raw command output.
+- The public HTTPS/TLS boundary remains the reverse proxy or Cloudflare Tunnel. Postgres itself is not exposed outside the private Docker networks.
+
+### Hank Changes
+
+- Add a server-storage status surface if Hank exposes server administration in-app.
+- Treat all storage routes as admin-only.
+- Do not show storage pages, schedule controls, backup controls, or restore controls to non-admin members.
+- Highlight `checksum.corruption_detected == true` and any `critical` storage event.
+- Show backup target/schedule as editable only for admins.
+- Show primary restore as a destructive admin action requiring the server-provided confirmation phrase.
+- Subscribe to `storage.health` if Hank needs live notifications, but display only the redacted event summary fields.
+
+### Rollout Order
+
+- server first, then app
+
+### Compatibility Notes
+
+- Older Hank builds can ignore these routes and events.
+- Hank should not call restore routes unless the signed-in user is an admin.
+
 ## [Single-Deployment Home Model]
 
 - Status: in_progress

@@ -5,6 +5,7 @@ Hank Remote is deployed as one Docker Compose stack on one machine.
 That machine runs:
 
 - `cloud`: the public HTTPS/WebSocket entrypoint
+- `db-ops`: database checksum, backup, and restore worker
 - `agent`: the local worker that talks to Home Assistant, SMB, files, and notes
 - `postgres`: cloud-side persistence
 
@@ -71,6 +72,14 @@ Cloud:
 - `HANK_REMOTE_SESSION_TTL_SECONDS`
 - `HANK_REMOTE_REQUEST_TIMEOUT_SECONDS`
 
+Database operations:
+
+- `HANK_REMOTE_DB_OPS_INTENT_SECRET`
+- `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`
+- `HANK_REMOTE_DB_OPS_STANZA`
+- `HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL`
+- `HANK_REMOTE_DB_OPS_COMPOSE_FILE`
+
 Agent:
 
 - `HANK_REMOTE_AGENT_CLOUD_URL`
@@ -109,7 +118,7 @@ The Compose stack already loads checked-in defaults from:
 - `configs/cloud.compose.env.example`
 - `configs/agent.compose.env.example`
 
-Create `/.env.cloud` only when you need to override server-specific cloud values.
+Create `/.env.cloud` at least for the real db-ops secret and backup encryption passphrase.
 Create `/.env.agent` after the dashboard issues an agent token.
 
 ### Default cloud env
@@ -126,6 +135,8 @@ POSTGRES_USER=hankremote
 POSTGRES_PASSWORD=replace-with-db-password
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
+HANK_REMOTE_DB_OPS_INTENT_SECRET=replace-with-a-long-random-db-ops-secret
+HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS=replace-with-a-long-random-backup-encryption-passphrase
 ```
 
 If host port `18080` is already in use, change only `HANK_REMOTE_CLOUD_HOST_PORT`, for example:
@@ -144,6 +155,8 @@ If you need to override those defaults on one server, create `/.env.cloud` with 
 HANK_REMOTE_CLOUD_HOST_PORT=18080
 POSTGRES_PASSWORD=replace-with-real-db-password
 HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-real-db-password@postgres:5432/hankremote?sslmode=disable
+HANK_REMOTE_DB_OPS_INTENT_SECRET=replace-with-real-db-ops-secret
+HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS=replace-with-real-backup-encryption-passphrase
 ```
 
 ### Agent env
@@ -183,7 +196,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-This starts `postgres` and `cloud`.
+This starts `postgres`, `db-ops`, and `cloud`.
 It intentionally does not start `agent` until you create `.env.agent` from the issued token.
 
 Check local health:
@@ -200,7 +213,7 @@ Expected result:
 - `/readyz` returns `200`
 - `/metrics` returns Prometheus text
 
-At this point the `cloud` and `postgres` services should be healthy.
+At this point the `cloud`, `db-ops`, and `postgres` services should be healthy.
 The `agent` is not expected to be running yet.
 
 ## 4. Point Cloudflare Tunnel at the cloud service
@@ -352,11 +365,21 @@ git pull
 docker compose --profile agent up --build -d
 ```
 
-## 10. Backups
+## 10. Database Integrity And Backups
+
+The Compose stack now includes database integrity checks and pgBackRest backups:
+
+- `postgres` uses the custom `hank-postgres` image with pgBackRest and PostgreSQL checksum tools.
+- new clusters are created with `POSTGRES_INITDB_ARGS=--data-checksums`
+- `db-ops` runs scheduled checksum status checks, `pg_amcheck`, pgBackRest backups, restore tests, and primary restore intents
+- `cloud` reads the shared db-ops state/log volumes and shows them at `/dashboard/storage`
+- pgBackRest uses encrypted repositories with `repo1-cipher-type=aes-256-cbc` and `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`
+- `postgres-restore` starts only under the `restore` profile during restore validation
 
 Back up at least:
 
-- Docker volume `hank_postgres_data`
+- Docker volume `hank_pgbackrest_repo`
+- Docker volume `hank_db_ops_state`
 - optional `/.env.cloud`
 - optional `/.env.agent`
 
@@ -365,8 +388,81 @@ Also back up any real content stored under:
 - Docker volume `hank_agent_files`
 - Docker volume `hank_agent_notes`
 
-The service stores cloud metadata in PostgreSQL.
+The old raw PostgreSQL volume `hank_postgres_data` is still important, but pgBackRest is the restore source once backups are running.
 Agent-side files and notes live in Docker volumes by default and need volume backup coverage.
+
+Database network access is intentionally narrow:
+
+- `postgres`, `cloud`, and `db-ops` share an internal database network.
+- `postgres-restore` and `db-ops` share a separate internal restore network.
+- only `cloud` publishes a host port.
+- `postgres-restore` mounts the backup repository read-only.
+
+If this deployment already has unencrypted pgBackRest backups, create a fresh encrypted full backup with the new cipher pass and keep the old unencrypted repository offline only until you no longer need it for rollback.
+
+### Check whether checksums are already enabled
+
+```bash
+cd /srv/hank-remote/HankServerside
+docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select current_setting('data_checksums')"
+```
+
+If it prints `on`, no checksum migration is needed.
+
+### Enable checksums on an existing cluster
+
+PostgreSQL requires the cluster to be stopped before `pg_checksums --enable` can run.
+Use the helper during a maintenance window:
+
+```bash
+cd /srv/hank-remote/HankServerside
+scripts/enable-pg-checksums.sh
+```
+
+After the stack restarts, open `/dashboard/storage` and confirm checksum health shows enabled.
+
+### pgBackRest backups
+
+Default schedule:
+
+- full backup: Sunday at 02:00
+- differential backup: Monday through Saturday at 02:00
+- checksum status: every 15 minutes
+- `pg_amcheck`: Sunday at 03:30
+- restore verification: Sunday at 04:00
+- retained full backup chains: 2
+
+Run a backup immediately from `/dashboard/storage`.
+If you run pgBackRest manually, include the same encryption settings:
+
+```bash
+docker compose exec db-ops sh -lc 'pgbackrest --stanza=hank --repo1-cipher-type=aes-256-cbc --repo1-cipher-pass="$HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS" --type=diff backup'
+```
+
+The backup repository is stored in `hank_pgbackrest_repo`.
+The current target type is `posix`; the dashboard/API config keeps the target typed so an external target can be added later without changing the Hank app contract.
+
+### Restore testing and primary restore
+
+Use `/dashboard/storage` to request a restore test into the internal restore data directory.
+Primary restore is intentionally available from the dashboard but requires selecting a backup and typing the configured confirmation phrase.
+Only signed-in admins can open the storage dashboard or call storage routes.
+Storage alerts and websocket events are redacted; they do not include database passwords, tokens, backup encryption values, or raw command output.
+
+Restore tests validate:
+
+- expected Hank database tables exist
+- non-system login role attributes match the main database
+
+During a primary restore, `db-ops`:
+
+1. stops `cloud` and `postgres`
+2. writes a restore safety marker in db-ops state
+3. runs pgBackRest restore into the primary PostgreSQL data volume
+4. restarts `postgres`
+5. restarts `cloud`
+
+The public cloud container does not receive Docker host control. Docker socket access is mounted only into the private `db-ops` service.
 
 ## 11. Security notes
 

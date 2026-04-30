@@ -21,6 +21,7 @@ import (
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/observability"
 	"github.com/dropfile/hankremote/internal/protocol"
+	"github.com/dropfile/hankremote/internal/storageops"
 	"github.com/dropfile/hankremote/internal/store"
 )
 
@@ -41,6 +42,8 @@ type Server struct {
 	collaboration      *noteCollaborationHub
 	agentRequests      *agentRequestRegistry
 	syncs              *homeSyncController
+	storage            *storageops.Service
+	storageEvents      map[string]struct{}
 	realtimeCancel     context.CancelFunc
 	sessionTTL         time.Duration
 	requestTimeout     time.Duration
@@ -80,6 +83,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		collaboration:  newNoteCollaborationHub(db),
 		agentRequests:  newAgentRequestRegistry(),
 		syncs:          newHomeSyncController(),
+		storage:        storageops.NewService("", "", ""),
+		storageEvents:  make(map[string]struct{}),
 		realtimeCancel: realtimeCancel,
 		sessionTTL:     sessionTTL,
 		requestTimeout: requestTimeout,
@@ -91,6 +96,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/home-users", server.handleHomeUsersPage)
 	mux.HandleFunc("/dashboard/service-profiles", server.handleServiceProfilesPage)
 	mux.HandleFunc("/dashboard/sync-status", server.handleSyncStatusPage)
+	mux.HandleFunc("/dashboard/storage", server.handleStoragePage)
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
 	mux.HandleFunc("/dashboard/file-transfers", server.handleFileTransfersPage)
 	mux.HandleFunc("/dashboard/accept-invitation", server.handleAcceptInvitationPage)
@@ -126,6 +132,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	}
 
 	go server.forwardStoreNotifications(realtimeCtx)
+	go server.forwardStorageEvents(realtimeCtx)
 
 	return server
 }
@@ -135,6 +142,10 @@ func (s *Server) ConfigureOpenAI(clientID, clientSecret, redirectURI, scopes str
 	s.openAIClientSecret = strings.TrimSpace(clientSecret)
 	s.openAIRedirectURI = strings.TrimSpace(redirectURI)
 	s.openAIScopes = strings.TrimSpace(scopes)
+}
+
+func (s *Server) ConfigureStorageOps(stateDir, logDir, intentSecret string) {
+	s.storage = storageops.NewService(stateDir, logDir, intentSecret)
 }
 func (s *Server) ListenAndServe() error {
 	s.logger.Info("starting Hank Remote cloud service", "addr", s.addr)
@@ -177,6 +188,11 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = io.WriteString(w, s.metrics.RenderPrometheus())
+	if s.storage != nil {
+		if status, err := s.storage.Status(); err == nil {
+			_, _ = io.WriteString(w, storageops.RenderMetrics(status))
+		}
+	}
 }
 
 func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +214,14 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
 	if body.Email == "" || len(body.Password) < 8 {
 		http.Error(w, "email and password are required; password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := s.store.GetSingletonHome(r.Context()); err == nil {
+		http.Error(w, "registration is disabled after first setup", http.StatusForbidden)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

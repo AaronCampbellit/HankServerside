@@ -1,0 +1,209 @@
+package cloud
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+
+	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
+	"github.com/dropfile/hankremote/internal/storageops"
+)
+
+func TestStorageRoutesAreAdminOnly(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	admin := domain.User{ID: "usr_storage_admin", Email: "admin-storage@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_storage_member", Email: "member-storage@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_storage", UserID: admin.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, admin))
+	must(t, db.CreateUser(ctx, member))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateHomeInvitation(ctx, domain.HomeInvitation{ID: "inv_storage_member", HomeID: home.ID, Email: member.Email, Role: domain.HomeRoleMember, TokenHash: "token-hash", CreatedAt: now}))
+	must(t, db.AcceptHomeInvitation(ctx, "inv_storage_member", member, domain.HomeRoleMember))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_storage_admin", UserID: admin.ID, TokenHash: hashToken("admin-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_storage_member", UserID: member.ID, TokenHash: hashToken("member-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureStorageOps(t.TempDir(), t.TempDir(), "secret")
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	requestJSON(t, testServer, "admin-token", http.MethodGet, "/v1/home/storage/status", nil, &storageops.StatusSnapshot{})
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodGet, "/v1/home/storage/status", nil},
+		{http.MethodGet, "/v1/home/storage/config", nil},
+		{http.MethodPut, "/v1/home/storage/config", storageops.DefaultConfig()},
+		{http.MethodGet, "/v1/home/storage/events", nil},
+		{http.MethodPost, "/v1/home/storage/backup", map[string]any{"backup_type": "diff"}},
+		{http.MethodPost, "/v1/home/storage/restore-test", map[string]any{"backup_label": "20260430-010101F"}},
+		{http.MethodPost, "/v1/home/storage/restore-primary", map[string]any{"backup_label": "20260430-010101F", "confirmation": "RESTORE HANK DATABASE"}},
+	} {
+		response := requestJSONStatus(t, testServer, "member-token", tc.method, tc.path, tc.body, http.StatusForbidden)
+		response.Body.Close()
+	}
+}
+
+func TestStoragePageRequiresAdmin(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	admin := domain.User{ID: "usr_storage_page_admin", Email: "storage-page-admin@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_storage_page_member", Email: "storage-page-member@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_storage_page", UserID: admin.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, admin))
+	must(t, db.CreateUser(ctx, member))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateHomeInvitation(ctx, domain.HomeInvitation{ID: "inv_storage_page_member", HomeID: home.ID, Email: member.Email, Role: domain.HomeRoleMember, TokenHash: "token-hash", CreatedAt: now}))
+	must(t, db.AcceptHomeInvitation(ctx, "inv_storage_page_member", member, domain.HomeRoleMember))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_storage_page_admin", UserID: admin.ID, TokenHash: hashToken("admin-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_storage_page_member", UserID: member.ID, TokenHash: hashToken("member-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	adminReq, err := http.NewRequest(http.MethodGet, testServer.URL+"/dashboard/storage", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "admin-token"})
+	adminResp, err := testServer.Client().Do(adminReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminResp.Body.Close()
+	if adminResp.StatusCode != http.StatusOK {
+		t.Fatalf("admin storage page status = %d, want %d", adminResp.StatusCode, http.StatusOK)
+	}
+
+	memberReq, err := http.NewRequest(http.MethodGet, testServer.URL+"/dashboard/storage", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "member-token"})
+	memberResp, err := testServer.Client().Do(memberReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberResp.Body.Close()
+	if memberResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("member storage page status = %d, want %d", memberResp.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestPrimaryRestoreRequiresConfirmation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_restore_admin", Email: "restore-admin@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_restore", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_restore_admin", UserID: user.ID, TokenHash: hashToken("restore-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureStorageOps(t.TempDir(), t.TempDir(), "secret")
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	response := requestJSONStatus(t, testServer, "restore-token", http.MethodPost, "/v1/home/storage/restore-primary", map[string]any{
+		"backup_label": "20260430-010101F",
+		"confirmation": "wrong",
+	}, http.StatusBadRequest)
+	response.Body.Close()
+}
+
+func TestStorageRequestRealtimePayloadIsRedactedSummary(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_storage_live", Email: "storage-live@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_storage_live", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_storage_live", UserID: user.ID, TokenHash: hashToken("storage-live-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureStorageOps(t.TempDir(), t.TempDir(), "secret")
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=storage-live-token"), nil)
+	if err != nil {
+		t.Fatalf("app websocket dial: %v", err)
+	}
+	defer appConn.Close(websocket.StatusNormalClosure, "done")
+
+	subscribe, err := protocol.NewEnvelope(protocol.TypeAppCommand, "req_storage_subscribe", "", "", protocol.RoutedCommand{
+		Command: "app.subscribe",
+		Body:    mustEncodeBody(t, protocol.AppSubscribeRequest{Topics: []string{"storage.health"}}),
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope subscribe: %v", err)
+	}
+	if err := wsjson.Write(ctx, appConn, subscribe); err != nil {
+		t.Fatalf("subscribe write: %v", err)
+	}
+	if response := readUntilRequestID(t, ctx, appConn, "req_storage_subscribe"); response.Type != protocol.TypeAppResponse {
+		t.Fatalf("subscribe response type = %q, want %q", response.Type, protocol.TypeAppResponse)
+	}
+
+	requestJSON(t, testServer, "storage-live-token", http.MethodPost, "/v1/home/storage/backup", map[string]any{"backup_type": "full"}, nil)
+
+	eventEnvelope := readUntilEvent(t, ctx, appConn, "storage.health.changed")
+	event, err := protocol.DecodePayload[protocol.AppEvent](eventEnvelope)
+	if err != nil {
+		t.Fatalf("DecodePayload event: %v", err)
+	}
+	if event.Topic != "storage.health" {
+		t.Fatalf("event topic = %q, want storage.health", event.Topic)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(event.Body, &payload); err != nil {
+		t.Fatalf("decode event body: %v", err)
+	}
+	allowed := map[string]struct{}{
+		"event_id":     {},
+		"operation":    {},
+		"status":       {},
+		"severity":     {},
+		"message":      {},
+		"backup_label": {},
+	}
+	for key := range payload {
+		if _, ok := allowed[key]; !ok {
+			t.Fatalf("storage realtime payload included disallowed key %q: %+v", key, payload)
+		}
+	}
+	if payload["event_id"] == "" || payload["operation"] != storageops.EventOperationBackup || payload["status"] != storageops.EventStatusPending {
+		t.Fatalf("storage realtime payload = %+v", payload)
+	}
+}

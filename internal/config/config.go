@@ -13,10 +13,26 @@ type Cloud struct {
 	DatabaseURL        string
 	SessionTTL         time.Duration
 	RequestTimeout     time.Duration
+	DBOpsStateDir      string
+	DBOpsLogDir        string
+	DBOpsIntentSecret  string
 	OpenAIClientID     string
 	OpenAIClientSecret string
 	OpenAIRedirectURI  string
 	OpenAIScopes       string
+}
+
+type DBOps struct {
+	StateDir           string
+	LogDir             string
+	IntentSecret       string
+	RepoCipherPass     string
+	DatabaseURL        string
+	Stanza             string
+	PGDataPath         string
+	RestoreDataPath    string
+	RestoreDatabaseURL string
+	ComposeFile        string
 }
 
 type Agent struct {
@@ -61,10 +77,33 @@ func LoadCloud() (Cloud, error) {
 		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
 		SessionTTL:         sessionTTL,
 		RequestTimeout:     requestTimeout,
+		DBOpsStateDir:      envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
+		DBOpsLogDir:        envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
+		DBOpsIntentSecret:  envOrDefault("HANK_REMOTE_DB_OPS_INTENT_SECRET", "replace-with-a-long-random-db-ops-secret"),
 		OpenAIClientID:     strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_ID")),
 		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
 		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
 		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
+	}, nil
+}
+
+func LoadDBOps() (DBOps, error) {
+	repoCipherPass := strings.TrimSpace(os.Getenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS"))
+	if repoCipherPass == "" {
+		return DBOps{}, fmt.Errorf("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS is required")
+	}
+
+	return DBOps{
+		StateDir:           envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
+		LogDir:             envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
+		IntentSecret:       envOrDefault("HANK_REMOTE_DB_OPS_INTENT_SECRET", "replace-with-a-long-random-db-ops-secret"),
+		RepoCipherPass:     repoCipherPass,
+		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
+		Stanza:             envOrDefault("HANK_REMOTE_DB_OPS_STANZA", "hank"),
+		PGDataPath:         envOrDefault("HANK_REMOTE_DB_OPS_PGDATA", "/var/lib/postgresql/data"),
+		RestoreDataPath:    envOrDefault("HANK_REMOTE_DB_OPS_RESTORE_PGDATA", "/var/lib/postgresql/restore"),
+		RestoreDatabaseURL: envOrDefault("HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL", "postgres://hankremote:hankremote@postgres-restore:5432/hankremote?sslmode=disable"),
+		ComposeFile:        envOrDefault("HANK_REMOTE_DB_OPS_COMPOSE_FILE", "/workspace/docker-compose.yml"),
 	}, nil
 }
 

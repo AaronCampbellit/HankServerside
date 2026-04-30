@@ -1,23 +1,35 @@
 # Runbook: Storage Failure
 
-Use this when `/readyz` reports storage failure or the cloud process cannot connect to PostgreSQL.
+Use this when `/readyz` reports storage failure, `/dashboard/storage` reports backup/checksum failures, or the cloud process cannot connect to PostgreSQL.
 
 ## Check
 
-1. inspect the cloud and PostgreSQL container logs for connection or migration errors
-2. verify `HANK_REMOTE_CLOUD_DATABASE_URL` points at the expected PostgreSQL service and database
-3. verify the PostgreSQL container is healthy and its data volume is mounted
-4. verify the database filesystem is not full
+1. inspect the cloud, PostgreSQL, and db-ops logs:
+   `docker compose logs -f cloud postgres db-ops`
+2. open `/dashboard/storage` and check the failure log
+3. verify `HANK_REMOTE_CLOUD_DATABASE_URL` points at the expected PostgreSQL service and database
+4. verify the PostgreSQL container is healthy and its data volume is mounted
+5. verify the pgBackRest repository and database filesystems are not full
+6. confirm checksums are enabled:
+   `docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select current_setting('data_checksums')"`
+7. confirm `.env.cloud` has the same `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS` used when the encrypted backup was created
+8. confirm Postgres is not exposed on the host:
+   `docker compose ps postgres postgres-restore`
 
 ## Recovery
 
 1. restore PostgreSQL availability or free disk space
-2. if the PostgreSQL data directory is corrupt, restore from backup
-3. restart the Compose stack or at least the `postgres` and `cloud` services
-4. confirm `/readyz` returns `200` again
+2. if checksums are disabled on an existing cluster, schedule maintenance and run `scripts/enable-pg-checksums.sh`
+3. if `pg_amcheck` or checksum logs report corruption, use `/dashboard/storage` to run a restore test against the latest good pgBackRest backup
+4. if the restore test passes and primary data is corrupt, request primary restore from `/dashboard/storage`
+5. restart the Compose stack or at least `postgres`, `db-ops`, and `cloud` if restore orchestration did not restart them
+6. confirm `/readyz` returns `200` again
 
 ## Verify
 
 - `/readyz` reports `storage: ready`
 - auth and home-management endpoints work again
 - existing homes and sessions are present after restore
+- `/dashboard/storage` shows the latest backup/checksum task without new failures
+- `/metrics` includes `hank_remote_db_backup_last_success_unixtime` after a successful backup
+- a restore test reports success and does not report missing Hank tables or login-role drift

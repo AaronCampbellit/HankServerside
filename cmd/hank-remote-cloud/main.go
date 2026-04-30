@@ -32,6 +32,7 @@ func main() {
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
 	server.ConfigureOpenAI(cfg.OpenAIClientID, cfg.OpenAIClientSecret, cfg.OpenAIRedirectURI, cfg.OpenAIScopes)
+	server.ConfigureStorageOps(cfg.DBOpsStateDir, cfg.DBOpsLogDir, cfg.DBOpsIntentSecret)
 
 	errCh := make(chan error, 1)
 	go func() {

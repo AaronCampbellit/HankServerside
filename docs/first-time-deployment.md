@@ -5,6 +5,7 @@ Use this for a fresh HankServerside install on one server.
 The first boot starts only:
 
 - `postgres`
+- `db-ops`
 - `cloud`
 
 The `agent` starts later, after the dashboard issues an agent token and generates `.env.agent`.
@@ -51,9 +52,12 @@ The agent always uses this internal URL:
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-If port `18080` is already used, create `.env.cloud`:
+Create `.env.cloud` to replace the backup and db-ops secrets. If port `18080` is already used, include a different host port too:
 
 ```env
+HANK_REMOTE_DB_OPS_INTENT_SECRET=replace-with-real-db-ops-secret
+HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS=replace-with-real-backup-encryption-passphrase
+# Optional if 18080 is already used:
 HANK_REMOTE_CLOUD_HOST_PORT=18081
 ```
 
@@ -77,6 +81,7 @@ docker compose ps
 Expected first-boot services:
 
 - `postgres`
+- `db-ops`
 - `cloud`
 
 The `agent` should not be running yet.
@@ -169,9 +174,20 @@ docker compose --profile agent up --build -d
 
 Back up these Compose volumes. Docker may prefix their actual names with the Compose project name:
 
-- `hank_postgres_data`
+- `hank_pgbackrest_repo`
+- `hank_db_ops_state`
 - `hank_agent_files`
 - `hank_agent_notes`
+
+`hank_postgres_data` still holds the live database, but pgBackRest backups in `hank_pgbackrest_repo` are the restore source once the storage worker is running.
+The pgBackRest repository is encrypted with `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`; keep that passphrase with your server secrets because backups cannot be restored without it.
+If you already created unencrypted pgBackRest backups before this hardening, run a fresh encrypted full backup and retire the old unencrypted repository after your rollback window ends.
+
+The database containers are private to Docker networks:
+
+- only `cloud` publishes a host port
+- `postgres` is reachable by `cloud` and `db-ops`
+- `postgres-restore` is reachable only by `db-ops` during restore validation
 
 List the exact names on the server with:
 

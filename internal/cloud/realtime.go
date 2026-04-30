@@ -18,6 +18,7 @@ const (
 	topicHomeSettings        = "home.settings"
 	topicHomeMembers         = "home.members"
 	topicHomePermissions     = "home.permissions"
+	topicStorage             = "storage.health"
 )
 
 func fileDirectoryTopic(path string) string {
@@ -214,6 +215,10 @@ func (s *Server) emitFileDirectoryChanged(ctx context.Context, path string, payl
 
 func (s *Server) emitHomeAssistantStateChanged(ctx context.Context, payload any) {
 	s.broadcastAppEvent(ctx, topicHomeAssistantStates, "homeassistant.state_changed", payload)
+}
+
+func (s *Server) emitStorageEvent(ctx context.Context, event string, payload any) {
+	s.broadcastAppEvent(ctx, topicStorage, event, payload)
 }
 
 func (s *Server) emitCommandSideEffect(ctx context.Context, command string, payload json.RawMessage) {

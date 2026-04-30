@@ -1,0 +1,12 @@
+FROM postgres:17-alpine
+
+RUN apk add --no-cache pgbackrest bash
+
+COPY configs/pgbackrest.conf /etc/pgbackrest/pgbackrest.conf
+COPY docker/postgres/entrypoint.sh /usr/local/bin/hank-postgres-entrypoint
+
+RUN chmod 644 /etc/pgbackrest/pgbackrest.conf \
+	&& chmod 755 /usr/local/bin/hank-postgres-entrypoint
+
+ENTRYPOINT ["hank-postgres-entrypoint"]
+CMD ["postgres"]

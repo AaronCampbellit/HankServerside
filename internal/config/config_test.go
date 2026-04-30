@@ -40,6 +40,27 @@ func TestLoadCloudRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadDBOpsRequiresRepoCipherPass(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS", "")
+
+	_, err := LoadDBOps()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS") {
+		t.Fatalf("LoadDBOps error = %v, want missing cipher pass error", err)
+	}
+}
+
+func TestLoadDBOpsParsesRepoCipherPass(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS", " cipher-secret ")
+
+	cfg, err := LoadDBOps()
+	if err != nil {
+		t.Fatalf("LoadDBOps error: %v", err)
+	}
+	if cfg.RepoCipherPass != "cipher-secret" {
+		t.Fatalf("RepoCipherPass = %q, want trimmed cipher pass", cfg.RepoCipherPass)
+	}
+}
+
 func TestLoadAgentRequiresIdentityAndToken(t *testing.T) {
 	t.Setenv("HANK_REMOTE_AGENT_ID", "")
 	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "")
