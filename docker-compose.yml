@@ -5,10 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile.postgres
     env_file:
-      - path: ./configs/cloud.compose.env.example
-        required: true
       - path: ./.env.cloud
-        required: false
+        required: true
     environment:
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
@@ -42,15 +40,13 @@ services:
       context: .
       dockerfile: Dockerfile.server
     env_file:
-      - path: ./configs/cloud.compose.env.example
-        required: true
       - path: ./.env.cloud
-        required: false
+        required: true
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "${HANK_REMOTE_CLOUD_HOST_BIND:-0.0.0.0}:${HANK_REMOTE_CLOUD_HOST_PORT:-18080}:8080"
+      - "${HANK_REMOTE_CLOUD_HOST_BIND}:${HANK_REMOTE_CLOUD_HOST_PORT}:8080"
     volumes:
       - hank_db_ops_state:/var/lib/hank/db-ops/state
       - hank_db_ops_logs:/var/log/hank/db-ops
@@ -66,17 +62,15 @@ services:
       context: .
       dockerfile: Dockerfile.dbops
     env_file:
-      - path: ./configs/cloud.compose.env.example
-        required: true
       - path: ./.env.cloud
-        required: false
+        required: true
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hankserverside}
-      HANK_REMOTE_CLOUD_HOST_BIND: ${HANK_REMOTE_CLOUD_HOST_BIND:-0.0.0.0}
-      HANK_REMOTE_CLOUD_HOST_PORT: ${HANK_REMOTE_CLOUD_HOST_PORT:-18080}
+      HANK_REMOTE_CLOUD_HOST_BIND: ${HANK_REMOTE_CLOUD_HOST_BIND}
+      HANK_REMOTE_CLOUD_HOST_PORT: ${HANK_REMOTE_CLOUD_HOST_PORT}
     volumes:
       - hank_postgres_data:/var/lib/postgresql/data
       - hank_postgres_restore_data:/var/lib/postgresql/restore
@@ -100,10 +94,8 @@ services:
     profiles:
       - restore
     env_file:
-      - path: ./configs/cloud.compose.env.example
-        required: true
       - path: ./.env.cloud
-        required: false
+        required: true
     environment:
       PGDATA: /var/lib/postgresql/restore
       POSTGRES_INITDB_ARGS: "--data-checksums"
@@ -130,10 +122,8 @@ services:
     profiles:
       - agent
     env_file:
-      - path: ./configs/agent.compose.env.example
-        required: true
       - path: ./.env.agent
-        required: false
+        required: true
     depends_on:
       - cloud
     volumes:

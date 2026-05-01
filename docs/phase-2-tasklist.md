@@ -39,7 +39,7 @@ Add env examples and validation.
 ### Suggested Files
 
 - `internal/config/config.go`
-- `configs/agent.env.example`
+- `docs/setup-and-onboarding.md`
 
 ## Task Group 2: Home Assistant Client
 

@@ -98,11 +98,12 @@ docker run --rm --name hankremote-postgres \
   postgres:17-alpine
 ```
 
-In another shell:
+In another shell, point the cloud process at that local database:
 
 ```bash
-cp configs/cloud.env.example .env
-export $(grep -v '^#' .env | xargs)
+export HANK_REMOTE_CLOUD_ADDR=:8080
+export HANK_REMOTE_CLOUD_DATABASE_URL='postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable'
+export HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS='local-dev-backup-passphrase'
 make run-cloud
 ```
 
@@ -126,7 +127,7 @@ curl -s http://127.0.0.1:8080/v1/home/agent/tokens \
 4. Start the home agent:
 
 ```bash
-cp configs/agent.env.example .env.agent
+# Create .env.agent from the dashboard-generated block or the example shape in docs/setup-and-onboarding.md.
 export $(grep -v '^#' .env.agent | xargs)
 make run-agent
 ```
@@ -162,12 +163,16 @@ After that, repo-local commands like `docker compose up --build` will prefer the
 
 This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud publishes on `0.0.0.0:18080` by default so the server IP can reach it directly; put a firewall, reverse proxy, or Cloudflare Tunnel in front of it for external access.
 
-1. The Compose stack already loads checked-in default env files from:
+Full setup and onboarding docs live in `docs/setup-and-onboarding.md`.
 
-- `configs/cloud.compose.env.example`
-- `configs/agent.compose.env.example`
+1. The Compose stack uses private repo-root env files:
 
-Docker creates the default persistent volumes automatically for PostgreSQL, local files, and notes. Create local override files only if you need to replace defaults with server-specific values.
+- `.env.cloud` before first boot
+- `.env.agent` after the dashboard creates the agent setup token
+
+Docker creates the default persistent volumes automatically for PostgreSQL, local files, and notes.
+
+Use `docker compose --env-file .env.cloud ...` for deployment commands so Compose sees host bind and port overrides from `.env.cloud`.
 
 2. Keep the internal agent cloud URL as:
 
@@ -175,7 +180,7 @@ Docker creates the default persistent volumes automatically for PostgreSQL, loca
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-If host port `18080` is already taken, create `.env.cloud` and change that instead of the agent URL:
+If host port `18080` is already taken, set this in `.env.cloud` and keep the agent URL unchanged:
 
 ```env
 HANK_REMOTE_CLOUD_HOST_PORT=18081
@@ -186,15 +191,15 @@ The agent service is behind the `agent` Compose profile, so it does not start un
 3. Build and start the first-boot services:
 
 ```bash
-docker compose up --build -d
+docker compose --env-file .env.cloud up --build -d
 ```
 
 4. Point Cloudflare Tunnel or your reverse proxy at your chosen host bind, for example `http://127.0.0.1:18080` or `http://<server-ip>:18080`.
-5. Open the public URL, register the first admin account, and issue an agent token.
+5. Open the public URL, register the first admin account, and issue an agent token. Public registration is disabled after this first setup.
 6. Copy the generated `.env.agent` block from the dashboard into `.env.agent`, adjust Home Assistant or SMB values if needed, then start the agent profile:
 
 ```bash
-docker compose --profile agent up -d agent
+docker compose --env-file .env.cloud --profile agent up -d agent
 ```
 
 ## Current Notes

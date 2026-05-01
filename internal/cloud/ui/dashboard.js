@@ -873,7 +873,7 @@ async function issueToken(event) {
     <button type="button" class="secondary" data-copy-agent-env>Copy .env.agent</button>
     <pre>${escapeHTML(envFile)}</pre>
     <div class="token-meta">Then start the home connector:</div>
-    <code>docker compose --profile agent up -d agent</code>`;
+    <code>docker compose --env-file .env.cloud --profile agent up -d agent</code>`;
   await Promise.all([loadAgents(), loadTokens(homeID)]);
   showToast("Setup file created. Copy it into .env.agent.");
 }

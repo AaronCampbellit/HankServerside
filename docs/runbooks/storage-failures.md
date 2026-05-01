@@ -5,16 +5,16 @@ Use this when `/readyz` reports storage failure, `/dashboard/storage` reports ba
 ## Check
 
 1. inspect the cloud, PostgreSQL, and db-ops logs:
-   `docker compose logs -f cloud postgres db-ops`
+   `docker compose --env-file .env.cloud logs -f cloud postgres db-ops`
 2. open `/dashboard/storage` and check the failure log
 3. verify `HANK_REMOTE_CLOUD_DATABASE_URL` points at the expected PostgreSQL service and database
 4. verify the PostgreSQL container is healthy and its data volume is mounted
 5. verify the pgBackRest repository and database filesystems are not full
 6. confirm checksums are enabled:
-   `docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select current_setting('data_checksums')"`
+   `docker compose --env-file .env.cloud exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select current_setting('data_checksums')"`
 7. confirm `.env.cloud` has the same `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS` used when the encrypted backup was created
 8. confirm Postgres is not exposed on the host:
-   `docker compose ps postgres postgres-restore`
+   `docker compose --env-file .env.cloud ps postgres postgres-restore`
 
 ## Recovery
 

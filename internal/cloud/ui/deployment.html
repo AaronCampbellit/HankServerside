@@ -40,8 +40,10 @@
         <section class="panel">
           <h2>Server Settings</h2>
           <div class="card-list">
-            <article class="card"><strong>Address</strong><div class="meta">Where the Hank Remote server listens.</div></article>
-            <article class="card"><strong>Database</strong><div class="meta">Where accounts and setup data are stored.</div></article>
+            <article class="card"><strong>.env.cloud</strong><div class="meta">Private server file for database and backup settings.</div></article>
+            <article class="card"><strong>Address</strong><div class="meta">Default server address is port 18080.</div></article>
+            <article class="card"><strong>Database</strong><div class="meta">Postgres stays private inside Docker.</div></article>
+            <article class="card"><strong>Backups</strong><div class="meta">Encrypted backup settings live in .env.cloud.</div></article>
             <article class="card"><strong>Login Lifetime</strong><div class="meta">How long app sessions stay signed in.</div></article>
             <article class="card"><strong>Request Timeout</strong><div class="meta">How long the server waits for the home connector.</div></article>
           </div>
@@ -62,10 +64,12 @@
           <div class="card-list">
             <article class="card">1. Server running returns OK.</article>
             <article class="card">2. Database ready returns OK.</article>
-            <article class="card">3. First account can sign in.</article>
-            <article class="card">4. The home connector shows online.</article>
-            <article class="card">5. The Hank app can log in.</article>
-            <article class="card">6. Files, notes, or Home Assistant load from the app.</article>
+            <article class="card">3. First account becomes admin.</article>
+            <article class="card">4. Later registration is blocked.</article>
+            <article class="card">5. The home connector shows online.</article>
+            <article class="card">6. Storage backup and restore test pass.</article>
+            <article class="card">7. The Hank app can log in.</article>
+            <article class="card">8. Files, notes, or Home Assistant load from the app.</article>
           </div>
         </section>
       </main>

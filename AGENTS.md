@@ -126,7 +126,12 @@ Agent:
 - `HANK_REMOTE_AGENT_TOKEN`
 - `HANK_REMOTE_AGENT_HOME_NAME`
 
-Use the files in `configs/` as examples.
+Runtime env files now live in the repo root:
+
+- `.env.cloud`
+- `.env.agent`
+
+Env examples live in `docs/setup-and-onboarding.md`. The `configs/` folder is for real non-env config assets such as `pgbackrest.conf`.
 
 ## Testing Expectations
 
