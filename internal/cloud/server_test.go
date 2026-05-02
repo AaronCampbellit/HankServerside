@@ -483,8 +483,13 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 		if adminOnlyLinks != storageLinks {
 			t.Fatalf("%s storage admin-only links = %d, want %d", page, adminOnlyLinks, storageLinks)
 		}
-		if !strings.Contains(body, `src="/assets/admin-nav.js" defer`) {
+		adminScriptStart := strings.Index(body, `src="/assets/admin-nav.js`)
+		if adminScriptStart == -1 {
 			t.Fatalf("%s missing admin nav visibility script", page)
+		}
+		adminScriptEnd := strings.Index(body[adminScriptStart:], ">")
+		if adminScriptEnd == -1 || !strings.Contains(body[adminScriptStart:adminScriptStart+adminScriptEnd], "defer") {
+			t.Fatalf("%s admin nav visibility script is not deferred", page)
 		}
 	}
 

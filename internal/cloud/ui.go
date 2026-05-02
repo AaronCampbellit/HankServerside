@@ -144,7 +144,7 @@ func serveUIFile(w http.ResponseWriter, r *http.Request, name string, contentTyp
 	}
 	w.Header().Set("Content-Type", contentType)
 	if strings.HasSuffix(name, ".html") {
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Cache-Control", "private, max-age=30")
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
 	}
