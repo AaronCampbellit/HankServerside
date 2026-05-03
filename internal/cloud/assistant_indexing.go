@@ -14,14 +14,14 @@ import (
 
 const assistantConversationSourceType = "assistant_conversation"
 
-func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) {
+func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, intent assistantIntent) {
 	settings = normalizeAssistantSettings(settings)
 	if settings.ProfileNotesEnabled || settings.HomeNotesEnabled {
 		if err := s.indexAssistantNotes(ctx, home, membership, auth, settings); err != nil {
 			s.logger.Warn("assistant note indexing failed", "error", err)
 		}
 	}
-	if settings.ProjectDocsEnabled {
+	if settings.ProjectDocsEnabled && intent.Kind == assistantIntentProjectDocs {
 		if err := s.indexAssistantProjectDocs(ctx, home.ID, auth.User.ID); err != nil {
 			s.logger.Warn("assistant project docs indexing failed", "error", err)
 		}
@@ -31,12 +31,12 @@ func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, me
 			s.logger.Warn("assistant calendar indexing failed", "error", err)
 		}
 	}
-	if settings.HomeAssistantEnabled && shouldIndexHomeAssistant(prompt) {
+	if settings.HomeAssistantEnabled && intent.Kind == assistantIntentHomeAssistantQuery {
 		if err := s.indexAssistantHomeAssistantStates(ctx, home, membership, auth); err != nil {
 			s.logger.Warn("assistant Home Assistant indexing failed", "error", err)
 		}
 	}
-	if settings.FilesEnabled && shouldIndexFiles(prompt) {
+	if settings.FilesEnabled && intent.Kind == assistantIntentFilesSearch {
 		if err := s.indexAssistantFiles(ctx, home, membership, auth); err != nil {
 			s.logger.Warn("assistant file indexing failed", "error", err)
 		}
@@ -394,13 +394,11 @@ func chunkAssistantText(text string, maxChars int) []string {
 }
 
 func shouldIndexFiles(prompt string) bool {
-	lowered := strings.ToLower(prompt)
-	return strings.Contains(lowered, "file") || strings.Contains(lowered, "folder") || strings.Contains(lowered, "smb") || strings.Contains(lowered, "share")
+	return classifyAssistantIntent(prompt).Kind == assistantIntentFilesSearch
 }
 
 func shouldIndexHomeAssistant(prompt string) bool {
-	lowered := strings.ToLower(prompt)
-	return strings.Contains(lowered, "home assistant") || strings.Contains(lowered, "entity") || strings.Contains(lowered, "light") || strings.Contains(lowered, "sensor") || strings.Contains(lowered, "switch")
+	return classifyAssistantIntent(prompt).Kind == assistantIntentHomeAssistantQuery
 }
 
 func assistantAttributesText(attributes map[string]any) string {

@@ -87,12 +87,32 @@ func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request,
 func (s *Server) currentAssistantSettings(ctx context.Context, homeID string, userID string) (domain.AssistantSettings, error) {
 	settings, err := s.store.GetAssistantSettings(ctx, homeID, userID)
 	if err == nil {
-		return normalizeAssistantSettings(settings), nil
+		normalized := normalizeAssistantSettings(settings)
+		if assistantSettingsNeedPersistence(settings, normalized) {
+			now := time.Now().UTC()
+			normalized.UpdatedAt = now
+			normalized.UpdatedBy = userID
+			if normalized.CreatedAt.IsZero() {
+				normalized.CreatedAt = now
+			}
+			if err := s.store.UpsertAssistantSettings(ctx, normalized); err != nil {
+				return domain.AssistantSettings{}, err
+			}
+		}
+		return normalized, nil
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		return defaultAssistantSettings(homeID, userID), nil
+		defaults := defaultAssistantSettings(homeID, userID)
+		if err := s.store.UpsertAssistantSettings(ctx, defaults); err != nil {
+			return domain.AssistantSettings{}, err
+		}
+		return defaults, nil
 	}
 	return domain.AssistantSettings{}, err
+}
+
+func assistantSettingsNeedPersistence(current domain.AssistantSettings, normalized domain.AssistantSettings) bool {
+	return current.SystemPrompt != normalized.SystemPrompt || current.MaxContextItems != normalized.MaxContextItems
 }
 
 func defaultAssistantSettings(homeID string, userID string) domain.AssistantSettings {
