@@ -33,6 +33,18 @@
       adminOnly: true,
     },
     {
+      href: "/dashboard/hank",
+      label: "Hank",
+      detail: "Ask HankAI about notes, calendars, Home Assistant, and files.",
+      keywords: ["hank", "hankai", "ai", "assistant", "chat", "notes", "calendar", "home assistant", "files", "smb"],
+    },
+    {
+      href: "/dashboard/assistant-settings",
+      label: "AI Settings",
+      detail: "OpenAI account linking and Hank Assistant setup.",
+      keywords: ["ai", "assistant", "openai", "chatgpt", "oauth", "link openai", "relink", "subscription", "settings"],
+    },
+    {
       href: "/dashboard/profile-notes",
       label: "My Notes",
       detail: "Write, search, and autosave profile notes.",

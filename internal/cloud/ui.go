@@ -45,6 +45,14 @@ func (s *Server) handleStoragePage(w http.ResponseWriter, r *http.Request) {
 	s.serveAdminUIPage(w, r, "/dashboard/storage", "storage.html")
 }
 
+func (s *Server) handleHankPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/hank", "hank.html")
+}
+
+func (s *Server) handleAssistantSettingsPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/assistant-settings", "assistant-settings.html")
+}
+
 func (s *Server) handleProfileNotesPage(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard/profile-notes", "profile-notes.html")
 }
@@ -78,7 +86,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "login.js", "dashboard.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "profile-notes.js", "file-transfers.js", "accept-invitation.js", "admin-nav.js":
+	case "login.js", "dashboard.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-transfers.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "site.webmanifest":
 		serveUIFile(w, r, name, "application/manifest+json; charset=utf-8")

@@ -18,6 +18,11 @@ func newID(prefix string) string {
 	return prefix + "_" + randomHex(12)
 }
 
+func stableAssistantID(prefix string, value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return prefix + "_" + hex.EncodeToString(sum[:12])
+}
+
 func newToken() string {
 	return randomHex(32)
 }

@@ -118,6 +118,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 	case len(parts) == 2 && parts[1] == "sessions":
 		s.handleAssistantSessions(w, r, home, auth)
 		return true
+	case len(parts) == 2 && parts[1] == "status":
+		s.handleAssistantStatus(w, r, home, auth)
+		return true
 	case len(parts) == 4 && parts[1] == "sessions" && parts[3] == "messages":
 		s.handleAssistantSessionMessages(w, r, home, membership, auth, parts[2])
 		return true
@@ -140,6 +143,24 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 		http.NotFound(w, r)
 		return true
 	}
+}
+
+func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	status := s.assistantStatus(r.Context(), auth.User.ID)
+	statusPayload := map[string]any{
+		"home_id":              home.ID,
+		"provider":             status.Provider,
+		"chat_configured":      status.ChatConfigured,
+		"embedding_configured": status.EmbeddingConfigured,
+		"chat_model":           status.ChatModel,
+		"embedding_model":      status.EmbeddingModel,
+		"vector_store":         status.VectorStore,
+	}
+	writeJSON(w, http.StatusOK, statusPayload)
 }
 
 func (s *Server) handleAssistantSessions(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
@@ -509,6 +530,9 @@ func (s *Server) handleAssistantCalendarIndex(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := s.indexAssistantCalendarEntries(r.Context(), home.ID, auth.User.ID, entries); err != nil {
+		s.logger.Warn("assistant calendar index refresh failed", "error", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "entry_count": len(entries)})
 }
 
@@ -662,6 +686,8 @@ func (s *Server) persistAssistantMessage(ctx context.Context, session domain.Ass
 }
 
 func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, prompt string) (assistantMessageContent, error) {
+	s.refreshAssistantIndex(ctx, home, membership, auth, prompt)
+
 	lowered := strings.ToLower(prompt)
 	switch {
 	case strings.Contains(lowered, "find ") || strings.Contains(lowered, "folder") || strings.Contains(lowered, "file"):
@@ -687,12 +713,12 @@ func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home
 			}
 			return assistantMessageContent{}, err
 		}
-		return s.answerNoteSearchPrompt(ctx, home, auth, prompt)
+		return s.answerRetrievedPrompt(ctx, home, auth, prompt)
 	}
 }
 
 func (s *Server) answerNoteSearchPrompt(ctx context.Context, home domain.Home, auth authContext, prompt string) (assistantMessageContent, error) {
-	notes, err := s.store.ListVisibleHomeNotes(ctx, home.ID, auth.User.ID, false)
+	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
@@ -726,7 +752,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 		return s.answerNoteSearchPrompt(ctx, home, auth, prompt)
 	}
 
-	notes, err := s.store.ListVisibleHomeNotes(ctx, home.ID, auth.User.ID, false)
+	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
@@ -802,6 +828,17 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 
 func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, prompt string) (assistantMessageContent, error) {
 	query := fileQuery(prompt)
+	queryEmbedding, _, _ := s.embedAssistantText(ctx, "", query)
+	if contexts, err := s.store.SearchAssistantContext(ctx, home.ID, "", query, queryEmbedding, 5); err == nil {
+		for _, contextItem := range contexts {
+			if contextItem.SourceType == "file" {
+				return assistantMessageContent{
+					Text:  fmt.Sprintf("I found the closest SMB match for `%s`.", query),
+					Cards: []assistantResultCard{assistantResultCardFromContext(contextItem)},
+				}, nil
+			}
+		}
+	}
 	results, err := s.searchFiles(ctx, home.ID, query)
 	if err != nil {
 		return assistantMessageContent{
@@ -827,6 +864,63 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, prompt 
 			},
 		},
 	}, nil
+}
+
+func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, auth authContext, prompt string) (assistantMessageContent, error) {
+	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt)
+	contexts, err := s.store.SearchAssistantContext(ctx, home.ID, auth.User.ID, prompt, queryEmbedding, 8)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	if len(contexts) == 0 {
+		return assistantMessageContent{
+			Text: "I could not find matching Hank context yet. Ask about a note title, calendar event, Home Assistant entity, or file path that has been synced into HankAI.",
+		}, nil
+	}
+
+	answer := fallbackRetrievedAnswer(prompt, contexts)
+	if providerAnswer, modelName, err := s.generateAssistantLLMResponse(ctx, auth.User.ID, []assistantLLMMessage{
+		{
+			Role:    "system",
+			Content: "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened.",
+		},
+		{
+			Role:    "user",
+			Content: assistantPromptWithContext(prompt, contexts),
+		},
+	}); err == nil && strings.TrimSpace(providerAnswer) != "" {
+		answer = strings.TrimSpace(providerAnswer)
+		_ = modelName
+	} else if err != nil {
+		s.logger.Warn("assistant provider answer failed; using retrieved fallback", "error", err)
+	}
+
+	cards := make([]assistantResultCard, 0, min(len(contexts), 3))
+	for _, item := range contexts {
+		card := assistantResultCardFromContext(item)
+		if card.Kind != "" {
+			cards = append(cards, card)
+		}
+		if len(cards) >= 3 {
+			break
+		}
+	}
+	return assistantMessageContent{Text: answer, Cards: cards}, nil
+}
+
+func (s *Server) assistantVisibleNotes(ctx context.Context, homeID string, userID string) ([]domain.UserNote, error) {
+	profileNotes, err := s.store.ListProfileNotes(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	homeNotes, err := s.store.ListVisibleHomeNotes(ctx, homeID, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	notes := make([]domain.UserNote, 0, len(profileNotes)+len(homeNotes))
+	notes = append(notes, profileNotes...)
+	notes = append(notes, homeNotes...)
+	return notes, nil
 }
 
 func (s *Server) finalizeAssistantClientToolRun(ctx context.Context, session domain.AssistantSession, run domain.AssistantRun, toolName string, result map[string]interface{}) (assistantMessageContent, error) {
@@ -1123,6 +1217,74 @@ func assistantPendingActionFromContent(content assistantMessageContent) *assista
 		return nil
 	}
 	return &pending
+}
+
+func assistantPromptWithContext(prompt string, contexts []domain.AssistantRetrievedContext) string {
+	var builder strings.Builder
+	builder.WriteString("User request:\n")
+	builder.WriteString(prompt)
+	builder.WriteString("\n\nHank context:\n")
+	for index, item := range contexts {
+		builder.WriteString(fmt.Sprintf("%d. [%s] %s\n", index+1, item.SourceType, item.Title))
+		if item.Path != "" {
+			builder.WriteString("Path: " + item.Path + "\n")
+		}
+		if item.Snippet != "" {
+			builder.WriteString("Snippet: " + item.Snippet + "\n")
+		}
+		builder.WriteString("\n")
+	}
+	return builder.String()
+}
+
+func fallbackRetrievedAnswer(prompt string, contexts []domain.AssistantRetrievedContext) string {
+	if len(contexts) == 0 {
+		return "I could not find matching Hank context yet."
+	}
+	top := contexts[0]
+	return fmt.Sprintf("I found `%s` as the closest HankAI match for `%s`.", top.Title, strings.TrimSpace(prompt))
+}
+
+func assistantResultCardFromContext(item domain.AssistantRetrievedContext) assistantResultCard {
+	switch item.SourceType {
+	case "profile_note", "shared_note":
+		return assistantResultCard{
+			Kind:        "note",
+			Title:       item.Title,
+			Summary:     item.Snippet,
+			ActionTitle: "Open in Notes",
+			NoteID:      item.Path,
+			SearchText:  item.Snippet,
+		}
+	case "calendar_event":
+		targetDate := parseAssistantResultTime(item.Path)
+		return assistantResultCard{
+			Kind:        "calendar",
+			Title:       item.Title,
+			Summary:     item.Snippet,
+			ActionTitle: "Open in Calendar",
+			EventID:     item.SourceID,
+			TargetDate:  targetDate,
+		}
+	case "file":
+		return assistantResultCard{
+			Kind:        "file",
+			Title:       item.Title,
+			Summary:     item.Snippet,
+			ActionTitle: "Open in File Server",
+			Path:        item.Path,
+		}
+	case "homeassistant_entity":
+		return assistantResultCard{
+			Kind:        "homeassistant",
+			Title:       item.Title,
+			Summary:     item.Snippet,
+			ActionTitle: "Open Dashboard",
+			SearchText:  item.SourceID,
+		}
+	default:
+		return assistantResultCard{}
+	}
 }
 
 func (s *Server) authorizedAssistantRun(ctx context.Context, home domain.Home, auth authContext, runID string) (domain.AssistantRun, domain.AssistantSession, error) {

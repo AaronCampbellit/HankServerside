@@ -358,6 +358,8 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/service-profiles",
 		"/dashboard/sync-status",
 		"/dashboard/storage",
+		"/dashboard/hank",
+		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
 		"/dashboard/file-transfers",
 		"/dashboard/accept-invitation",
@@ -415,6 +417,8 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		"/dashboard/home-users",
 		"/dashboard/service-profiles",
 		"/dashboard/sync-status",
+		"/dashboard/hank",
+		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
 		"/dashboard/file-transfers",
 	}
@@ -465,6 +469,8 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 		"service-profiles.html",
 		"sync-status.html",
 		"storage.html",
+		"hank.html",
+		"assistant-settings.html",
 		"profile-notes.html",
 		"file-transfers.html",
 		"accept-invitation.html",
@@ -504,6 +510,58 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	}
 	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
 		t.Fatalf("admin-nav.js content-type = %q", contentType)
+	}
+}
+
+func TestOpenAIStatusReportsConfigAndLinkedAccount(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_openai", Email: "openai@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_openai", UserID: user.ID, TokenHash: hashToken("openai-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, session))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	server.ConfigureOpenAI("client-id", "client-secret", "https://remote.example.com/v1/oauth/openai/callback", "openid profile email")
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var status openAIAccountStatusResponse
+	requestJSON(t, testServer, "openai-token", http.MethodGet, "/v1/oauth/openai/status", nil, &status)
+	if !status.Configured {
+		t.Fatalf("configured = false, want true; missing=%v", status.Missing)
+	}
+	if status.Linked {
+		t.Fatal("linked = true before account exists")
+	}
+
+	expiresAt := now.Add(2 * time.Hour)
+	must(t, db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
+		UserID:       user.ID,
+		AccessToken:  "access",
+		RefreshToken: "refresh",
+		TokenType:    "Bearer",
+		Scope:        "openid profile",
+		ExpiresAt:    &expiresAt,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}))
+
+	status = openAIAccountStatusResponse{}
+	requestJSON(t, testServer, "openai-token", http.MethodGet, "/v1/oauth/openai/status", nil, &status)
+	if !status.Linked {
+		t.Fatal("linked = false after account exists")
+	}
+	if status.Scope != "openid profile" {
+		t.Fatalf("scope = %q, want %q", status.Scope, "openid profile")
+	}
+	if status.ExpiresAt == nil {
+		t.Fatal("expires_at is nil")
 	}
 }
 

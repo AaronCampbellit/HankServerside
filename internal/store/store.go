@@ -15,8 +15,9 @@ var ErrConflict = errors.New("conflict")
 var ErrUnsupportedMultiHome = errors.New("multiple homes are no longer supported in a single deployment")
 
 type Store struct {
-	db          *sql.DB
-	databaseURL string
+	db              *sql.DB
+	databaseURL     string
+	vectorAvailable bool
 }
 
 type AgentTokenRecord struct {
@@ -36,6 +37,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	store.vectorAvailable = store.enableVectorExtension(ctx)
 
 	if err := store.migrate(ctx); err != nil {
 		_ = db.Close()
@@ -56,7 +58,27 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
+func (s *Store) VectorAvailable() bool {
+	return s != nil && s.vectorAvailable
+}
+
+func (s *Store) enableVectorExtension(ctx context.Context) bool {
+	var available bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector')`).Scan(&available); err != nil || !available {
+		return false
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+		return false
+	}
+	return true
+}
+
 func (s *Store) migrate(ctx context.Context) error {
+	vectorColumn := ""
+	if s.vectorAvailable {
+		vectorColumn = ",\n\t\t\tembedding VECTOR(768) NULL"
+	}
+
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
@@ -309,6 +331,67 @@ func (s *Store) migrate(ctx context.Context) error {
 			FOREIGN KEY(session_id) REFERENCES assistant_sessions(id),
 			FOREIGN KEY(message_id) REFERENCES assistant_messages(id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS assistant_tool_calls (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			tool_name TEXT NOT NULL,
+			tool_scope TEXT NOT NULL,
+			arguments_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			result_json JSONB NULL,
+			status TEXT NOT NULL,
+			started_at TIMESTAMP NOT NULL,
+			completed_at TIMESTAMP NULL,
+			FOREIGN KEY(run_id) REFERENCES assistant_runs(id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS assistant_documents (
+			id TEXT PRIMARY KEY,
+			home_id TEXT NOT NULL,
+			user_id TEXT NULL,
+			source_type TEXT NOT NULL,
+			source_id TEXT NOT NULL,
+			source_key TEXT NOT NULL UNIQUE,
+			title TEXT NOT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			canonical_uri TEXT NOT NULL,
+			metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			search_text TEXT NOT NULL,
+			embedding_model TEXT NOT NULL DEFAULT '',
+			embedding_version TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY(home_id) REFERENCES homes(id),
+			FOREIGN KEY(user_id) REFERENCES users(id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS assistant_chunks (
+			id TEXT PRIMARY KEY,
+			document_id TEXT NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			content TEXT NOT NULL,
+			token_count INTEGER NOT NULL,
+			embedding_json TEXT NOT NULL DEFAULT '',
+			embedding_model TEXT NOT NULL DEFAULT '',
+			embedding_version TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMP NOT NULL` + vectorColumn + `,
+			FOREIGN KEY(document_id) REFERENCES assistant_documents(id) ON DELETE CASCADE,
+			UNIQUE(document_id, chunk_index)
+		);`,
+		`CREATE TABLE IF NOT EXISTS assistant_file_index (
+			id TEXT PRIMARY KEY,
+			home_id TEXT NOT NULL,
+			service_profile_id TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL,
+			name TEXT NOT NULL,
+			is_directory BOOLEAN NOT NULL DEFAULT FALSE,
+			size_bytes BIGINT NOT NULL DEFAULT 0,
+			modified_at TIMESTAMP NULL,
+			search_text TEXT NOT NULL,
+			metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			embedding_json TEXT NOT NULL DEFAULT '',
+			embedding_model TEXT NOT NULL DEFAULT '',
+			embedding_version TEXT NOT NULL DEFAULT '',
+			updated_at TIMESTAMP NOT NULL` + vectorColumn + `,
+			FOREIGN KEY(home_id) REFERENCES homes(id),
+			UNIQUE(home_id, path)
+		);`,
 		`CREATE TABLE IF NOT EXISTS openai_accounts (
 			user_id TEXT PRIMARY KEY,
 			provider_user_id TEXT NOT NULL DEFAULT '',
@@ -371,8 +454,19 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_notes_home_note_id ON user_notes(home_id, note_id) WHERE home_id IS NOT NULL;`,
 		`CREATE INDEX IF NOT EXISTS idx_assistant_sessions_user_updated ON assistant_sessions(user_id, updated_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_assistant_messages_session_created ON assistant_messages(session_id, created_at ASC);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_tool_calls_run ON assistant_tool_calls(run_id, started_at ASC);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_documents_home_type ON assistant_documents(home_id, source_type, updated_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_chunks_document ON assistant_chunks(document_id, chunk_index ASC);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_file_index_home_updated ON assistant_file_index(home_id, updated_at DESC);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_calendar_external ON assistant_calendar_entries(user_id, device_id, external_event_id);`,
 		`UPDATE home_memberships SET role = 'admin' WHERE role = 'owner';`,
+	}
+
+	if s.vectorAvailable {
+		statements = append(statements,
+			`ALTER TABLE assistant_chunks ADD COLUMN IF NOT EXISTS embedding VECTOR(768) NULL;`,
+			`ALTER TABLE assistant_file_index ADD COLUMN IF NOT EXISTS embedding VECTOR(768) NULL;`,
+		)
 	}
 
 	for _, statement := range statements {

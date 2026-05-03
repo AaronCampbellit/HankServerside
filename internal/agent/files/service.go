@@ -121,6 +121,54 @@ func (s *Service) Stat(ctx context.Context, path string) (protocol.FileItem, err
 	return s.statLocal(ctx, path)
 }
 
+func (s *Service) Search(ctx context.Context, query string, limit int) ([]protocol.FileItem, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	type queueItem struct {
+		path  string
+		depth int
+	}
+	queue := []queueItem{{path: "", depth: 0}}
+	matches := make([]protocol.FileItem, 0)
+	visited := 0
+	for len(queue) > 0 && visited < 500 {
+		current := queue[0]
+		queue = queue[1:]
+		visited++
+		items, err := s.List(ctx, current.path)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if fileSearchScore(item, query) > 0 {
+				matches = append(matches, item)
+			}
+			if item.IsDirectory && current.depth < 5 {
+				queue = append(queue, queueItem{path: item.Path, depth: current.depth + 1})
+			}
+		}
+	}
+
+	sort.Slice(matches, func(i int, j int) bool {
+		left := fileSearchScore(matches[i], query)
+		right := fileSearchScore(matches[j], query)
+		if left == right {
+			return matches[i].Path < matches[j].Path
+		}
+		return left > right
+	})
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches, nil
+}
+
 func (s *Service) CreateDirectory(ctx context.Context, path string) error {
 	if s.usingSMB() {
 		return s.createDirectorySMB(ctx, path)
@@ -394,6 +442,31 @@ func sortItems(items []protocol.FileItem) {
 		}
 		return items[i].Name < items[j].Name
 	})
+}
+
+func fileSearchScore(item protocol.FileItem, query string) int {
+	query = strings.ToLower(strings.TrimSpace(query))
+	name := strings.ToLower(item.Name)
+	path := strings.ToLower(item.Path)
+	score := 0
+	if strings.Contains(name, query) {
+		score += 8
+	}
+	if strings.Contains(path, query) {
+		score += 5
+	}
+	for _, token := range strings.Fields(query) {
+		if strings.Contains(name, token) {
+			score += 3
+		}
+		if strings.Contains(path, token) {
+			score++
+		}
+	}
+	if item.IsDirectory {
+		score++
+	}
+	return score
 }
 
 func fileItem(path string, info fs.FileInfo) protocol.FileItem {

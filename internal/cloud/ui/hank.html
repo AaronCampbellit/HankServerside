@@ -3,23 +3,23 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote Join Home</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260502-left-sidebar">
+    <title>Hank Remote HankAI</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260503-hank-ai">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <link rel="manifest" href="/assets/site.webmanifest">
   </head>
   <body>
-    <div class="shell">
+    <div class="shell hank-page">
       <header class="hero">
         <div>
           <div class="brand-lockup">
             <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
             <p class="eyebrow">Hank Remote</p>
           </div>
-          <h1>Join Home</h1>
-          <p class="lede">Use an invite code to join someone else's Hank Remote home.</p>
+          <h1>Hank</h1>
+          <p class="lede">Ask HankAI about your notes, calendars, Home Assistant, and files.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -39,34 +39,48 @@
         <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
         <a class="tab-link" href="/dashboard/sync-status">Status</a>
         <a class="tab-link" href="/dashboard/storage" data-admin-only="true" hidden>Storage</a>
-        <a class="tab-link" href="/dashboard/hank">Hank</a>
+        <a class="tab-link active" href="/dashboard/hank">Hank</a>
         <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
         <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
         <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
-        <a class="tab-link active" href="/dashboard/accept-invitation">Join Home</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
-      <main class="grid">
-        <section class="panel wide-panel">
+      <main class="hank-chat-layout">
+        <aside class="panel hank-sessions-panel">
           <div class="panel-head">
-            <h2>Invite Code</h2>
-            <span class="pill">Join</span>
+            <h2>Conversations</h2>
+            <button id="new-session-button" type="button">New</button>
           </div>
-          <label>
-            <span>Code</span>
-            <input id="token" type="text" placeholder="Paste invitation token">
-          </label>
-          <div class="actions wrap">
-            <button id="accept-button" type="button">Join Home</button>
+          <div id="assistant-status" class="kv-grid compact"></div>
+          <div id="session-list" class="card-list empty-state">Loading conversations.</div>
+        </aside>
+
+        <section class="panel hank-chat-panel">
+          <div class="panel-head">
+            <h2 id="conversation-title">HankAI</h2>
+            <span id="run-state" class="pill">Ready</span>
           </div>
-          <div id="result" class="card-list empty-state">Enter an invite code to join a home.</div>
+          <div id="message-list" class="hank-message-list empty-state">Choose or create a conversation.</div>
+          <div id="confirmation-card" class="card hank-confirmation" hidden>
+            <div class="card-title">Confirmation Needed</div>
+            <p id="confirmation-message" class="meta"></p>
+            <div class="actions wrap">
+              <button id="confirm-button" type="button">Confirm</button>
+              <button id="cancel-button" type="button" class="secondary">Cancel</button>
+            </div>
+          </div>
+          <form id="message-form" class="hank-message-form">
+            <textarea id="message-input" rows="3" placeholder="Ask Hank"></textarea>
+            <button id="send-button" type="submit">Send</button>
+          </form>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/accept-invitation.js" defer></script>
+    <script src="/assets/hank.js?v=20260503-hank-ai" defer></script>
     <script src="/assets/admin-nav.js?v=20260502-left-sidebar" defer></script>
   </body>
 </html>

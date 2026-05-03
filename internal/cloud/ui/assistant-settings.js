@@ -1,0 +1,170 @@
+const state = {
+  user: null,
+  status: null,
+  assistant: null,
+};
+
+const els = {
+  logoutButton: document.getElementById("logout-button"),
+  sessionState: document.getElementById("session-state"),
+  sessionMeta: document.getElementById("session-meta"),
+  openAILinkPill: document.getElementById("openai-link-pill"),
+  openAIConfigPill: document.getElementById("openai-config-pill"),
+  openAIAccountOutput: document.getElementById("openai-account-output"),
+  openAIConfigOutput: document.getElementById("openai-config-output"),
+  linkOpenAIButton: document.getElementById("link-openai-button"),
+  refreshButton: document.getElementById("refresh-button"),
+  toast: document.getElementById("toast"),
+};
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has("Content-Type") && options.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(path, { ...options, headers });
+  const contentType = response.headers.get("Content-Type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    const message = typeof payload === "string" ? payload : payload.error || payload.message || response.statusText;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+function escapeHTML(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString() : "Never";
+}
+
+function showToast(message, isError = false) {
+  els.toast.hidden = false;
+  els.toast.textContent = message;
+  els.toast.style.background = isError ? "rgba(142, 45, 28, 0.94)" : "rgba(35, 27, 20, 0.92)";
+  clearTimeout(showToast.timeoutID);
+  showToast.timeoutID = window.setTimeout(() => {
+    els.toast.hidden = true;
+  }, 3400);
+}
+
+function renderSession() {
+  document.body.classList.add("signed-in");
+  els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
+  els.sessionMeta.textContent = "Hank Remote account is active.";
+}
+
+function renderKV(rows) {
+  return rows.map(([label, value]) => `
+    <div class="kv-row">
+      <div class="kv-label">${escapeHTML(label)}</div>
+      <div>${escapeHTML(value)}</div>
+    </div>
+  `).join("");
+}
+
+function renderStatus() {
+  const status = state.status || {};
+  const assistant = state.assistant || {};
+  const missing = status.missing || [];
+
+  els.openAILinkPill.textContent = status.linked ? "Linked" : "Not Linked";
+  els.openAILinkPill.className = status.linked ? "status-chip" : "status-chip offline";
+  els.openAIAccountOutput.innerHTML = renderKV([
+    ["Account", status.linked ? "OpenAI is linked." : "No OpenAI account is linked yet."],
+    ["Last Linked", formatDate(status.updated_at)],
+    ["Expires", formatDate(status.expires_at)],
+    ["Scope", status.scope || status.scopes || "Not reported"],
+  ]);
+
+  els.openAIConfigPill.textContent = status.configured ? "Ready" : "Needs Setup";
+  els.openAIConfigPill.className = status.configured ? "status-chip" : "status-chip offline";
+  els.linkOpenAIButton.disabled = !status.configured;
+  els.linkOpenAIButton.textContent = status.linked ? "Relink OpenAI" : "Link OpenAI";
+
+  if (status.configured) {
+    els.openAIConfigOutput.className = "card-list";
+    els.openAIConfigOutput.innerHTML = `
+      <article class="card">
+        <div class="card-title">OpenAI OAuth is configured.</div>
+        <div class="meta">Redirect URL: ${escapeHTML(status.redirect_uri || "Not shown")}</div>
+        <div class="meta">Scopes: ${escapeHTML(status.scopes || "openid profile email")}</div>
+      </article>
+      <article class="card">
+        <div class="card-title">HankAI provider: ${escapeHTML(assistant.provider || "local")}</div>
+        <div class="meta">Chat model: ${escapeHTML(assistant.chat_model || "local fallback")}</div>
+        <div class="meta">Embedding model: ${escapeHTML(assistant.embedding_model || "local fallback")}</div>
+        <div class="meta">Vector store: ${escapeHTML(assistant.vector_store || "postgres")}</div>
+      </article>
+    `;
+    return;
+  }
+
+  els.openAIConfigOutput.className = "card-list";
+  els.openAIConfigOutput.innerHTML = `
+    <article class="card">
+      <div class="card-title">HankAI provider: ${escapeHTML(assistant.provider || "local")}</div>
+      <div class="meta">Chat: ${assistant.chat_configured ? "Configured" : "Using local fallback until Ollama or OpenAI is configured."}</div>
+      <div class="meta">Embeddings: ${assistant.embedding_configured ? "Configured" : "Using local fallback embeddings."}</div>
+      <div class="meta">Vector store: ${escapeHTML(assistant.vector_store || "postgres")}</div>
+    </article>
+    <article class="card">
+      <div class="card-title">Add these to <code>.env.cloud</code>, then restart the cloud service.</div>
+      <div class="meta">${missing.length ? missing.map(escapeHTML).join(", ") : "OpenAI OAuth settings are missing."}</div>
+    </article>
+  `;
+}
+
+async function loadStatus() {
+  const [status, assistant] = await Promise.all([
+    api("/v1/oauth/openai/status"),
+    api("/v1/home/assistant/status"),
+  ]);
+  state.status = status;
+  state.assistant = assistant;
+  renderStatus();
+}
+
+async function linkOpenAI() {
+  try {
+    const payload = await api("/v1/oauth/openai/start");
+    if (!payload.authorization_url) {
+      throw new Error("OpenAI did not return a link.");
+    }
+    window.location.href = payload.authorization_url;
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function logout() {
+  try {
+    await api("/v1/auth/logout", { method: "POST" });
+  } catch (_) {
+  }
+  window.location.replace("/");
+}
+
+async function hydrate() {
+  try {
+    const me = await api("/v1/me");
+    state.user = me.user;
+    renderSession();
+    await loadStatus();
+  } catch (_) {
+    window.location.replace("/");
+  }
+}
+
+els.logoutButton.addEventListener("click", logout);
+els.linkOpenAIButton.addEventListener("click", linkOpenAI);
+els.refreshButton.addEventListener("click", () => loadStatus().then(() => showToast("AI settings refreshed.")).catch((error) => showToast(error.message, true)));
+
+hydrate();

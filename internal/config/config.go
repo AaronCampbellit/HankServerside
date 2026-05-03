@@ -20,6 +20,19 @@ type Cloud struct {
 	OpenAIClientSecret string
 	OpenAIRedirectURI  string
 	OpenAIScopes       string
+	AssistantAI        AssistantAI
+}
+
+type AssistantAI struct {
+	Provider             string
+	OllamaBaseURL        string
+	OllamaChatModel      string
+	OllamaEmbeddingModel string
+	OpenAIBaseURL        string
+	OpenAIAPIKey         string
+	OpenAIChatModel      string
+	OpenAIEmbeddingModel string
+	EmbeddingDimension   int
 }
 
 type DBOps struct {
@@ -72,6 +85,12 @@ func LoadCloud() (Cloud, error) {
 		return Cloud{}, err
 	}
 
+	embeddingDimension := envOrDefault("HANK_REMOTE_AI_EMBEDDING_DIMENSION", "768")
+	embeddingDimensionValue, err := strconv.Atoi(embeddingDimension)
+	if err != nil || embeddingDimensionValue <= 0 {
+		return Cloud{}, fmt.Errorf("HANK_REMOTE_AI_EMBEDDING_DIMENSION must be a positive integer")
+	}
+
 	return Cloud{
 		Addr:               envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
 		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
@@ -84,6 +103,17 @@ func LoadCloud() (Cloud, error) {
 		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
 		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
 		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
+		AssistantAI: AssistantAI{
+			Provider:             strings.ToLower(envOrDefault("HANK_REMOTE_AI_PROVIDER", "auto")),
+			OllamaBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_OLLAMA_BASE_URL")), "/"),
+			OllamaChatModel:      envOrDefault("HANK_REMOTE_OLLAMA_CHAT_MODEL", "llama3.1"),
+			OllamaEmbeddingModel: envOrDefault("HANK_REMOTE_OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),
+			OpenAIBaseURL:        strings.TrimRight(envOrDefault("HANK_REMOTE_OPENAI_API_BASE_URL", "https://api.openai.com"), "/"),
+			OpenAIAPIKey:         strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_API_KEY")),
+			OpenAIChatModel:      envOrDefault("HANK_REMOTE_OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+			OpenAIEmbeddingModel: envOrDefault("HANK_REMOTE_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+			EmbeddingDimension:   embeddingDimensionValue,
+		},
 	}, nil
 }
 

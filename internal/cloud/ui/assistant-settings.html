@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote Join Home</title>
+    <title>Hank Remote AI Settings</title>
     <link rel="stylesheet" href="/assets/styles.css?v=20260502-left-sidebar">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
@@ -18,8 +18,8 @@
             <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
             <p class="eyebrow">Hank Remote</p>
           </div>
-          <h1>Join Home</h1>
-          <p class="lede">Use an invite code to join someone else's Hank Remote home.</p>
+          <h1>AI Settings</h1>
+          <p class="lede">Connect OpenAI for Hank Assistant features that need a linked account.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -40,33 +40,60 @@
         <a class="tab-link" href="/dashboard/sync-status">Status</a>
         <a class="tab-link" href="/dashboard/storage" data-admin-only="true" hidden>Storage</a>
         <a class="tab-link" href="/dashboard/hank">Hank</a>
-        <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
+        <a class="tab-link active" href="/dashboard/assistant-settings">AI Settings</a>
         <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
         <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
-        <a class="tab-link active" href="/dashboard/accept-invitation">Join Home</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
       <main class="grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>OpenAI Account</h2>
+            <span id="openai-link-pill" class="pill">Checking</span>
+          </div>
+          <div id="openai-account-output" class="kv-grid"></div>
+          <div class="actions wrap">
+            <button id="link-openai-button" type="button">Link OpenAI</button>
+            <button id="refresh-button" type="button" class="secondary">Refresh</button>
+            <a class="button-link secondary" href="/dashboard/hank">Open Hank</a>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Server Setup</h2>
+            <span id="openai-config-pill" class="pill">Checking</span>
+          </div>
+          <div id="openai-config-output" class="card-list empty-state">Checking OpenAI setup.</div>
+        </section>
+
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Invite Code</h2>
-            <span class="pill">Join</span>
+            <h2>Assistant Features</h2>
+            <span class="pill">Hank Assistant</span>
           </div>
-          <label>
-            <span>Code</span>
-            <input id="token" type="text" placeholder="Paste invitation token">
-          </label>
-          <div class="actions wrap">
-            <button id="accept-button" type="button">Join Home</button>
+          <div class="card-list">
+            <article class="card">
+              <h3>Linked OpenAI Account</h3>
+              <p class="meta">Used for subscription-backed assistant chat when OpenAI OAuth is configured.</p>
+            </article>
+            <article class="card">
+              <h3>Local Hank Tools</h3>
+              <p class="meta">Notes, files, and calendar handoffs still use Hank Remote permissions and confirmations.</p>
+            </article>
+            <article class="card">
+              <h3>App Flow</h3>
+              <p class="meta">The Hank app can request the same OpenAI link URL and open it in the in-app browser.</p>
+            </article>
           </div>
-          <div id="result" class="card-list empty-state">Enter an invite code to join a home.</div>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/accept-invitation.js" defer></script>
+    <script src="/assets/assistant-settings.js" defer></script>
     <script src="/assets/admin-nav.js?v=20260502-left-sidebar" defer></script>
   </body>
 </html>

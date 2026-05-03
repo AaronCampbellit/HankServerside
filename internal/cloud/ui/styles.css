@@ -414,6 +414,20 @@ button.ghost {
   color: var(--ink);
 }
 
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(232, 214, 195, 0.14);
+  background: #293345;
+  color: #eef4ff;
+  text-decoration: none;
+  font-weight: 700;
+}
+
 .actions,
 .inline-form {
   display: flex;
@@ -901,6 +915,89 @@ button:disabled {
   color: #08111c;
 }
 
+.hank-chat-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.hank-sessions-panel,
+.hank-chat-panel {
+  min-height: 620px;
+}
+
+.hank-session-list {
+  gap: 8px;
+}
+
+.hank-session-card {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+}
+
+.hank-session-card.active {
+  border-color: rgba(82, 190, 160, 0.7);
+  background: rgba(82, 190, 160, 0.12);
+}
+
+.hank-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 380px;
+  max-height: 58vh;
+  overflow: auto;
+  padding: 4px;
+}
+
+.hank-message {
+  max-width: min(760px, 92%);
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.hank-message.user {
+  align-self: flex-end;
+  background: rgba(82, 190, 160, 0.12);
+}
+
+.hank-message.assistant,
+.hank-message.system {
+  align-self: flex-start;
+}
+
+.hank-message p {
+  margin: 6px 0 0;
+  color: #fff;
+}
+
+.hank-result-cards {
+  margin-top: 10px;
+}
+
+.hank-confirmation {
+  margin-top: 12px;
+  border-color: rgba(230, 171, 92, 0.65);
+}
+
+.hank-message-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.hank-message-form textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 @media (max-width: 980px) {
   .dashboard-shell {
     display: block;
@@ -982,6 +1079,16 @@ button:disabled {
 
   .document-editor {
     padding: 18px 16px 40px;
+  }
+
+  .hank-chat-layout,
+  .hank-message-form {
+    grid-template-columns: 1fr;
+  }
+
+  .hank-sessions-panel,
+  .hank-chat-panel {
+    min-height: 0;
   }
 }
 

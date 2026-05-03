@@ -233,6 +233,63 @@ type AssistantCalendarEntry struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+type AssistantDocument struct {
+	ID               string    `json:"id"`
+	HomeID           string    `json:"home_id"`
+	UserID           *string   `json:"user_id,omitempty"`
+	SourceType       string    `json:"source_type"`
+	SourceID         string    `json:"source_id"`
+	SourceKey        string    `json:"source_key"`
+	Title            string    `json:"title"`
+	Path             string    `json:"path"`
+	CanonicalURI     string    `json:"canonical_uri"`
+	MetadataJSON     string    `json:"metadata_json"`
+	SearchText       string    `json:"search_text"`
+	EmbeddingModel   string    `json:"embedding_model"`
+	EmbeddingVersion string    `json:"embedding_version"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type AssistantChunk struct {
+	ID               string    `json:"id"`
+	DocumentID       string    `json:"document_id"`
+	ChunkIndex       int       `json:"chunk_index"`
+	Content          string    `json:"content"`
+	TokenCount       int       `json:"token_count"`
+	EmbeddingJSON    string    `json:"embedding_json"`
+	EmbeddingModel   string    `json:"embedding_model"`
+	EmbeddingVersion string    `json:"embedding_version"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type AssistantFileIndex struct {
+	ID               string     `json:"id"`
+	HomeID           string     `json:"home_id"`
+	ServiceProfileID string     `json:"service_profile_id"`
+	Path             string     `json:"path"`
+	Name             string     `json:"name"`
+	IsDirectory      bool       `json:"is_directory"`
+	SizeBytes        int64      `json:"size_bytes"`
+	ModifiedAt       *time.Time `json:"modified_at,omitempty"`
+	SearchText       string     `json:"search_text"`
+	MetadataJSON     string     `json:"metadata_json"`
+	EmbeddingJSON    string     `json:"embedding_json"`
+	EmbeddingModel   string     `json:"embedding_model"`
+	EmbeddingVersion string     `json:"embedding_version"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type AssistantRetrievedContext struct {
+	SourceType   string    `json:"source_type"`
+	SourceID     string    `json:"source_id"`
+	Title        string    `json:"title"`
+	Path         string    `json:"path"`
+	CanonicalURI string    `json:"canonical_uri"`
+	Snippet      string    `json:"snippet"`
+	Score        float64   `json:"score"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type OpenAIAccount struct {
 	UserID         string     `json:"user_id"`
 	ProviderUserID string     `json:"provider_user_id"`

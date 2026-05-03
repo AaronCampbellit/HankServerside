@@ -31,6 +31,15 @@ type FilesStatResponse struct {
 	Item FileItem `json:"item"`
 }
 
+type FilesSearchRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type FilesSearchResponse struct {
+	Items []FileItem `json:"items"`
+}
+
 type FilesCreateDirectoryRequest struct {
 	Path string `json:"path"`
 }

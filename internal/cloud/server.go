@@ -51,6 +51,7 @@ type Server struct {
 	openAIClientSecret string
 	openAIRedirectURI  string
 	openAIScopes       string
+	assistantAI        AssistantAIConfig
 }
 
 type authContext struct {
@@ -97,6 +98,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/service-profiles", server.handleServiceProfilesPage)
 	mux.HandleFunc("/dashboard/sync-status", server.handleSyncStatusPage)
 	mux.HandleFunc("/dashboard/storage", server.handleStoragePage)
+	mux.HandleFunc("/dashboard/hank", server.handleHankPage)
+	mux.HandleFunc("/dashboard/assistant-settings", server.handleAssistantSettingsPage)
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
 	mux.HandleFunc("/dashboard/file-transfers", server.handleFileTransfersPage)
 	mux.HandleFunc("/dashboard/accept-invitation", server.handleAcceptInvitationPage)
@@ -110,6 +113,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("/v1/auth/logout", server.handleAuthLogout)
 	mux.HandleFunc("/v1/me", server.handleMe)
+	mux.HandleFunc("/v1/oauth/openai/status", server.handleOpenAIOAuthStatus)
 	mux.HandleFunc("/v1/oauth/openai/start", server.handleOpenAIOAuthStart)
 	mux.HandleFunc("/v1/oauth/openai/callback", server.handleOpenAIOAuthCallback)
 	mux.HandleFunc("/v1/me/notes", server.handleProfileNotesHTTP)
@@ -142,6 +146,11 @@ func (s *Server) ConfigureOpenAI(clientID, clientSecret, redirectURI, scopes str
 	s.openAIClientSecret = strings.TrimSpace(clientSecret)
 	s.openAIRedirectURI = strings.TrimSpace(redirectURI)
 	s.openAIScopes = strings.TrimSpace(scopes)
+}
+
+func (s *Server) ConfigureAssistantAI(cfg AssistantAIConfig) {
+	cfg.normalize()
+	s.assistantAI = cfg
 }
 
 func (s *Server) ConfigureStorageOps(stateDir, logDir, intentSecret string) {

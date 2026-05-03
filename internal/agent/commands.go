@@ -94,6 +94,17 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		}
 		return protocol.FilesStatResponse{Item: item}, nil
 
+	case "files.search":
+		request, err := decodeBody[protocol.FilesSearchRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_file_request", err)
+		}
+		items, err := d.files.Search(ctx, request.Query, request.Limit)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.FilesSearchResponse{Items: items}, nil
+
 	case "files.create_directory":
 		request, err := decodeBody[protocol.FilesCreateDirectoryRequest](command.Body)
 		if err != nil {

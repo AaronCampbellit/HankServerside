@@ -23,6 +23,19 @@ func (s *Store) UpsertOpenAIAccount(ctx context.Context, account domain.OpenAIAc
 	return err
 }
 
+func (s *Store) GetOpenAIAccount(ctx context.Context, userID string) (domain.OpenAIAccount, error) {
+	var account domain.OpenAIAccount
+	err := s.queryRow(ctx, `SELECT user_id, provider_user_id, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at
+		FROM openai_accounts WHERE user_id = ?`, userID).Scan(&account.UserID, &account.ProviderUserID, &account.AccessToken, &account.RefreshToken, &account.TokenType, &account.Scope, &account.ExpiresAt, &account.CreatedAt, &account.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.OpenAIAccount{}, ErrNotFound
+		}
+		return domain.OpenAIAccount{}, err
+	}
+	return account, nil
+}
+
 func (s *Store) UpsertOpenAIOAuthState(ctx context.Context, state domain.OpenAIOAuthState) error {
 	_, err := s.exec(ctx, `INSERT INTO openai_oauth_states (state_hash, user_id, code_verifier, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?)
