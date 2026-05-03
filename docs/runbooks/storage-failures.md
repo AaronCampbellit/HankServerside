@@ -28,6 +28,7 @@ Use this when `/readyz` reports storage failure, `/dashboard/storage` reports ba
 ## Common Storage Events
 
 - `pgBackRest stanza creation failed. exit status 31`: check the redacted output excerpt in `/dashboard/storage` first. If it mentions cipher/decrypt, restore the original `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`; an encrypted pgBackRest repo cannot be read with a new passphrase. If it mentions `repo1-path` or repository access, set the backup target back to `/var/lib/pgbackrest` unless the Compose file also mounts the custom path into both `postgres` and `db-ops`.
+- `option 'repo1-cipher-pass' is not allowed on the command-line`: redeploy the latest Compose stack. The passphrase must be supplied through `PGBACKREST_REPO1_CIPHER_PASS`, not as a pgBackRest command argument.
 - `pg_amcheck could not complete.`: treat this as setup or connectivity failure until the output excerpt reports corruption. Confirm the database URL works from `db-ops`, then rerun the check.
 - `pg_amcheck reported a database integrity problem.`: treat this as a real database integrity incident. Stop writes if possible, run a restore test from the newest good backup, and preserve the output excerpt for diagnosis.
 - `PostgreSQL data checksums are not enabled for this cluster.`: this is expected for a database volume created before checksums were added to Compose. It is not repaired by restarting; schedule downtime and run `scripts/enable-pg-checksums.sh`.

@@ -90,7 +90,7 @@ Each event has:
   - `postgres`, `cloud`, and `db-ops` share the internal database network.
   - `postgres-restore` and `db-ops` share a separate internal restore network.
   - only `cloud` publishes a host port.
-- pgBackRest repositories are encrypted with `repo1-cipher-type=aes-256-cbc` and `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`.
+- pgBackRest repositories are encrypted with `repo1-cipher-type=aes-256-cbc`; `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS` is mapped to `PGBACKREST_REPO1_CIPHER_PASS` so the passphrase is not passed on the command line.
 - Backup repository ownership is intentionally narrow:
   - `postgres` writes WAL through encrypted pgBackRest archive-push
   - `db-ops` writes backups, restore state, and validation results

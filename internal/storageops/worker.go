@@ -63,9 +63,10 @@ type Worker struct {
 }
 
 func NewWorker(options WorkerOptions) *Worker {
+	repoCipherPass := strings.TrimSpace(options.RepoCipherPass)
 	runner := options.Runner
 	if runner == nil {
-		runner = ExecRunner{}
+		runner = ExecRunner{Env: pgBackRestEnv(repoCipherPass)}
 	}
 	stanza := strings.TrimSpace(options.Stanza)
 	if stanza == "" {
@@ -90,7 +91,7 @@ func NewWorker(options WorkerOptions) *Worker {
 	return &Worker{
 		service:            NewService(options.StateDir, options.LogDir, options.IntentSecret),
 		runner:             runner,
-		repoCipherPass:     strings.TrimSpace(options.RepoCipherPass),
+		repoCipherPass:     repoCipherPass,
 		databaseURL:        strings.TrimSpace(options.DatabaseURL),
 		stanza:             stanza,
 		pgDataPath:         pgDataPath,
@@ -757,6 +758,8 @@ func pgBackRestFailureHint(output string, err error) string {
 		combined += " " + strings.ToLower(err.Error())
 	}
 	switch {
+	case strings.Contains(combined, "not allowed on the command-line"):
+		return "Deploy the latest server build so pgBackRest receives the repository passphrase through PGBACKREST_REPO1_CIPHER_PASS instead of command-line arguments."
 	case strings.Contains(combined, "cipher") || strings.Contains(combined, "decrypt"):
 		return "Check that HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS matches the passphrase used when this backup repository was created."
 	case strings.Contains(combined, "unable to find primary cluster"):
@@ -793,9 +796,17 @@ func outputIndicatesAMCheckCorruption(output string) bool {
 
 func (w *Worker) pgBackRestArgs(cfg Config) []string {
 	cfg = cfg.Normalized()
-	args := []string{"--stanza=" + w.stanza, "--repo1-cipher-type=aes-256-cbc", "--repo1-cipher-pass=" + w.repoCipherPass}
+	args := []string{"--stanza=" + w.stanza, "--repo1-cipher-type=aes-256-cbc"}
 	if cfg.Target.Type == TargetTypePosix && strings.TrimSpace(cfg.Target.Path) != "" {
 		args = append(args, "--repo1-path="+cfg.Target.Path)
 	}
 	return args
+}
+
+func pgBackRestEnv(repoCipherPass string) []string {
+	repoCipherPass = strings.TrimSpace(repoCipherPass)
+	if repoCipherPass == "" {
+		return nil
+	}
+	return []string{"PGBACKREST_REPO1_CIPHER_PASS=" + repoCipherPass}
 }

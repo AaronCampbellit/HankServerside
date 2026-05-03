@@ -112,7 +112,7 @@ func TestWorkerRequiresRepoCipherPass(t *testing.T) {
 	}
 }
 
-func TestWorkerAddsEncryptedPgBackRestArgsAndRedactsEvents(t *testing.T) {
+func TestWorkerAddsEncryptedPgBackRestTypeAndKeepsCipherPassOutOfEvents(t *testing.T) {
 	logDir := t.TempDir()
 	stateDir := t.TempDir()
 	runner := &fakeRunner{
@@ -142,8 +142,8 @@ func TestWorkerAddsEncryptedPgBackRestArgsAndRedactsEvents(t *testing.T) {
 	if !strings.Contains(encryptedCall, "--repo1-cipher-type=aes-256-cbc") {
 		t.Fatalf("backup call missing cipher type: %s", encryptedCall)
 	}
-	if !strings.Contains(encryptedCall, "--repo1-cipher-pass=cipher-secret") {
-		t.Fatalf("backup call missing cipher pass: %s", encryptedCall)
+	if strings.Contains(encryptedCall, "--repo1-cipher-pass") || strings.Contains(encryptedCall, "cipher-secret") {
+		t.Fatalf("backup call leaked cipher pass: %s", encryptedCall)
 	}
 	events, err := ListEvents(logDir, EventFilter{Limit: 10})
 	if err != nil {
@@ -157,6 +157,26 @@ func TestWorkerAddsEncryptedPgBackRestArgsAndRedactsEvents(t *testing.T) {
 		if strings.Contains(encoded, "cipher-secret") {
 			t.Fatalf("event leaked cipher pass: %+v", event)
 		}
+	}
+}
+
+func TestDefaultRunnerPassesPgBackRestCipherPassByEnvironment(t *testing.T) {
+	worker := NewWorker(WorkerOptions{RepoCipherPass: " cipher-secret "})
+	runner, ok := worker.runner.(ExecRunner)
+	if !ok {
+		t.Fatalf("runner = %T, want ExecRunner", worker.runner)
+	}
+	found := false
+	for _, item := range runner.Env {
+		if item == "PGBACKREST_REPO1_CIPHER_PASS=cipher-secret" {
+			found = true
+		}
+		if strings.Contains(item, " cipher-secret ") {
+			t.Fatalf("cipher pass was not trimmed: %q", item)
+		}
+	}
+	if !found {
+		t.Fatalf("runner env = %+v", runner.Env)
 	}
 }
 

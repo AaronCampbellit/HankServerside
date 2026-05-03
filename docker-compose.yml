@@ -16,6 +16,7 @@ services:
         required: true
     environment:
       POSTGRES_INITDB_ARGS: "--data-checksums"
+      PGBACKREST_REPO1_CIPHER_PASS: ${HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS}
     volumes:
       - hank_postgres_data:/var/lib/postgresql/data
       - hank_pgbackrest_repo:/var/lib/pgbackrest
@@ -30,7 +31,7 @@ services:
       - "-c"
       - "archive_mode=on"
       - "-c"
-      - "archive_command=pgbackrest --stanza=hank --repo1-cipher-type=aes-256-cbc --repo1-cipher-pass=\"$${HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS}\" archive-push %p"
+      - "archive_command=pgbackrest --stanza=hank --repo1-cipher-type=aes-256-cbc archive-push %p"
       - "-c"
       - "wal_level=replica"
       - "-c"
@@ -80,6 +81,7 @@ services:
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hankserverside}
       HANK_REMOTE_CLOUD_HOST_BIND: ${HANK_REMOTE_CLOUD_HOST_BIND}
       HANK_REMOTE_CLOUD_HOST_PORT: ${HANK_REMOTE_CLOUD_HOST_PORT}
+      PGBACKREST_REPO1_CIPHER_PASS: ${HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS}
     volumes:
       - hank_postgres_data:/var/lib/postgresql/data
       - hank_postgres_restore_data:/var/lib/postgresql/restore
@@ -109,6 +111,7 @@ services:
     environment:
       PGDATA: /var/lib/postgresql/restore
       POSTGRES_INITDB_ARGS: "--data-checksums"
+      PGBACKREST_REPO1_CIPHER_PASS: ${HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS}
     volumes:
       - hank_postgres_restore_data:/var/lib/postgresql/restore
       - hank_pgbackrest_repo:/var/lib/pgbackrest:ro
