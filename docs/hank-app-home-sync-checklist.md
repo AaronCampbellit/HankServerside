@@ -352,6 +352,12 @@ Expected behavior:
   - last error
 - Highlight corruption when `checksum.corruption_detected == true`.
 - Show recent failures from the `failures` list.
+- Show current backup/restore work from `tasks`:
+  - queued or running full backup
+  - queued or running differential backup
+  - queued or running restore test
+  - queued or running primary restore
+  - latest task step and updated time
 
 ### Backup Configuration
 

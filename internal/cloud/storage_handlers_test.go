@@ -51,6 +51,7 @@ func TestStorageRoutesAreAdminOnly(t *testing.T) {
 		{http.MethodGet, "/v1/home/storage/config", nil},
 		{http.MethodPut, "/v1/home/storage/config", storageops.DefaultConfig()},
 		{http.MethodGet, "/v1/home/storage/events", nil},
+		{http.MethodDelete, "/v1/home/storage/events", nil},
 		{http.MethodPost, "/v1/home/storage/backup", map[string]any{"backup_type": "diff"}},
 		{http.MethodPost, "/v1/home/storage/restore-test", map[string]any{"backup_label": "20260430-010101F"}},
 		{http.MethodPost, "/v1/home/storage/restore-primary", map[string]any{"backup_label": "20260430-010101F", "confirmation": "RESTORE HANK DATABASE"}},
@@ -108,6 +109,51 @@ func TestStoragePageRequiresAdmin(t *testing.T) {
 	memberResp.Body.Close()
 	if memberResp.StatusCode != http.StatusForbidden {
 		t.Fatalf("member storage page status = %d, want %d", memberResp.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestStorageEventsCanBeCleared(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_storage_clear", Email: "storage-clear@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_storage_clear", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_storage_clear", UserID: user.ID, TokenHash: hashToken("storage-clear-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	stateDir := t.TempDir()
+	logDir := t.TempDir()
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureStorageOps(stateDir, logDir, "secret")
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	if _, err := storageops.AppendEvent(logDir, storageops.Event{
+		Operation: storageops.EventOperationBackup,
+		Status:    storageops.EventStatusFailed,
+		Severity:  storageops.EventSeverityError,
+		Message:   "backup failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var status storageops.StatusSnapshot
+	requestJSON(t, testServer, "storage-clear-token", http.MethodGet, "/v1/home/storage/status", nil, &status)
+	if len(status.Events) != 1 {
+		t.Fatalf("events length before clear = %d, want 1", len(status.Events))
+	}
+
+	var payload map[string]bool
+	requestJSON(t, testServer, "storage-clear-token", http.MethodDelete, "/v1/home/storage/events", nil, &payload)
+	if !payload["cleared"] {
+		t.Fatalf("clear payload = %+v", payload)
+	}
+	requestJSON(t, testServer, "storage-clear-token", http.MethodGet, "/v1/home/storage/status", nil, &status)
+	if len(status.Events) != 0 || len(status.Failures) != 0 {
+		t.Fatalf("status after clear = %+v", status)
 	}
 }
 

@@ -82,6 +82,14 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 		writeJSON(w, http.StatusOK, map[string]any{"events": events})
 		return true
 
+	case len(parts) == 2 && parts[1] == "events" && r.Method == http.MethodDelete:
+		if err := s.storage.ClearEvents(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"cleared": true})
+		return true
+
 	case len(parts) == 2 && parts[1] == "backup" && r.Method == http.MethodPost:
 		var body struct {
 			BackupType string `json:"backup_type"`

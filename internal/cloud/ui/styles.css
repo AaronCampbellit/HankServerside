@@ -478,9 +478,46 @@ button.ghost {
   gap: 10px;
 }
 
+.compact-head {
+  margin-top: 10px;
+  margin-bottom: 8px;
+}
+
+.compact-head h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
 .card-title {
   font-size: 0.95rem;
   margin-bottom: 2px;
+}
+
+.task-card.active {
+  border-color: rgba(99, 219, 155, 0.28);
+  background: rgba(99, 219, 155, 0.06);
+}
+
+.loading-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: pulse-dot 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .status-chip {

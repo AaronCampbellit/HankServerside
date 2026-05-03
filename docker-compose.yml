@@ -1,9 +1,16 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: hank-postgres
     build:
       context: .
       dockerfile: Dockerfile.postgres
+    logging: *default-logging
     env_file:
       - path: ./.env.cloud
         required: true
@@ -39,6 +46,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
+    logging: *default-logging
     env_file:
       - path: ./.env.cloud
         required: true
@@ -61,6 +69,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dbops
+    logging: *default-logging
     env_file:
       - path: ./.env.cloud
         required: true
@@ -91,6 +100,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgres
+    logging: *default-logging
     profiles:
       - restore
     env_file:
@@ -121,6 +131,7 @@ services:
     image: hankserverside
     profiles:
       - agent
+    logging: *default-logging
     env_file:
       - path: ./.env.agent
         required: true

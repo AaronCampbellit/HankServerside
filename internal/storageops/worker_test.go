@@ -160,6 +160,38 @@ func TestWorkerAddsEncryptedPgBackRestArgsAndRedactsEvents(t *testing.T) {
 	}
 }
 
+func TestWorkerPublishesBackupTaskStatus(t *testing.T) {
+	logDir := t.TempDir()
+	stateDir := t.TempDir()
+	runner := &fakeRunner{
+		outputs: map[string]string{
+			" info --output=json": `[{"backup":[{"label":"20260430-010101F","type":"full","info":{"size":42},"timestamp":{"start":1777528861,"stop":1777528871}}]}]`,
+		},
+	}
+	worker := NewWorker(WorkerOptions{
+		StateDir:       stateDir,
+		LogDir:         logDir,
+		IntentSecret:   "secret",
+		RepoCipherPass: "cipher-secret",
+		DatabaseURL:    "postgres://example",
+		Runner:         runner,
+	})
+
+	if err := worker.RunBackup(context.Background(), "full"); err != nil {
+		t.Fatal(err)
+	}
+	task, ok, err := LoadActiveTask(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected active task status")
+	}
+	if task.Status != TaskStatusSuccess || task.BackupType != "full" || task.BackupLabel != "20260430-010101F" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
 func TestWorkerChecksumLogsDisabledWarning(t *testing.T) {
 	logDir := t.TempDir()
 	stateDir := t.TempDir()

@@ -1,6 +1,7 @@
 const state = {
   user: null,
   status: null,
+  refreshTimer: null,
 };
 
 const els = {
@@ -24,12 +25,14 @@ const els = {
   restoreTestButton: document.getElementById("restore-test-button"),
   backupCount: document.getElementById("backup-count"),
   backupOutput: document.getElementById("backup-output"),
+  taskPill: document.getElementById("task-pill"),
+  taskOutput: document.getElementById("task-output"),
   restoreForm: document.getElementById("restore-form"),
   restoreLabel: document.getElementById("restore-label"),
   restoreConfirmation: document.getElementById("restore-confirmation"),
-  failureCount: document.getElementById("failure-count"),
-  failureOutput: document.getElementById("failure-output"),
-  eventsOutput: document.getElementById("events-output"),
+  logCount: document.getElementById("log-count"),
+  logOutput: document.getElementById("log-output"),
+  clearLogsButton: document.getElementById("clear-logs-button"),
   toast: document.getElementById("toast"),
 };
 
@@ -98,7 +101,6 @@ function renderStatus() {
   const status = state.status || {};
   const checksum = status.checksum || {};
   const backup = status.backup || {};
-  const restore = status.restore || {};
   const config = status.config || {};
   const schedule = config.schedule || {};
   const target = config.target || {};
@@ -123,13 +125,13 @@ function renderStatus() {
   els.restoreVerificationCron.value = schedule.restore_verification_cron || "0 4 * * 0";
   els.restoreConfirmation.placeholder = config.restore?.confirmation_phrase || "RESTORE HANK DATABASE";
 
-  renderBackups(backup.backups || [], restore);
-  renderEvents(status.failures || [], els.failureOutput, true);
-  renderEvents(status.events || [], els.eventsOutput, false);
-  els.failureCount.textContent = `${(status.failures || []).length} failure${(status.failures || []).length === 1 ? "" : "s"}`;
+  renderBackups(backup.backups || []);
+  renderTasks(status.tasks || []);
+  renderEvents(status.events || [], els.logOutput);
+  els.logCount.textContent = `${(status.events || []).length} log${(status.events || []).length === 1 ? "" : "s"}`;
 }
 
-function renderBackups(backups, restore) {
+function renderBackups(backups) {
   els.backupCount.textContent = `${backups.length} backup${backups.length === 1 ? "" : "s"}`;
   els.restoreLabel.innerHTML = "";
   if (!backups.length) {
@@ -159,15 +161,60 @@ function renderBackups(backups, restore) {
     option.textContent = backup.label;
     els.restoreLabel.appendChild(option);
   });
-  if (restore?.pending_intents?.length) {
-    showToast(`${restore.pending_intents.length} storage task pending.`);
-  }
 }
 
-function renderEvents(events, target, failuresOnly) {
+function renderTasks(tasks) {
+  const activeTasks = tasks.filter((task) => isActiveTask(task));
+  setTaskControlsBusy(activeTasks.length > 0);
+  if (!tasks.length) {
+    els.taskPill.textContent = "Idle";
+    els.taskPill.className = "pill";
+    els.taskOutput.className = "card-list empty-state";
+    els.taskOutput.textContent = "No backup or restore task running.";
+    return;
+  }
+  els.taskPill.textContent = activeTasks.length ? "Running" : "Finished";
+  els.taskPill.className = activeTasks.length ? "status-chip" : "pill";
+  els.taskOutput.className = "card-list";
+  els.taskOutput.innerHTML = tasks.map((task) => `
+    <article class="card task-card ${isActiveTask(task) ? "active" : ""}">
+      <div class="card-head">
+        <div>
+          <div class="card-title">${isActiveTask(task) ? `<span class="loading-dot" aria-hidden="true"></span>` : ""}${escapeHTML(task.message || taskLabel(task))}</div>
+          <div class="meta">${escapeHTML(task.step || task.operation || "storage")} · updated ${escapeHTML(formatDate(task.updated_at))}</div>
+        </div>
+        <span class="status-chip ${task.status === "failed" ? "offline" : ""}">${escapeHTML(task.status || "running")}</span>
+      </div>
+      ${task.backup_label ? `<div class="meta">Backup: ${escapeHTML(task.backup_label)}</div>` : ""}
+    </article>
+  `).join("");
+}
+
+function taskLabel(task) {
+  if (task.operation === "backup") {
+    return `${task.backup_type === "full" ? "Full" : "Diff"} backup ${task.status || "running"}`;
+  }
+  if (task.operation === "restore_test") return `Restore test ${task.status || "running"}`;
+  if (task.operation === "primary_restore") return `Primary restore ${task.status || "running"}`;
+  return `Storage task ${task.status || "running"}`;
+}
+
+function isActiveTask(task) {
+  return task?.status === "queued" || task?.status === "running";
+}
+
+function setTaskControlsBusy(isBusy) {
+  els.backupDiffButton.disabled = isBusy;
+  els.backupFullButton.disabled = isBusy;
+  els.restoreTestButton.disabled = isBusy;
+  const primaryRestoreButton = els.restoreForm.querySelector("button[type='submit']");
+  if (primaryRestoreButton) primaryRestoreButton.disabled = isBusy;
+}
+
+function renderEvents(events, target) {
   if (!events.length) {
     target.className = "card-list empty-state";
-    target.textContent = failuresOnly ? "No backup or checksum failures reported." : "No storage events reported.";
+    target.textContent = "No storage logs reported.";
     return;
   }
   target.className = "card-list";
@@ -208,6 +255,19 @@ function renderEventDetails(event) {
 async function loadStatus() {
   state.status = await api("/v1/home/storage/status");
   renderStatus();
+  scheduleStatusRefresh();
+}
+
+function scheduleStatusRefresh() {
+  window.clearTimeout(state.refreshTimer);
+  const tasks = state.status?.tasks || [];
+  if (!tasks.some((task) => isActiveTask(task))) {
+    state.refreshTimer = null;
+    return;
+  }
+  state.refreshTimer = window.setTimeout(() => {
+    loadStatus().catch((error) => showToast(error.message, true));
+  }, 3000);
 }
 
 async function saveConfig(event) {
@@ -278,6 +338,19 @@ async function requestPrimaryRestore(event) {
   }
 }
 
+async function clearLogs() {
+  if (!window.confirm("Clear storage logs? Backups and settings will not be changed.")) {
+    return;
+  }
+  try {
+    await api("/v1/home/storage/events", { method: "DELETE" });
+    await loadStatus();
+    showToast("Storage logs cleared.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 async function logout() {
   try {
     await api("/v1/auth/logout", { method: "POST" });
@@ -304,5 +377,6 @@ els.backupDiffButton.addEventListener("click", () => requestBackup("diff"));
 els.backupFullButton.addEventListener("click", () => requestBackup("full"));
 els.restoreTestButton.addEventListener("click", requestRestoreTest);
 els.restoreForm.addEventListener("submit", requestPrimaryRestore);
+els.clearLogsButton.addEventListener("click", clearLogs);
 
 hydrate();

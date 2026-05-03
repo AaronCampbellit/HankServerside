@@ -181,11 +181,11 @@ func (w *Worker) processIntents(ctx context.Context) error {
 		var runErr error
 		switch intent.Type {
 		case IntentTypeBackup:
-			runErr = w.RunBackup(ctx, intent.BackupType)
+			runErr = w.runBackup(ctx, intent.BackupType, intent.ID)
 		case IntentTypeRestoreTest:
-			runErr = w.RunRestoreTest(ctx, intent.BackupLabel)
+			runErr = w.runRestoreTest(ctx, intent.BackupLabel, intent.ID)
 		case IntentTypePrimaryRestore:
-			runErr = w.RunPrimaryRestore(ctx, intent.BackupLabel)
+			runErr = w.runPrimaryRestore(ctx, intent.BackupLabel, intent.ID)
 		default:
 			runErr = fmt.Errorf("unsupported intent type %q", intent.Type)
 		}
@@ -257,6 +257,10 @@ func (w *Worker) RunAMCheck(ctx context.Context) error {
 }
 
 func (w *Worker) RunBackup(ctx context.Context, backupType string) error {
+	return w.runBackup(ctx, backupType, "")
+}
+
+func (w *Worker) runBackup(ctx context.Context, backupType string, taskID string) error {
 	backupType = strings.TrimSpace(strings.ToLower(backupType))
 	if backupType == "" {
 		backupType = "diff"
@@ -264,36 +268,52 @@ func (w *Worker) RunBackup(ctx context.Context, backupType string) error {
 	if backupType != "full" && backupType != "diff" {
 		return errors.New("backup type must be full or diff")
 	}
+	task := w.startTask(taskID, EventOperationBackup, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Preparing backup", func(task *TaskStatus) {
+		task.BackupType = backupType
+	})
+	fail := func(message string, output string, err error) error {
+		w.finishTask(&task, TaskStatusFailed, message)
+		return w.recordBackupFailure(message, output, err)
+	}
+
 	start := NewEvent(EventOperationBackup, EventStatusStarted, EventSeverityInfo, "pgBackRest backup started.")
 	start.Details = map[string]any{"backup_type": backupType}
 	_, _ = AppendEvent(w.service.LogDir, start)
 
 	cfg, _ := w.service.Config()
+	w.updateTask(&task, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Checking encrypted backup settings")
 	if err := w.requireRepoCipherPass(); err != nil {
-		return w.recordBackupFailure("Encrypted pgBackRest repository is not configured.", "", err)
+		return fail("Encrypted pgBackRest repository is not configured.", "", err)
 	}
 	baseArgs := w.pgBackRestArgs(cfg)
+	w.updateTask(&task, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Preparing pgBackRest folders")
 	if err := w.preparePgBackRestPaths(ctx, cfg); err != nil {
-		return w.recordBackupFailure("Could not prepare pgBackRest directories.", "", err)
+		return fail("Could not prepare pgBackRest directories.", "", err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Creating pgBackRest stanza")
 	if output, err := w.runPgBackRest(ctx, append(baseArgs, "stanza-create")...); err != nil && !strings.Contains(output, "already exists") {
-		return w.recordBackupFailure("pgBackRest stanza creation failed.", output, err)
+		return fail("pgBackRest stanza creation failed.", output, err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Checking pgBackRest repository")
 	if output, err := w.runPgBackRest(ctx, append(baseArgs, "check")...); err != nil {
-		return w.recordBackupFailure("pgBackRest check failed.", output, err)
+		return fail("pgBackRest check failed.", output, err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Running "+backupType+" backup")
 	backupArgs := append(append([]string{}, baseArgs...), "--type="+backupType, fmt.Sprintf("--repo1-retention-full=%d", cfg.Schedule.RetentionFull), "backup")
 	output, err := w.runPgBackRest(ctx, backupArgs...)
 	if err != nil {
-		return w.recordBackupFailure("pgBackRest backup failed.", output, err)
+		return fail("pgBackRest backup failed.", output, err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationBackup, backupType, TaskStatusRunning), "Refreshing backup list")
 	backups := w.loadBackupInfo(ctx)
 	_ = SaveBackupSets(w.service.StateDir, backups)
 	label := latestBackupLabel(backups)
+	task.BackupLabel = label
 	event := NewEvent(EventOperationBackup, EventStatusSuccess, EventSeverityInfo, "pgBackRest backup completed.")
 	event.BackupLabel = label
 	event.Details = map[string]any{"backup_type": backupType, "output_redacted": strings.TrimSpace(output) != ""}
 	_, appendErr := AppendEvent(w.service.LogDir, event)
+	w.finishTask(&task, TaskStatusSuccess, taskMessage(EventOperationBackup, backupType, TaskStatusSuccess))
 	return appendErr
 }
 
@@ -350,16 +370,30 @@ func (w *Worker) loadBackupInfo(ctx context.Context) []BackupSet {
 }
 
 func (w *Worker) RunRestoreTest(ctx context.Context, backupLabel string) error {
+	return w.runRestoreTest(ctx, backupLabel, "")
+}
+
+func (w *Worker) runRestoreTest(ctx context.Context, backupLabel string, taskID string) error {
+	task := w.startTask(taskID, EventOperationRestoreTest, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Preparing restore verification", func(task *TaskStatus) {
+		task.BackupLabel = strings.TrimSpace(backupLabel)
+	})
+	fail := func(message string, err error) error {
+		w.finishTask(&task, TaskStatusFailed, message)
+		return w.recordRestoreFailure(EventOperationRestoreTest, message, backupLabel, err)
+	}
+
 	start := NewEvent(EventOperationRestoreTest, EventStatusStarted, EventSeverityInfo, "Restore verification started.")
 	start.BackupLabel = backupLabel
 	_, _ = AppendEvent(w.service.LogDir, start)
 
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Checking encrypted backup settings")
 	if err := w.requireRepoCipherPass(); err != nil {
-		return w.recordRestoreFailure(EventOperationRestoreTest, "Encrypted pgBackRest repository is not configured.", backupLabel, err)
+		return fail("Encrypted pgBackRest repository is not configured.", err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Resetting restore test database")
 	_ = w.composeWithProfile(context.Background(), "restore", "rm", "-sf", "postgres-restore")
 	if err := clearDirectoryContents(w.restoreDataPath); err != nil {
-		return w.recordRestoreFailure(EventOperationRestoreTest, "Could not clear restore-test data directory.", backupLabel, err)
+		return fail("Could not clear restore-test data directory.", err)
 	}
 	_, _ = w.runner.Run(ctx, "chown", "-R", "postgres:postgres", w.restoreDataPath)
 	cfg, _ := w.service.Config()
@@ -368,26 +402,31 @@ func (w *Worker) RunRestoreTest(ctx context.Context, backupLabel string) error {
 		args = append(args, "--set="+strings.TrimSpace(backupLabel))
 	}
 	args = append(args, "restore")
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Restoring backup into test database")
 	output, err := w.runPgBackRest(ctx, args...)
 	if err != nil {
-		return w.recordRestoreFailure(EventOperationRestoreTest, "Restore verification failed.", backupLabel, fmt.Errorf("%w: %s", err, output))
+		return fail("Restore verification failed.", fmt.Errorf("%w: %s", err, output))
 	}
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Starting restore test database")
 	if err := w.composeWithProfile(ctx, "restore", "up", "-d", "postgres-restore"); err != nil {
-		return w.recordRestoreFailure(EventOperationRestoreTest, "Restore verification database did not start.", backupLabel, err)
+		return fail("Restore verification database did not start.", err)
 	}
 	defer func() {
 		_ = w.composeWithProfile(context.Background(), "restore", "stop", "postgres-restore")
 	}()
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Waiting for restore test database")
 	if err := w.waitForRestoreDatabase(ctx); err != nil {
-		return w.recordRestoreFailure(EventOperationRestoreTest, "Restore verification database was not ready.", backupLabel, err)
+		return fail("Restore verification database was not ready.", err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Validating restored database")
 	if err := w.validateRestoredDatabase(ctx); err != nil {
-		return w.recordRestoreFailure(EventOperationRestoreTest, "Restore verification database validation failed.", backupLabel, err)
+		return fail("Restore verification database validation failed.", err)
 	}
 	event := NewEvent(EventOperationRestoreTest, EventStatusSuccess, EventSeverityInfo, "Restore verification completed.")
 	event.BackupLabel = backupLabel
 	event.Details = map[string]any{"output_redacted": strings.TrimSpace(output) != "", "table_check": "hank_core_tables", "role_check": "matched"}
 	_, appendErr := AppendEvent(w.service.LogDir, event)
+	w.finishTask(&task, TaskStatusSuccess, taskMessage(EventOperationRestoreTest, "", TaskStatusSuccess))
 	return appendErr
 }
 
@@ -415,16 +454,31 @@ func (w *Worker) RunScheduledRestoreVerification(ctx context.Context) error {
 }
 
 func (w *Worker) RunPrimaryRestore(ctx context.Context, backupLabel string) error {
+	return w.runPrimaryRestore(ctx, backupLabel, "")
+}
+
+func (w *Worker) runPrimaryRestore(ctx context.Context, backupLabel string, taskID string) error {
+	task := w.startTask(taskID, EventOperationPrimaryRestore, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Preparing primary restore", func(task *TaskStatus) {
+		task.BackupLabel = strings.TrimSpace(backupLabel)
+	})
+	fail := func(message string, err error) error {
+		w.finishTask(&task, TaskStatusFailed, message)
+		return w.recordRestoreFailure(EventOperationPrimaryRestore, message, backupLabel, err)
+	}
+
 	start := NewEvent(EventOperationPrimaryRestore, EventStatusStarted, EventSeverityWarning, "Primary database restore started.")
 	start.BackupLabel = backupLabel
 	_, _ = AppendEvent(w.service.LogDir, start)
 
+	w.updateTask(&task, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Checking encrypted backup settings")
 	if err := w.requireRepoCipherPass(); err != nil {
-		return w.recordRestoreFailure(EventOperationPrimaryRestore, "Encrypted pgBackRest repository is not configured.", backupLabel, err)
+		return fail("Encrypted pgBackRest repository is not configured.", err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Stopping cloud and PostgreSQL")
 	if err := w.compose(ctx, "stop", "cloud", "postgres"); err != nil {
-		return w.recordRestoreFailure(EventOperationPrimaryRestore, "Could not stop cloud and postgres before restore.", backupLabel, err)
+		return fail("Could not stop cloud and postgres before restore.", err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Writing primary restore safety marker")
 	if err := w.writeSafetyMarker(backupLabel); err != nil {
 		warning := NewEvent(EventOperationPrimaryRestore, EventStatusStarted, EventSeverityWarning, "Primary restore safety marker could not be written.")
 		warning.Details = map[string]any{"error": err.Error()}
@@ -437,22 +491,26 @@ func (w *Worker) RunPrimaryRestore(ctx context.Context, backupLabel string) erro
 	}
 	args = append(args, "restore")
 	_, _ = w.runner.Run(ctx, "chown", "-R", "postgres:postgres", w.pgDataPath)
+	w.updateTask(&task, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Restoring primary database")
 	output, err := w.runPgBackRest(ctx, args...)
 	if err != nil {
 		_ = w.compose(ctx, "up", "-d", "postgres", "cloud")
-		return w.recordRestoreFailure(EventOperationPrimaryRestore, "Primary database restore failed.", backupLabel, fmt.Errorf("%w: %s", err, output))
+		return fail("Primary database restore failed.", fmt.Errorf("%w: %s", err, output))
 	}
+	w.updateTask(&task, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Starting PostgreSQL")
 	if err := w.compose(ctx, "up", "-d", "postgres"); err != nil {
-		return w.recordRestoreFailure(EventOperationPrimaryRestore, "Postgres did not restart after restore.", backupLabel, err)
+		return fail("Postgres did not restart after restore.", err)
 	}
 	time.Sleep(5 * time.Second)
+	w.updateTask(&task, taskMessage(EventOperationPrimaryRestore, "", TaskStatusRunning), "Starting cloud service")
 	if err := w.compose(ctx, "up", "-d", "cloud"); err != nil {
-		return w.recordRestoreFailure(EventOperationPrimaryRestore, "Cloud did not restart after restore.", backupLabel, err)
+		return fail("Cloud did not restart after restore.", err)
 	}
 	event := NewEvent(EventOperationPrimaryRestore, EventStatusSuccess, EventSeverityInfo, "Primary database restore completed.")
 	event.BackupLabel = backupLabel
 	event.Details = map[string]any{"output_redacted": strings.TrimSpace(output) != ""}
 	_, appendErr := AppendEvent(w.service.LogDir, event)
+	w.finishTask(&task, TaskStatusSuccess, taskMessage(EventOperationPrimaryRestore, "", TaskStatusSuccess))
 	return appendErr
 }
 
@@ -462,6 +520,49 @@ func (w *Worker) recordRestoreFailure(operation string, message string, backupLa
 	event.Details = map[string]any{"error": redactAndTruncate(err.Error())}
 	_, _ = AppendEvent(w.service.LogDir, event)
 	return fmt.Errorf("%s %w", message, err)
+}
+
+func (w *Worker) startTask(taskID string, operation string, message string, step string, mutate func(*TaskStatus)) TaskStatus {
+	now := time.Now().UTC()
+	task := TaskStatus{
+		ID:        strings.TrimSpace(taskID),
+		Operation: operation,
+		Status:    TaskStatusRunning,
+		Message:   message,
+		Step:      step,
+		StartedAt: &now,
+		UpdatedAt: now,
+	}
+	if task.ID == "" {
+		task.ID = newEventID()
+	}
+	if mutate != nil {
+		mutate(&task)
+	}
+	_ = SaveActiveTask(w.service.StateDir, task)
+	return task
+}
+
+func (w *Worker) updateTask(task *TaskStatus, message string, step string) {
+	if task == nil || strings.TrimSpace(task.ID) == "" {
+		return
+	}
+	task.Status = TaskStatusRunning
+	task.Message = strings.TrimSpace(message)
+	task.Step = strings.TrimSpace(step)
+	task.UpdatedAt = time.Now().UTC()
+	_ = SaveActiveTask(w.service.StateDir, *task)
+}
+
+func (w *Worker) finishTask(task *TaskStatus, status string, message string) {
+	if task == nil || strings.TrimSpace(task.ID) == "" {
+		return
+	}
+	task.Status = strings.TrimSpace(status)
+	task.Message = strings.TrimSpace(message)
+	task.Step = ""
+	task.UpdatedAt = time.Now().UTC()
+	_ = SaveActiveTask(w.service.StateDir, *task)
 }
 
 func (w *Worker) compose(ctx context.Context, args ...string) error {

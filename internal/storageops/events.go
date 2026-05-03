@@ -13,6 +13,9 @@ import (
 )
 
 const (
+	DefaultEventLogMaxEntries = 2000
+	DefaultEventLogMaxBytes   = 5 * 1024 * 1024
+
 	EventSeverityInfo     = "info"
 	EventSeverityWarning  = "warning"
 	EventSeverityError    = "error"
@@ -80,12 +83,19 @@ func AppendEvent(logDir string, event Event) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
-	file, err := os.OpenFile(EventLogPath(logDir), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	path := EventLogPath(logDir)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 	if err != nil {
 		return Event{}, err
 	}
-	defer file.Close()
 	if _, err := file.Write(append(data, '\n')); err != nil {
+		_ = file.Close()
+		return Event{}, err
+	}
+	if err := file.Close(); err != nil {
+		return Event{}, err
+	}
+	if err := pruneEventLog(logDir, DefaultEventLogMaxEntries, DefaultEventLogMaxBytes); err != nil {
 		return Event{}, err
 	}
 	return event, nil
@@ -164,6 +174,81 @@ func normalizeSeverity(value string) string {
 
 func IsFailureEvent(event Event) bool {
 	return event.Status == EventStatusFailed || event.Severity == EventSeverityError || event.Severity == EventSeverityCritical
+}
+
+func ClearEventLog(logDir string) error {
+	if err := os.MkdirAll(dirOrDefault(logDir, DefaultLogDir), 0o777); err != nil {
+		return err
+	}
+	err := os.Remove(EventLogPath(logDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func pruneEventLog(logDir string, maxEntries int, maxBytes int64) error {
+	if maxEntries <= 0 && maxBytes <= 0 {
+		return nil
+	}
+	path := EventLogPath(logDir)
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var lines []string
+	var sizes []int64
+	var totalBytes int64
+	totalEntries := 0
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lineBytes := int64(len(line) + 1)
+		lines = append(lines, line)
+		sizes = append(sizes, lineBytes)
+		totalBytes += lineBytes
+		totalEntries++
+		if maxEntries > 0 && len(lines) > maxEntries {
+			totalBytes -= sizes[0]
+			lines = lines[1:]
+			sizes = sizes[1:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	for maxBytes > 0 && totalBytes > maxBytes && len(lines) > 1 {
+		totalBytes -= sizes[0]
+		lines = lines[1:]
+		sizes = sizes[1:]
+	}
+	if (maxEntries <= 0 || totalEntries <= maxEntries) && (maxBytes <= 0 || info.Size() <= maxBytes) {
+		return nil
+	}
+
+	tmp := path + ".tmp"
+	output := strings.Join(lines, "\n")
+	if output != "" {
+		output += "\n"
+	}
+	if err := os.WriteFile(tmp, []byte(output), 0o666); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func newEventID() string {

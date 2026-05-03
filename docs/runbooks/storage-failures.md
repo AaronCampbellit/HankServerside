@@ -32,6 +32,14 @@ Use this when `/readyz` reports storage failure, `/dashboard/storage` reports ba
 - `pg_amcheck reported a database integrity problem.`: treat this as a real database integrity incident. Stop writes if possible, run a restore test from the newest good backup, and preserve the output excerpt for diagnosis.
 - `PostgreSQL data checksums are not enabled for this cluster.`: this is expected for a database volume created before checksums were added to Compose. It is not repaired by restarting; schedule downtime and run `scripts/enable-pg-checksums.sh`.
 
+## Log Cleanup
+
+`/dashboard/storage` shows one combined storage log. Admins can clear it when they want a fresh troubleshooting run. The event file is also pruned automatically to the newest 2,000 entries and at most 5 MB so storage logs do not grow without bound. Compose also rotates service stdout/stderr logs at 10 MB per file with 3 files kept per service.
+
+## Task Status
+
+`/dashboard/storage` shows queued and running backup/restore work above the backup list. While a full backup, differential backup, restore test, or primary restore is active, the page refreshes automatically and displays the latest worker step.
+
 ## Verify
 
 - `/readyz` reports `storage: ready`

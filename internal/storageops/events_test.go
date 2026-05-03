@@ -1,8 +1,10 @@
 package storageops
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEventLogParsingAndStatus(t *testing.T) {
@@ -76,6 +78,125 @@ func TestEventRedaction(t *testing.T) {
 	for _, leaked := range []string{"db-secret", "cipher-secret", "session-token", "db-password", "raw-token"} {
 		if contains := strings.Contains(encoded, leaked); contains {
 			t.Fatalf("event leaked %q: %+v", leaked, events[0])
+		}
+	}
+}
+
+func TestStatusIncludesQueuedStorageTask(t *testing.T) {
+	stateDir := t.TempDir()
+	logDir := t.TempDir()
+	intent, err := CreateIntent(stateDir, "secret", Intent{
+		Type:       IntentTypeBackup,
+		BackupType: "full",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := LoadStatus(stateDir, logDir, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Tasks) != 1 {
+		t.Fatalf("tasks length = %d, want 1", len(status.Tasks))
+	}
+	task := status.Tasks[0]
+	if task.ID != intent.ID || task.Status != TaskStatusQueued || task.BackupType != "full" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+func TestStatusUsesActiveTaskInsteadOfDuplicatingQueuedIntent(t *testing.T) {
+	stateDir := t.TempDir()
+	logDir := t.TempDir()
+	intent, err := CreateIntent(stateDir, "secret", Intent{
+		Type:       IntentTypeBackup,
+		BackupType: "diff",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := timeNowForTest()
+	if err := SaveActiveTask(stateDir, TaskStatus{
+		ID:         intent.ID,
+		Operation:  EventOperationBackup,
+		Status:     TaskStatusRunning,
+		Message:    "Running diff backup.",
+		Step:       "Running diff backup",
+		BackupType: "diff",
+		StartedAt:  &now,
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := LoadStatus(stateDir, logDir, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Tasks) != 1 {
+		t.Fatalf("tasks length = %d, want 1: %+v", len(status.Tasks), status.Tasks)
+	}
+	if status.Tasks[0].Status != TaskStatusRunning || status.Tasks[0].Step != "Running diff backup" {
+		t.Fatalf("task = %+v", status.Tasks[0])
+	}
+}
+
+func TestClearEventLog(t *testing.T) {
+	logDir := t.TempDir()
+	if _, err := AppendEvent(logDir, Event{
+		Operation: EventOperationBackup,
+		Status:    EventStatusStarted,
+		Severity:  EventSeverityInfo,
+		Message:   "backup started",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ClearEventLog(logDir); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ListEvents(logDir, EventFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events length = %d, want 0", len(events))
+	}
+}
+
+func timeNowForTest() time.Time {
+	return time.Now().UTC()
+}
+
+func TestEventLogPruningKeepsRecentEntries(t *testing.T) {
+	logDir := t.TempDir()
+	for index := 0; index < 5; index++ {
+		if _, err := AppendEvent(logDir, Event{
+			Operation: EventOperationBackup,
+			Status:    EventStatusStarted,
+			Severity:  EventSeverityInfo,
+			Message:   fmt.Sprintf("backup %d", index),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := pruneEventLog(logDir, 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ListEvents(logDir, EventFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events length = %d, want 3", len(events))
+	}
+	for _, oldMessage := range []string{"backup 0", "backup 1"} {
+		for _, event := range events {
+			if event.Message == oldMessage {
+				t.Fatalf("old event was not pruned: %+v", events)
+			}
 		}
 	}
 }

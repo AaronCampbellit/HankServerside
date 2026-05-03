@@ -58,8 +58,20 @@ HankServerside now exposes database integrity and backup state to Hank. The serv
 - `checksum`: enabled state, last check timestamps, failure count, corruption flag, and last error
 - `backup`: target, backup list, last successful backup, and failure count
 - `restore`: last restore-test/primary-restore timestamps and pending intents
+- `tasks`: current queued/running storage tasks, plus very recent completion/failure state
 - `events`: recent storage log events
 - `failures`: recent backup/checksum/restore failures
+
+Each task has:
+
+- `id`
+- `operation`: `backup`, `restore_test`, or `primary_restore`
+- `status`: `queued`, `running`, `success`, or `failed`
+- `message`
+- optional `step`
+- optional `backup_type`
+- optional `backup_label`
+- optional `queued_at`, `started_at`, and `updated_at`
 
 Each event has:
 

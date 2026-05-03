@@ -29,6 +29,10 @@ func (s *Service) Events(filter EventFilter) ([]Event, error) {
 	return ListEvents(s.LogDir, filter)
 }
 
+func (s *Service) ClearEvents() error {
+	return ClearEventLog(s.LogDir)
+}
+
 func (s *Service) Config() (Config, error) {
 	return LoadConfig(s.StateDir)
 }

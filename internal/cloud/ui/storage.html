@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote Storage</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260502-left-sidebar">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260503-storage-tasks">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -110,6 +110,11 @@
             <button id="backup-full-button" type="button">Run Full Backup</button>
             <button id="restore-test-button" type="button" class="secondary">Test Restore</button>
           </div>
+          <div class="panel-head compact-head">
+            <h3>Task Status</h3>
+            <span id="task-pill" class="pill">Idle</span>
+          </div>
+          <div id="task-output" class="card-list empty-state">No backup or restore task running.</div>
           <div id="backup-output" class="card-list empty-state">No backups reported yet.</div>
         </section>
 
@@ -135,25 +140,20 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Failure Log</h2>
-            <span id="failure-count" class="pill">0 failures</span>
+            <h2>Storage Log</h2>
+            <span id="log-count" class="pill">0 logs</span>
           </div>
-          <div id="failure-output" class="card-list empty-state">No backup or checksum failures reported.</div>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Recent Log</h2>
-            <span class="pill">Latest</span>
+          <div class="actions wrap">
+            <button id="clear-logs-button" type="button" class="secondary">Clear Logs</button>
           </div>
-          <div id="events-output" class="card-list empty-state">No storage events reported.</div>
+          <div id="log-output" class="card-list empty-state">No storage logs reported.</div>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/storage.js" defer></script>
+    <script src="/assets/storage.js?v=20260503-storage-tasks" defer></script>
     <script src="/assets/admin-nav.js?v=20260502-left-sidebar" defer></script>
   </body>
 </html>
