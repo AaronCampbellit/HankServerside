@@ -11,14 +11,26 @@ const els = {
   checksumPill: document.getElementById("checksum-pill"),
   checksumOutput: document.getElementById("checksum-output"),
   backupPill: document.getElementById("backup-pill"),
+  settingsSummary: document.getElementById("settings-summary"),
+  backupScheduleSummary: document.getElementById("backup-schedule-summary"),
+  healthScheduleSummary: document.getElementById("health-schedule-summary"),
   configForm: document.getElementById("config-form"),
   targetPath: document.getElementById("target-path"),
+  fullDay: document.getElementById("full-day"),
+  fullTime: document.getElementById("full-time"),
   fullCron: document.getElementById("full-cron"),
+  diffDays: document.getElementById("diff-days"),
+  diffTime: document.getElementById("diff-time"),
   diffCron: document.getElementById("diff-cron"),
-  checksumSeconds: document.getElementById("checksum-seconds"),
+  checksumMinutes: document.getElementById("checksum-minutes"),
   retentionFull: document.getElementById("retention-full"),
+  amcheckDay: document.getElementById("amcheck-day"),
+  amcheckTime: document.getElementById("amcheck-time"),
   amcheckCron: document.getElementById("amcheck-cron"),
+  restoreVerificationDay: document.getElementById("restore-verification-day"),
+  restoreVerificationTime: document.getElementById("restore-verification-time"),
   restoreVerificationCron: document.getElementById("restore-verification-cron"),
+  advancedSchedule: document.getElementById("advanced-schedule"),
   refreshButton: document.getElementById("refresh-button"),
   backupDiffButton: document.getElementById("backup-diff-button"),
   backupFullButton: document.getElementById("backup-full-button"),
@@ -72,6 +84,119 @@ function formatBytes(value) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+const dayNames = {
+  "*": "Every day",
+  "0": "Sunday",
+  "1": "Monday",
+  "2": "Tuesday",
+  "3": "Wednesday",
+  "4": "Thursday",
+  "5": "Friday",
+  "6": "Saturday",
+  "7": "Sunday",
+  "1-5": "Monday-Friday",
+  "1-6": "Monday-Saturday",
+};
+
+function padTimePart(value) {
+  return String(Number(value || 0)).padStart(2, "0");
+}
+
+function formatTimeForInput(hour, minute) {
+  return `${padTimePart(hour)}:${padTimePart(minute)}`;
+}
+
+function formatTimeForDisplay(timeValue) {
+  if (!timeValue) return "unknown time";
+  const [hour, minute] = timeValue.split(":").map((part) => Number(part));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "unknown time";
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function parseCronSchedule(spec, fallbackSpec = "") {
+  const value = String(spec || fallbackSpec || "").trim();
+  const fields = value.split(/\s+/);
+  if (fields.length !== 5 || fields[2] !== "*" || fields[3] !== "*") {
+    return { spec: value, days: "custom", time: "", custom: true };
+  }
+  const minute = Number(fields[0]);
+  const hour = Number(fields[1]);
+  if (!Number.isInteger(minute) || !Number.isInteger(hour) || minute < 0 || minute > 59 || hour < 0 || hour > 23) {
+    return { spec: value, days: "custom", time: "", custom: true };
+  }
+  return {
+    spec: value,
+    days: fields[4] === "7" ? "0" : fields[4],
+    time: formatTimeForInput(hour, minute),
+    custom: false,
+  };
+}
+
+function selectHasValue(select, value) {
+  return Array.from(select.options).some((option) => option.value === value);
+}
+
+function applyScheduleControl(select, timeInput, rawInput, spec, fallbackSpec) {
+  const schedule = parseCronSchedule(spec, fallbackSpec);
+  rawInput.value = schedule.spec || fallbackSpec;
+  timeInput.value = schedule.time || parseCronSchedule(fallbackSpec).time;
+  if (!schedule.custom && selectHasValue(select, schedule.days)) {
+    select.value = schedule.days;
+  } else {
+    select.value = "custom";
+    els.advancedSchedule.open = true;
+  }
+  syncRawScheduleField(select, timeInput, rawInput);
+}
+
+function syncRawScheduleField(select, timeInput, rawInput) {
+  const isCustom = select.value === "custom";
+  timeInput.disabled = isCustom;
+  rawInput.disabled = !isCustom;
+  if (isCustom) return;
+  const [hour = "0", minute = "0"] = String(timeInput.value || "02:00").split(":");
+  rawInput.value = `${Number(minute)} ${Number(hour)} * * ${select.value}`;
+}
+
+function scheduleFromControls(select, timeInput, rawInput, fallbackSpec) {
+  if (select.value === "custom") {
+    return rawInput.value.trim() || fallbackSpec;
+  }
+  syncRawScheduleField(select, timeInput, rawInput);
+  return rawInput.value.trim();
+}
+
+function describeSchedule(select, timeInput, rawInput) {
+  if (select.value === "custom") {
+    return rawInput.value.trim() || "Custom";
+  }
+  return `${dayNames[select.value] || select.value} at ${formatTimeForDisplay(timeInput.value)}`;
+}
+
+function updateScheduleSummaries() {
+  els.settingsSummary.textContent = `${describeSchedule(els.fullDay, els.fullTime, els.fullCron)} full backup. ${describeSchedule(els.diffDays, els.diffTime, els.diffCron)} diff backup.`;
+  els.backupScheduleSummary.textContent = `${describeSchedule(els.fullDay, els.fullTime, els.fullCron)} / ${describeSchedule(els.diffDays, els.diffTime, els.diffCron)}`;
+  els.healthScheduleSummary.textContent = `Every ${els.checksumMinutes.value || 15} minutes / ${describeSchedule(els.restoreVerificationDay, els.restoreVerificationTime, els.restoreVerificationCron)}`;
+}
+
+function bindScheduleControl(select, timeInput, rawInput) {
+  const sync = () => {
+    syncRawScheduleField(select, timeInput, rawInput);
+    if (select.value === "custom") {
+      els.advancedSchedule.open = true;
+    }
+    updateScheduleSummaries();
+  };
+  select.addEventListener("change", sync);
+  timeInput.addEventListener("input", sync);
+  rawInput.addEventListener("input", updateScheduleSummaries);
+}
+
+function minutesFromSeconds(seconds) {
+  const value = Number(seconds || 900);
+  return Math.max(1, Math.round(value / 60));
+}
+
 function showToast(message, isError = false) {
   els.toast.hidden = false;
   els.toast.textContent = message;
@@ -117,12 +242,13 @@ function renderStatus() {
 
   els.backupPill.textContent = target.type || "posix";
   els.targetPath.value = target.path || "/var/lib/pgbackrest";
-  els.fullCron.value = schedule.full_backup_cron || "0 2 * * 0";
-  els.diffCron.value = schedule.differential_backup_cron || "0 2 * * 1-6";
-  els.checksumSeconds.value = schedule.checksum_interval_seconds || 900;
+  applyScheduleControl(els.fullDay, els.fullTime, els.fullCron, schedule.full_backup_cron, "0 2 * * 0");
+  applyScheduleControl(els.diffDays, els.diffTime, els.diffCron, schedule.differential_backup_cron, "0 2 * * 1-6");
+  els.checksumMinutes.value = minutesFromSeconds(schedule.checksum_interval_seconds || 900);
   els.retentionFull.value = schedule.retention_full || 2;
-  els.amcheckCron.value = schedule.amcheck_cron || "30 3 * * 0";
-  els.restoreVerificationCron.value = schedule.restore_verification_cron || "0 4 * * 0";
+  applyScheduleControl(els.amcheckDay, els.amcheckTime, els.amcheckCron, schedule.amcheck_cron, "30 3 * * 0");
+  applyScheduleControl(els.restoreVerificationDay, els.restoreVerificationTime, els.restoreVerificationCron, schedule.restore_verification_cron, "0 4 * * 0");
+  updateScheduleSummaries();
   els.restoreConfirmation.placeholder = config.restore?.confirmation_phrase || "RESTORE HANK DATABASE";
 
   renderBackups(backup.backups || []);
@@ -281,12 +407,12 @@ async function saveConfig(event) {
     },
     schedule: {
       ...(current.schedule || {}),
-      full_backup_cron: els.fullCron.value.trim(),
-      differential_backup_cron: els.diffCron.value.trim(),
-      checksum_interval_seconds: Number(els.checksumSeconds.value || 900),
+      full_backup_cron: scheduleFromControls(els.fullDay, els.fullTime, els.fullCron, "0 2 * * 0"),
+      differential_backup_cron: scheduleFromControls(els.diffDays, els.diffTime, els.diffCron, "0 2 * * 1-6"),
+      checksum_interval_seconds: Number(els.checksumMinutes.value || 15) * 60,
       retention_full: Number(els.retentionFull.value || 2),
-      amcheck_cron: els.amcheckCron.value.trim(),
-      restore_verification_cron: els.restoreVerificationCron.value.trim(),
+      amcheck_cron: scheduleFromControls(els.amcheckDay, els.amcheckTime, els.amcheckCron, "30 3 * * 0"),
+      restore_verification_cron: scheduleFromControls(els.restoreVerificationDay, els.restoreVerificationTime, els.restoreVerificationCron, "0 4 * * 0"),
       restore_verification_enabled: true,
     },
   };
@@ -373,6 +499,11 @@ async function hydrate() {
 els.logoutButton.addEventListener("click", logout);
 els.refreshButton.addEventListener("click", () => loadStatus().then(() => showToast("Storage status refreshed.")).catch((error) => showToast(error.message, true)));
 els.configForm.addEventListener("submit", saveConfig);
+bindScheduleControl(els.fullDay, els.fullTime, els.fullCron);
+bindScheduleControl(els.diffDays, els.diffTime, els.diffCron);
+bindScheduleControl(els.amcheckDay, els.amcheckTime, els.amcheckCron);
+bindScheduleControl(els.restoreVerificationDay, els.restoreVerificationTime, els.restoreVerificationCron);
+els.checksumMinutes.addEventListener("input", updateScheduleSummaries);
 els.backupDiffButton.addEventListener("click", () => requestBackup("diff"));
 els.backupFullButton.addEventListener("click", () => requestBackup("full"));
 els.restoreTestButton.addEventListener("click", requestRestoreTest);
