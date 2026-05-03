@@ -80,6 +80,7 @@ type assistantIntentKind string
 
 const (
 	assistantIntentGeneral            assistantIntentKind = "general"
+	assistantIntentNotesList          assistantIntentKind = "notes.list"
 	assistantIntentNotesSearch        assistantIntentKind = "notes.search"
 	assistantIntentNotesAppend        assistantIntentKind = "notes.append"
 	assistantIntentFilesSearch        assistantIntentKind = "files.search"
@@ -787,70 +788,65 @@ func (s *Server) touchAssistantSessionAndMemory(ctx context.Context, session dom
 
 func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
-	intent := classifyAssistantIntent(prompt)
-	s.refreshAssistantIndex(ctx, home, membership, auth, settings, intent)
-
-	switch intent.Kind {
-	case assistantIntentFilesSearch:
-		if !settings.FilesEnabled {
-			return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
-		}
-		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
-			if errors.Is(err, errFeaturePermissionDenied) {
-				return assistantMessageContent{Text: "File access is disabled for your Home membership right now."}, nil
-			}
-			return assistantMessageContent{}, err
-		}
-		return s.answerFilePrompt(ctx, home, settings, prompt)
-	case assistantIntentNotesAppend:
-		if !settings.ProfileNotesEnabled && !settings.HomeNotesEnabled {
-			return assistantMessageContent{Text: "Notes access is turned off in HankAI settings."}, nil
-		}
-		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
-			if errors.Is(err, errFeaturePermissionDenied) {
-				return assistantMessageContent{Text: "Notes access is disabled for your Home membership right now."}, nil
-			}
-			return assistantMessageContent{}, err
-		}
-		return s.answerAppendNotePrompt(ctx, home, auth, settings, prompt)
-	case assistantIntentNotesSearch:
-		if !settings.ProfileNotesEnabled && !settings.HomeNotesEnabled {
-			return assistantMessageContent{Text: "Notes access is turned off in HankAI settings."}, nil
-		}
-		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
-			if errors.Is(err, errFeaturePermissionDenied) {
-				return assistantMessageContent{Text: "Notes access is disabled for your Home membership right now."}, nil
-			}
-			return assistantMessageContent{}, err
-		}
-		return s.answerNoteSearchPrompt(ctx, home, auth, settings, prompt)
-	case assistantIntentHomeAssistantQuery:
-		if !settings.HomeAssistantEnabled {
-			return assistantMessageContent{Text: "Home Assistant access is turned off in HankAI settings."}, nil
-		}
-		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureHomeAssistant); err != nil {
-			if errors.Is(err, errFeaturePermissionDenied) {
-				return assistantMessageContent{Text: "Home Assistant access is disabled for your Home membership right now."}, nil
-			}
-			return assistantMessageContent{}, err
-		}
-		if isHomeAssistantMutationPrompt(prompt) {
-			return assistantMessageContent{
-				Text: "I can look up Home Assistant state right now, but changing devices still needs a confirmed control workflow before HankAI can run it.",
-			}, nil
-		}
-		return s.answerHomeAssistantPrompt(ctx, home, prompt)
-	case assistantIntentProjectDocs:
-		if !settings.ProjectDocsEnabled {
-			return assistantMessageContent{Text: "Project docs access is turned off in HankAI settings."}, nil
-		}
-		return s.answerProjectDocPrompt(ctx, home, auth, settings, prompt)
-	default:
-		if !assistantSettingsHasEnabledSources(settings) {
-			return assistantMessageContent{Text: "All HankAI sources are turned off in AI Settings."}, nil
-		}
-		return s.answerRetrievedPrompt(ctx, home, membership, auth, settings, prompt)
+	tool, intent := resolveAssistantTool(prompt)
+	runtime := assistantToolRuntime{
+		Home:       home,
+		Membership: membership,
+		Auth:       auth,
+		Settings:   settings,
+		Prompt:     prompt,
 	}
+	s.refreshAssistantIndex(ctx, runtime, tool, intent)
+	if tool.Execute == nil {
+		return assistantMessageContent{
+			Text: "This HankAI tool is registered but does not have an executor yet.",
+		}, nil
+	}
+	return tool.Execute(ctx, s, runtime, intent)
+}
+
+func (s *Server) answerNoteListPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings) (assistantMessageContent, error) {
+	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID, settings)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	notes = uniqueAssistantNotes(notes)
+	if len(notes) == 0 {
+		return assistantMessageContent{
+			Text: "I couldn't find any notes you can access in Hank Remote yet.",
+		}, nil
+	}
+	sort.Slice(notes, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(notes[i].Title))
+		right := strings.ToLower(strings.TrimSpace(notes[j].Title))
+		if left == right {
+			return notes[i].UpdatedAt.After(notes[j].UpdatedAt)
+		}
+		return left < right
+	})
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("You have access to %d notes:", len(notes)))
+	cards := make([]assistantResultCard, 0, min(len(notes), 12))
+	for _, note := range notes {
+		title := firstNonBlank(note.Title, note.NoteID, "Untitled Note")
+		builder.WriteString("\n- ")
+		builder.WriteString(title)
+		builder.WriteString(" (")
+		builder.WriteString(noteAccessLabel(note))
+		builder.WriteString(")")
+		if len(cards) < 12 {
+			cards = append(cards, assistantResultCard{
+				Kind:        "note",
+				Title:       title,
+				Summary:     notePreview(note.Content),
+				ActionTitle: "Open in Notes",
+				NoteID:      note.NoteID,
+				SearchText:  title,
+			})
+		}
+	}
+	return assistantMessageContent{Text: builder.String(), Cards: cards}, nil
 }
 
 func (s *Server) answerNoteSearchPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
@@ -892,17 +888,18 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
-	ranked := rankScoredNotes(notes, noteHint)
+	matchHint := noteSearchQuery(noteHint)
+	ranked := rankScoredNotes(notes, matchHint)
 	if len(ranked) == 0 {
 		return assistantMessageContent{
-			Text: fmt.Sprintf("I couldn't find a shared note matching `%s`.", noteHint),
+			Text: fmt.Sprintf("I couldn't find a shared note matching `%s`.", matchHint),
 		}, nil
 	}
 
 	target := ranked[0].Note
 	if needsNoteAppendConfirmation(ranked) {
 		return assistantMessageContent{
-			Text: fmt.Sprintf("I found more than one likely note for `%s`. Confirm before I add `%s` to `%s`.", noteHint, itemText, target.Title),
+			Text: fmt.Sprintf("I found more than one likely note for `%s`. Confirm before I add `%s` to `%s`.", matchHint, itemText, target.Title),
 			Cards: []assistantResultCard{
 				{
 					Kind:        "note",
@@ -910,7 +907,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 					Summary:     notePreview(target.Content),
 					ActionTitle: "Review in Notes",
 					NoteID:      target.NoteID,
-					SearchText:  noteHint,
+					SearchText:  matchHint,
 				},
 			},
 			Meta: map[string]interface{}{
@@ -921,7 +918,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 						TargetNoteKey: target.NoteID,
 						TargetTitle:   target.Title,
 						AppendedText:  itemText,
-						MatchHint:     noteHint,
+						MatchHint:     matchHint,
 						Confirmation:  fmt.Sprintf("Confirm adding `%s` to `%s`.", itemText, target.Title),
 					},
 				},
@@ -1193,6 +1190,30 @@ func (s *Server) assistantVisibleNotes(ctx context.Context, homeID string, userI
 		notes = append(notes, homeNotes...)
 	}
 	return notes, nil
+}
+
+func uniqueAssistantNotes(notes []domain.UserNote) []domain.UserNote {
+	seen := map[string]bool{}
+	unique := make([]domain.UserNote, 0, len(notes))
+	for _, note := range notes {
+		key := firstNonBlank(note.ID, note.NoteID)
+		if key == "" {
+			key = fmt.Sprintf("%s:%s:%s", note.OwnerUserID, note.HomeID, note.Title)
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, note)
+	}
+	return unique
+}
+
+func noteAccessLabel(note domain.UserNote) string {
+	if strings.TrimSpace(note.HomeID) != "" {
+		return "shared"
+	}
+	return "personal"
 }
 
 func (s *Server) filterAssistantContexts(ctx context.Context, home domain.Home, membership domain.HomeMembership, userID string, settings domain.AssistantSettings, contexts []domain.AssistantRetrievedContext, includeProjectDocs bool) ([]domain.AssistantRetrievedContext, error) {
@@ -1698,22 +1719,8 @@ func assistantSessionTitle(prompt string) string {
 }
 
 func classifyAssistantIntent(prompt string) assistantIntent {
-	trimmed := strings.TrimSpace(prompt)
-	lowered := strings.ToLower(trimmed)
-	switch {
-	case isNoteAppendPrompt(trimmed):
-		return assistantIntent{Kind: assistantIntentNotesAppend, Query: noteSearchQuery(trimmed)}
-	case isProjectDocsPrompt(lowered):
-		return assistantIntent{Kind: assistantIntentProjectDocs, Query: trimmed}
-	case isHomeAssistantPrompt(lowered):
-		return assistantIntent{Kind: assistantIntentHomeAssistantQuery, Query: homeAssistantQueryDisplay(trimmed)}
-	case isNoteSearchPrompt(lowered):
-		return assistantIntent{Kind: assistantIntentNotesSearch, Query: noteSearchQuery(trimmed)}
-	case isFileSearchPrompt(lowered):
-		return assistantIntent{Kind: assistantIntentFilesSearch, Query: fileQuery(trimmed)}
-	default:
-		return assistantIntent{Kind: assistantIntentGeneral, Query: trimmed}
-	}
+	_, intent := resolveAssistantTool(prompt)
+	return intent
 }
 
 func isNoteAppendPrompt(prompt string) bool {
@@ -1797,6 +1804,20 @@ func isHomeAssistantMutationPrompt(prompt string) bool {
 		}
 	}
 	return false
+}
+
+func isNoteListPrompt(lowered string) bool {
+	if !(strings.Contains(lowered, "note") || strings.Contains(lowered, "notes")) {
+		return false
+	}
+	return strings.Contains(lowered, "what notes") ||
+		strings.Contains(lowered, "which notes") ||
+		strings.Contains(lowered, "all notes") ||
+		strings.Contains(lowered, "list notes") ||
+		strings.Contains(lowered, "list my notes") ||
+		strings.Contains(lowered, "notes do i have") ||
+		strings.Contains(lowered, "notes can i access") ||
+		strings.Contains(lowered, "notes are there")
 }
 
 func isNoteSearchPrompt(lowered string) bool {
@@ -1900,10 +1921,20 @@ func extractAppendIntent(prompt string) (string, string) {
 	}
 	rest := strings.TrimSpace(trimmed[prefixLength:])
 	loweredRest := strings.ToLower(rest)
-	if index := strings.Index(loweredRest, " to "); index >= 0 {
-		return strings.TrimSpace(strings.TrimSuffix(rest[:index], ".")), strings.TrimSpace(strings.TrimSuffix(rest[index+len(" to "):], "."))
+	for _, delimiter := range []string{" to the ", " to ", " into the ", " into ", " onto the ", " onto ", " the the "} {
+		if index := strings.Index(loweredRest, delimiter); index >= 0 {
+			return strings.TrimSpace(strings.TrimSuffix(rest[:index], ".")), cleanNoteHint(rest[index+len(delimiter):])
+		}
 	}
 	return trimmed, ""
+}
+
+func cleanNoteHint(value string) string {
+	value = strings.TrimSpace(strings.TrimSuffix(value, "."))
+	if strings.HasPrefix(strings.ToLower(value), "the ") {
+		value = strings.TrimSpace(value[len("the "):])
+	}
+	return strings.TrimSpace(value)
 }
 
 func noteSearchQuery(prompt string) string {
@@ -1940,7 +1971,7 @@ func fileQuery(prompt string) string {
 func stripAssistantSearchPrefix(prompt string) string {
 	trimmed := strings.TrimSpace(prompt)
 	lowered := strings.ToLower(trimmed)
-	prefixes := []string{"search for ", "look for ", "show me ", "where is ", "where are ", "find ", "search ", "open ", "show ", "locate ", "get "}
+	prefixes := []string{"can you find all ", "can you find ", "can you show me ", "can you show ", "please find all ", "please find ", "search for ", "look for ", "show me ", "where is ", "where are ", "find all ", "find ", "search ", "open ", "show ", "locate ", "get "}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(lowered, prefix) {
 			return strings.TrimSpace(trimmed[len(prefix):])
@@ -1988,7 +2019,7 @@ func parseHomeAssistantQuery(prompt string) assistantHomeAssistantQuery {
 	}
 	stopWords := map[string]bool{
 		"what": true, "which": true, "show": true, "list": true, "find": true,
-		"me": true, "all": true, "any": true, "are": true, "is": true,
+		"can": true, "you": true, "please": true, "me": true, "all": true, "any": true, "are": true, "is": true,
 		"there": true, "the": true, "a": true, "an": true, "in": true,
 		"of": true, "for": true, "home": true, "assistant": true, "hass": true,
 		"entity": true, "entities": true, "entitied": true, "currently": true,
@@ -2017,7 +2048,7 @@ func homeAssistantQueryDisplay(prompt string) string {
 	query := stripAssistantSearchPrefix(prompt)
 	query = removeQueryWords(query, map[string]bool{
 		"what": true, "which": true, "show": true, "list": true, "find": true,
-		"me": true, "all": true, "any": true, "are": true, "is": true,
+		"can": true, "you": true, "please": true, "me": true, "all": true, "any": true, "are": true, "is": true,
 		"there": true, "the": true, "a": true, "an": true, "in": true,
 		"of": true, "for": true, "home": true, "assistant": true, "hass": true,
 		"entity": true, "entities": true, "entitied": true, "currently": true,

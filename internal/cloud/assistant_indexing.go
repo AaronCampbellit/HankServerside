@@ -14,32 +14,21 @@ import (
 
 const assistantConversationSourceType = "assistant_conversation"
 
-func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, intent assistantIntent) {
+func (s *Server) refreshAssistantIndex(ctx context.Context, runtime assistantToolRuntime, tool assistantTool, intent assistantIntent) {
+	settings := runtime.Settings
 	settings = normalizeAssistantSettings(settings)
 	if settings.ProfileNotesEnabled || settings.HomeNotesEnabled {
-		if err := s.indexAssistantNotes(ctx, home, membership, auth, settings); err != nil {
+		if err := s.indexAssistantNotes(ctx, runtime.Home, runtime.Membership, runtime.Auth, settings); err != nil {
 			s.logger.Warn("assistant note indexing failed", "error", err)
 		}
 	}
-	if settings.ProjectDocsEnabled && intent.Kind == assistantIntentProjectDocs {
-		if err := s.indexAssistantProjectDocs(ctx, home.ID, auth.User.ID); err != nil {
-			s.logger.Warn("assistant project docs indexing failed", "error", err)
-		}
-	}
 	if settings.CalendarEnabled {
-		if err := s.indexAssistantCalendarSnapshot(ctx, home.ID, auth.User.ID); err != nil {
+		if err := s.indexAssistantCalendarSnapshot(ctx, runtime.Home.ID, runtime.Auth.User.ID); err != nil {
 			s.logger.Warn("assistant calendar indexing failed", "error", err)
 		}
 	}
-	if settings.HomeAssistantEnabled && intent.Kind == assistantIntentHomeAssistantQuery {
-		if err := s.indexAssistantHomeAssistantStates(ctx, home, membership, auth); err != nil {
-			s.logger.Warn("assistant Home Assistant indexing failed", "error", err)
-		}
-	}
-	if settings.FilesEnabled && intent.Kind == assistantIntentFilesSearch {
-		if err := s.indexAssistantFiles(ctx, home, membership, auth); err != nil {
-			s.logger.Warn("assistant file indexing failed", "error", err)
-		}
+	if tool.RefreshIndex != nil {
+		tool.RefreshIndex(ctx, s, runtime, intent)
 	}
 }
 
