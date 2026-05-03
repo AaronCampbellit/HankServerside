@@ -2,7 +2,7 @@ FROM postgres:17-alpine AS pgvector-builder
 
 ARG PGVECTOR_VERSION=v0.8.1
 
-RUN apk add --no-cache build-base git \
+RUN apk add --no-cache build-base git clang19 llvm19-dev \
 	&& git clone --branch "${PGVECTOR_VERSION}" --depth 1 https://github.com/pgvector/pgvector.git /tmp/pgvector \
 	&& make -C /tmp/pgvector \
 	&& make -C /tmp/pgvector install
