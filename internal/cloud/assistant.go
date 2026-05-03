@@ -863,6 +863,33 @@ func (s *Server) answerNoteSearchPrompt(ctx context.Context, home domain.Home, a
 	}
 
 	top := results[0]
+	if assistantPromptWantsAll(strings.ToLower(prompt)) && len(results) > 1 {
+		limit := min(len(results), 12)
+		var builder strings.Builder
+		builder.WriteString(fmt.Sprintf("I found %d matching notes for `%s`:", len(results), query))
+		cards := make([]assistantResultCard, 0, limit)
+		for _, note := range results[:limit] {
+			title := firstNonBlank(note.Title, note.NoteID, "Untitled Note")
+			builder.WriteString("\n- ")
+			builder.WriteString(title)
+			builder.WriteString(" (")
+			builder.WriteString(noteAccessLabel(note))
+			builder.WriteString(")")
+			cards = append(cards, assistantResultCard{
+				Kind:        "note",
+				Title:       title,
+				Summary:     notePreview(note.Content),
+				ActionTitle: "Open in Notes",
+				NoteID:      note.NoteID,
+				SearchText:  query,
+			})
+		}
+		if remaining := len(results) - limit; remaining > 0 {
+			builder.WriteString(fmt.Sprintf("\n- and %d more", remaining))
+		}
+		return assistantMessageContent{Text: builder.String(), Cards: cards}, nil
+	}
+
 	return assistantMessageContent{
 		Text: fmt.Sprintf("I found `%s` in Notes.", top.Title),
 		Cards: []assistantResultCard{
@@ -970,14 +997,35 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, setting
 	settings = normalizeAssistantSettings(settings)
 	query := fileQuery(prompt)
 	queryEmbedding, _, _ := s.embedAssistantText(ctx, "", query)
-	if contexts, err := s.store.SearchAssistantContext(ctx, home.ID, "", query, queryEmbedding, 5); err == nil {
+	wantsAll := assistantPromptWantsAll(strings.ToLower(prompt))
+	contextLimit := 5
+	if wantsAll {
+		contextLimit = 25
+	}
+	if contexts, err := s.store.SearchAssistantContext(ctx, home.ID, "", query, queryEmbedding, contextLimit); err == nil {
+		fileCards := make([]assistantResultCard, 0, min(len(contexts), 12))
 		for _, contextItem := range contexts {
 			if contextItem.SourceType == "file" && assistantSettingsAllowSource(settings, contextItem.SourceType) {
+				fileCards = append(fileCards, assistantResultCardFromContext(contextItem))
+			}
+			if !wantsAll && len(fileCards) >= 1 {
+				break
+			}
+			if len(fileCards) >= 12 {
+				break
+			}
+		}
+		if len(fileCards) > 0 {
+			if wantsAll {
 				return assistantMessageContent{
-					Text:  fmt.Sprintf("I found the closest SMB match for `%s`.", query),
-					Cards: []assistantResultCard{assistantResultCardFromContext(contextItem)},
+					Text:  fmt.Sprintf("I found %d SMB matches for `%s`.", len(fileCards), query),
+					Cards: fileCards,
 				}, nil
 			}
+			return assistantMessageContent{
+				Text:  fmt.Sprintf("I found the closest SMB match for `%s`.", query),
+				Cards: fileCards[:1],
+			}, nil
 		}
 	}
 	results, err := s.searchFiles(ctx, home.ID, query)
@@ -993,6 +1041,23 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, setting
 	}
 
 	best := results[0]
+	if wantsAll && len(results) > 1 {
+		limit := min(len(results), 12)
+		cards := make([]assistantResultCard, 0, limit)
+		for _, item := range results[:limit] {
+			cards = append(cards, assistantResultCard{
+				Kind:        "file",
+				Title:       item.Name,
+				Summary:     item.Path,
+				ActionTitle: "Open in File Server",
+				Path:        item.Path,
+			})
+		}
+		return assistantMessageContent{
+			Text:  fmt.Sprintf("I found %d SMB matches for `%s`.", len(results), query),
+			Cards: cards,
+		}, nil
+	}
 	return assistantMessageContent{
 		Text: fmt.Sprintf("I found the closest SMB match for `%s`.", query),
 		Cards: []assistantResultCard{
@@ -1038,6 +1103,9 @@ func (s *Server) answerHomeAssistantPrompt(ctx context.Context, home domain.Home
 	}
 
 	limit := min(len(matches), 12)
+	if query.WantsAll {
+		limit = min(len(matches), 50)
+	}
 	var builder strings.Builder
 	if query.OnlyOn {
 		builder.WriteString("These Home Assistant entities are on:")
@@ -1993,6 +2061,20 @@ func removeQueryWords(query string, stopWords map[string]bool) string {
 	return strings.TrimSpace(strings.Join(filtered, " "))
 }
 
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
 func assistantNoteSourceType(note domain.UserNote) string {
 	if strings.TrimSpace(note.HomeID) != "" {
 		return "shared_note"
@@ -2001,10 +2083,11 @@ func assistantNoteSourceType(note domain.UserNote) string {
 }
 
 type assistantHomeAssistantQuery struct {
-	OnlyOn  bool
-	Domain  string
-	Terms   []string
-	Display string
+	OnlyOn   bool
+	Domain   string
+	Terms    []string
+	Display  string
+	WantsAll bool
 }
 
 func parseHomeAssistantQuery(prompt string) assistantHomeAssistantQuery {
@@ -2016,6 +2099,7 @@ func parseHomeAssistantQuery(prompt string) assistantHomeAssistantQuery {
 			strings.Contains(lowered, " is on") ||
 			strings.Contains(lowered, " currently on") ||
 			strings.HasSuffix(lowered, " on"),
+		WantsAll: assistantPromptWantsAll(lowered),
 	}
 	stopWords := map[string]bool{
 		"what": true, "which": true, "show": true, "list": true, "find": true,
@@ -2025,17 +2109,22 @@ func parseHomeAssistantQuery(prompt string) assistantHomeAssistantQuery {
 		"entity": true, "entities": true, "entitied": true, "currently": true,
 		"on": true, "state": true, "states": true,
 	}
+	domainCandidates := make([]string, 0, 1)
 	for _, token := range tokens {
 		if domain, ok := homeAssistantDomainToken(token); ok {
-			if query.Domain == "" {
-				query.Domain = domain
-			}
+			domainCandidates = append(domainCandidates, domain)
+			query.Terms = append(query.Terms, domain)
 			continue
 		}
 		if stopWords[token] {
 			continue
 		}
 		query.Terms = append(query.Terms, token)
+	}
+	query.Terms = uniqueStrings(query.Terms)
+	if len(domainCandidates) > 0 && len(query.Terms) == len(domainCandidates) {
+		query.Domain = domainCandidates[0]
+		query.Terms = nil
 	}
 	query.Display = homeAssistantQueryDisplay(prompt)
 	if query.Display == "" {
@@ -2055,6 +2144,16 @@ func homeAssistantQueryDisplay(prompt string) string {
 		"on": true, "state": true, "states": true,
 	})
 	return strings.TrimSpace(query)
+}
+
+func assistantPromptWantsAll(lowered string) bool {
+	return strings.Contains(lowered, " all ") ||
+		strings.HasPrefix(lowered, "all ") ||
+		strings.Contains(lowered, " every ") ||
+		strings.HasPrefix(lowered, "every ") ||
+		strings.Contains(lowered, "what ") ||
+		strings.Contains(lowered, "which ") ||
+		strings.Contains(lowered, "there")
 }
 
 func homeAssistantDomainToken(token string) (string, bool) {
@@ -2081,7 +2180,11 @@ func homeAssistantDomainToken(token string) (string, bool) {
 }
 
 func matchingHomeAssistantStates(states []protocol.HomeAssistantState, query assistantHomeAssistantQuery) []protocol.HomeAssistantState {
-	matches := make([]protocol.HomeAssistantState, 0, len(states))
+	type scoredState struct {
+		State protocol.HomeAssistantState
+		Score int
+	}
+	scored := make([]scoredState, 0, len(states))
 	for _, state := range states {
 		if query.OnlyOn && strings.ToLower(strings.TrimSpace(state.State)) != "on" {
 			continue
@@ -2089,14 +2192,22 @@ func matchingHomeAssistantStates(states []protocol.HomeAssistantState, query ass
 		if query.Domain != "" && !homeAssistantDomainMatches(state.EntityID, query.Domain) {
 			continue
 		}
-		if !homeAssistantStateMatchesTerms(state, query.Terms) {
+		score := homeAssistantStateMatchScore(state, query)
+		if score <= 0 {
 			continue
 		}
-		matches = append(matches, state)
+		scored = append(scored, scoredState{State: state, Score: score})
 	}
-	sort.Slice(matches, func(i, j int) bool {
-		return strings.ToLower(homeAssistantStateLabel(matches[i])) < strings.ToLower(homeAssistantStateLabel(matches[j]))
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].Score == scored[j].Score {
+			return strings.ToLower(homeAssistantStateLabel(scored[i].State)) < strings.ToLower(homeAssistantStateLabel(scored[j].State))
+		}
+		return scored[i].Score > scored[j].Score
 	})
+	matches := make([]protocol.HomeAssistantState, 0, len(scored))
+	for _, item := range scored {
+		matches = append(matches, item.State)
+	}
 	return matches
 }
 
@@ -2111,22 +2222,84 @@ func homeAssistantDomainMatches(entityID string, domain string) bool {
 	return entityDomain == domain
 }
 
-func homeAssistantStateMatchesTerms(state protocol.HomeAssistantState, terms []string) bool {
-	if len(terms) == 0 {
-		return true
+func homeAssistantStateMatchScore(state protocol.HomeAssistantState, query assistantHomeAssistantQuery) int {
+	if len(query.Terms) == 0 {
+		return 1
 	}
-	searchText := strings.ToLower(strings.Join([]string{
+	searchText := homeAssistantSearchText(state)
+	compactText := compactSearchText(searchText)
+	score := 0
+	matchedTerms := 0
+	for _, term := range query.Terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		compactTerm := compactSearchText(term)
+		switch {
+		case strings.Contains(searchText, term):
+			score += 5
+			matchedTerms++
+		case compactTerm != "" && strings.Contains(compactText, compactTerm):
+			score += 4
+			matchedTerms++
+		case fuzzyTokenMatch(searchText, term):
+			score += 2
+			matchedTerms++
+		}
+	}
+	if matchedTerms == 0 {
+		return 0
+	}
+	if matchedTerms < len(query.Terms) {
+		return 0
+	}
+	score += matchedTerms * 2
+	if homeAssistantDomainMatches(state.EntityID, query.Domain) {
+		score += 3
+	}
+	return score
+}
+
+func homeAssistantSearchText(state protocol.HomeAssistantState) string {
+	entityDomain := state.EntityID
+	if dot := strings.Index(state.EntityID, "."); dot >= 0 {
+		entityDomain = state.EntityID[:dot]
+	}
+	return strings.ToLower(strings.Join([]string{
 		state.EntityID,
+		strings.ReplaceAll(state.EntityID, "_", " "),
+		entityDomain,
 		state.State,
 		homeAssistantFriendlyName(state),
 		assistantAttributesText(state.Attributes),
 	}, "\n"))
-	for _, term := range terms {
-		if !strings.Contains(searchText, strings.ToLower(term)) {
-			return false
+}
+
+func compactSearchText(value string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
 		}
 	}
-	return true
+	return builder.String()
+}
+
+func fuzzyTokenMatch(searchText string, term string) bool {
+	if len(term) < 4 {
+		return false
+	}
+	for _, token := range strings.Fields(searchText) {
+		token = strings.Trim(token, ".,?!:;\"'`()[]{}_-")
+		if len(token) < 4 {
+			continue
+		}
+		if strings.HasPrefix(token, term) || strings.HasPrefix(term, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func homeAssistantStateLabel(state protocol.HomeAssistantState) string {

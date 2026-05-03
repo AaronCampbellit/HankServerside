@@ -238,6 +238,19 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 		EmbeddingVersion: "test",
 		UpdatedAt:        now,
 	}))
+	must(t, db.UpsertAssistantFileIndex(ctx, domain.AssistantFileIndex{
+		ID:               "afile_2025_w2",
+		HomeID:           home.ID,
+		Path:             "Documents/Taxes/2025 Taxes/W2.pdf",
+		Name:             "W2.pdf",
+		IsDirectory:      false,
+		SearchText:       "Documents Taxes 2025 W2",
+		MetadataJSON:     "{}",
+		EmbeddingJSON:    "[]",
+		EmbeddingModel:   "test",
+		EmbeddingVersion: "test",
+		UpdatedAt:        now.Add(-time.Minute),
+	}))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	settings := defaultAssistantSettings(home.ID, user.ID)
@@ -251,6 +264,14 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	}
 	if len(answer.Cards) != 1 || answer.Cards[0].Kind != "file" || answer.Cards[0].Path != "Documents/Taxes/2025 Taxes" {
 		t.Fatalf("file search cards = %#v", answer.Cards)
+	}
+
+	allAnswer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "show me all 2025 taxes")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse all files: %v", err)
+	}
+	if len(allAnswer.Cards) < 2 {
+		t.Fatalf("broad file search cards = %#v, want multiple", allAnswer.Cards)
 	}
 }
 
@@ -266,6 +287,10 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 		{EntityID: "light.garage_overhead", State: "on", Attributes: map[string]any{"friendly_name": "Garage Overhead"}},
 		{EntityID: "switch.kitchen_outlet", State: "on", Attributes: map[string]any{"friendly_name": "Kitchen Outlet"}},
 		{EntityID: "sensor.garage_temperature", State: "72", Attributes: map[string]any{"friendly_name": "Garage Temperature"}},
+		{EntityID: "light.kitchenlightshelly", State: "off", Attributes: map[string]any{"friendly_name": "KitchenLightShelly Switch 0"}},
+		{EntityID: "switch.kitchen_light_scene", State: "on", Attributes: map[string]any{"friendly_name": "Kitchen Light Scene"}},
+		{EntityID: "binary_sensor.kitchen_light_motion", State: "off", Attributes: map[string]any{"friendly_name": "Kitchen Light Motion"}},
+		{EntityID: "light.kitchen_island", State: "off", Attributes: map[string]any{"friendly_name": "Kitchen Island"}},
 		{EntityID: "light.porch", State: "off", Attributes: map[string]any{"friendly_name": "Porch Light"}},
 	}
 	go serveAssistantHomeAssistantStates(ctx, t, agentConn, agentID, homeID, states)
@@ -325,6 +350,26 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	}
 	if strings.Contains(garageLightRun.AssistantMessage.Text, "Garage Temperature") || strings.Contains(garageLightRun.AssistantMessage.Text, "Kitchen Outlet") {
 		t.Fatalf("garage light query included wrong entity: %q", garageLightRun.AssistantMessage.Text)
+	}
+
+	var kitchenLightRun assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "show me all the kitchen light entities",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &kitchenLightRun)
+	if kitchenLightRun.AssistantMessage == nil {
+		t.Fatalf("missing assistant message for kitchen light query: %#v", kitchenLightRun)
+	}
+	for _, want := range []string{"KitchenLightShelly", "Kitchen Light Scene", "Kitchen Light Motion", "Kitchen Island"} {
+		if !strings.Contains(kitchenLightRun.AssistantMessage.Text, want) {
+			t.Fatalf("kitchen light query missing %q: %q", want, kitchenLightRun.AssistantMessage.Text)
+		}
+	}
+	if strings.Contains(kitchenLightRun.AssistantMessage.Text, "Kitchen Outlet") || strings.Contains(kitchenLightRun.AssistantMessage.Text, "Porch Light") {
+		t.Fatalf("kitchen light query included wrong entity: %q", kitchenLightRun.AssistantMessage.Text)
 	}
 }
 
