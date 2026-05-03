@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -391,6 +392,12 @@ func (w *Worker) runRestoreTest(ctx context.Context, backupLabel string, taskID 
 	if err := w.requireRepoCipherPass(); err != nil {
 		return fail("Encrypted pgBackRest repository is not configured.", err)
 	}
+	if err := validatePSQLDatabaseURL("HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL", w.restoreDatabaseURL); err != nil {
+		return fail("Restore verification database URL is invalid.", err)
+	}
+	if err := validatePSQLDatabaseURL("HANK_REMOTE_CLOUD_DATABASE_URL", w.databaseURL); err != nil {
+		return fail("Main database URL is invalid.", err)
+	}
 	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Resetting restore test database")
 	_ = w.composeWithProfile(context.Background(), "restore", "rm", "-sf", "postgres-restore")
 	if err := clearDirectoryContents(w.restoreDataPath); err != nil {
@@ -519,6 +526,9 @@ func (w *Worker) recordRestoreFailure(operation string, message string, backupLa
 	event := NewEvent(operation, EventStatusFailed, EventSeverityCritical, message)
 	event.BackupLabel = backupLabel
 	event.Details = map[string]any{"error": redactAndTruncate(err.Error())}
+	if hint := restoreFailureHint(err); hint != "" {
+		event.Details["hint"] = hint
+	}
 	_, _ = AppendEvent(w.service.LogDir, event)
 	return fmt.Errorf("%s %w", message, err)
 }
@@ -590,6 +600,9 @@ func (w *Worker) composeWithProfile(ctx context.Context, profile string, args ..
 }
 
 func (w *Worker) waitForRestoreDatabase(ctx context.Context) error {
+	if err := validatePSQLDatabaseURL("HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL", w.restoreDatabaseURL); err != nil {
+		return err
+	}
 	deadline := time.Now().Add(2 * time.Minute)
 	var lastOutput string
 	var lastErr error
@@ -809,4 +822,62 @@ func pgBackRestEnv(repoCipherPass string) []string {
 		return nil
 	}
 	return []string{"PGBACKREST_REPO1_CIPHER_PASS=" + repoCipherPass}
+}
+
+func validatePSQLDatabaseURL(envName string, databaseURL string) error {
+	value := strings.TrimSpace(databaseURL)
+	if value == "" {
+		return fmt.Errorf("%s is required", envName)
+	}
+	if strings.HasPrefix(value, "<") && strings.HasSuffix(value, ">") {
+		return fmt.Errorf("%s must not include angle brackets", envName)
+	}
+	if strings.HasPrefix(value, "<") {
+		return fmt.Errorf("%s must not include a leading angle bracket", envName)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("%s is not a valid Postgres URL: %w", envName, err)
+	}
+	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
+		return fmt.Errorf("%s must start with postgres:// or postgresql://", envName)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("%s must include a database host", envName)
+	}
+	if parsed.RawQuery == "" {
+		return nil
+	}
+	for _, part := range strings.Split(parsed.RawQuery, "&") {
+		if part == "" {
+			continue
+		}
+		if strings.Contains(part, "<") || strings.Contains(part, ">") {
+			return fmt.Errorf("%s has invalid URI query parameter %q; remove angle brackets and use sslmode=disable", envName, part)
+		}
+		if !strings.Contains(part, "=") {
+			return fmt.Errorf("%s has invalid URI query parameter %q; use sslmode=disable", envName, part)
+		}
+	}
+	if _, err := url.ParseQuery(parsed.RawQuery); err != nil {
+		return fmt.Errorf("%s has an invalid URI query string: %w", envName, err)
+	}
+	return nil
+}
+
+func restoreFailureHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	combined := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(combined, "hank_remote_db_ops_restore_database_url"):
+		return "Fix HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL in .env.cloud. It should look like postgres://hankremote:<password>@postgres-restore:5432/hankremote?sslmode=disable."
+	case strings.Contains(combined, "hank_remote_cloud_database_url"):
+		return "Fix HANK_REMOTE_CLOUD_DATABASE_URL in .env.cloud. It should look like postgres://hankremote:<password>@postgres:5432/hankremote?sslmode=disable."
+	case strings.Contains(combined, "missing key/value separator"):
+		return "Check the database URL query string in .env.cloud. Use sslmode=disable, not ssl or a value wrapped in angle brackets."
+	default:
+		return ""
+	}
 }

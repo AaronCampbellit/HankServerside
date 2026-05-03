@@ -327,6 +327,67 @@ func TestRestoreValidationComparesLoginRoles(t *testing.T) {
 	}
 }
 
+func TestRestoreTestRejectsMalformedRestoreDatabaseURL(t *testing.T) {
+	logDir := t.TempDir()
+	runner := &fakeRunner{}
+	worker := NewWorker(WorkerOptions{
+		StateDir:           t.TempDir(),
+		LogDir:             logDir,
+		IntentSecret:       "secret",
+		RepoCipherPass:     "cipher-secret",
+		DatabaseURL:        "postgres://hankremote:secret@postgres:5432/hankremote?sslmode=disable",
+		RestoreDataPath:    t.TempDir(),
+		RestoreDatabaseURL: "postgres://hankremote:secret@postgres-restore:5432/hankremote?ssl>",
+		Runner:             runner,
+	})
+
+	err := worker.RunRestoreTest(context.Background(), "20260503-083455F")
+	if err == nil {
+		t.Fatal("expected malformed restore database URL failure")
+	}
+	if !strings.Contains(err.Error(), "HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL") {
+		t.Fatalf("error = %v, want restore database URL key", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %+v, want validation before external commands", runner.calls)
+	}
+	events, err := ListEvents(logDir, EventFilter{FailuresOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one failure", events)
+	}
+	if events[0].Message != "Restore verification database URL is invalid." {
+		t.Fatalf("event message = %q", events[0].Message)
+	}
+	if !strings.Contains(events[0].Details["hint"].(string), "HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL") {
+		t.Fatalf("event details = %+v", events[0].Details)
+	}
+}
+
+func TestWaitForRestoreDatabaseRejectsMalformedURLBeforePSQL(t *testing.T) {
+	runner := &fakeRunner{}
+	worker := NewWorker(WorkerOptions{
+		StateDir:           t.TempDir(),
+		LogDir:             t.TempDir(),
+		IntentSecret:       "secret",
+		RepoCipherPass:     "cipher-secret",
+		DatabaseURL:        "postgres://main",
+		RestoreDataPath:    t.TempDir(),
+		RestoreDatabaseURL: "postgres://restore?ssl>",
+		Runner:             runner,
+	})
+
+	err := worker.waitForRestoreDatabase(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "ssl>") {
+		t.Fatalf("wait error = %v, want malformed query failure", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %+v, want no psql call", runner.calls)
+	}
+}
+
 func TestScheduledRestoreVerificationUsesLatestBackup(t *testing.T) {
 	logDir := t.TempDir()
 	stateDir := t.TempDir()

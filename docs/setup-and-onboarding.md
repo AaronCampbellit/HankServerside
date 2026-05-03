@@ -88,6 +88,7 @@ HANK_REMOTE_DB_OPS_COMPOSE_FILE=/workspace/docker-compose.yml
 ```
 
 Use the same database password in `POSTGRES_PASSWORD`, `HANK_REMOTE_CLOUD_DATABASE_URL`, and `HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL`.
+Do not wrap either database URL in `< >`; keep the query string exactly as `?sslmode=disable` for the Compose stack.
 
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot be restored without it.
 
