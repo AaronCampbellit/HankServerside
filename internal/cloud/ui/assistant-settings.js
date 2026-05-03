@@ -2,6 +2,7 @@ const state = {
   user: null,
   status: null,
   assistant: null,
+  settings: null,
   statusTimer: null,
 };
 
@@ -15,6 +16,19 @@ const els = {
   openAIConfigOutput: document.getElementById("openai-config-output"),
   linkOpenAIButton: document.getElementById("link-openai-button"),
   refreshButton: document.getElementById("refresh-button"),
+  assistantSettingsPill: document.getElementById("assistant-settings-pill"),
+  assistantSettingsForm: document.getElementById("assistant-settings-form"),
+  assistantHarnessOutput: document.getElementById("assistant-harness-output"),
+  harnessNotesEnabled: document.getElementById("harness-notes-enabled"),
+  harnessProfileNotesEnabled: document.getElementById("harness-profile-notes-enabled"),
+  harnessHomeNotesEnabled: document.getElementById("harness-home-notes-enabled"),
+  harnessFilesEnabled: document.getElementById("harness-files-enabled"),
+  harnessCalendarEnabled: document.getElementById("harness-calendar-enabled"),
+  harnessHomeAssistantEnabled: document.getElementById("harness-homeassistant-enabled"),
+  harnessProjectDocsEnabled: document.getElementById("harness-project-docs-enabled"),
+  harnessSystemPrompt: document.getElementById("harness-system-prompt"),
+  harnessMaxContext: document.getElementById("harness-max-context"),
+  resetAssistantPromptButton: document.getElementById("reset-assistant-prompt-button"),
   toast: document.getElementById("toast"),
 };
 
@@ -149,20 +163,98 @@ function renderStatus() {
   `;
 }
 
+function renderAssistantSettings() {
+  const payload = state.settings || {};
+  const settings = payload.settings || {};
+  const defaults = payload.defaults || {};
+  const sources = payload.sources || [];
+  const enabledSources = sources.filter((source) => source.enabled);
+
+  els.assistantSettingsPill.textContent = enabledSources.length ? `${enabledSources.length} sources` : "No sources";
+  els.assistantSettingsPill.className = enabledSources.length ? "status-chip" : "status-chip offline";
+
+  els.harnessNotesEnabled.checked = settings.notes_enabled !== false;
+  els.harnessProfileNotesEnabled.checked = settings.profile_notes_enabled !== false;
+  els.harnessHomeNotesEnabled.checked = settings.home_notes_enabled !== false;
+  els.harnessFilesEnabled.checked = settings.files_enabled !== false;
+  els.harnessCalendarEnabled.checked = settings.calendar_enabled !== false;
+  els.harnessHomeAssistantEnabled.checked = settings.homeassistant_enabled !== false;
+  els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
+  els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
+  els.harnessMaxContext.value = settings.max_context_items || defaults.max_context_items || 8;
+  syncNotesSourceControls();
+
+  els.assistantHarnessOutput.className = "card-list";
+  els.assistantHarnessOutput.innerHTML = `
+    <article class="card">
+      <div class="card-title">Current provider: ${escapeHTML(state.assistant?.provider || "local")}</div>
+      <div class="meta">Chat model: ${escapeHTML(state.assistant?.chat_model || "local fallback")}</div>
+      <div class="meta">Embeddings: ${escapeHTML(state.assistant?.embedding_model || "local-hash")}</div>
+      <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || 8)} items</div>
+    </article>
+    <article class="card">
+      <div class="card-title">Allowed sources</div>
+      <div class="meta">${enabledSources.length ? enabledSources.map((source) => escapeHTML(source.label)).join(", ") : "None"}</div>
+      <div class="meta">Changes apply to the next HankAI message. Tokens stay on Hank Remote.</div>
+    </article>
+    <article class="card">
+      <div class="card-title">External model boundary</div>
+      <div class="meta">When ChatGPT/Codex is the provider, enabled Hank context and the prompt are sent to the linked Codex backend for chat responses.</div>
+    </article>
+  `;
+}
+
+function syncNotesSourceControls() {
+  const notesOn = els.harnessNotesEnabled.checked;
+  els.harnessProfileNotesEnabled.disabled = !notesOn;
+  els.harnessHomeNotesEnabled.disabled = !notesOn;
+}
+
+function assistantSettingsFormPayload() {
+  return {
+    notes_enabled: els.harnessNotesEnabled.checked,
+    profile_notes_enabled: els.harnessProfileNotesEnabled.checked,
+    home_notes_enabled: els.harnessHomeNotesEnabled.checked,
+    files_enabled: els.harnessFilesEnabled.checked,
+    calendar_enabled: els.harnessCalendarEnabled.checked,
+    homeassistant_enabled: els.harnessHomeAssistantEnabled.checked,
+    project_docs_enabled: els.harnessProjectDocsEnabled.checked,
+    system_prompt: els.harnessSystemPrompt.value,
+    max_context_items: Number(els.harnessMaxContext.value || 8),
+  };
+}
+
 async function loadStatus() {
-  const [status, assistant] = await Promise.all([
+  const [status, assistant, settings] = await Promise.all([
     api("/v1/oauth/openai/status"),
     api("/v1/home/assistant/status"),
+    api("/v1/home/assistant/settings"),
   ]);
   state.status = status;
   state.assistant = assistant;
+  state.settings = settings;
   renderStatus();
+  renderAssistantSettings();
   clearTimeout(state.statusTimer);
   if (status.pending?.state === "pending") {
     const waitSeconds = Math.max(Number(status.pending.poll_after_seconds || 3), 2);
     state.statusTimer = window.setTimeout(() => {
       loadStatus().catch((error) => showToast(error.message, true));
     }, waitSeconds * 1000);
+  }
+}
+
+async function saveAssistantSettings(event) {
+  event.preventDefault();
+  try {
+    state.settings = await api("/v1/home/assistant/settings", {
+      method: "PUT",
+      body: JSON.stringify(assistantSettingsFormPayload()),
+    });
+    renderAssistantSettings();
+    showToast("HankAI settings saved.");
+  } catch (error) {
+    showToast(error.message, true);
   }
 }
 
@@ -207,5 +299,13 @@ async function hydrate() {
 els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
 els.refreshButton.addEventListener("click", () => loadStatus().then(() => showToast("AI settings refreshed.")).catch((error) => showToast(error.message, true)));
+els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
+els.harnessNotesEnabled.addEventListener("change", syncNotesSourceControls);
+els.resetAssistantPromptButton.addEventListener("click", () => {
+  const defaultPrompt = state.settings?.defaults?.system_prompt || "";
+  if (defaultPrompt) {
+    els.harnessSystemPrompt.value = defaultPrompt;
+  }
+});
 
 hydrate();

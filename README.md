@@ -78,6 +78,7 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
 - `internal/domain`: shared cloud-side models
 - `internal/observability`: metrics aggregation
 - `docs/architecture.md`: system design notes
+- `docs/project-knowledge-index.md`: central map of markdown that HankAI indexes as project docs
 
 ## Quick Start
 

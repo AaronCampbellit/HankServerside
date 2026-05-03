@@ -37,6 +37,7 @@ type AssistantAI struct {
 	ChatGPTBackendBaseURL string
 	ChatGPTClientID       string
 	ChatGPTChatModel      string
+	ProjectDocsDir        string
 	EmbeddingDimension    int
 }
 
@@ -122,6 +123,7 @@ func LoadCloud() (Cloud, error) {
 			ChatGPTBackendBaseURL: strings.TrimRight(envOrDefault("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", "https://chatgpt.com/backend-api/codex"), "/"),
 			ChatGPTClientID:       envOrDefault("HANK_REMOTE_CHATGPT_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
 			ChatGPTChatModel:      envOrDefault("HANK_REMOTE_CHATGPT_CHAT_MODEL", "gpt-5.4-mini"),
+			ProjectDocsDir:        envOrDefault("HANK_REMOTE_PROJECT_DOCS_DIR", "."),
 			EmbeddingDimension:    embeddingDimensionValue,
 		},
 	}, nil

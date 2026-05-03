@@ -16,6 +16,7 @@ func TestLoadCloudDefaults(t *testing.T) {
 	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", "")
 	t.Setenv("HANK_REMOTE_CHATGPT_CLIENT_ID", "")
 	t.Setenv("HANK_REMOTE_CHATGPT_CHAT_MODEL", "")
+	t.Setenv("HANK_REMOTE_PROJECT_DOCS_DIR", "")
 
 	cfg, err := LoadCloud()
 	if err != nil {
@@ -49,6 +50,9 @@ func TestLoadCloudDefaults(t *testing.T) {
 	if cfg.AssistantAI.ChatGPTChatModel != "gpt-5.4-mini" {
 		t.Fatalf("ChatGPTChatModel = %q", cfg.AssistantAI.ChatGPTChatModel)
 	}
+	if cfg.AssistantAI.ProjectDocsDir != "." {
+		t.Fatalf("ProjectDocsDir = %q", cfg.AssistantAI.ProjectDocsDir)
+	}
 }
 
 func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
@@ -57,6 +61,7 @@ func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
 	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", " https://chatgpt.example.com/backend-api/codex/ ")
 	t.Setenv("HANK_REMOTE_CHATGPT_CLIENT_ID", "test-client")
 	t.Setenv("HANK_REMOTE_CHATGPT_CHAT_MODEL", "gpt-test")
+	t.Setenv("HANK_REMOTE_PROJECT_DOCS_DIR", "/srv/hank/docs")
 
 	cfg, err := LoadCloud()
 	if err != nil {
@@ -76,6 +81,9 @@ func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
 	}
 	if cfg.AssistantAI.ChatGPTChatModel != "gpt-test" {
 		t.Fatalf("ChatGPTChatModel = %q", cfg.AssistantAI.ChatGPTChatModel)
+	}
+	if cfg.AssistantAI.ProjectDocsDir != "/srv/hank/docs" {
+		t.Fatalf("ProjectDocsDir = %q", cfg.AssistantAI.ProjectDocsDir)
 	}
 }
 

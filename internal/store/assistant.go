@@ -130,6 +130,51 @@ func (s *Store) UpdateAssistantRun(ctx context.Context, run domain.AssistantRun)
 	return err
 }
 
+func (s *Store) GetAssistantSettings(ctx context.Context, homeID string, userID string) (domain.AssistantSettings, error) {
+	row := s.queryRow(ctx, `SELECT home_id, user_id, notes_enabled, profile_notes_enabled, home_notes_enabled,
+			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, system_prompt, max_context_items,
+			created_at, updated_at, updated_by
+		FROM assistant_settings
+		WHERE home_id = ? AND user_id = ?`, homeID, userID)
+	return scanAssistantSettings(row)
+}
+
+func (s *Store) UpsertAssistantSettings(ctx context.Context, settings domain.AssistantSettings) error {
+	_, err := s.exec(ctx, `INSERT INTO assistant_settings (
+			home_id, user_id, notes_enabled, profile_notes_enabled, home_notes_enabled,
+			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, system_prompt, max_context_items,
+			created_at, updated_at, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(home_id, user_id) DO UPDATE SET
+			notes_enabled = excluded.notes_enabled,
+			profile_notes_enabled = excluded.profile_notes_enabled,
+			home_notes_enabled = excluded.home_notes_enabled,
+			files_enabled = excluded.files_enabled,
+			calendar_enabled = excluded.calendar_enabled,
+			homeassistant_enabled = excluded.homeassistant_enabled,
+			project_docs_enabled = excluded.project_docs_enabled,
+			system_prompt = excluded.system_prompt,
+			max_context_items = excluded.max_context_items,
+			updated_at = excluded.updated_at,
+			updated_by = excluded.updated_by`,
+		settings.HomeID,
+		settings.UserID,
+		settings.NotesEnabled,
+		settings.ProfileNotesEnabled,
+		settings.HomeNotesEnabled,
+		settings.FilesEnabled,
+		settings.CalendarEnabled,
+		settings.HomeAssistantEnabled,
+		settings.ProjectDocsEnabled,
+		settings.SystemPrompt,
+		settings.MaxContextItems,
+		settings.CreatedAt,
+		settings.UpdatedAt,
+		settings.UpdatedBy,
+	)
+	return err
+}
+
 func (s *Store) UpsertAssistantCalendarEntries(ctx context.Context, entries []domain.AssistantCalendarEntry) error {
 	tx, err := s.beginTx(ctx, nil)
 	if err != nil {
@@ -217,6 +262,32 @@ func scanAssistantSession(scanner interface{ Scan(dest ...any) error }) (domain.
 		return domain.AssistantSession{}, err
 	}
 	return session, nil
+}
+
+func scanAssistantSettings(scanner interface{ Scan(dest ...any) error }) (domain.AssistantSettings, error) {
+	var settings domain.AssistantSettings
+	if err := scanner.Scan(
+		&settings.HomeID,
+		&settings.UserID,
+		&settings.NotesEnabled,
+		&settings.ProfileNotesEnabled,
+		&settings.HomeNotesEnabled,
+		&settings.FilesEnabled,
+		&settings.CalendarEnabled,
+		&settings.HomeAssistantEnabled,
+		&settings.ProjectDocsEnabled,
+		&settings.SystemPrompt,
+		&settings.MaxContextItems,
+		&settings.CreatedAt,
+		&settings.UpdatedAt,
+		&settings.UpdatedBy,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return domain.AssistantSettings{}, ErrNotFound
+		}
+		return domain.AssistantSettings{}, err
+	}
+	return settings, nil
 }
 
 func scanAssistantMessage(scanner interface{ Scan(dest ...any) error }) (domain.AssistantMessage, error) {

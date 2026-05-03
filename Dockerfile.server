@@ -17,6 +17,8 @@ RUN apk add --no-cache ca-certificates \
 WORKDIR /app
 COPY --from=build /out/hank-remote-cloud /usr/local/bin/hank-remote-cloud
 COPY --from=build /out/hank-remote-agent /usr/local/bin/hank-remote-agent
+COPY --from=build /src/README.md /src/AGENTS.md /src/SERVER_SYNC.md /app/
+COPY --from=build /src/docs /app/docs
 USER hank
 EXPOSE 8080
 CMD ["/usr/local/bin/hank-remote-cloud"]

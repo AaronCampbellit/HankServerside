@@ -46,6 +46,7 @@ func main() {
 		ChatGPTBackendBaseURL: cfg.AssistantAI.ChatGPTBackendBaseURL,
 		ChatGPTClientID:       cfg.AssistantAI.ChatGPTClientID,
 		ChatGPTChatModel:      cfg.AssistantAI.ChatGPTChatModel,
+		ProjectDocsDir:        cfg.AssistantAI.ProjectDocsDir,
 		EmbeddingDimension:    cfg.AssistantAI.EmbeddingDimension,
 	})
 	server.ConfigureStorageOps(cfg.DBOpsStateDir, cfg.DBOpsLogDir, cfg.DBOpsIntentSecret)

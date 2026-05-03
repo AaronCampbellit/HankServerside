@@ -121,6 +121,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 	case len(parts) == 2 && parts[1] == "status":
 		s.handleAssistantStatus(w, r, home, auth)
 		return true
+	case len(parts) == 2 && parts[1] == "settings":
+		s.handleAssistantSettings(w, r, home, auth)
+		return true
 	case len(parts) == 4 && parts[1] == "sessions" && parts[3] == "messages":
 		s.handleAssistantSessionMessages(w, r, home, membership, auth, parts[2])
 		return true
@@ -530,13 +533,24 @@ func (s *Server) handleAssistantCalendarIndex(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.indexAssistantCalendarEntries(r.Context(), home.ID, auth.User.ID, entries); err != nil {
-		s.logger.Warn("assistant calendar index refresh failed", "error", err)
+	settings, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if settings.CalendarEnabled {
+		if err := s.indexAssistantCalendarEntries(r.Context(), home.ID, auth.User.ID, entries); err != nil {
+			s.logger.Warn("assistant calendar index refresh failed", "error", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "entry_count": len(entries)})
 }
 
 func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, session domain.AssistantSession, content string, deviceID string, timezone string) (assistantRunResponse, error) {
+	settings, err := s.currentAssistantSettings(ctx, home.ID, auth.User.ID)
+	if err != nil {
+		return assistantRunResponse{}, err
+	}
 	if strings.TrimSpace(session.Title) == "" || session.Title == "New Conversation" {
 		session.Title = assistantSessionTitle(content)
 	}
@@ -558,6 +572,28 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 	}
 
 	if pending, ok := s.planCalendarTool(content, timezone, deviceID); ok {
+		if !settings.CalendarEnabled {
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: "Calendar access is turned off in HankAI settings.",
+			})
+			if err != nil {
+				return assistantRunResponse{}, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, err
+			}
+			if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, completedAt); err != nil {
+				return assistantRunResponse{}, err
+			}
+			return assistantRunResponse{
+				ID:               run.ID,
+				State:            run.State,
+				AssistantMessage: &message,
+			}, nil
+		}
 		if pending.requiresConfirmation {
 			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
 				Text: pending.confirmationMessage,
@@ -616,7 +652,7 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 		}, nil
 	}
 
-	assistantContent, err := s.generateAssistantResponse(ctx, home, membership, auth, content)
+	assistantContent, err := s.generateAssistantResponse(ctx, home, membership, auth, settings, content)
 	if err != nil {
 		return assistantRunResponse{}, err
 	}
@@ -685,40 +721,47 @@ func (s *Server) persistAssistantMessage(ctx context.Context, session domain.Ass
 	return assistantMessageToAPI(message), nil
 }
 
-func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, prompt string) (assistantMessageContent, error) {
-	s.refreshAssistantIndex(ctx, home, membership, auth, prompt)
+func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
+	settings = normalizeAssistantSettings(settings)
+	s.refreshAssistantIndex(ctx, home, membership, auth, settings, prompt)
 
 	lowered := strings.ToLower(prompt)
 	switch {
 	case strings.Contains(lowered, "find ") || strings.Contains(lowered, "folder") || strings.Contains(lowered, "file"):
+		if !settings.FilesEnabled {
+			return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
+		}
 		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 			if errors.Is(err, errFeaturePermissionDenied) {
 				return assistantMessageContent{Text: "File access is disabled for your Home membership right now."}, nil
 			}
 			return assistantMessageContent{}, err
 		}
-		return s.answerFilePrompt(ctx, home, prompt)
+		return s.answerFilePrompt(ctx, home, settings, prompt)
 	case strings.Contains(lowered, "add ") && (strings.Contains(lowered, " list") || strings.Contains(lowered, "note")):
+		if !settings.NotesEnabled || (!settings.ProfileNotesEnabled && !settings.HomeNotesEnabled) {
+			return assistantMessageContent{Text: "Notes access is turned off in HankAI settings."}, nil
+		}
 		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
 			if errors.Is(err, errFeaturePermissionDenied) {
 				return assistantMessageContent{Text: "Notes access is disabled for your Home membership right now."}, nil
 			}
 			return assistantMessageContent{}, err
 		}
-		return s.answerAppendNotePrompt(ctx, home, auth, prompt)
+		return s.answerAppendNotePrompt(ctx, home, auth, settings, prompt)
 	default:
-		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
-			if errors.Is(err, errFeaturePermissionDenied) {
-				return assistantMessageContent{Text: "Notes access is disabled for your Home membership right now."}, nil
-			}
-			return assistantMessageContent{}, err
+		if shouldIndexHomeAssistant(prompt) && !settings.HomeAssistantEnabled {
+			return assistantMessageContent{Text: "Home Assistant access is turned off in HankAI settings."}, nil
 		}
-		return s.answerRetrievedPrompt(ctx, home, auth, prompt)
+		if !assistantSettingsHasEnabledSources(settings) {
+			return assistantMessageContent{Text: "All HankAI sources are turned off in AI Settings."}, nil
+		}
+		return s.answerRetrievedPrompt(ctx, home, membership, auth, settings, prompt)
 	}
 }
 
-func (s *Server) answerNoteSearchPrompt(ctx context.Context, home domain.Home, auth authContext, prompt string) (assistantMessageContent, error) {
-	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID)
+func (s *Server) answerNoteSearchPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
+	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID, settings)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
@@ -746,13 +789,13 @@ func (s *Server) answerNoteSearchPrompt(ctx context.Context, home domain.Home, a
 	}, nil
 }
 
-func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, auth authContext, prompt string) (assistantMessageContent, error) {
+func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
 	itemText, noteHint := extractAppendIntent(prompt)
 	if noteHint == "" {
-		return s.answerNoteSearchPrompt(ctx, home, auth, prompt)
+		return s.answerNoteSearchPrompt(ctx, home, auth, settings, prompt)
 	}
 
-	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID)
+	notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID, settings)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
@@ -826,12 +869,13 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 	}, nil
 }
 
-func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, prompt string) (assistantMessageContent, error) {
+func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
+	settings = normalizeAssistantSettings(settings)
 	query := fileQuery(prompt)
 	queryEmbedding, _, _ := s.embedAssistantText(ctx, "", query)
 	if contexts, err := s.store.SearchAssistantContext(ctx, home.ID, "", query, queryEmbedding, 5); err == nil {
 		for _, contextItem := range contexts {
-			if contextItem.SourceType == "file" {
+			if contextItem.SourceType == "file" && assistantSettingsAllowSource(settings, contextItem.SourceType) {
 				return assistantMessageContent{
 					Text:  fmt.Sprintf("I found the closest SMB match for `%s`.", query),
 					Cards: []assistantResultCard{assistantResultCardFromContext(contextItem)},
@@ -866,15 +910,27 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, prompt 
 	}, nil
 }
 
-func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, auth authContext, prompt string) (assistantMessageContent, error) {
+func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
+	settings = normalizeAssistantSettings(settings)
 	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt)
-	contexts, err := s.store.SearchAssistantContext(ctx, home.ID, auth.User.ID, prompt, queryEmbedding, 8)
+	searchLimit := settings.MaxContextItems * 3
+	if searchLimit < 20 {
+		searchLimit = 20
+	}
+	if searchLimit > 60 {
+		searchLimit = 60
+	}
+	contexts, err := s.store.SearchAssistantContext(ctx, home.ID, auth.User.ID, prompt, queryEmbedding, searchLimit)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	contexts, err = s.filterAssistantContexts(ctx, home, membership, auth.User.ID, settings, contexts)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
 	if len(contexts) == 0 {
 		return assistantMessageContent{
-			Text: "I could not find matching Hank context yet. Ask about a note title, calendar event, Home Assistant entity, or file path that has been synced into HankAI.",
+			Text: fmt.Sprintf("I could not find matching Hank context in the sources HankAI can currently use: %s.", assistantSettingsEnabledSourceLabels(settings)),
 		}, nil
 	}
 
@@ -882,7 +938,7 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, au
 	if providerAnswer, modelName, err := s.generateAssistantLLMResponse(ctx, auth.User.ID, []assistantLLMMessage{
 		{
 			Role:    "system",
-			Content: "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened.",
+			Content: settings.SystemPrompt,
 		},
 		{
 			Role:    "user",
@@ -912,19 +968,61 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, au
 	return assistantMessageContent{Text: answer, Cards: cards}, nil
 }
 
-func (s *Server) assistantVisibleNotes(ctx context.Context, homeID string, userID string) ([]domain.UserNote, error) {
-	profileNotes, err := s.store.ListProfileNotes(ctx, userID, false)
-	if err != nil {
-		return nil, err
+func (s *Server) assistantVisibleNotes(ctx context.Context, homeID string, userID string, settings domain.AssistantSettings) ([]domain.UserNote, error) {
+	settings = normalizeAssistantSettings(settings)
+	notes := make([]domain.UserNote, 0)
+	if settings.NotesEnabled && settings.ProfileNotesEnabled {
+		profileNotes, err := s.store.ListProfileNotes(ctx, userID, false)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, profileNotes...)
 	}
-	homeNotes, err := s.store.ListVisibleHomeNotes(ctx, homeID, userID, false)
-	if err != nil {
-		return nil, err
+	if settings.NotesEnabled && settings.HomeNotesEnabled {
+		homeNotes, err := s.store.ListVisibleHomeNotes(ctx, homeID, userID, false)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, homeNotes...)
 	}
-	notes := make([]domain.UserNote, 0, len(profileNotes)+len(homeNotes))
-	notes = append(notes, profileNotes...)
-	notes = append(notes, homeNotes...)
 	return notes, nil
+}
+
+func (s *Server) filterAssistantContexts(ctx context.Context, home domain.Home, membership domain.HomeMembership, userID string, settings domain.AssistantSettings, contexts []domain.AssistantRetrievedContext) ([]domain.AssistantRetrievedContext, error) {
+	featureAllowed := map[string]bool{}
+	for _, feature := range []string{domain.HomePermissionFeatureNotes, domain.HomePermissionFeatureFiles, domain.HomePermissionFeatureHomeAssistant} {
+		allowed, err := s.homeFeatureAllowed(ctx, home, membership, userID, feature)
+		if err != nil {
+			return nil, err
+		}
+		featureAllowed[feature] = allowed
+	}
+
+	filtered := make([]domain.AssistantRetrievedContext, 0, len(contexts))
+	for _, item := range contexts {
+		if !assistantSettingsAllowSource(settings, item.SourceType) {
+			continue
+		}
+		switch item.SourceType {
+		case "profile_note", "shared_note":
+			if !featureAllowed[domain.HomePermissionFeatureNotes] {
+				continue
+			}
+		case "file":
+			if !featureAllowed[domain.HomePermissionFeatureFiles] {
+				continue
+			}
+		case "homeassistant_entity":
+			if !featureAllowed[domain.HomePermissionFeatureHomeAssistant] {
+				continue
+			}
+		}
+		filtered = append(filtered, item)
+		if len(filtered) >= settings.MaxContextItems {
+			break
+		}
+	}
+	return filtered, nil
 }
 
 func (s *Server) finalizeAssistantClientToolRun(ctx context.Context, session domain.AssistantSession, run domain.AssistantRun, toolName string, result map[string]interface{}) (assistantMessageContent, error) {
@@ -1284,6 +1382,15 @@ func assistantResultCardFromContext(item domain.AssistantRetrievedContext) assis
 			Title:       item.Title,
 			Summary:     item.Snippet,
 			ActionTitle: "Open Dashboard",
+			SearchText:  item.SourceID,
+		}
+	case assistantProjectDocSourceType:
+		return assistantResultCard{
+			Kind:        "project_doc",
+			Title:       item.Title,
+			Summary:     item.Snippet,
+			ActionTitle: "Open Project Doc",
+			Path:        item.Path,
 			SearchText:  item.SourceID,
 		}
 	default:

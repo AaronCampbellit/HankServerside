@@ -70,6 +70,7 @@ HANK_REMOTE_OLLAMA_BASE_URL=http://ollama:11434
 HANK_REMOTE_OLLAMA_CHAT_MODEL=llama3.1
 HANK_REMOTE_OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 HANK_REMOTE_AI_EMBEDDING_DIMENSION=768
+HANK_REMOTE_PROJECT_DOCS_DIR=/app
 
 # Optional OpenAI fallback/provider.
 HANK_REMOTE_OPENAI_API_KEY=
@@ -101,6 +102,13 @@ Do not wrap either database URL in `< >`; keep the query string exactly as `?ssl
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot be restored without it.
 
 `HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
+
+After signing in to the dashboard, open `AI Settings` to manage the HankAI harness. Those settings are stored in the database and apply immediately to the next HankAI message:
+- which Hank sources can be sent to the active provider
+- the system prompt HankAI uses
+- how many retrieved context items are included per request
+
+`Project docs` is one of those sources. By default the Docker image makes `README.md`, `AGENTS.md`, `SERVER_SYNC.md`, and every markdown file under `docs/` available from `/app`. For local runs, `HANK_REMOTE_PROJECT_DOCS_DIR=.` points HankAI at the checkout root.
 
 If the server should only be reached by a local Cloudflare Tunnel or local reverse proxy, use:
 

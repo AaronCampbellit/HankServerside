@@ -343,6 +343,26 @@ func (s *Store) migrate(ctx context.Context) error {
 			completed_at TIMESTAMP NULL,
 			FOREIGN KEY(run_id) REFERENCES assistant_runs(id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS assistant_settings (
+			home_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			notes_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			profile_notes_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			home_notes_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			files_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			calendar_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			homeassistant_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			project_docs_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			system_prompt TEXT NOT NULL DEFAULT '',
+			max_context_items INTEGER NOT NULL DEFAULT 8,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			updated_by TEXT NOT NULL,
+			PRIMARY KEY(home_id, user_id),
+			FOREIGN KEY(home_id) REFERENCES homes(id),
+			FOREIGN KEY(user_id) REFERENCES users(id),
+			FOREIGN KEY(updated_by) REFERENCES users(id)
+		);`,
 		`CREATE TABLE IF NOT EXISTS assistant_documents (
 			id TEXT PRIMARY KEY,
 			home_id TEXT NOT NULL,
@@ -463,6 +483,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_calendar_external ON assistant_calendar_entries(user_id, device_id, external_event_id);`,
 		`ALTER TABLE openai_accounts ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT '';`,
 		`ALTER TABLE openai_accounts ADD COLUMN IF NOT EXISTS chatgpt_plan_type TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS project_docs_enabled BOOLEAN NOT NULL DEFAULT TRUE;`,
 		`UPDATE home_memberships SET role = 'admin' WHERE role = 'owner';`,
 	}
 

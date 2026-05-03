@@ -98,6 +98,8 @@ To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, 
 - `GET /v1/oauth/openai/start`
 - `GET /v1/oauth/openai/status`
 - `GET /v1/oauth/openai/callback` (cloud callback endpoint)
+- `GET /v1/home/assistant/settings`
+- `PUT /v1/home/assistant/settings`
 
 ### App Flow
 
@@ -117,3 +119,15 @@ To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, 
 - Show actionable error copy if link fails (invalid state, expired state, provider failure).
 - If not linked, Assistant tab should still work for local flows where available, but clearly indicate ChatGPT subscription-backed features require linking.
 - The current dashboard can show the device code. Hank iOS needs a follow-up UI change if it should show the device code natively instead of only opening a browser link.
+
+### HankAI Harness Settings
+
+The server now exposes per-user, per-Home HankAI harness settings through `GET`/`PUT /v1/home/assistant/settings`.
+
+The settings include:
+- source access toggles for notes, profile notes, shared Home notes, files, calendar, and Home Assistant
+- project docs access for Hank Remote README, contract docs, setup docs, phase docs, and runbooks
+- `system_prompt`, which is the system message sent to the active chat provider
+- `max_context_items`, capped by the server
+
+These settings apply to the next assistant message without restarting Hank Remote. If Hank iOS adds native controls later, it should treat these as privacy and behavior controls for what Hank context may be sent to the active model provider.

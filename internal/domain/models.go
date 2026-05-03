@@ -290,6 +290,23 @@ type AssistantRetrievedContext struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type AssistantSettings struct {
+	HomeID               string    `json:"home_id"`
+	UserID               string    `json:"user_id"`
+	NotesEnabled         bool      `json:"notes_enabled"`
+	ProfileNotesEnabled  bool      `json:"profile_notes_enabled"`
+	HomeNotesEnabled     bool      `json:"home_notes_enabled"`
+	FilesEnabled         bool      `json:"files_enabled"`
+	CalendarEnabled      bool      `json:"calendar_enabled"`
+	HomeAssistantEnabled bool      `json:"homeassistant_enabled"`
+	ProjectDocsEnabled   bool      `json:"project_docs_enabled"`
+	SystemPrompt         string    `json:"system_prompt"`
+	MaxContextItems      int       `json:"max_context_items"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	UpdatedBy            string    `json:"updated_by"`
+}
+
 type OpenAIAccount struct {
 	UserID          string     `json:"user_id"`
 	ProviderUserID  string     `json:"provider_user_id"`

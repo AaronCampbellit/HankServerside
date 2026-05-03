@@ -12,40 +12,55 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
-func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, prompt string) {
-	if err := s.indexAssistantNotes(ctx, home, membership, auth); err != nil {
-		s.logger.Warn("assistant note indexing failed", "error", err)
+func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) {
+	settings = normalizeAssistantSettings(settings)
+	if settings.NotesEnabled && (settings.ProfileNotesEnabled || settings.HomeNotesEnabled) {
+		if err := s.indexAssistantNotes(ctx, home, membership, auth, settings); err != nil {
+			s.logger.Warn("assistant note indexing failed", "error", err)
+		}
 	}
-	if err := s.indexAssistantCalendarSnapshot(ctx, home.ID, auth.User.ID); err != nil {
-		s.logger.Warn("assistant calendar indexing failed", "error", err)
+	if settings.ProjectDocsEnabled {
+		if err := s.indexAssistantProjectDocs(ctx, home.ID, auth.User.ID); err != nil {
+			s.logger.Warn("assistant project docs indexing failed", "error", err)
+		}
 	}
-	if shouldIndexHomeAssistant(prompt) {
+	if settings.CalendarEnabled {
+		if err := s.indexAssistantCalendarSnapshot(ctx, home.ID, auth.User.ID); err != nil {
+			s.logger.Warn("assistant calendar indexing failed", "error", err)
+		}
+	}
+	if settings.HomeAssistantEnabled && shouldIndexHomeAssistant(prompt) {
 		if err := s.indexAssistantHomeAssistantStates(ctx, home, membership, auth); err != nil {
 			s.logger.Warn("assistant Home Assistant indexing failed", "error", err)
 		}
 	}
-	if shouldIndexFiles(prompt) {
+	if settings.FilesEnabled && shouldIndexFiles(prompt) {
 		if err := s.indexAssistantFiles(ctx, home, membership, auth); err != nil {
 			s.logger.Warn("assistant file indexing failed", "error", err)
 		}
 	}
 }
 
-func (s *Server) indexAssistantNotes(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext) error {
+func (s *Server) indexAssistantNotes(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings) error {
 	if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
 		return nil
 	}
-	profileNotes, err := s.store.ListProfileNotes(ctx, auth.User.ID, false)
-	if err != nil {
-		return err
-	}
-	for _, note := range profileNotes {
-		if note.DeletedAt != nil {
-			continue
-		}
-		if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, "profile_note", note); err != nil {
+	if settings.ProfileNotesEnabled {
+		profileNotes, err := s.store.ListProfileNotes(ctx, auth.User.ID, false)
+		if err != nil {
 			return err
 		}
+		for _, note := range profileNotes {
+			if note.DeletedAt != nil {
+				continue
+			}
+			if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, "profile_note", note); err != nil {
+				return err
+			}
+		}
+	}
+	if !settings.HomeNotesEnabled {
+		return nil
 	}
 	homeNotes, err := s.store.ListVisibleHomeNotes(ctx, home.ID, auth.User.ID, false)
 	if err != nil {

@@ -390,6 +390,31 @@ h3 {
   gap: 10px;
 }
 
+.toggle-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.toggle-field {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.toggle-field input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--brand);
+}
+
 .setting-field {
   display: grid;
   gap: 5px;
@@ -1167,7 +1192,8 @@ button:disabled {
 
   .two-up,
   .three-up,
-  .settings-grid {
+  .settings-grid,
+  .toggle-list {
     grid-template-columns: 1fr;
   }
 

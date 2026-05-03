@@ -31,6 +31,7 @@ type AssistantAIConfig struct {
 	ChatGPTBackendBaseURL string
 	ChatGPTClientID       string
 	ChatGPTChatModel      string
+	ProjectDocsDir        string
 	EmbeddingDimension    int
 }
 
@@ -89,6 +90,10 @@ func (c *AssistantAIConfig) normalize() {
 	c.ChatGPTChatModel = strings.TrimSpace(c.ChatGPTChatModel)
 	if c.ChatGPTChatModel == "" {
 		c.ChatGPTChatModel = "gpt-5.4-mini"
+	}
+	c.ProjectDocsDir = strings.TrimSpace(c.ProjectDocsDir)
+	if c.ProjectDocsDir == "" {
+		c.ProjectDocsDir = "."
 	}
 	if c.EmbeddingDimension <= 0 {
 		c.EmbeddingDimension = 768

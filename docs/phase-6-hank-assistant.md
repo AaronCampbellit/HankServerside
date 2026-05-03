@@ -122,10 +122,19 @@ HankAI provider selection now supports `auto`, `ollama`, `openai`, `chatgpt_code
 `openai` is the supported API-key provider and only uses `HANK_REMOTE_OPENAI_API_KEY`.
 `chatgpt_codex` is experimental and uses the server-side ChatGPT/Codex device-code link for chat only; it is not treated as an OpenAI API key.
 
+The dashboard AI Settings page also owns the HankAI harness controls. These are stored per Home user and are read fresh for every assistant message, so changing them does not require a cloud restart:
+- source access toggles for profile notes, shared Home notes, files, calendar, and Home Assistant
+- project docs access for `README.md`, `AGENTS.md`, `SERVER_SYNC.md`, and markdown under `docs/`
+- the system prompt sent to the active chat provider
+- the maximum number of retrieved context items included in each provider request
+
+When ChatGPT/Codex is the active provider, only enabled retrieved context and the configured system prompt are sent to the Codex backend. Tokens remain server-side.
+
 ### 2. Retrieval and Indexing
 
 Build a unified searchable corpus from:
 - profile notes and shared Home notes
+- Hank Remote project docs and runbooks
 - device calendar snapshots supplied by Hank
 - SMB file and folder index snapshots supplied by the agent
 
@@ -136,6 +145,8 @@ Retrieval should be hybrid:
 - recency and source-type re-ranking
 
 Embeddings stay on Ollama, OpenAI API-key embeddings, or the local hash fallback. ChatGPT/Codex OAuth tokens are not used for retrieval indexing.
+Disabled HankAI sources are not refreshed into the assistant index during a run and are filtered out before provider prompts are assembled.
+Project docs are read from `HANK_REMOTE_PROJECT_DOCS_DIR`, which defaults to the process working directory. The Docker cloud image copies the root markdown files and `docs/` into `/app`.
 
 ### 3. Tool Runtime
 

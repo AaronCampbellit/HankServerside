@@ -70,23 +70,75 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Assistant Features</h2>
-            <span class="pill">Hank Assistant</span>
+            <h2>HankAI Harness</h2>
+            <span id="assistant-settings-pill" class="pill">Loading</span>
           </div>
-          <div class="card-list">
-            <article class="card">
-              <h3>ChatGPT/Codex Link</h3>
-              <p class="meta">Experimental subscription-backed chat uses device-code linking and keeps tokens on Hank Remote.</p>
-            </article>
-            <article class="card">
-              <h3>Local Hank Tools</h3>
-              <p class="meta">Notes, files, and calendar handoffs still use Hank Remote permissions and confirmations.</p>
-            </article>
-            <article class="card">
-              <h3>App Flow</h3>
-              <p class="meta">The Hank app can request the same status and start endpoints; native device-code display is a follow-up app change.</p>
-            </article>
+          <form id="assistant-settings-form" class="settings-form">
+            <div class="settings-block">
+              <div class="settings-block-head">
+                <h3>Hank Sources</h3>
+                <span class="mini-pill">Used on the next chat</span>
+              </div>
+              <div class="toggle-list">
+                <label class="toggle-field">
+                  <input id="harness-notes-enabled" type="checkbox">
+                  <span>Notes</span>
+                </label>
+                <label class="toggle-field">
+                  <input id="harness-profile-notes-enabled" type="checkbox">
+                  <span>My notes</span>
+                </label>
+                <label class="toggle-field">
+                  <input id="harness-home-notes-enabled" type="checkbox">
+                  <span>Shared home notes</span>
+                </label>
+                <label class="toggle-field">
+                  <input id="harness-files-enabled" type="checkbox">
+                  <span>Files</span>
+                </label>
+                <label class="toggle-field">
+                  <input id="harness-calendar-enabled" type="checkbox">
+                  <span>Calendar</span>
+                </label>
+                <label class="toggle-field">
+                  <input id="harness-homeassistant-enabled" type="checkbox">
+                  <span>Home Assistant</span>
+                </label>
+                <label class="toggle-field">
+                  <input id="harness-project-docs-enabled" type="checkbox">
+                  <span>Project docs</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="settings-block">
+              <div class="settings-block-head">
+                <h3>Prompt</h3>
+                <span class="mini-pill">System message</span>
+              </div>
+              <label class="setting-field" for="harness-system-prompt">
+                <span>System prompt</span>
+                <textarea id="harness-system-prompt" rows="7" spellcheck="true"></textarea>
+              </label>
+              <label class="setting-field" for="harness-max-context">
+                <span>Context items per request</span>
+                <input id="harness-max-context" type="number" min="1" max="20" step="1">
+              </label>
+            </div>
+
+            <div class="settings-actions">
+              <button id="save-assistant-settings-button" type="submit">Save HankAI Settings</button>
+              <button id="reset-assistant-prompt-button" type="button" class="secondary">Reset Prompt</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Harness Information</h2>
+            <span class="pill">Live</span>
           </div>
+          <div id="assistant-harness-output" class="card-list empty-state">Loading HankAI harness details.</div>
         </section>
       </main>
 
