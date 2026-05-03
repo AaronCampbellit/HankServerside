@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"strings"
 	"time"
 
 	"github.com/hirochachacha/go-smb2"
@@ -263,9 +262,7 @@ func (s *Service) dialSMBShare(ctx context.Context) (*smb2.Share, func() error, 
 }
 
 func smbAddress(host string) string {
-	host = strings.TrimSpace(host)
-	host = strings.TrimPrefix(host, "smb://")
-	host = strings.TrimPrefix(host, "//")
+	host = NormalizeSMBHost(host)
 	if _, _, err := net.SplitHostPort(host); err == nil {
 		return host
 	}

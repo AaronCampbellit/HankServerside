@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,7 +60,7 @@ func NewWithConfig(cfg Config) *Service {
 	return &Service{
 		root: strings.TrimSpace(cfg.Root),
 		smb: SMBConfig{
-			Host:     strings.TrimSpace(cfg.SMB.Host),
+			Host:     NormalizeSMBHost(cfg.SMB.Host),
 			Share:    strings.TrimSpace(cfg.SMB.Share),
 			Username: strings.TrimSpace(cfg.SMB.Username),
 			Password: cfg.SMB.Password,
@@ -84,12 +85,39 @@ func (s *Service) ApplySMBConfig(cfg SMBConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.smb = SMBConfig{
-		Host:     strings.TrimSpace(cfg.Host),
+		Host:     NormalizeSMBHost(cfg.Host),
 		Share:    strings.TrimSpace(cfg.Share),
 		Username: strings.TrimSpace(cfg.Username),
 		Password: cfg.Password,
 		Domain:   strings.TrimSpace(cfg.Domain),
 	}
+}
+
+func NormalizeSMBHost(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	host = strings.ReplaceAll(host, "\\", "/")
+
+	if parsed, err := url.Parse(host); err == nil && parsed.Scheme != "" {
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https":
+			return strings.TrimSpace(parsed.Hostname())
+		default:
+			if parsed.Host != "" {
+				return strings.TrimSpace(parsed.Host)
+			}
+		}
+	}
+
+	host = strings.TrimPrefix(host, "smb://")
+	host = strings.TrimPrefix(host, "cifs://")
+	host = strings.TrimLeft(host, "/")
+	if slash := strings.Index(host, "/"); slash >= 0 {
+		host = host[:slash]
+	}
+	return strings.TrimSpace(host)
 }
 
 func (s *Service) Snapshot() map[string]any {

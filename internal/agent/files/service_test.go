@@ -83,6 +83,38 @@ func TestSMBConfigEnablesService(t *testing.T) {
 	}
 }
 
+func TestNormalizeSMBHostAcceptsWebAndSMBInputs(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"192.168.86.138":             "192.168.86.138",
+		"https://192.168.86.138":     "192.168.86.138",
+		"https://192.168.86.138/ui":  "192.168.86.138",
+		"https://192.168.86.138:443": "192.168.86.138",
+		"smb://truenas.local/media":  "truenas.local",
+		"smb://truenas.local:1445/x": "truenas.local:1445",
+		"//truenas.local/media":      "truenas.local",
+		`\\truenas.local\media`:      "truenas.local",
+	}
+
+	for input, want := range cases {
+		if got := NormalizeSMBHost(input); got != want {
+			t.Fatalf("NormalizeSMBHost(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestSMBAddressDialsNormalizedHostOnPort445(t *testing.T) {
+	t.Parallel()
+
+	if got := smbAddress("https://192.168.86.138"); got != "192.168.86.138:445" {
+		t.Fatalf("smbAddress() = %q, want %q", got, "192.168.86.138:445")
+	}
+	if got := smbAddress("smb://truenas.local:1445/share"); got != "truenas.local:1445" {
+		t.Fatalf("smbAddress() = %q, want %q", got, "truenas.local:1445")
+	}
+}
+
 func TestResolveSharePathUsesShareRoot(t *testing.T) {
 	t.Parallel()
 

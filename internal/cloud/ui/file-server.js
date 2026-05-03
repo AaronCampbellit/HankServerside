@@ -155,6 +155,26 @@ function fileConfig() {
   };
 }
 
+function normalizeSMBHostInput(value) {
+  let host = String(value || "").trim().replaceAll("\\", "/");
+  if (!host) return "";
+
+  try {
+    const parsed = new URL(host);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.hostname;
+    }
+    if (parsed.host) {
+      return parsed.host;
+    }
+  } catch (_) {
+  }
+
+  host = host.replace(/^smb:\/\//i, "").replace(/^cifs:\/\//i, "").replace(/^\/+/, "");
+  const slashIndex = host.indexOf("/");
+  return slashIndex >= 0 ? host.slice(0, slashIndex).trim() : host.trim();
+}
+
 function preferredAppSocketURL() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/ws/app`;
@@ -720,11 +740,12 @@ async function saveSMBSettings(event) {
     return;
   }
   const publicConfig = {
-    host: els.smbHost.value.trim(),
+    host: normalizeSMBHostInput(els.smbHost.value),
     share: els.smbShare.value.trim(),
     domain: els.smbDomain.value.trim(),
     username: els.smbUsername.value.trim(),
   };
+  els.smbHost.value = publicConfig.host;
   const payload = {
     public_config: publicConfig,
     persist: els.smbPersist.checked,
