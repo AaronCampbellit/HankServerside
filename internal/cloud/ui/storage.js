@@ -181,8 +181,28 @@ function renderEvents(events, target, failuresOnly) {
         <span class="status-chip ${event.severity === "error" || event.severity === "critical" ? "offline" : ""}">${escapeHTML(event.severity || "info")}</span>
       </div>
       ${event.backup_label ? `<div class="meta">Backup: ${escapeHTML(event.backup_label)}</div>` : ""}
+      ${renderEventDetails(event)}
     </article>
   `).join("");
+}
+
+function renderEventDetails(event) {
+  const details = event.details || {};
+  const rows = [];
+  if (details.hint) rows.push(["Next Check", details.hint]);
+  if (details.error) rows.push(["Command", details.error]);
+  if (details.output_excerpt) rows.push(["Output", details.output_excerpt]);
+  if (!rows.length) return "";
+  return `
+    <div class="kv-grid">
+      ${rows.map(([label, value]) => `
+        <div class="kv-row">
+          <div class="kv-label">${escapeHTML(label)}</div>
+          <code class="mono-block">${escapeHTML(value)}</code>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 async function loadStatus() {

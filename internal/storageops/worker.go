@@ -233,15 +233,21 @@ func (w *Worker) RunAMCheck(ctx context.Context) error {
 	if w.databaseURL == "" {
 		return errors.New("database URL is required for pg_amcheck")
 	}
-	output, err := w.runner.Run(ctx, "pg_amcheck", "--no-dependent-indexes", w.databaseURL)
+	output, err := w.runner.Run(ctx, "pg_amcheck", "--install-missing=pg_catalog", "--no-dependent-indexes", w.databaseURL)
 	event := NewEvent(EventOperationAMCheck, EventStatusSuccess, EventSeverityInfo, "pg_amcheck completed without reported corruption.")
 	event.Details = map[string]any{"output_redacted": strings.TrimSpace(output) != ""}
 	if err != nil {
 		event.Status = EventStatusFailed
-		event.Severity = EventSeverityCritical
-		event.Message = "pg_amcheck reported a database integrity problem."
-		event.Details["error"] = redactAndTruncate(err.Error())
-		event.Details["corruption_detected"] = true
+		event.Details = commandFailureDetails(output, err)
+		if outputIndicatesAMCheckCorruption(output) {
+			event.Severity = EventSeverityCritical
+			event.Message = "pg_amcheck reported a database integrity problem."
+			event.Details["corruption_detected"] = true
+		} else {
+			event.Severity = EventSeverityError
+			event.Message = "pg_amcheck could not complete."
+			event.Details["corruption_detected"] = false
+		}
 	}
 	_, appendErr := AppendEvent(w.service.LogDir, event)
 	if err != nil {
@@ -293,7 +299,10 @@ func (w *Worker) RunBackup(ctx context.Context, backupType string) error {
 
 func (w *Worker) recordBackupFailure(message string, output string, err error) error {
 	event := NewEvent(EventOperationBackup, EventStatusFailed, EventSeverityError, message)
-	event.Details = map[string]any{"error": redactAndTruncate(err.Error()), "output_redacted": strings.TrimSpace(output) != ""}
+	event.Details = commandFailureDetails(output, err)
+	if hint := pgBackRestFailureHint(output, err); hint != "" {
+		event.Details["hint"] = hint
+	}
 	_, _ = AppendEvent(w.service.LogDir, event)
 	return fmt.Errorf("%s %w", message, err)
 }
@@ -616,6 +625,69 @@ func truncateOutput(value string) string {
 
 func redactAndTruncate(value string) string {
 	return truncateOutput(RedactSensitive(value))
+}
+
+func commandFailureDetails(output string, err error) map[string]any {
+	details := map[string]any{"output_redacted": strings.TrimSpace(output) != ""}
+	if err != nil {
+		details["error"] = redactAndTruncate(err.Error())
+	}
+	if excerpt := commandOutputExcerpt(output); excerpt != "" {
+		details["output_excerpt"] = excerpt
+	}
+	return details
+}
+
+func commandOutputExcerpt(output string) string {
+	output = strings.TrimSpace(redactAndTruncate(output))
+	if output == "" {
+		return ""
+	}
+	const maxOutputExcerptBytes = 1600
+	if len(output) <= maxOutputExcerptBytes {
+		return output
+	}
+	return output[:maxOutputExcerptBytes] + "\n... truncated ..."
+}
+
+func pgBackRestFailureHint(output string, err error) string {
+	combined := strings.ToLower(output)
+	if err != nil {
+		combined += " " + strings.ToLower(err.Error())
+	}
+	switch {
+	case strings.Contains(combined, "cipher") || strings.Contains(combined, "decrypt"):
+		return "Check that HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS matches the passphrase used when this backup repository was created."
+	case strings.Contains(combined, "unable to find primary cluster"):
+		return "Check that the pgBackRest stanza points at the running PostgreSQL data directory and socket path."
+	case strings.Contains(combined, "permission denied") || strings.Contains(combined, "could not create") || strings.Contains(combined, "unable to create"):
+		return "Check ownership and write access for the pgBackRest repository and log directories."
+	case strings.Contains(combined, "repo1-path") || strings.Contains(combined, "repository"):
+		return "Check that the configured backup target path is mounted into both postgres and db-ops."
+	default:
+		return ""
+	}
+}
+
+func outputIndicatesAMCheckCorruption(output string) bool {
+	normalized := strings.ToLower(output)
+	corruptionSignals := []string{
+		"corrupt",
+		"checksum verification failed",
+		"invalid page",
+		"could not read block",
+		"block verification failed",
+		"heap table corruption",
+		"btree index corruption",
+		"toast value",
+		"missing chunk",
+	}
+	for _, signal := range corruptionSignals {
+		if strings.Contains(normalized, signal) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Worker) pgBackRestArgs(cfg Config) []string {

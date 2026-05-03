@@ -109,7 +109,9 @@ func applyEventToStatus(status *StatusSnapshot, event Event) {
 		if IsFailureEvent(event) {
 			status.Checksum.FailureCount++
 			status.Checksum.LastError = event.Message
-			status.Checksum.CorruptionDetected = true
+			if boolFromDetails(event.Details, "corruption_detected") || strings.Contains(strings.ToLower(event.Message), "corrupt") {
+				status.Checksum.CorruptionDetected = true
+			}
 		}
 	case EventOperationBackup:
 		if event.Status == EventStatusSuccess {

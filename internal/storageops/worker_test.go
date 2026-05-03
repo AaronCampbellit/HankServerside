@@ -84,6 +84,9 @@ func TestWorkerBackupLogsFailure(t *testing.T) {
 	if len(events) != 1 || events[0].Operation != EventOperationBackup {
 		t.Fatalf("failure events = %+v", events)
 	}
+	if events[0].Details["output_excerpt"] != "backup failed" {
+		t.Fatalf("failure output excerpt = %+v", events[0].Details)
+	}
 }
 
 func TestWorkerRequiresRepoCipherPass(t *testing.T) {
@@ -181,6 +184,71 @@ func TestWorkerChecksumLogsDisabledWarning(t *testing.T) {
 		t.Fatal("expected checksum disabled status")
 	}
 	if len(status.Events) != 1 || status.Events[0].Severity != EventSeverityWarning {
+		t.Fatalf("events = %+v", status.Events)
+	}
+}
+
+func TestWorkerAMCheckSetupFailureIsNotMarkedAsCorruption(t *testing.T) {
+	logDir := t.TempDir()
+	stateDir := t.TempDir()
+	runner := &fakeRunner{
+		outputs: map[string]string{"pg_amcheck": "ERROR: extension \"amcheck\" is not installed"},
+		errors:  map[string]error{"pg_amcheck": errors.New("exit 1")},
+	}
+	worker := NewWorker(WorkerOptions{
+		StateDir:       stateDir,
+		LogDir:         logDir,
+		IntentSecret:   "secret",
+		RepoCipherPass: "cipher-secret",
+		DatabaseURL:    "postgres://example",
+		Runner:         runner,
+	})
+
+	if err := worker.RunAMCheck(context.Background()); err == nil {
+		t.Fatal("expected pg_amcheck failure")
+	}
+	status, err := LoadStatus(stateDir, logDir, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Checksum.CorruptionDetected {
+		t.Fatal("setup failure should not be marked as corruption")
+	}
+	if len(status.Events) != 1 || status.Events[0].Severity != EventSeverityError {
+		t.Fatalf("events = %+v", status.Events)
+	}
+	if !strings.Contains(runner.calls[0], "--install-missing=pg_catalog") {
+		t.Fatalf("pg_amcheck call did not install missing extension: %s", runner.calls[0])
+	}
+}
+
+func TestWorkerAMCheckCorruptionStaysCritical(t *testing.T) {
+	logDir := t.TempDir()
+	stateDir := t.TempDir()
+	runner := &fakeRunner{
+		outputs: map[string]string{"pg_amcheck": "heap table corruption detected in public.users"},
+		errors:  map[string]error{"pg_amcheck": errors.New("exit 1")},
+	}
+	worker := NewWorker(WorkerOptions{
+		StateDir:       stateDir,
+		LogDir:         logDir,
+		IntentSecret:   "secret",
+		RepoCipherPass: "cipher-secret",
+		DatabaseURL:    "postgres://example",
+		Runner:         runner,
+	})
+
+	if err := worker.RunAMCheck(context.Background()); err == nil {
+		t.Fatal("expected pg_amcheck failure")
+	}
+	status, err := LoadStatus(stateDir, logDir, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Checksum.CorruptionDetected {
+		t.Fatal("expected corruption to be marked")
+	}
+	if len(status.Events) != 1 || status.Events[0].Severity != EventSeverityCritical {
 		t.Fatalf("events = %+v", status.Events)
 	}
 }
