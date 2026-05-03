@@ -12,11 +12,11 @@ import (
 )
 
 const (
-	defaultAssistantSystemPrompt = "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened."
+	legacyAssistantSystemPrompt  = "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened."
+	defaultAssistantSystemPrompt = "You are HankAI, the assistant inside Hank Remote. Use the enabled Hank context sources to answer questions about the user's home, notes, files, calendar, Home Assistant state, and Hank Remote project documentation. Stay grounded in the supplied context; if the context is missing or stale, say what is missing instead of guessing. Keep answers practical and concise, with concrete next steps when useful. Do not claim you changed notes, files, calendars, Home Assistant, server settings, or project files unless a typed Hank tool result says that action already happened. Treat external provider access as a privacy boundary: only use the context included in the request and do not ask for secrets, passwords, API keys, or private tokens. For project questions, prefer README, AGENTS, SERVER_SYNC, docs, and runbooks over general assumptions. For home-control or destructive actions, explain the intended action and require confirmation through Hank before execution."
 
-	defaultAssistantMaxContextItems = 8
-	maxAssistantContextItems        = 20
-	maxAssistantSystemPromptBytes   = 6000
+	maxAssistantContextItems      = 20
+	maxAssistantSystemPromptBytes = 6000
 )
 
 type assistantSettingsSource struct {
@@ -33,15 +33,14 @@ type assistantSettingsResponse struct {
 }
 
 type assistantSettingsUpdateRequest struct {
-	NotesEnabled         *bool   `json:"notes_enabled"`
 	ProfileNotesEnabled  *bool   `json:"profile_notes_enabled"`
 	HomeNotesEnabled     *bool   `json:"home_notes_enabled"`
 	FilesEnabled         *bool   `json:"files_enabled"`
 	CalendarEnabled      *bool   `json:"calendar_enabled"`
 	HomeAssistantEnabled *bool   `json:"homeassistant_enabled"`
 	ProjectDocsEnabled   *bool   `json:"project_docs_enabled"`
+	ConversationsEnabled *bool   `json:"conversations_enabled"`
 	SystemPrompt         *string `json:"system_prompt"`
-	MaxContextItems      *int    `json:"max_context_items"`
 }
 
 func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
@@ -101,15 +100,15 @@ func defaultAssistantSettings(homeID string, userID string) domain.AssistantSett
 	return domain.AssistantSettings{
 		HomeID:               homeID,
 		UserID:               userID,
-		NotesEnabled:         true,
 		ProfileNotesEnabled:  true,
 		HomeNotesEnabled:     true,
 		FilesEnabled:         true,
 		CalendarEnabled:      true,
 		HomeAssistantEnabled: true,
 		ProjectDocsEnabled:   true,
+		ConversationsEnabled: true,
 		SystemPrompt:         defaultAssistantSystemPrompt,
-		MaxContextItems:      defaultAssistantMaxContextItems,
+		MaxContextItems:      maxAssistantContextItems,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 		UpdatedBy:            userID,
@@ -117,9 +116,6 @@ func defaultAssistantSettings(homeID string, userID string) domain.AssistantSett
 }
 
 func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request assistantSettingsUpdateRequest) (domain.AssistantSettings, error) {
-	if request.NotesEnabled != nil {
-		settings.NotesEnabled = *request.NotesEnabled
-	}
 	if request.ProfileNotesEnabled != nil {
 		settings.ProfileNotesEnabled = *request.ProfileNotesEnabled
 	}
@@ -138,11 +134,11 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	if request.ProjectDocsEnabled != nil {
 		settings.ProjectDocsEnabled = *request.ProjectDocsEnabled
 	}
+	if request.ConversationsEnabled != nil {
+		settings.ConversationsEnabled = *request.ConversationsEnabled
+	}
 	if request.SystemPrompt != nil {
 		settings.SystemPrompt = strings.TrimSpace(*request.SystemPrompt)
-	}
-	if request.MaxContextItems != nil {
-		settings.MaxContextItems = *request.MaxContextItems
 	}
 	settings = normalizeAssistantSettings(settings)
 	if len(settings.SystemPrompt) > maxAssistantSystemPromptBytes {
@@ -152,21 +148,13 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 }
 
 func normalizeAssistantSettings(settings domain.AssistantSettings) domain.AssistantSettings {
-	if strings.TrimSpace(settings.SystemPrompt) == "" {
+	trimmedPrompt := strings.TrimSpace(settings.SystemPrompt)
+	if trimmedPrompt == "" || trimmedPrompt == legacyAssistantSystemPrompt {
 		settings.SystemPrompt = defaultAssistantSystemPrompt
 	} else {
-		settings.SystemPrompt = strings.TrimSpace(settings.SystemPrompt)
+		settings.SystemPrompt = trimmedPrompt
 	}
-	if settings.MaxContextItems <= 0 {
-		settings.MaxContextItems = defaultAssistantMaxContextItems
-	}
-	if settings.MaxContextItems > maxAssistantContextItems {
-		settings.MaxContextItems = maxAssistantContextItems
-	}
-	if !settings.NotesEnabled {
-		settings.ProfileNotesEnabled = false
-		settings.HomeNotesEnabled = false
-	}
+	settings.MaxContextItems = maxAssistantContextItems
 	return settings
 }
 
@@ -176,7 +164,7 @@ func assistantSettingsPayload(settings domain.AssistantSettings) assistantSettin
 		Settings: settings,
 		Defaults: map[string]any{
 			"system_prompt":     defaultAssistantSystemPrompt,
-			"max_context_items": defaultAssistantMaxContextItems,
+			"max_context_items": maxAssistantContextItems,
 		},
 		Sources: assistantSettingsSources(settings),
 	}
@@ -192,15 +180,21 @@ func assistantSettingsSources(settings domain.AssistantSettings) []assistantSett
 			Description: "README, AGENTS, SERVER_SYNC, and docs markdown from HankServerside.",
 		},
 		{
+			Key:         "assistant_conversation",
+			Label:       "Past conversations",
+			Enabled:     settings.ConversationsEnabled,
+			Description: "Your private HankAI conversation history.",
+		},
+		{
 			Key:         "profile_notes",
-			Label:       "My notes",
-			Enabled:     settings.NotesEnabled && settings.ProfileNotesEnabled,
+			Label:       "Personal notes",
+			Enabled:     settings.ProfileNotesEnabled,
 			Description: "Notes stored in your Hank profile.",
 		},
 		{
 			Key:         "home_notes",
-			Label:       "Shared home notes",
-			Enabled:     settings.NotesEnabled && settings.HomeNotesEnabled,
+			Label:       "Shared notes",
+			Enabled:     settings.HomeNotesEnabled,
 			Description: "Notes shared with your Home.",
 		},
 		{
@@ -228,9 +222,9 @@ func assistantSettingsAllowSource(settings domain.AssistantSettings, sourceType 
 	settings = normalizeAssistantSettings(settings)
 	switch sourceType {
 	case "profile_note":
-		return settings.NotesEnabled && settings.ProfileNotesEnabled
+		return settings.ProfileNotesEnabled
 	case "shared_note":
-		return settings.NotesEnabled && settings.HomeNotesEnabled
+		return settings.HomeNotesEnabled
 	case "file":
 		return settings.FilesEnabled
 	case "calendar_event":
@@ -239,6 +233,8 @@ func assistantSettingsAllowSource(settings domain.AssistantSettings, sourceType 
 		return settings.HomeAssistantEnabled
 	case assistantProjectDocSourceType:
 		return settings.ProjectDocsEnabled
+	case assistantConversationSourceType:
+		return settings.ConversationsEnabled
 	default:
 		return false
 	}

@@ -12,9 +12,11 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
+const assistantConversationSourceType = "assistant_conversation"
+
 func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) {
 	settings = normalizeAssistantSettings(settings)
-	if settings.NotesEnabled && (settings.ProfileNotesEnabled || settings.HomeNotesEnabled) {
+	if settings.ProfileNotesEnabled || settings.HomeNotesEnabled {
 		if err := s.indexAssistantNotes(ctx, home, membership, auth, settings); err != nil {
 			s.logger.Warn("assistant note indexing failed", "error", err)
 		}
@@ -39,6 +41,84 @@ func (s *Server) refreshAssistantIndex(ctx context.Context, home domain.Home, me
 			s.logger.Warn("assistant file indexing failed", "error", err)
 		}
 	}
+}
+
+func (s *Server) indexAssistantConversation(ctx context.Context, session domain.AssistantSession, userID string) error {
+	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	messages, err := s.store.ListAssistantMessages(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	searchText := assistantConversationSearchText(session, messages)
+	if strings.TrimSpace(searchText) == "" {
+		return nil
+	}
+	metadata, _ := json.Marshal(map[string]any{
+		"session_id": session.ID,
+		"title":      session.Title,
+	})
+	userIDCopy := userID
+	sourceKey := strings.Join([]string{assistantConversationSourceType, session.HomeID, userID, session.ID}, ":")
+	updatedAt := firstTime(session.UpdatedAt, time.Now().UTC())
+	document := domain.AssistantDocument{
+		ID:           stableAssistantID("adoc", sourceKey),
+		HomeID:       session.HomeID,
+		UserID:       &userIDCopy,
+		SourceType:   assistantConversationSourceType,
+		SourceID:     session.ID,
+		SourceKey:    sourceKey,
+		Title:        firstNonBlank(session.Title, "HankAI Conversation"),
+		Path:         session.ID,
+		CanonicalURI: "hank://assistant/sessions/" + session.ID,
+		MetadataJSON: string(metadata),
+		SearchText:   searchText,
+		UpdatedAt:    updatedAt,
+	}
+	return s.store.UpsertAssistantDocumentWithChunks(ctx, document, s.assistantChunksForText(ctx, userID, document.ID, searchText, updatedAt))
+}
+
+func assistantConversationSearchText(session domain.AssistantSession, messages []domain.AssistantMessage) string {
+	var builder strings.Builder
+	if strings.TrimSpace(session.Title) != "" {
+		builder.WriteString("Conversation: " + strings.TrimSpace(session.Title) + "\n")
+	}
+	for _, message := range messages {
+		var content assistantMessageContent
+		if err := json.Unmarshal([]byte(message.ContentJSON), &content); err != nil {
+			continue
+		}
+		text := strings.TrimSpace(content.Text)
+		if text == "" && len(content.Cards) == 0 {
+			continue
+		}
+		switch message.Role {
+		case assistantRoleUser:
+			builder.WriteString("User: ")
+		case assistantRoleAssistant:
+			builder.WriteString("HankAI: ")
+		default:
+			builder.WriteString(strings.TrimSpace(message.Role) + ": ")
+		}
+		builder.WriteString(text)
+		builder.WriteString("\n")
+		for _, card := range content.Cards {
+			cardText := strings.TrimSpace(strings.Join([]string{
+				card.Kind,
+				card.Title,
+				card.Summary,
+				card.NoteID,
+				card.EventID,
+				card.Path,
+				card.SearchText,
+			}, " "))
+			if cardText != "" {
+				builder.WriteString("Result: " + cardText + "\n")
+			}
+		}
+	}
+	return strings.TrimSpace(builder.String())
 }
 
 func (s *Server) indexAssistantNotes(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings) error {

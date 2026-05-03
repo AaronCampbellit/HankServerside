@@ -81,16 +81,12 @@
               </div>
               <div class="toggle-list">
                 <label class="toggle-field">
-                  <input id="harness-notes-enabled" type="checkbox">
-                  <span>Notes</span>
-                </label>
-                <label class="toggle-field">
                   <input id="harness-profile-notes-enabled" type="checkbox">
-                  <span>My notes</span>
+                  <span>Personal notes</span>
                 </label>
                 <label class="toggle-field">
                   <input id="harness-home-notes-enabled" type="checkbox">
-                  <span>Shared home notes</span>
+                  <span>Shared notes</span>
                 </label>
                 <label class="toggle-field">
                   <input id="harness-files-enabled" type="checkbox">
@@ -108,6 +104,10 @@
                   <input id="harness-project-docs-enabled" type="checkbox">
                   <span>Project docs</span>
                 </label>
+                <label class="toggle-field">
+                  <input id="harness-conversations-enabled" type="checkbox">
+                  <span>Past conversations</span>
+                </label>
               </div>
             </div>
 
@@ -119,10 +119,6 @@
               <label class="setting-field" for="harness-system-prompt">
                 <span>System prompt</span>
                 <textarea id="harness-system-prompt" rows="7" spellcheck="true"></textarea>
-              </label>
-              <label class="setting-field" for="harness-max-context">
-                <span>Context items per request</span>
-                <input id="harness-max-context" type="number" min="1" max="20" step="1">
               </label>
             </div>
 

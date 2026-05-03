@@ -59,7 +59,10 @@
         <section class="panel hank-chat-panel">
           <div class="panel-head">
             <h2 id="conversation-title">HankAI</h2>
-            <span id="run-state" class="pill">Ready</span>
+            <div class="actions wrap compact">
+              <button id="delete-session-button" type="button" class="ghost">Delete</button>
+              <span id="run-state" class="pill">Ready</span>
+            </div>
           </div>
           <div id="message-list" class="hank-message-list empty-state">Choose or create a conversation.</div>
           <div id="confirmation-card" class="card hank-confirmation" hidden>

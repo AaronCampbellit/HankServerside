@@ -301,6 +301,7 @@ Add app client support for assistant routes:
 - `GET /v1/home/assistant/sessions`
 - `POST /v1/home/assistant/sessions`
 - `GET /v1/home/assistant/sessions/{sessionID}`
+- `DELETE /v1/home/assistant/sessions/{sessionID}`
 - `GET /v1/home/assistant/sessions/{sessionID}/messages`
 - `POST /v1/home/assistant/sessions/{sessionID}/messages`
 - `GET /v1/home/assistant/runs/{runID}`

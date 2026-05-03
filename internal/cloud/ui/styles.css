@@ -1098,11 +1098,36 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
+  display: grid;
+  gap: 7px;
 }
 
 .hank-session-card.active {
   border-color: rgba(82, 190, 160, 0.7);
   background: rgba(82, 190, 160, 0.12);
+}
+
+.hank-session-select {
+  width: 100%;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.hank-session-select:hover {
+  transform: none;
+  background: transparent;
+}
+
+.hank-session-delete {
+  justify-self: start;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
 }
 
 .hank-message-list {

@@ -19,15 +19,14 @@ const els = {
   assistantSettingsPill: document.getElementById("assistant-settings-pill"),
   assistantSettingsForm: document.getElementById("assistant-settings-form"),
   assistantHarnessOutput: document.getElementById("assistant-harness-output"),
-  harnessNotesEnabled: document.getElementById("harness-notes-enabled"),
   harnessProfileNotesEnabled: document.getElementById("harness-profile-notes-enabled"),
   harnessHomeNotesEnabled: document.getElementById("harness-home-notes-enabled"),
   harnessFilesEnabled: document.getElementById("harness-files-enabled"),
   harnessCalendarEnabled: document.getElementById("harness-calendar-enabled"),
   harnessHomeAssistantEnabled: document.getElementById("harness-homeassistant-enabled"),
   harnessProjectDocsEnabled: document.getElementById("harness-project-docs-enabled"),
+  harnessConversationsEnabled: document.getElementById("harness-conversations-enabled"),
   harnessSystemPrompt: document.getElementById("harness-system-prompt"),
-  harnessMaxContext: document.getElementById("harness-max-context"),
   resetAssistantPromptButton: document.getElementById("reset-assistant-prompt-button"),
   toast: document.getElementById("toast"),
 };
@@ -143,6 +142,7 @@ function renderStatus() {
         <div class="meta">Chat model: ${escapeHTML(assistant.chat_model || "local fallback")}</div>
         <div class="meta">Embedding model: ${escapeHTML(assistant.embedding_model || "local fallback")}</div>
         <div class="meta">Vector store: ${escapeHTML(assistant.vector_store || "postgres")}</div>
+        <div class="meta">Vector mode: ${escapeHTML(assistant.index?.vector_mode || "json_fallback")}</div>
       </article>
     `;
     return;
@@ -155,6 +155,7 @@ function renderStatus() {
       <div class="meta">Chat: ${assistant.chat_configured ? "Configured" : "Using local fallback until Ollama or OpenAI is configured."}</div>
       <div class="meta">Embeddings: ${assistant.embedding_configured ? "Configured" : "Using local fallback embeddings."}</div>
       <div class="meta">Vector store: ${escapeHTML(assistant.vector_store || "postgres")}</div>
+      <div class="meta">Vector mode: ${escapeHTML(assistant.index?.vector_mode || "json_fallback")}</div>
     </article>
     <article class="card">
       <div class="card-title">Add these to <code>.env.cloud</code>, then restart the cloud service.</div>
@@ -173,16 +174,15 @@ function renderAssistantSettings() {
   els.assistantSettingsPill.textContent = enabledSources.length ? `${enabledSources.length} sources` : "No sources";
   els.assistantSettingsPill.className = enabledSources.length ? "status-chip" : "status-chip offline";
 
-  els.harnessNotesEnabled.checked = settings.notes_enabled !== false;
   els.harnessProfileNotesEnabled.checked = settings.profile_notes_enabled !== false;
   els.harnessHomeNotesEnabled.checked = settings.home_notes_enabled !== false;
   els.harnessFilesEnabled.checked = settings.files_enabled !== false;
   els.harnessCalendarEnabled.checked = settings.calendar_enabled !== false;
   els.harnessHomeAssistantEnabled.checked = settings.homeassistant_enabled !== false;
   els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
+  els.harnessConversationsEnabled.checked = settings.conversations_enabled !== false;
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
-  els.harnessMaxContext.value = settings.max_context_items || defaults.max_context_items || 8;
-  syncNotesSourceControls();
+  const index = state.assistant?.index || {};
 
   els.assistantHarnessOutput.className = "card-list";
   els.assistantHarnessOutput.innerHTML = `
@@ -190,7 +190,14 @@ function renderAssistantSettings() {
       <div class="card-title">Current provider: ${escapeHTML(state.assistant?.provider || "local")}</div>
       <div class="meta">Chat model: ${escapeHTML(state.assistant?.chat_model || "local fallback")}</div>
       <div class="meta">Embeddings: ${escapeHTML(state.assistant?.embedding_model || "local-hash")}</div>
-      <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || 8)} items</div>
+      <div class="meta">Vector mode: ${escapeHTML(index.vector_mode || "json_fallback")}</div>
+      <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || defaults.max_context_items || 20)} items</div>
+    </article>
+    <article class="card">
+      <div class="card-title">Indexed memory</div>
+      <div class="meta">Chunks: ${escapeHTML(index.chunk_count || 0)} (${escapeHTML(index.embedded_chunk_count || 0)} embedded)</div>
+      <div class="meta">Files: ${escapeHTML(index.file_count || 0)} (${escapeHTML(index.embedded_file_count || 0)} embedded)</div>
+      <div class="meta">Past conversations: ${escapeHTML(index.conversation_count || 0)}</div>
     </article>
     <article class="card">
       <div class="card-title">Allowed sources</div>
@@ -204,23 +211,16 @@ function renderAssistantSettings() {
   `;
 }
 
-function syncNotesSourceControls() {
-  const notesOn = els.harnessNotesEnabled.checked;
-  els.harnessProfileNotesEnabled.disabled = !notesOn;
-  els.harnessHomeNotesEnabled.disabled = !notesOn;
-}
-
 function assistantSettingsFormPayload() {
   return {
-    notes_enabled: els.harnessNotesEnabled.checked,
     profile_notes_enabled: els.harnessProfileNotesEnabled.checked,
     home_notes_enabled: els.harnessHomeNotesEnabled.checked,
     files_enabled: els.harnessFilesEnabled.checked,
     calendar_enabled: els.harnessCalendarEnabled.checked,
     homeassistant_enabled: els.harnessHomeAssistantEnabled.checked,
     project_docs_enabled: els.harnessProjectDocsEnabled.checked,
+    conversations_enabled: els.harnessConversationsEnabled.checked,
     system_prompt: els.harnessSystemPrompt.value,
-    max_context_items: Number(els.harnessMaxContext.value || 8),
   };
 }
 
@@ -247,11 +247,11 @@ async function loadStatus() {
 async function saveAssistantSettings(event) {
   event.preventDefault();
   try {
-    state.settings = await api("/v1/home/assistant/settings", {
+    await api("/v1/home/assistant/settings", {
       method: "PUT",
       body: JSON.stringify(assistantSettingsFormPayload()),
     });
-    renderAssistantSettings();
+    await loadStatus();
     showToast("HankAI settings saved.");
   } catch (error) {
     showToast(error.message, true);
@@ -300,7 +300,6 @@ els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
 els.refreshButton.addEventListener("click", () => loadStatus().then(() => showToast("AI settings refreshed.")).catch((error) => showToast(error.message, true)));
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
-els.harnessNotesEnabled.addEventListener("change", syncNotesSourceControls);
 els.resetAssistantPromptButton.addEventListener("click", () => {
   const defaultPrompt = state.settings?.defaults?.system_prompt || "";
   if (defaultPrompt) {

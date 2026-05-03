@@ -13,6 +13,7 @@ const els = {
   assistantStatus: document.getElementById("assistant-status"),
   sessionList: document.getElementById("session-list"),
   newSessionButton: document.getElementById("new-session-button"),
+  deleteSessionButton: document.getElementById("delete-session-button"),
   conversationTitle: document.getElementById("conversation-title"),
   runState: document.getElementById("run-state"),
   messageList: document.getElementById("message-list"),
@@ -67,11 +68,14 @@ function renderSession() {
 }
 
 function renderStatus(status) {
+  const index = status.index || {};
   els.assistantStatus.innerHTML = [
     ["Provider", status.provider || "local"],
     ["Chat", status.chat_configured ? "Configured" : "Local fallback"],
     ["Embeddings", status.embedding_configured ? "Configured" : "Local fallback"],
     ["Vector Store", status.vector_store || "postgres"],
+    ["Vector Mode", index.vector_mode || "json_fallback"],
+    ["Memory", `${index.chunk_count || 0} chunks · ${index.conversation_count || 0} conversations`],
   ].map(([label, value]) => `
     <div class="kv-row">
       <div class="kv-label">${escapeHTML(label)}</div>
@@ -88,16 +92,20 @@ function renderSessions() {
   }
   els.sessionList.className = "card-list hank-session-list";
   els.sessionList.innerHTML = state.sessions.map((session) => `
-    <button class="card hank-session-card${session.id === state.selectedSessionID ? " active" : ""}" type="button" data-session-id="${escapeHTML(session.id)}">
-      <span class="card-title">${escapeHTML(session.title || "New Conversation")}</span>
-      <span class="meta">${new Date(session.updated_at || session.last_message_at).toLocaleString()}</span>
-    </button>
+    <article class="card hank-session-card${session.id === state.selectedSessionID ? " active" : ""}">
+      <button class="hank-session-select" type="button" data-session-id="${escapeHTML(session.id)}">
+        <span class="card-title">${escapeHTML(session.title || "New Conversation")}</span>
+        <span class="meta">${new Date(session.updated_at || session.last_message_at).toLocaleString()}</span>
+      </button>
+      <button class="hank-session-delete ghost" type="button" data-delete-session-id="${escapeHTML(session.id)}">Delete</button>
+    </article>
   `).join("");
 }
 
 function renderMessages(messages = []) {
   const session = state.sessions.find((item) => item.id === state.selectedSessionID);
   els.conversationTitle.textContent = session?.title || "HankAI";
+  els.deleteSessionButton.disabled = !session;
   if (!messages.length) {
     els.messageList.className = "hank-message-list empty-state";
     els.messageList.textContent = "Ask Hank about your synced Hank data.";
@@ -128,12 +136,17 @@ function renderCards(cards) {
 async function loadSessions() {
   const payload = await api("/v1/home/assistant/sessions");
   state.sessions = payload.sessions || [];
+  if (state.selectedSessionID && !state.sessions.some((session) => session.id === state.selectedSessionID)) {
+    state.selectedSessionID = "";
+  }
   if (!state.selectedSessionID && state.sessions[0]) {
     state.selectedSessionID = state.sessions[0].id;
   }
   renderSessions();
   if (state.selectedSessionID) {
     await loadMessages(state.selectedSessionID);
+  } else {
+    renderMessages([]);
   }
 }
 
@@ -150,6 +163,27 @@ async function createSession() {
   state.selectedSessionID = session.id;
   renderSessions();
   renderMessages([]);
+}
+
+async function deleteSession(sessionID = state.selectedSessionID) {
+  if (!sessionID) return;
+  const session = state.sessions.find((item) => item.id === sessionID);
+  const title = session?.title || "this conversation";
+  if (!window.confirm(`Delete ${title}?`)) {
+    return;
+  }
+  await api(`/v1/home/assistant/sessions/${encodeURIComponent(sessionID)}`, { method: "DELETE" });
+  state.sessions = state.sessions.filter((item) => item.id !== sessionID);
+  if (state.selectedSessionID === sessionID) {
+    state.selectedSessionID = state.sessions[0]?.id || "";
+  }
+  renderSessions();
+  if (state.selectedSessionID) {
+    await loadMessages(state.selectedSessionID);
+  } else {
+    renderMessages([]);
+  }
+  showToast("Conversation deleted.");
 }
 
 async function sendMessage(event) {
@@ -183,6 +217,14 @@ async function sendMessage(event) {
     state.isSending = false;
     els.sendButton.disabled = false;
   }
+}
+
+function handleMessageInputKeydown(event) {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
+    return;
+  }
+  event.preventDefault();
+  els.messageForm.requestSubmit();
 }
 
 async function continueRun(initialRun) {
@@ -248,12 +290,19 @@ async function hydrate() {
 
 els.logoutButton.addEventListener("click", logout);
 els.newSessionButton.addEventListener("click", () => createSession().catch((error) => showToast(error.message, true)));
+els.deleteSessionButton.addEventListener("click", () => deleteSession().catch((error) => showToast(error.message, true)));
 els.sessionList.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-delete-session-id]");
+  if (deleteButton) {
+    deleteSession(deleteButton.dataset.deleteSessionId).catch((error) => showToast(error.message, true));
+    return;
+  }
   const button = event.target.closest("[data-session-id]");
   if (!button) return;
   loadMessages(button.dataset.sessionId).catch((error) => showToast(error.message, true));
 });
 els.messageForm.addEventListener("submit", sendMessage);
+els.messageInput.addEventListener("keydown", handleMessageInputKeydown);
 els.confirmButton.addEventListener("click", () => confirmPending(true));
 els.cancelButton.addEventListener("click", () => confirmPending(false));
 

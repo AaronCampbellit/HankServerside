@@ -56,6 +56,37 @@ func (s *Store) TouchAssistantSession(ctx context.Context, sessionID string, tit
 	return err
 }
 
+func (s *Store) DeleteAssistantSession(ctx context.Context, sessionID string) error {
+	tx, err := s.beginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_documents
+		WHERE source_type = 'assistant_conversation' AND source_id = ?`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_tool_calls
+		WHERE run_id IN (SELECT id FROM assistant_runs WHERE session_id = ?)`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_runs WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_messages WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM assistant_sessions WHERE id = ?`, sessionID)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err == nil && count == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CreateAssistantMessage(ctx context.Context, message domain.AssistantMessage) error {
 	_, err := s.exec(ctx, `INSERT INTO assistant_messages (id, session_id, role, status, content_json, model_name, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -131,8 +162,8 @@ func (s *Store) UpdateAssistantRun(ctx context.Context, run domain.AssistantRun)
 }
 
 func (s *Store) GetAssistantSettings(ctx context.Context, homeID string, userID string) (domain.AssistantSettings, error) {
-	row := s.queryRow(ctx, `SELECT home_id, user_id, notes_enabled, profile_notes_enabled, home_notes_enabled,
-			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, system_prompt, max_context_items,
+	row := s.queryRow(ctx, `SELECT home_id, user_id, profile_notes_enabled, home_notes_enabled,
+			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, conversations_enabled, system_prompt, max_context_items,
 			created_at, updated_at, updated_by
 		FROM assistant_settings
 		WHERE home_id = ? AND user_id = ?`, homeID, userID)
@@ -141,31 +172,31 @@ func (s *Store) GetAssistantSettings(ctx context.Context, homeID string, userID 
 
 func (s *Store) UpsertAssistantSettings(ctx context.Context, settings domain.AssistantSettings) error {
 	_, err := s.exec(ctx, `INSERT INTO assistant_settings (
-			home_id, user_id, notes_enabled, profile_notes_enabled, home_notes_enabled,
-			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, system_prompt, max_context_items,
+			home_id, user_id, profile_notes_enabled, home_notes_enabled,
+			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, conversations_enabled, system_prompt, max_context_items,
 			created_at, updated_at, updated_by
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(home_id, user_id) DO UPDATE SET
-			notes_enabled = excluded.notes_enabled,
 			profile_notes_enabled = excluded.profile_notes_enabled,
 			home_notes_enabled = excluded.home_notes_enabled,
 			files_enabled = excluded.files_enabled,
 			calendar_enabled = excluded.calendar_enabled,
 			homeassistant_enabled = excluded.homeassistant_enabled,
 			project_docs_enabled = excluded.project_docs_enabled,
+			conversations_enabled = excluded.conversations_enabled,
 			system_prompt = excluded.system_prompt,
 			max_context_items = excluded.max_context_items,
 			updated_at = excluded.updated_at,
 			updated_by = excluded.updated_by`,
 		settings.HomeID,
 		settings.UserID,
-		settings.NotesEnabled,
 		settings.ProfileNotesEnabled,
 		settings.HomeNotesEnabled,
 		settings.FilesEnabled,
 		settings.CalendarEnabled,
 		settings.HomeAssistantEnabled,
 		settings.ProjectDocsEnabled,
+		settings.ConversationsEnabled,
 		settings.SystemPrompt,
 		settings.MaxContextItems,
 		settings.CreatedAt,
@@ -269,13 +300,13 @@ func scanAssistantSettings(scanner interface{ Scan(dest ...any) error }) (domain
 	if err := scanner.Scan(
 		&settings.HomeID,
 		&settings.UserID,
-		&settings.NotesEnabled,
 		&settings.ProfileNotesEnabled,
 		&settings.HomeNotesEnabled,
 		&settings.FilesEnabled,
 		&settings.CalendarEnabled,
 		&settings.HomeAssistantEnabled,
 		&settings.ProjectDocsEnabled,
+		&settings.ConversationsEnabled,
 		&settings.SystemPrompt,
 		&settings.MaxContextItems,
 		&settings.CreatedAt,

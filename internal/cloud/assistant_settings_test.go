@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/store"
 )
 
 func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
@@ -40,8 +41,21 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if !defaults.Settings.FilesEnabled || !defaults.Settings.HomeAssistantEnabled || defaults.Settings.SystemPrompt != defaultAssistantSystemPrompt {
 		t.Fatalf("default settings = %#v", defaults.Settings)
 	}
+	if !defaults.Settings.ProfileNotesEnabled || !defaults.Settings.HomeNotesEnabled {
+		t.Fatalf("note source defaults = false, settings=%#v", defaults.Settings)
+	}
 	if !defaults.Settings.ProjectDocsEnabled {
 		t.Fatalf("project docs default = false, settings=%#v", defaults.Settings)
+	}
+	if defaults.Settings.MaxContextItems != maxAssistantContextItems {
+		t.Fatalf("default max context = %d, want %d", defaults.Settings.MaxContextItems, maxAssistantContextItems)
+	}
+	if !strings.Contains(defaults.Settings.SystemPrompt, "You are HankAI") || !strings.Contains(defaults.Settings.SystemPrompt, "privacy boundary") {
+		t.Fatalf("default prompt does not include harness guidance: %q", defaults.Settings.SystemPrompt)
+	}
+	legacySettings := normalizeAssistantSettings(domain.AssistantSettings{SystemPrompt: legacyAssistantSystemPrompt})
+	if legacySettings.SystemPrompt != defaultAssistantSystemPrompt {
+		t.Fatalf("legacy prompt was not upgraded")
 	}
 
 	var updated assistantSettingsResponse
@@ -50,20 +64,61 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 		"calendar_enabled":      false,
 		"homeassistant_enabled": true,
 		"project_docs_enabled":  false,
+		"profile_notes_enabled": false,
+		"home_notes_enabled":    true,
 		"system_prompt":         "Use only the supplied Hank test context.",
-		"max_context_items":     3,
 	}, &updated)
 	if updated.Settings.FilesEnabled || updated.Settings.CalendarEnabled || updated.Settings.ProjectDocsEnabled {
 		t.Fatalf("source toggles were not saved: %#v", updated.Settings)
 	}
-	if updated.Settings.SystemPrompt != "Use only the supplied Hank test context." || updated.Settings.MaxContextItems != 3 {
+	if updated.Settings.ProfileNotesEnabled || !updated.Settings.HomeNotesEnabled {
+		t.Fatalf("note toggles were not saved: %#v", updated.Settings)
+	}
+	if updated.Settings.SystemPrompt != "Use only the supplied Hank test context." || updated.Settings.MaxContextItems != maxAssistantContextItems {
 		t.Fatalf("prompt/context settings = %#v", updated.Settings)
 	}
 
 	var persisted assistantSettingsResponse
 	requestJSON(t, testServer, "harness-settings-token", http.MethodGet, "/v1/home/assistant/settings", nil, &persisted)
-	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != 3 {
+	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems {
 		t.Fatalf("persisted settings = %#v", persisted.Settings)
+	}
+}
+
+func TestAssistantSessionCanBeDeleted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_delete_assistant_session", Email: "delete-assistant-session@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_delete_assistant_session", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_delete_assistant_session", UserID: user.ID, TokenHash: hashToken("delete-assistant-session-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, session))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var created assistantAPISession
+	requestJSON(t, testServer, "delete-assistant-session-token", http.MethodPost, "/v1/home/assistant/sessions", nil, &created)
+	if created.ID == "" {
+		t.Fatal("created session has no id")
+	}
+
+	requestJSON(t, testServer, "delete-assistant-session-token", http.MethodDelete, "/v1/home/assistant/sessions/"+created.ID, nil, nil)
+
+	var list assistantSessionListResponse
+	requestJSON(t, testServer, "delete-assistant-session-token", http.MethodGet, "/v1/home/assistant/sessions", nil, &list)
+	if len(list.Sessions) != 0 {
+		t.Fatalf("sessions after delete = %#v", list.Sessions)
+	}
+	if _, err := db.GetAssistantSession(ctx, created.ID); err != store.ErrNotFound {
+		t.Fatalf("GetAssistantSession err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -208,7 +263,8 @@ func TestAssistantProjectDocsAreIndexedAsHarnessSource(t *testing.T) {
 	})
 
 	settings := defaultAssistantSettings(home.ID, user.ID)
-	settings.NotesEnabled = false
+	settings.ProfileNotesEnabled = false
+	settings.HomeNotesEnabled = false
 	settings.FilesEnabled = false
 	settings.CalendarEnabled = false
 	settings.HomeAssistantEnabled = false
@@ -228,5 +284,93 @@ func TestAssistantProjectDocsAreIndexedAsHarnessSource(t *testing.T) {
 	}
 	if !strings.Contains(sentMessages[1].Content, "[project_doc]") || !strings.Contains(sentMessages[1].Content, "frobnicator") {
 		t.Fatalf("project docs were not sent as context: %s", sentMessages[1].Content)
+	}
+}
+
+func TestAssistantConversationMemoryIsIndexedAndFiltered(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_conversation_memory", Email: "conversation-memory@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_conversation_memory", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AssistantSession{ID: "asess_conversation_memory", HomeID: home.ID, UserID: user.ID, Title: "New Conversation", LastMessageAt: now, CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.ProfileNotesEnabled = false
+	settings.HomeNotesEnabled = false
+	settings.FilesEnabled = false
+	settings.CalendarEnabled = false
+	settings.HomeAssistantEnabled = false
+	settings.ProjectDocsEnabled = false
+	settings.ConversationsEnabled = true
+	must(t, db.UpsertAssistantSettings(ctx, settings))
+
+	var providerCalls int
+	var sentMessages []assistantLLMMessage
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		var body struct {
+			Messages []assistantLLMMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		sentMessages = body.Messages
+		writeJSON(w, http.StatusOK, map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "Conversation memory answer."}},
+			},
+		})
+	}))
+	defer provider.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{Provider: "openai", OpenAIBaseURL: provider.URL, OpenAIAPIKey: "api-key", OpenAIChatModel: "gpt-test"})
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+
+	if _, err := server.processAssistantMessage(ctx, home, membership, auth, session, "Remember that the blue cabinet has spare fuses.", "test-device", "UTC"); err != nil {
+		t.Fatalf("process first assistant message: %v", err)
+	}
+	stats, err := db.AssistantIndexStats(ctx, home.ID, user.ID)
+	if err != nil {
+		t.Fatalf("AssistantIndexStats: %v", err)
+	}
+	if stats.ConversationCount != 1 {
+		t.Fatalf("conversation count = %d, want 1; stats=%#v", stats.ConversationCount, stats)
+	}
+
+	session, err = db.GetAssistantSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantSession: %v", err)
+	}
+	if _, err := server.processAssistantMessage(ctx, home, membership, auth, session, "Where are the spare fuses?", "test-device", "UTC"); err != nil {
+		t.Fatalf("process second assistant message: %v", err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("provider calls = %d, want 1", providerCalls)
+	}
+	if len(sentMessages) != 2 || !strings.Contains(sentMessages[1].Content, "[assistant_conversation]") || !strings.Contains(sentMessages[1].Content, "blue cabinet has spare fuses") {
+		t.Fatalf("conversation memory was not sent as context: %#v", sentMessages)
+	}
+
+	settings.ConversationsEnabled = false
+	must(t, db.UpsertAssistantSettings(ctx, settings))
+	session, err = db.GetAssistantSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantSession disabled: %v", err)
+	}
+	if _, err := server.processAssistantMessage(ctx, home, membership, auth, session, "Where are the spare fuses now?", "test-device", "UTC"); err != nil {
+		t.Fatalf("process disabled assistant message: %v", err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("provider calls after disabling conversations = %d, want 1", providerCalls)
 	}
 }

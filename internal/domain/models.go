@@ -290,16 +290,34 @@ type AssistantRetrievedContext struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type AssistantIndexSourceCount struct {
+	SourceType         string `json:"source_type"`
+	DocumentCount      int    `json:"document_count"`
+	ChunkCount         int    `json:"chunk_count"`
+	EmbeddedChunkCount int    `json:"embedded_chunk_count"`
+}
+
+type AssistantIndexStats struct {
+	VectorAvailable    bool                        `json:"vector_available"`
+	VectorMode         string                      `json:"vector_mode"`
+	DocumentsBySource  []AssistantIndexSourceCount `json:"documents_by_source"`
+	ChunkCount         int                         `json:"chunk_count"`
+	EmbeddedChunkCount int                         `json:"embedded_chunk_count"`
+	FileCount          int                         `json:"file_count"`
+	EmbeddedFileCount  int                         `json:"embedded_file_count"`
+	ConversationCount  int                         `json:"conversation_count"`
+}
+
 type AssistantSettings struct {
 	HomeID               string    `json:"home_id"`
 	UserID               string    `json:"user_id"`
-	NotesEnabled         bool      `json:"notes_enabled"`
 	ProfileNotesEnabled  bool      `json:"profile_notes_enabled"`
 	HomeNotesEnabled     bool      `json:"home_notes_enabled"`
 	FilesEnabled         bool      `json:"files_enabled"`
 	CalendarEnabled      bool      `json:"calendar_enabled"`
 	HomeAssistantEnabled bool      `json:"homeassistant_enabled"`
 	ProjectDocsEnabled   bool      `json:"project_docs_enabled"`
+	ConversationsEnabled bool      `json:"conversations_enabled"`
 	SystemPrompt         string    `json:"system_prompt"`
 	MaxContextItems      int       `json:"max_context_items"`
 	CreatedAt            time.Time `json:"created_at"`

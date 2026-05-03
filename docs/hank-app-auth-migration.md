@@ -125,9 +125,9 @@ To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, 
 The server now exposes per-user, per-Home HankAI harness settings through `GET`/`PUT /v1/home/assistant/settings`.
 
 The settings include:
-- source access toggles for notes, profile notes, shared Home notes, files, calendar, and Home Assistant
+- source access toggles for personal notes, shared notes, files, calendar, and Home Assistant
 - project docs access for Hank Remote README, contract docs, setup docs, phase docs, and runbooks
 - `system_prompt`, which is the system message sent to the active chat provider
-- `max_context_items`, capped by the server
+- a server-owned maximum context window
 
 These settings apply to the next assistant message without restarting Hank Remote. If Hank iOS adds native controls later, it should treat these as privacy and behavior controls for what Hank context may be sent to the active model provider.

@@ -154,6 +154,11 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		return
 	}
 	status := s.assistantStatus(r.Context(), auth.User.ID)
+	indexStats, err := s.store.AssistantIndexStats(r.Context(), home.ID, auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	statusPayload := map[string]any{
 		"home_id":              home.ID,
 		"provider":             status.Provider,
@@ -162,6 +167,7 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		"chat_model":           status.ChatModel,
 		"embedding_model":      status.EmbeddingModel,
 		"vector_store":         status.VectorStore,
+		"index":                indexStats,
 	}
 	writeJSON(w, http.StatusOK, statusPayload)
 }
@@ -201,10 +207,6 @@ func (s *Server) handleAssistantSessions(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handleAssistantSession(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, sessionID string) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	session, err := s.store.GetAssistantSession(r.Context(), sessionID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -218,7 +220,22 @@ func (s *Server) handleAssistantSession(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, assistantSessionToAPI(session))
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, assistantSessionToAPI(session))
+	case http.MethodDelete:
+		if err := s.store.DeleteAssistantSession(r.Context(), session.ID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": true, "id": session.ID})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleAssistantSessionMessages(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, auth authContext, sessionID string) {
@@ -396,6 +413,15 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 	run.PendingActionJSON = ""
 	run.CompletedAt = &completedAt
 	if err := s.store.UpdateAssistantRun(r.Context(), run); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	settings, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.touchAssistantSessionAndMemory(r.Context(), session, settings, completedAt); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -585,7 +611,7 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
 				return assistantRunResponse{}, err
 			}
-			if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, completedAt); err != nil {
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
 				return assistantRunResponse{}, err
 			}
 			return assistantRunResponse{
@@ -690,7 +716,7 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 	if err := s.store.CreateAssistantRun(ctx, run); err != nil {
 		return assistantRunResponse{}, err
 	}
-	if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, completedAt); err != nil {
+	if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
 		return assistantRunResponse{}, err
 	}
 
@@ -721,6 +747,22 @@ func (s *Server) persistAssistantMessage(ctx context.Context, session domain.Ass
 	return assistantMessageToAPI(message), nil
 }
 
+func (s *Server) touchAssistantSessionAndMemory(ctx context.Context, session domain.AssistantSession, settings domain.AssistantSettings, updatedAt time.Time) error {
+	if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, updatedAt); err != nil {
+		return err
+	}
+	settings = normalizeAssistantSettings(settings)
+	if !settings.ConversationsEnabled {
+		return nil
+	}
+	session.LastMessageAt = updatedAt
+	session.UpdatedAt = updatedAt
+	if err := s.indexAssistantConversation(ctx, session, session.UserID); err != nil {
+		s.logger.Warn("assistant conversation indexing failed", "session_id", session.ID, "error", err)
+	}
+	return nil
+}
+
 func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
 	s.refreshAssistantIndex(ctx, home, membership, auth, settings, prompt)
@@ -739,7 +781,7 @@ func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home
 		}
 		return s.answerFilePrompt(ctx, home, settings, prompt)
 	case strings.Contains(lowered, "add ") && (strings.Contains(lowered, " list") || strings.Contains(lowered, "note")):
-		if !settings.NotesEnabled || (!settings.ProfileNotesEnabled && !settings.HomeNotesEnabled) {
+		if !settings.ProfileNotesEnabled && !settings.HomeNotesEnabled {
 			return assistantMessageContent{Text: "Notes access is turned off in HankAI settings."}, nil
 		}
 		if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
@@ -971,14 +1013,14 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, me
 func (s *Server) assistantVisibleNotes(ctx context.Context, homeID string, userID string, settings domain.AssistantSettings) ([]domain.UserNote, error) {
 	settings = normalizeAssistantSettings(settings)
 	notes := make([]domain.UserNote, 0)
-	if settings.NotesEnabled && settings.ProfileNotesEnabled {
+	if settings.ProfileNotesEnabled {
 		profileNotes, err := s.store.ListProfileNotes(ctx, userID, false)
 		if err != nil {
 			return nil, err
 		}
 		notes = append(notes, profileNotes...)
 	}
-	if settings.NotesEnabled && settings.HomeNotesEnabled {
+	if settings.HomeNotesEnabled {
 		homeNotes, err := s.store.ListVisibleHomeNotes(ctx, homeID, userID, false)
 		if err != nil {
 			return nil, err
@@ -1165,6 +1207,13 @@ func (s *Server) executeConfirmedAssistantAction(
 		run.MessageID = message.ID
 		run.CompletedAt = &completedAt
 		if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, err
+		}
+		settings, err := s.currentAssistantSettings(ctx, session.HomeID, userID)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
 			return assistantRunResponse{}, err
 		}
 		return assistantRunResponse{

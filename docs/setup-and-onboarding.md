@@ -105,10 +105,12 @@ Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot 
 
 After signing in to the dashboard, open `AI Settings` to manage the HankAI harness. Those settings are stored in the database and apply immediately to the next HankAI message:
 - which Hank sources can be sent to the active provider
+- whether HankAI can use your private past conversations as memory
 - the system prompt HankAI uses
-- how many retrieved context items are included per request
+- the server-owned maximum context window used for provider requests
 
 `Project docs` is one of those sources. By default the Docker image makes `README.md`, `AGENTS.md`, `SERVER_SYNC.md`, and every markdown file under `docs/` available from `/app`. For local runs, `HANK_REMOTE_PROJECT_DOCS_DIR=.` points HankAI at the checkout root.
+The Hank dashboard and AI Settings page show the current index counts, embedding counts, and whether retrieval is using `pgvector` or the JSON embedding fallback.
 
 If the server should only be reached by a local Cloudflare Tunnel or local reverse proxy, use:
 
