@@ -76,6 +76,14 @@ HANK_REMOTE_OPENAI_API_KEY=
 HANK_REMOTE_OPENAI_CHAT_MODEL=gpt-4o-mini
 HANK_REMOTE_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
+# Experimental ChatGPT/Codex link for subscription-backed HankAI chat.
+# Keep disabled unless HANK_REMOTE_AI_PROVIDER is chatgpt_codex or you want auto mode to use linked ChatGPT.
+HANK_REMOTE_CHATGPT_OAUTH_ENABLED=false
+HANK_REMOTE_CHATGPT_AUTH_ISSUER=https://auth.openai.com
+HANK_REMOTE_CHATGPT_BACKEND_BASE_URL=https://chatgpt.com/backend-api/codex
+HANK_REMOTE_CHATGPT_CLIENT_ID=app_EMoamEEZ73f0CkXaXp7hrann
+HANK_REMOTE_CHATGPT_CHAT_MODEL=gpt-5.4-mini
+
 HANK_REMOTE_DB_OPS_STATE_DIR=/var/lib/hank/db-ops/state
 HANK_REMOTE_DB_OPS_LOG_DIR=/var/log/hank/db-ops
 HANK_REMOTE_DB_OPS_INTENT_SECRET=replace-with-real-db-ops-secret
@@ -91,6 +99,8 @@ Use the same database password in `POSTGRES_PASSWORD`, `HANK_REMOTE_CLOUD_DATABA
 Do not wrap either database URL in `< >`; keep the query string exactly as `?sslmode=disable` for the Compose stack.
 
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot be restored without it.
+
+`HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
 
 If the server should only be reached by a local Cloudflare Tunnel or local reverse proxy, use:
 

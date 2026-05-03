@@ -11,6 +11,11 @@ func TestLoadCloudDefaults(t *testing.T) {
 	t.Setenv("HANK_REMOTE_CLOUD_DATABASE_URL", "")
 	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "")
 	t.Setenv("HANK_REMOTE_REQUEST_TIMEOUT_SECONDS", "")
+	t.Setenv("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", "")
+	t.Setenv("HANK_REMOTE_CHATGPT_AUTH_ISSUER", "")
+	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", "")
+	t.Setenv("HANK_REMOTE_CHATGPT_CLIENT_ID", "")
+	t.Setenv("HANK_REMOTE_CHATGPT_CHAT_MODEL", "")
 
 	cfg, err := LoadCloud()
 	if err != nil {
@@ -28,6 +33,49 @@ func TestLoadCloudDefaults(t *testing.T) {
 	}
 	if cfg.RequestTimeout != 30*time.Second {
 		t.Fatalf("RequestTimeout = %s, want %s", cfg.RequestTimeout, 30*time.Second)
+	}
+	if cfg.AssistantAI.ChatGPTOAuthEnabled {
+		t.Fatal("ChatGPTOAuthEnabled = true, want false by default")
+	}
+	if cfg.AssistantAI.ChatGPTAuthIssuer != "https://auth.openai.com" {
+		t.Fatalf("ChatGPTAuthIssuer = %q", cfg.AssistantAI.ChatGPTAuthIssuer)
+	}
+	if cfg.AssistantAI.ChatGPTBackendBaseURL != "https://chatgpt.com/backend-api/codex" {
+		t.Fatalf("ChatGPTBackendBaseURL = %q", cfg.AssistantAI.ChatGPTBackendBaseURL)
+	}
+	if cfg.AssistantAI.ChatGPTClientID != "app_EMoamEEZ73f0CkXaXp7hrann" {
+		t.Fatalf("ChatGPTClientID = %q", cfg.AssistantAI.ChatGPTClientID)
+	}
+	if cfg.AssistantAI.ChatGPTChatModel != "gpt-5.4-mini" {
+		t.Fatalf("ChatGPTChatModel = %q", cfg.AssistantAI.ChatGPTChatModel)
+	}
+}
+
+func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
+	t.Setenv("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", "true")
+	t.Setenv("HANK_REMOTE_CHATGPT_AUTH_ISSUER", " https://auth.example.com/ ")
+	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", " https://chatgpt.example.com/backend-api/codex/ ")
+	t.Setenv("HANK_REMOTE_CHATGPT_CLIENT_ID", "test-client")
+	t.Setenv("HANK_REMOTE_CHATGPT_CHAT_MODEL", "gpt-test")
+
+	cfg, err := LoadCloud()
+	if err != nil {
+		t.Fatalf("LoadCloud error: %v", err)
+	}
+	if !cfg.AssistantAI.ChatGPTOAuthEnabled {
+		t.Fatal("ChatGPTOAuthEnabled = false, want true")
+	}
+	if cfg.AssistantAI.ChatGPTAuthIssuer != "https://auth.example.com" {
+		t.Fatalf("ChatGPTAuthIssuer = %q", cfg.AssistantAI.ChatGPTAuthIssuer)
+	}
+	if cfg.AssistantAI.ChatGPTBackendBaseURL != "https://chatgpt.example.com/backend-api/codex" {
+		t.Fatalf("ChatGPTBackendBaseURL = %q", cfg.AssistantAI.ChatGPTBackendBaseURL)
+	}
+	if cfg.AssistantAI.ChatGPTClientID != "test-client" {
+		t.Fatalf("ChatGPTClientID = %q", cfg.AssistantAI.ChatGPTClientID)
+	}
+	if cfg.AssistantAI.ChatGPTChatModel != "gpt-test" {
+		t.Fatalf("ChatGPTChatModel = %q", cfg.AssistantAI.ChatGPTChatModel)
 	}
 }
 

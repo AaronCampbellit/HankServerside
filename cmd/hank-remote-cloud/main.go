@@ -33,15 +33,20 @@ func main() {
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
 	server.ConfigureOpenAI(cfg.OpenAIClientID, cfg.OpenAIClientSecret, cfg.OpenAIRedirectURI, cfg.OpenAIScopes)
 	server.ConfigureAssistantAI(cloud.AssistantAIConfig{
-		Provider:             cfg.AssistantAI.Provider,
-		OllamaBaseURL:        cfg.AssistantAI.OllamaBaseURL,
-		OllamaChatModel:      cfg.AssistantAI.OllamaChatModel,
-		OllamaEmbeddingModel: cfg.AssistantAI.OllamaEmbeddingModel,
-		OpenAIBaseURL:        cfg.AssistantAI.OpenAIBaseURL,
-		OpenAIAPIKey:         cfg.AssistantAI.OpenAIAPIKey,
-		OpenAIChatModel:      cfg.AssistantAI.OpenAIChatModel,
-		OpenAIEmbeddingModel: cfg.AssistantAI.OpenAIEmbeddingModel,
-		EmbeddingDimension:   cfg.AssistantAI.EmbeddingDimension,
+		Provider:              cfg.AssistantAI.Provider,
+		OllamaBaseURL:         cfg.AssistantAI.OllamaBaseURL,
+		OllamaChatModel:       cfg.AssistantAI.OllamaChatModel,
+		OllamaEmbeddingModel:  cfg.AssistantAI.OllamaEmbeddingModel,
+		OpenAIBaseURL:         cfg.AssistantAI.OpenAIBaseURL,
+		OpenAIAPIKey:          cfg.AssistantAI.OpenAIAPIKey,
+		OpenAIChatModel:       cfg.AssistantAI.OpenAIChatModel,
+		OpenAIEmbeddingModel:  cfg.AssistantAI.OpenAIEmbeddingModel,
+		ChatGPTOAuthEnabled:   cfg.AssistantAI.ChatGPTOAuthEnabled,
+		ChatGPTAuthIssuer:     cfg.AssistantAI.ChatGPTAuthIssuer,
+		ChatGPTBackendBaseURL: cfg.AssistantAI.ChatGPTBackendBaseURL,
+		ChatGPTClientID:       cfg.AssistantAI.ChatGPTClientID,
+		ChatGPTChatModel:      cfg.AssistantAI.ChatGPTChatModel,
+		EmbeddingDimension:    cfg.AssistantAI.EmbeddingDimension,
 	})
 	server.ConfigureStorageOps(cfg.DBOpsStateDir, cfg.DBOpsLogDir, cfg.DBOpsIntentSecret)
 

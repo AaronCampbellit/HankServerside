@@ -118,6 +118,10 @@ Runs inside the cloud service and owns:
 
 This layer should be deterministic around tool use even when the model output is not.
 
+HankAI provider selection now supports `auto`, `ollama`, `openai`, `chatgpt_codex`, and `disabled`.
+`openai` is the supported API-key provider and only uses `HANK_REMOTE_OPENAI_API_KEY`.
+`chatgpt_codex` is experimental and uses the server-side ChatGPT/Codex device-code link for chat only; it is not treated as an OpenAI API key.
+
 ### 2. Retrieval and Indexing
 
 Build a unified searchable corpus from:
@@ -130,6 +134,8 @@ Retrieval should be hybrid:
 - trigram fuzzy match
 - vector similarity
 - recency and source-type re-ranking
+
+Embeddings stay on Ollama, OpenAI API-key embeddings, or the local hash fallback. ChatGPT/Codex OAuth tokens are not used for retrieval indexing.
 
 ### 3. Tool Runtime
 
@@ -577,6 +583,6 @@ The current cloud implementation expects the iOS app to support:
    - `waiting_client_tool`
 3. Client-tool execution for EventKit-backed calendar actions and tool-result POST back to cloud.
 4. Periodic calendar index uploads via `PUT /v1/home/assistant/calendar-index`.
-5. Optional OpenAI account link flow via `GET /v1/oauth/openai/start` with server callback `GET /v1/oauth/openai/callback`.
+5. Optional ChatGPT/Codex account link flow via `GET /v1/oauth/openai/start` and `GET /v1/oauth/openai/status`. Servers may return `auth_mode: "device_code"` instead of `authorization_url`; Hank iOS needs a follow-up UI change to show the code natively.
 
 If these are missing in Hank iOS, assistant flows will appear incomplete even when cloud/agent are healthy.

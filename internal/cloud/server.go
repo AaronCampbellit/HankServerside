@@ -52,6 +52,7 @@ type Server struct {
 	openAIRedirectURI  string
 	openAIScopes       string
 	assistantAI        AssistantAIConfig
+	chatGPTDeviceAuths *chatGPTDeviceAuthRegistry
 }
 
 type authContext struct {
@@ -72,23 +73,24 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 
 	realtimeCtx, realtimeCancel := context.WithCancel(context.Background())
 	server := &Server{
-		addr:           addr,
-		store:          db,
-		router:         NewRouter(),
-		logger:         logger,
-		metrics:        observability.NewMetrics(),
-		limiter:        newRateLimiter(),
-		transfers:      newTransferRegistry(),
-		appTickets:     newAppWebSocketTicketRegistry(),
-		notes:          newCloudNotesService(db),
-		collaboration:  newNoteCollaborationHub(db),
-		agentRequests:  newAgentRequestRegistry(),
-		syncs:          newHomeSyncController(),
-		storage:        storageops.NewService("", "", ""),
-		storageEvents:  make(map[string]struct{}),
-		realtimeCancel: realtimeCancel,
-		sessionTTL:     sessionTTL,
-		requestTimeout: requestTimeout,
+		addr:               addr,
+		store:              db,
+		router:             NewRouter(),
+		logger:             logger,
+		metrics:            observability.NewMetrics(),
+		limiter:            newRateLimiter(),
+		transfers:          newTransferRegistry(),
+		appTickets:         newAppWebSocketTicketRegistry(),
+		notes:              newCloudNotesService(db),
+		collaboration:      newNoteCollaborationHub(db),
+		agentRequests:      newAgentRequestRegistry(),
+		syncs:              newHomeSyncController(),
+		storage:            storageops.NewService("", "", ""),
+		storageEvents:      make(map[string]struct{}),
+		realtimeCancel:     realtimeCancel,
+		sessionTTL:         sessionTTL,
+		requestTimeout:     requestTimeout,
+		chatGPTDeviceAuths: newChatGPTDeviceAuthRegistry(),
 	}
 
 	mux := http.NewServeMux()

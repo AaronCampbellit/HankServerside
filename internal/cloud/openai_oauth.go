@@ -18,21 +18,26 @@ import (
 type openAITokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 	Scope        string `json:"scope"`
 }
 
 type openAIAccountStatusResponse struct {
-	Configured  bool       `json:"configured"`
-	Linked      bool       `json:"linked"`
-	Missing     []string   `json:"missing,omitempty"`
-	Scopes      string     `json:"scopes,omitempty"`
-	RedirectURI string     `json:"redirect_uri,omitempty"`
-	TokenType   string     `json:"token_type,omitempty"`
-	Scope       string     `json:"scope,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
+	Configured      bool                             `json:"configured"`
+	Linked          bool                             `json:"linked"`
+	Missing         []string                         `json:"missing,omitempty"`
+	AuthMode        string                           `json:"auth_mode,omitempty"`
+	AuthProvider    string                           `json:"auth_provider,omitempty"`
+	ChatGPTPlanType string                           `json:"chatgpt_plan_type,omitempty"`
+	Pending         *chatGPTDeviceAuthStatusResponse `json:"pending,omitempty"`
+	Scopes          string                           `json:"scopes,omitempty"`
+	RedirectURI     string                           `json:"redirect_uri,omitempty"`
+	TokenType       string                           `json:"token_type,omitempty"`
+	Scope           string                           `json:"scope,omitempty"`
+	ExpiresAt       *time.Time                       `json:"expires_at,omitempty"`
+	UpdatedAt       *time.Time                       `json:"updated_at,omitempty"`
 }
 
 func (s *Server) handleOpenAIOAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -45,20 +50,38 @@ func (s *Server) handleOpenAIOAuthStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	useChatGPT := s.shouldUseChatGPTOAuth()
 	missing := s.openAIOAuthMissingConfig()
+	authMode := "authorization_url"
+	if useChatGPT {
+		missing = s.chatGPTOAuthMissingConfig()
+		authMode = chatGPTDeviceAuthMode
+	}
 	response := openAIAccountStatusResponse{
-		Configured:  len(missing) == 0,
-		Missing:     missing,
-		Scopes:      defaultString(strings.TrimSpace(s.openAIScopes), "openid profile email"),
-		RedirectURI: strings.TrimSpace(s.openAIRedirectURI),
+		Configured:   len(missing) == 0,
+		Missing:      missing,
+		AuthMode:     authMode,
+		Scopes:       defaultString(strings.TrimSpace(s.openAIScopes), "openid profile email"),
+		RedirectURI:  strings.TrimSpace(s.openAIRedirectURI),
+		AuthProvider: openAIAccountProviderLegacyOpenAI,
+	}
+	if useChatGPT {
+		response.AuthProvider = openAIAccountProviderChatGPTCodex
+		response.Pending = s.chatGPTDeviceAuths.status(auth.User.ID)
+		response.Scopes = ""
+		response.RedirectURI = ""
 	}
 	account, err := s.store.GetOpenAIAccount(r.Context(), auth.User.ID)
 	if err == nil {
-		response.Linked = true
-		response.TokenType = account.TokenType
-		response.Scope = account.Scope
-		response.ExpiresAt = account.ExpiresAt
-		response.UpdatedAt = &account.UpdatedAt
+		if (!useChatGPT && account.AuthProvider != openAIAccountProviderChatGPTCodex) || (useChatGPT && account.AuthProvider == openAIAccountProviderChatGPTCodex) {
+			response.Linked = true
+			response.AuthProvider = account.AuthProvider
+			response.ChatGPTPlanType = account.ChatGPTPlanType
+			response.TokenType = account.TokenType
+			response.Scope = account.Scope
+			response.ExpiresAt = account.ExpiresAt
+			response.UpdatedAt = &account.UpdatedAt
+		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -74,6 +97,19 @@ func (s *Server) handleOpenAIOAuthStart(w http.ResponseWriter, r *http.Request) 
 	}
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
+		return
+	}
+	if s.shouldUseChatGPTOAuth() {
+		if len(s.chatGPTOAuthMissingConfig()) > 0 {
+			http.Error(w, "chatgpt oauth is not configured", http.StatusNotImplemented)
+			return
+		}
+		response, err := s.beginChatGPTDeviceAuth(r.Context(), auth.User.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	if len(s.openAIOAuthMissingConfig()) > 0 {
@@ -131,7 +167,7 @@ func (s *Server) handleOpenAIOAuthCallback(w http.ResponseWriter, r *http.Reques
 	}
 	now := time.Now().UTC()
 	expiresAt := now.Add(time.Duration(tok.ExpiresIn) * time.Second)
-	if err := s.store.UpsertOpenAIAccount(r.Context(), domain.OpenAIAccount{UserID: oauthState.UserID, ProviderUserID: "", AccessToken: tok.AccessToken, RefreshToken: tok.RefreshToken, Scope: tok.Scope, TokenType: tok.TokenType, ExpiresAt: &expiresAt, CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := s.store.UpsertOpenAIAccount(r.Context(), domain.OpenAIAccount{UserID: oauthState.UserID, ProviderUserID: "", AuthProvider: openAIAccountProviderLegacyOpenAI, AccessToken: tok.AccessToken, RefreshToken: tok.RefreshToken, Scope: tok.Scope, TokenType: tok.TokenType, ExpiresAt: &expiresAt, CreatedAt: now, UpdatedAt: now}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

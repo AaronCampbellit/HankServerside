@@ -395,6 +395,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS openai_accounts (
 			user_id TEXT PRIMARY KEY,
 			provider_user_id TEXT NOT NULL DEFAULT '',
+			auth_provider TEXT NOT NULL DEFAULT '',
+			chatgpt_plan_type TEXT NOT NULL DEFAULT '',
 			access_token TEXT NOT NULL DEFAULT '',
 			refresh_token TEXT NOT NULL DEFAULT '',
 			token_type TEXT NOT NULL DEFAULT '',
@@ -459,6 +461,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_assistant_chunks_document ON assistant_chunks(document_id, chunk_index ASC);`,
 		`CREATE INDEX IF NOT EXISTS idx_assistant_file_index_home_updated ON assistant_file_index(home_id, updated_at DESC);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_calendar_external ON assistant_calendar_entries(user_id, device_id, external_event_id);`,
+		`ALTER TABLE openai_accounts ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE openai_accounts ADD COLUMN IF NOT EXISTS chatgpt_plan_type TEXT NOT NULL DEFAULT '';`,
 		`UPDATE home_memberships SET role = 'admin' WHERE role = 'owner';`,
 	}
 

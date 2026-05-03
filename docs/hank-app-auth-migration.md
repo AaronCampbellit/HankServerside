@@ -89,29 +89,31 @@ That path should be considered deprecated.
 - keeps browser and app auth models separated cleanly
 - allows the dashboard to stay cookie-only without forcing an app rewrite
 
-## OpenAI Account Linking (New)
+## ChatGPT/Codex Account Linking (Experimental)
 
-To enable subscription-backed ChatGPT usage inside Hank Assistant, the app should support the OpenAI OAuth link flow.
+To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, the app should support the server-side ChatGPT/Codex link flow. This does not replace the supported OpenAI API-key provider; API billing/auth remain separate.
 
 ### Endpoints
 
 - `GET /v1/oauth/openai/start`
+- `GET /v1/oauth/openai/status`
 - `GET /v1/oauth/openai/callback` (cloud callback endpoint)
 
 ### App Flow
 
 1. Ensure the user is authenticated with normal Hank session auth (`Authorization: Bearer <session_token>`).
 2. Call `GET /v1/oauth/openai/start`.
-3. Read `authorization_url` from response and open it in an in-app browser (or external browser with app return handling).
-4. User completes OpenAI sign-in/consent.
-5. OpenAI redirects to server callback (`/v1/oauth/openai/callback`) where token exchange and linking are finalized server-side.
-6. App should refresh linked-account state and show success/failure status in Assistant settings.
+3. If the response includes `authorization_url`, open it in an in-app browser or external browser with app return handling.
+4. If the response includes `auth_mode: "device_code"`, show `verification_url`, `user_code`, `expires_at`, and `poll_after_seconds`. The server polls the auth service and stores the final tokens server-side.
+5. For the legacy redirect flow, OpenAI redirects to `/v1/oauth/openai/callback` where token exchange and linking are finalized server-side.
+6. App should call `GET /v1/oauth/openai/status` until linked, failed, or expired, then show success/failure status in Assistant settings.
 
 ### UX Requirements
 
 - Add an Assistant settings card:
   - linked/not linked status
-  - "Link OpenAI" action
-  - "Relink" if link fails/expired
+  - "Link ChatGPT/Codex" action when the server reports `auth_provider: "chatgpt_codex"` or `auth_mode: "device_code"`
+  - pending device code, plan type, token expiry, and "Relink" if link fails/expired
 - Show actionable error copy if link fails (invalid state, expired state, provider failure).
 - If not linked, Assistant tab should still work for local flows where available, but clearly indicate ChatGPT subscription-backed features require linking.
+- The current dashboard can show the device code. Hank iOS needs a follow-up UI change if it should show the device code natively instead of only opening a browser link.

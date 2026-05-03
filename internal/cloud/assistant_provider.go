@@ -18,15 +18,20 @@ import (
 )
 
 type AssistantAIConfig struct {
-	Provider             string
-	OllamaBaseURL        string
-	OllamaChatModel      string
-	OllamaEmbeddingModel string
-	OpenAIBaseURL        string
-	OpenAIAPIKey         string
-	OpenAIChatModel      string
-	OpenAIEmbeddingModel string
-	EmbeddingDimension   int
+	Provider              string
+	OllamaBaseURL         string
+	OllamaChatModel       string
+	OllamaEmbeddingModel  string
+	OpenAIBaseURL         string
+	OpenAIAPIKey          string
+	OpenAIChatModel       string
+	OpenAIEmbeddingModel  string
+	ChatGPTOAuthEnabled   bool
+	ChatGPTAuthIssuer     string
+	ChatGPTBackendBaseURL string
+	ChatGPTClientID       string
+	ChatGPTChatModel      string
+	EmbeddingDimension    int
 }
 
 type assistantProviderStatus struct {
@@ -69,6 +74,22 @@ func (c *AssistantAIConfig) normalize() {
 	if c.OpenAIEmbeddingModel == "" {
 		c.OpenAIEmbeddingModel = "text-embedding-3-small"
 	}
+	c.ChatGPTAuthIssuer = strings.TrimRight(strings.TrimSpace(c.ChatGPTAuthIssuer), "/")
+	if c.ChatGPTAuthIssuer == "" {
+		c.ChatGPTAuthIssuer = "https://auth.openai.com"
+	}
+	c.ChatGPTBackendBaseURL = strings.TrimRight(strings.TrimSpace(c.ChatGPTBackendBaseURL), "/")
+	if c.ChatGPTBackendBaseURL == "" {
+		c.ChatGPTBackendBaseURL = "https://chatgpt.com/backend-api/codex"
+	}
+	c.ChatGPTClientID = strings.TrimSpace(c.ChatGPTClientID)
+	if c.ChatGPTClientID == "" {
+		c.ChatGPTClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	}
+	c.ChatGPTChatModel = strings.TrimSpace(c.ChatGPTChatModel)
+	if c.ChatGPTChatModel == "" {
+		c.ChatGPTChatModel = "gpt-5.4-mini"
+	}
 	if c.EmbeddingDimension <= 0 {
 		c.EmbeddingDimension = 768
 	}
@@ -81,16 +102,28 @@ func (s *Server) assistantStatus(ctx context.Context, userID string) assistantPr
 	status := assistantProviderStatus{
 		Provider:       provider,
 		VectorStore:    "postgres",
-		ChatModel:      cfg.OllamaChatModel,
-		EmbeddingModel: cfg.OllamaEmbeddingModel,
+		ChatModel:      "local fallback",
+		EmbeddingModel: "local-hash",
 		ChatConfigured: provider == "ollama" && cfg.OllamaBaseURL != "",
+	}
+	if cfg.OllamaBaseURL != "" {
+		status.EmbeddingConfigured = true
+		status.EmbeddingModel = cfg.OllamaEmbeddingModel
+	} else if strings.TrimSpace(cfg.OpenAIAPIKey) != "" {
+		status.EmbeddingConfigured = true
+		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
+	}
+	if provider == "ollama" {
+		status.ChatModel = cfg.OllamaChatModel
 	}
 	if provider == "openai" {
 		status.ChatModel = cfg.OpenAIChatModel
-		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
 		status.ChatConfigured = token != ""
 	}
-	status.EmbeddingConfigured = (provider == "ollama" && cfg.OllamaBaseURL != "") || (provider == "openai" && token != "")
+	if provider == assistantProviderChatGPTCodex {
+		status.ChatModel = cfg.ChatGPTChatModel
+		status.ChatConfigured = token != ""
+	}
 	if !s.store.VectorAvailable() {
 		status.VectorStore = "postgres_without_pgvector"
 	}
@@ -101,19 +134,18 @@ func (s *Server) resolveAssistantProvider(ctx context.Context, userID string) (s
 	cfg := s.assistantAI
 	cfg.normalize()
 	openAIToken := strings.TrimSpace(cfg.OpenAIAPIKey)
-	if openAIToken == "" {
-		if account, err := s.store.GetOpenAIAccount(ctx, userID); err == nil {
-			openAIToken = strings.TrimSpace(account.AccessToken)
-		} else if !errors.Is(err, store.ErrNotFound) {
-			s.logger.Warn("assistant OpenAI account lookup failed", "error", err)
-		}
-	}
+	chatGPTLinked := s.hasLinkedChatGPTCodex(ctx, userID)
 
 	switch cfg.Provider {
 	case "ollama":
 		return "ollama", ""
 	case "openai":
 		return "openai", openAIToken
+	case assistantProviderChatGPTCodex:
+		if cfg.ChatGPTOAuthEnabled && chatGPTLinked {
+			return assistantProviderChatGPTCodex, "linked"
+		}
+		return assistantProviderChatGPTCodex, ""
 	case "disabled":
 		return "local", ""
 	default:
@@ -123,8 +155,25 @@ func (s *Server) resolveAssistantProvider(ctx context.Context, userID string) (s
 		if openAIToken != "" {
 			return "openai", openAIToken
 		}
+		if cfg.ChatGPTOAuthEnabled && chatGPTLinked {
+			return assistantProviderChatGPTCodex, "linked"
+		}
 		return "local", ""
 	}
+}
+
+func (s *Server) hasLinkedChatGPTCodex(ctx context.Context, userID string) bool {
+	if strings.TrimSpace(userID) == "" {
+		return false
+	}
+	account, err := s.store.GetOpenAIAccount(ctx, userID)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.logger.Warn("assistant ChatGPT account lookup failed", "error", err)
+		}
+		return false
+	}
+	return account.AuthProvider == openAIAccountProviderChatGPTCodex && strings.TrimSpace(account.AccessToken) != ""
 }
 
 func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string, messages []assistantLLMMessage) (string, string, error) {
@@ -144,6 +193,28 @@ func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string
 		}
 		text, err := postOpenAIChat(ctx, cfg.OpenAIBaseURL, token, cfg.OpenAIChatModel, messages)
 		return text, "openai:" + cfg.OpenAIChatModel, err
+	case assistantProviderChatGPTCodex:
+		if !cfg.ChatGPTOAuthEnabled {
+			return "", "", errChatGPTRelinkRequired
+		}
+		account, err := s.chatGPTCodexAccount(ctx, userID)
+		if err != nil {
+			return "", "", err
+		}
+		text, err := postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, cfg.ChatGPTChatModel, messages)
+		var providerErr *providerHTTPError
+		if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+			account, err = s.refreshChatGPTCodexAccount(ctx, account)
+			if err != nil {
+				return "", "", err
+			}
+			text, err = postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, cfg.ChatGPTChatModel, messages)
+			if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+				_ = s.store.DeleteOpenAIAccount(ctx, userID)
+				return "", "", errChatGPTRelinkRequired
+			}
+		}
+		return text, assistantProviderChatGPTCodex + ":" + cfg.ChatGPTChatModel, err
 	default:
 		return "", "local", errors.New("assistant provider is not configured")
 	}
@@ -152,23 +223,18 @@ func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string
 func (s *Server) embedAssistantText(ctx context.Context, userID string, text string) ([]float64, string, string) {
 	cfg := s.assistantAI
 	cfg.normalize()
-	provider, token := s.resolveAssistantProvider(ctx, userID)
-	switch provider {
-	case "ollama":
-		if cfg.OllamaBaseURL != "" {
-			if embedding, err := postOllamaEmbedding(ctx, cfg.OllamaBaseURL, cfg.OllamaEmbeddingModel, text); err == nil && len(embedding) > 0 {
-				return normalizeEmbedding(embedding, cfg.EmbeddingDimension), cfg.OllamaEmbeddingModel, "ollama"
-			} else if err != nil {
-				s.logger.Warn("assistant Ollama embedding failed", "error", err)
-			}
+	if cfg.OllamaBaseURL != "" {
+		if embedding, err := postOllamaEmbedding(ctx, cfg.OllamaBaseURL, cfg.OllamaEmbeddingModel, text); err == nil && len(embedding) > 0 {
+			return normalizeEmbedding(embedding, cfg.EmbeddingDimension), cfg.OllamaEmbeddingModel, "ollama"
+		} else if err != nil {
+			s.logger.Warn("assistant Ollama embedding failed", "error", err)
 		}
-	case "openai":
-		if token != "" {
-			if embedding, err := postOpenAIEmbedding(ctx, cfg.OpenAIBaseURL, token, cfg.OpenAIEmbeddingModel, cfg.EmbeddingDimension, text); err == nil && len(embedding) > 0 {
-				return normalizeEmbedding(embedding, cfg.EmbeddingDimension), cfg.OpenAIEmbeddingModel, "openai"
-			} else if err != nil {
-				s.logger.Warn("assistant OpenAI embedding failed", "error", err)
-			}
+	}
+	if strings.TrimSpace(cfg.OpenAIAPIKey) != "" {
+		if embedding, err := postOpenAIEmbedding(ctx, cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIEmbeddingModel, cfg.EmbeddingDimension, text); err == nil && len(embedding) > 0 {
+			return normalizeEmbedding(embedding, cfg.EmbeddingDimension), cfg.OpenAIEmbeddingModel, "openai"
+		} else if err != nil {
+			s.logger.Warn("assistant OpenAI embedding failed", "error", err)
 		}
 	}
 	return localEmbedding(text, cfg.EmbeddingDimension), "local-hash", "v1"
@@ -269,6 +335,61 @@ func postOpenAIEmbedding(ctx context.Context, baseURL string, token string, mode
 	return response.Data[0].Embedding, nil
 }
 
+func postChatGPTCodexResponse(ctx context.Context, baseURL string, token string, accountID string, model string, messages []assistantLLMMessage) (string, error) {
+	body := map[string]any{
+		"model": model,
+		"input": messages,
+		"store": false,
+	}
+	headers := map[string]string{
+		"Authorization": "Bearer " + token,
+	}
+	if strings.TrimSpace(accountID) != "" {
+		headers["ChatGPT-Account-ID"] = accountID
+	}
+	var response struct {
+		OutputText string `json:"output_text"`
+		Output     []struct {
+			Text    string `json:"text"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := postJSONToEndpoint(ctx, strings.TrimRight(baseURL, "/")+"/responses", body, headers, &response); err != nil {
+		return "", err
+	}
+	if response.Error != nil {
+		return "", errors.New(response.Error.Message)
+	}
+	if strings.TrimSpace(response.OutputText) != "" {
+		return strings.TrimSpace(response.OutputText), nil
+	}
+	for _, output := range response.Output {
+		if strings.TrimSpace(output.Text) != "" {
+			return strings.TrimSpace(output.Text), nil
+		}
+		for _, content := range output.Content {
+			if strings.TrimSpace(content.Text) != "" {
+				return strings.TrimSpace(content.Text), nil
+			}
+		}
+	}
+	return "", errors.New("ChatGPT/Codex returned no output text")
+}
+
+type providerHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *providerHTTPError) Error() string {
+	return fmt.Sprintf("provider status %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
+}
+
 func postJSON(ctx context.Context, url string, bearerToken string, body any, out any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -293,7 +414,7 @@ func postJSON(ctx context.Context, url string, bearerToken string, body any, out
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("provider status %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+		return &providerHTTPError{StatusCode: response.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
 	if out == nil {
 		return nil

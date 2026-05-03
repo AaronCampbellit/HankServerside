@@ -9,24 +9,26 @@ import (
 )
 
 func (s *Store) UpsertOpenAIAccount(ctx context.Context, account domain.OpenAIAccount) error {
-	_, err := s.exec(ctx, `INSERT INTO openai_accounts (user_id, provider_user_id, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.exec(ctx, `INSERT INTO openai_accounts (user_id, provider_user_id, auth_provider, chatgpt_plan_type, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
 			provider_user_id = excluded.provider_user_id,
+			auth_provider = excluded.auth_provider,
+			chatgpt_plan_type = excluded.chatgpt_plan_type,
 			access_token = excluded.access_token,
 			refresh_token = excluded.refresh_token,
 			token_type = excluded.token_type,
 			scope = excluded.scope,
 			expires_at = excluded.expires_at,
 			updated_at = excluded.updated_at`,
-		account.UserID, account.ProviderUserID, account.AccessToken, account.RefreshToken, account.TokenType, account.Scope, account.ExpiresAt, account.CreatedAt, account.UpdatedAt)
+		account.UserID, account.ProviderUserID, account.AuthProvider, account.ChatGPTPlanType, account.AccessToken, account.RefreshToken, account.TokenType, account.Scope, account.ExpiresAt, account.CreatedAt, account.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetOpenAIAccount(ctx context.Context, userID string) (domain.OpenAIAccount, error) {
 	var account domain.OpenAIAccount
-	err := s.queryRow(ctx, `SELECT user_id, provider_user_id, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at
-		FROM openai_accounts WHERE user_id = ?`, userID).Scan(&account.UserID, &account.ProviderUserID, &account.AccessToken, &account.RefreshToken, &account.TokenType, &account.Scope, &account.ExpiresAt, &account.CreatedAt, &account.UpdatedAt)
+	err := s.queryRow(ctx, `SELECT user_id, provider_user_id, auth_provider, chatgpt_plan_type, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at
+		FROM openai_accounts WHERE user_id = ?`, userID).Scan(&account.UserID, &account.ProviderUserID, &account.AuthProvider, &account.ChatGPTPlanType, &account.AccessToken, &account.RefreshToken, &account.TokenType, &account.Scope, &account.ExpiresAt, &account.CreatedAt, &account.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return domain.OpenAIAccount{}, ErrNotFound
@@ -34,6 +36,11 @@ func (s *Store) GetOpenAIAccount(ctx context.Context, userID string) (domain.Ope
 		return domain.OpenAIAccount{}, err
 	}
 	return account, nil
+}
+
+func (s *Store) DeleteOpenAIAccount(ctx context.Context, userID string) error {
+	_, err := s.exec(ctx, `DELETE FROM openai_accounts WHERE user_id = ?`, userID)
+	return err
 }
 
 func (s *Store) UpsertOpenAIOAuthState(ctx context.Context, state domain.OpenAIOAuthState) error {

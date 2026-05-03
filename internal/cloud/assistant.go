@@ -891,6 +891,10 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, au
 	}); err == nil && strings.TrimSpace(providerAnswer) != "" {
 		answer = strings.TrimSpace(providerAnswer)
 		_ = modelName
+	} else if errors.Is(err, errChatGPTRelinkRequired) {
+		return assistantMessageContent{
+			Text: "ChatGPT/Codex needs to be linked again before HankAI can use your ChatGPT plan for chat. Open AI Settings and relink ChatGPT/Codex.",
+		}, nil
 	} else if err != nil {
 		s.logger.Warn("assistant provider answer failed; using retrieved fallback", "error", err)
 	}

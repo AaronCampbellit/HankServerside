@@ -291,15 +291,17 @@ type AssistantRetrievedContext struct {
 }
 
 type OpenAIAccount struct {
-	UserID         string     `json:"user_id"`
-	ProviderUserID string     `json:"provider_user_id"`
-	AccessToken    string     `json:"-"`
-	RefreshToken   string     `json:"-"`
-	TokenType      string     `json:"token_type"`
-	Scope          string     `json:"scope"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	UserID          string     `json:"user_id"`
+	ProviderUserID  string     `json:"provider_user_id"`
+	AuthProvider    string     `json:"auth_provider"`
+	ChatGPTPlanType string     `json:"chatgpt_plan_type"`
+	AccessToken     string     `json:"-"`
+	RefreshToken    string     `json:"-"`
+	TokenType       string     `json:"token_type"`
+	Scope           string     `json:"scope"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type OpenAIOAuthState struct {

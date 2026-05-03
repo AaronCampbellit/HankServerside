@@ -24,15 +24,20 @@ type Cloud struct {
 }
 
 type AssistantAI struct {
-	Provider             string
-	OllamaBaseURL        string
-	OllamaChatModel      string
-	OllamaEmbeddingModel string
-	OpenAIBaseURL        string
-	OpenAIAPIKey         string
-	OpenAIChatModel      string
-	OpenAIEmbeddingModel string
-	EmbeddingDimension   int
+	Provider              string
+	OllamaBaseURL         string
+	OllamaChatModel       string
+	OllamaEmbeddingModel  string
+	OpenAIBaseURL         string
+	OpenAIAPIKey          string
+	OpenAIChatModel       string
+	OpenAIEmbeddingModel  string
+	ChatGPTOAuthEnabled   bool
+	ChatGPTAuthIssuer     string
+	ChatGPTBackendBaseURL string
+	ChatGPTClientID       string
+	ChatGPTChatModel      string
+	EmbeddingDimension    int
 }
 
 type DBOps struct {
@@ -104,15 +109,20 @@ func LoadCloud() (Cloud, error) {
 		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
 		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
 		AssistantAI: AssistantAI{
-			Provider:             strings.ToLower(envOrDefault("HANK_REMOTE_AI_PROVIDER", "auto")),
-			OllamaBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_OLLAMA_BASE_URL")), "/"),
-			OllamaChatModel:      envOrDefault("HANK_REMOTE_OLLAMA_CHAT_MODEL", "llama3.1"),
-			OllamaEmbeddingModel: envOrDefault("HANK_REMOTE_OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),
-			OpenAIBaseURL:        strings.TrimRight(envOrDefault("HANK_REMOTE_OPENAI_API_BASE_URL", "https://api.openai.com"), "/"),
-			OpenAIAPIKey:         strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_API_KEY")),
-			OpenAIChatModel:      envOrDefault("HANK_REMOTE_OPENAI_CHAT_MODEL", "gpt-4o-mini"),
-			OpenAIEmbeddingModel: envOrDefault("HANK_REMOTE_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
-			EmbeddingDimension:   embeddingDimensionValue,
+			Provider:              strings.ToLower(envOrDefault("HANK_REMOTE_AI_PROVIDER", "auto")),
+			OllamaBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_OLLAMA_BASE_URL")), "/"),
+			OllamaChatModel:       envOrDefault("HANK_REMOTE_OLLAMA_CHAT_MODEL", "llama3.1"),
+			OllamaEmbeddingModel:  envOrDefault("HANK_REMOTE_OLLAMA_EMBEDDING_MODEL", "nomic-embed-text"),
+			OpenAIBaseURL:         strings.TrimRight(envOrDefault("HANK_REMOTE_OPENAI_API_BASE_URL", "https://api.openai.com"), "/"),
+			OpenAIAPIKey:          strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_API_KEY")),
+			OpenAIChatModel:       envOrDefault("HANK_REMOTE_OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+			OpenAIEmbeddingModel:  envOrDefault("HANK_REMOTE_OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+			ChatGPTOAuthEnabled:   boolEnvOrDefault("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", false),
+			ChatGPTAuthIssuer:     strings.TrimRight(envOrDefault("HANK_REMOTE_CHATGPT_AUTH_ISSUER", "https://auth.openai.com"), "/"),
+			ChatGPTBackendBaseURL: strings.TrimRight(envOrDefault("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", "https://chatgpt.com/backend-api/codex"), "/"),
+			ChatGPTClientID:       envOrDefault("HANK_REMOTE_CHATGPT_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
+			ChatGPTChatModel:      envOrDefault("HANK_REMOTE_CHATGPT_CHAT_MODEL", "gpt-5.4-mini"),
+			EmbeddingDimension:    embeddingDimensionValue,
 		},
 	}, nil
 }
@@ -181,6 +191,18 @@ func envOrDefault(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func boolEnvOrDefault(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func durationSeconds(key string, fallback int) (time.Duration, error) {
