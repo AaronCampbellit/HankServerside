@@ -361,6 +361,7 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/hank",
 		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
+		"/dashboard/file-server",
 		"/dashboard/file-transfers",
 		"/dashboard/accept-invitation",
 	}
@@ -420,7 +421,7 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		"/dashboard/hank",
 		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
-		"/dashboard/file-transfers",
+		"/dashboard/file-server",
 	}
 
 	for _, routePath := range normalPages {
@@ -442,6 +443,17 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		}
 		response.Body.Close()
 	}
+
+	legacyFileTransfers := requestDashboardPage(t, testServer, "/dashboard/file-transfers", "member-token")
+	if legacyFileTransfers.StatusCode != http.StatusSeeOther {
+		data, _ := io.ReadAll(legacyFileTransfers.Body)
+		legacyFileTransfers.Body.Close()
+		t.Fatalf("member legacy file-transfers status = %d, want %d body=%s", legacyFileTransfers.StatusCode, http.StatusSeeOther, string(data))
+	}
+	if location := legacyFileTransfers.Header.Get("Location"); location != "/dashboard/file-server" {
+		t.Fatalf("legacy file-transfers redirect location = %q, want %q", location, "/dashboard/file-server")
+	}
+	legacyFileTransfers.Body.Close()
 
 	acceptResponse := requestDashboardPage(t, testServer, "/dashboard/accept-invitation", "outsider-token")
 	if acceptResponse.StatusCode != http.StatusOK {
@@ -472,7 +484,7 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 		"hank.html",
 		"assistant-settings.html",
 		"profile-notes.html",
-		"file-transfers.html",
+		"file-server.html",
 		"accept-invitation.html",
 	}
 	for _, page := range pages {

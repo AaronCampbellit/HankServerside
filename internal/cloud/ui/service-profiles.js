@@ -17,10 +17,6 @@ const els = {
   haPublicConfig: document.getElementById("ha-public-config"),
   haSecrets: document.getElementById("ha-secrets"),
   haPersist: document.getElementById("ha-persist"),
-  smbForm: document.getElementById("smb-form"),
-  smbPublicConfig: document.getElementById("smb-public-config"),
-  smbSecrets: document.getElementById("smb-secrets"),
-  smbPersist: document.getElementById("smb-persist"),
   toast: document.getElementById("toast"),
 };
 
@@ -160,9 +156,6 @@ function renderSummary() {
   els.haForm.querySelectorAll("input, textarea, button").forEach((element) => {
     element.disabled = !owner;
   });
-  els.smbForm.querySelectorAll("input, textarea, button").forEach((element) => {
-    element.disabled = !owner;
-  });
 
   if (!home) {
     els.profilesSummary.className = "card-list empty-state";
@@ -204,9 +197,7 @@ function renderSummary() {
 
 function renderForms() {
   const homeAssistant = profileByType("homeassistant");
-  const smb = profileByType("smb");
   els.haPublicConfig.value = prettyJSON(homeAssistant?.public_config_json);
-  els.smbPublicConfig.value = prettyJSON(smb?.public_config_json);
 }
 
 async function loadHomes() {
@@ -251,25 +242,13 @@ async function saveProfile(serviceType) {
   }
 
   try {
-    let payload;
-    if (serviceType === "homeassistant") {
-      payload = {
-        public_config: parseOptionalJSON(els.haPublicConfig.value, "Home Assistant public config") ?? {},
-        persist: els.haPersist.checked,
-      };
-      const secrets = parseOptionalJSON(els.haSecrets.value, "Home Assistant secrets");
-      if (secrets !== null) {
-        payload.secrets = secrets;
-      }
-    } else {
-      payload = {
-        public_config: parseOptionalJSON(els.smbPublicConfig.value, "SMB public config") ?? {},
-        persist: els.smbPersist.checked,
-      };
-      const secrets = parseOptionalJSON(els.smbSecrets.value, "SMB secrets");
-      if (secrets !== null) {
-        payload.secrets = secrets;
-      }
+    const payload = {
+      public_config: parseOptionalJSON(els.haPublicConfig.value, "Home Assistant public config") ?? {},
+      persist: els.haPersist.checked,
+    };
+    const secrets = parseOptionalJSON(els.haSecrets.value, "Home Assistant secrets");
+    if (secrets !== null) {
+      payload.secrets = secrets;
     }
 
     await api(`/v1/home/service-profiles/${encodeURIComponent(serviceType)}`, {
@@ -277,11 +256,7 @@ async function saveProfile(serviceType) {
       body: JSON.stringify(payload),
     });
 
-    if (serviceType === "homeassistant") {
-      els.haSecrets.value = "";
-    } else {
-      els.smbSecrets.value = "";
-    }
+    els.haSecrets.value = "";
     await loadProfiles();
     showToast(`${serviceType} connection saved.`);
   } catch (error) {
@@ -319,10 +294,6 @@ els.homeSelect.addEventListener("change", async () => {
 els.haForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await saveProfile("homeassistant");
-});
-els.smbForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await saveProfile("smb");
 });
 
 hydrate();

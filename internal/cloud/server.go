@@ -103,6 +103,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/hank", server.handleHankPage)
 	mux.HandleFunc("/dashboard/assistant-settings", server.handleAssistantSettingsPage)
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
+	mux.HandleFunc("/dashboard/file-server", server.handleFileServerPage)
 	mux.HandleFunc("/dashboard/file-transfers", server.handleFileTransfersPage)
 	mux.HandleFunc("/dashboard/accept-invitation", server.handleAcceptInvitationPage)
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)

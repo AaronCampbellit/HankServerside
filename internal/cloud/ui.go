@@ -57,8 +57,29 @@ func (s *Server) handleProfileNotesPage(w http.ResponseWriter, r *http.Request) 
 	s.serveHomeMemberUIPage(w, r, "/dashboard/profile-notes", "profile-notes.html")
 }
 
+func (s *Server) handleFileServerPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/file-server", "file-server.html")
+}
+
 func (s *Server) handleFileTransfersPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/file-transfers", "file-transfers.html")
+	if r.URL.Path != "/dashboard/file-transfers" {
+		http.NotFound(w, r)
+		return
+	}
+	auth, err := s.appAuthFromRequest(r)
+	if err != nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if _, _, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID); err != nil {
+		http.Error(w, "home membership required", http.StatusForbidden)
+		return
+	}
+	target := "/dashboard/file-server"
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) handleAcceptInvitationPage(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +107,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "login.js", "dashboard.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-transfers.js", "accept-invitation.js", "admin-nav.js":
+	case "login.js", "dashboard.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "site.webmanifest":
 		serveUIFile(w, r, name, "application/manifest+json; charset=utf-8")

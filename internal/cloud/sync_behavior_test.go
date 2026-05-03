@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -291,11 +292,38 @@ func TestServiceProfileApplySetsBackupTimestamp(t *testing.T) {
 			if err != nil || command.Command != "config.apply" {
 				return
 			}
+			var apply protocol.ConfigApplyRequest
+			if err := json.Unmarshal(command.Body, &apply); err != nil {
+				t.Errorf("config.apply body decode: %v", err)
+				return
+			}
+			var public map[string]string
+			if err := json.Unmarshal(apply.PublicConfig, &public); err != nil {
+				t.Errorf("public config decode: %v", err)
+				return
+			}
+			if public["username"] != "aaron" {
+				t.Errorf("public username = %q, want %q", public["username"], "aaron")
+				return
+			}
+			var secrets map[string]string
+			if err := json.Unmarshal(apply.Secrets, &secrets); err != nil {
+				t.Errorf("secrets decode: %v", err)
+				return
+			}
+			if _, ok := secrets["username"]; ok {
+				t.Errorf("secrets unexpectedly included username")
+				return
+			}
+			if secrets["password"] != "secret" {
+				t.Errorf("secret password = %q, want %q", secrets["password"], "secret")
+				return
+			}
 
 			reply, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.ConfigApplyResponse{
 				Profile: protocol.ServiceProfileSnapshot{
 					ServiceType:    domain.ServiceTypeSMB,
-					PublicConfig:   mustEncodeBody(t, map[string]any{"host": "nas.local", "share": "docs"}),
+					PublicConfig:   mustEncodeBody(t, map[string]any{"host": "nas.local", "share": "docs", "username": "aaron"}),
 					SecretVersion:  1,
 					AppliedVersion: 1,
 					Status:         domain.SyncStatusHealthy,
@@ -308,8 +336,8 @@ func TestServiceProfileApplySetsBackupTimestamp(t *testing.T) {
 
 	var profile domain.HomeServiceProfile
 	requestJSON(t, testServer, sessionToken, http.MethodPut, "/v1/home/service-profiles/smb", map[string]any{
-		"public_config": map[string]any{"host": "nas.local", "share": "docs"},
-		"secrets":       map[string]any{"username": "aaron", "password": "secret"},
+		"public_config": map[string]any{"host": "nas.local", "share": "docs", "username": "aaron"},
+		"secrets":       map[string]any{"password": "secret"},
 		"persist":       true,
 	}, &profile)
 

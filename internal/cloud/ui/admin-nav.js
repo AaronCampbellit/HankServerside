@@ -16,8 +16,8 @@
     {
       href: "/dashboard/service-profiles",
       label: "Connections",
-      detail: "Save Home Assistant and file share settings for the home connector.",
-      keywords: ["connections", "home assistant", "ha token", "file share", "smb", "nas", "credentials", "settings"],
+      detail: "Save Home Assistant settings for the home connector.",
+      keywords: ["connections", "home assistant", "ha token", "settings"],
     },
     {
       href: "/dashboard/sync-status",
@@ -51,10 +51,10 @@
       keywords: ["notes", "my notes", "documents", "editor", "autosave", "formatting", "search notes"],
     },
     {
-      href: "/dashboard/file-transfers",
-      label: "Transfers",
-      detail: "Upload and download files through Hank Remote.",
-      keywords: ["transfers", "upload", "download", "files", "file moves"],
+      href: "/dashboard/file-server",
+      label: "File Server",
+      detail: "Browse, upload, download, and manage home files.",
+      keywords: ["file server", "files", "file share", "smb", "nas", "transfers", "upload", "download", "file moves", "credentials"],
     },
     {
       href: "/dashboard/accept-invitation",

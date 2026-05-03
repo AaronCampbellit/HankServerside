@@ -42,7 +42,7 @@
         <a class="tab-link" href="/dashboard/hank">Hank</a>
         <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
         <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
-        <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
+        <a class="tab-link" href="/dashboard/file-server">File Server</a>
         <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
@@ -171,32 +171,11 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Files</h2>
-            <span class="pill">Browse</span>
+            <h2>File Server</h2>
+            <span class="pill">Files</span>
           </div>
-          <p class="hint">Browse files through Hank Remote.</p>
           <div class="tool-shell">
-            <div class="three-up">
-              <label>
-                <span>Folder Path</span>
-                <input id="files-path" type="text" placeholder="/">
-              </label>
-              <label>
-                <span>New Folder</span>
-                <input id="files-new-directory" type="text" placeholder="new-folder">
-              </label>
-              <label>
-                <span>Upload File</span>
-                <input id="files-upload" type="file">
-              </label>
-            </div>
-            <div class="actions wrap">
-              <button type="button" id="files-refresh-button">Browse</button>
-              <button type="button" id="files-up-button" class="secondary">Up One Level</button>
-              <button type="button" id="files-create-directory-button">Create Folder</button>
-              <button type="button" id="files-upload-button">Upload File</button>
-            </div>
-            <div id="files-output" class="card-list empty-state">Choose a home to browse files.</div>
+            <a class="manage-link" href="/dashboard/file-server">Open File Server</a>
           </div>
         </section>
 

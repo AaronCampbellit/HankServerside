@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote File Server</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260503-file-server">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <link rel="manifest" href="/assets/site.webmanifest">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>File Server</h1>
+          <p class="lede">Browse, move, upload, and download home files through Hank Remote.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections">
+        <a class="tab-link" href="/dashboard">Overview</a>
+        <a class="tab-link" href="/dashboard/home-users">People</a>
+        <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
+        <a class="tab-link" href="/dashboard/sync-status">Status</a>
+        <a class="tab-link" href="/dashboard/storage" data-admin-only="true" hidden>Storage</a>
+        <a class="tab-link" href="/dashboard/hank">Hank</a>
+        <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
+        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
+        <a class="tab-link active" href="/dashboard/file-server">File Server</a>
+        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
+      </nav>
+
+      <main class="grid file-server-grid">
+        <section class="panel file-source-panel">
+          <div class="panel-head">
+            <h2>Connected File Server</h2>
+            <span id="source-status" class="pill">Loading</span>
+          </div>
+          <label>
+            <span>Home</span>
+            <select id="home-select"></select>
+          </label>
+          <div id="source-summary" class="card-list empty-state">Loading file server.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Latest Transfer</h2>
+            <span class="pill">Result</span>
+          </div>
+          <div id="transfer-output" class="card-list empty-state">No file transfers yet.</div>
+        </section>
+
+        <section class="panel wide-panel file-explorer-panel">
+          <div class="panel-head">
+            <h2>File Explorer</h2>
+            <span id="path-status" class="pill">/</span>
+          </div>
+          <div class="file-path-row">
+            <label>
+              <span>Folder Path</span>
+              <input id="files-path" type="text" value="/" autocomplete="off">
+            </label>
+            <div class="actions wrap path-actions">
+              <button type="button" id="files-refresh-button">Open</button>
+              <button type="button" id="files-up-button" class="secondary">Up One Level</button>
+            </div>
+          </div>
+          <div id="file-breadcrumbs" class="file-breadcrumbs" aria-label="Folder Path"></div>
+          <div class="file-action-row">
+            <label>
+              <span>New Folder</span>
+              <input id="files-new-directory" type="text" placeholder="new-folder" autocomplete="off">
+            </label>
+            <label>
+              <span>Upload File</span>
+              <input id="files-upload" type="file" multiple>
+            </label>
+            <div class="actions wrap">
+              <button type="button" id="files-create-directory-button">Create Folder</button>
+              <button type="button" id="files-upload-button">Upload File</button>
+            </div>
+          </div>
+          <div id="files-output" class="file-list empty-state">Choose a home to browse files.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>File Server Settings</h2>
+            <span id="settings-role" class="pill">Loading</span>
+          </div>
+          <form id="smb-form" class="settings-form">
+            <div class="settings-grid">
+              <label class="setting-field">
+                <span>Server Address</span>
+                <input id="smb-host" type="text" placeholder="192.168.1.20" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Share Name</span>
+                <input id="smb-share" type="text" placeholder="media" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Domain</span>
+                <input id="smb-domain" type="text" placeholder="WORKGROUP" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Username</span>
+                <input id="smb-username" type="text" placeholder="aaron" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Password</span>
+                <input id="smb-password" type="password" autocomplete="new-password">
+              </label>
+              <label class="toggle-field">
+                <input id="smb-persist" type="checkbox" checked>
+                <span>Save on home connector</span>
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="submit">Save File Server</button>
+            </div>
+          </form>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/file-server.js?v=20260503-file-server" defer></script>
+    <script src="/assets/admin-nav.js?v=20260503-file-server" defer></script>
+  </body>
+</html>

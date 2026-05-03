@@ -42,7 +42,7 @@
         <a class="tab-link" href="/dashboard/hank">Hank</a>
         <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
         <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
-        <a class="tab-link" href="/dashboard/file-transfers">Transfers</a>
+        <a class="tab-link" href="/dashboard/file-server">File Server</a>
         <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
       </nav>
 
@@ -92,25 +92,12 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>File Share</h2>
+            <h2>File Server</h2>
             <span class="pill">NAS or SMB</span>
           </div>
-          <form id="smb-form" class="stack">
-            <label>
-              <span>Share Address</span>
-              <textarea id="smb-public-config" rows="6" placeholder='{"host":"192.168.1.20","share":"media","domain":"WORKGROUP"}'></textarea>
-            </label>
-            <label>
-              <span>Share Login</span>
-              <textarea id="smb-secrets" rows="6" placeholder='{"username":"aaron","password":"replace-me"}'></textarea>
-            </label>
-            <label>
-              <span><input id="smb-persist" type="checkbox" checked> Save this on the home connector</span>
-            </label>
-            <div class="actions wrap">
-              <button type="submit">Save File Share</button>
-            </div>
-          </form>
+          <div class="tool-shell">
+            <a class="manage-link" href="/dashboard/file-server">Open File Server Settings</a>
+          </div>
         </section>
       </main>
 

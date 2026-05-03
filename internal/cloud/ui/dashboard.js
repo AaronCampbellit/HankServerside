@@ -8,7 +8,6 @@ const state = {
   appSocketPromise: null,
   pendingRequests: new Map(),
   requestCounter: 0,
-  currentFilesPath: "/",
   currentNoteRevision: "",
   lastAgentEnvFile: "",
 };
@@ -39,14 +38,6 @@ const els = {
   haServiceBody: document.getElementById("ha-service-body"),
   haServiceButton: document.getElementById("ha-service-button"),
   haOutput: document.getElementById("ha-output"),
-  filesPath: document.getElementById("files-path"),
-  filesNewDirectory: document.getElementById("files-new-directory"),
-  filesUpload: document.getElementById("files-upload"),
-  filesRefreshButton: document.getElementById("files-refresh-button"),
-  filesUpButton: document.getElementById("files-up-button"),
-  filesCreateDirectoryButton: document.getElementById("files-create-directory-button"),
-  filesUploadButton: document.getElementById("files-upload-button"),
-  filesOutput: document.getElementById("files-output"),
   notesSearchQuery: document.getElementById("notes-search-query"),
   notesTagQuery: document.getElementById("notes-tag-query"),
   notesPageType: document.getElementById("notes-page-type"),
@@ -84,14 +75,6 @@ async function api(path, options = {}) {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
-}
-
-function formatBytes(value) {
-  const bytes = Number(value || 0);
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function showToast(message, isError = false) {
@@ -473,171 +456,6 @@ async function runHAServiceCall() {
   }
 }
 
-function normalizePath(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed || trimmed === "/") return "/";
-  const normalized = `/${trimmed.replace(/^\/+/, "").replace(/\/+/g, "/")}`;
-  return normalized.endsWith("/") && normalized !== "/" ? normalized.slice(0, -1) : normalized;
-}
-
-function joinPath(base, child) {
-  const normalizedBase = normalizePath(base);
-  const normalizedChild = String(child || "").trim().replace(/^\/+/, "");
-  if (!normalizedChild) return normalizedBase;
-  return normalizedBase === "/" ? `/${normalizedChild}` : `${normalizedBase}/${normalizedChild}`;
-}
-
-function parentPath(path) {
-  const normalized = normalizePath(path);
-  if (normalized === "/") return "/";
-  const parts = normalized.split("/").filter(Boolean);
-  parts.pop();
-  return parts.length ? `/${parts.join("/")}` : "/";
-}
-
-function renderFiles(items) {
-  if (!items.length) {
-    els.filesOutput.className = "card-list empty-state";
-    els.filesOutput.textContent = "This folder is empty.";
-    return;
-  }
-  els.filesOutput.className = "tableish";
-  els.filesOutput.innerHTML = "";
-  items.forEach((item) => {
-    const row = document.createElement("article");
-    row.className = "tableish-row";
-    row.innerHTML = `<div><div class="title">${escapeHTML(item.name)}</div><div class="meta">${escapeHTML(item.path)}</div></div><div><div class="meta">${item.is_directory ? "Folder" : formatBytes(item.size)}</div><div class="meta">${formatDate(item.modified_at)}</div></div><div class="item-actions"></div>`;
-    const actions = row.querySelector(".item-actions");
-    if (item.is_directory) {
-      const open = document.createElement("button");
-      open.type = "button";
-      open.textContent = "Open";
-      open.addEventListener("click", () => browseFiles(item.path));
-      actions.appendChild(open);
-    } else {
-      const download = document.createElement("button");
-      download.type = "button";
-      download.textContent = "Download";
-      download.addEventListener("click", () => downloadFile(item.path));
-      actions.appendChild(download);
-    }
-    const rename = document.createElement("button");
-    rename.type = "button";
-    rename.className = "secondary";
-    rename.textContent = "Rename";
-    rename.addEventListener("click", () => renameFileItem(item));
-    actions.appendChild(rename);
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "ghost";
-    remove.textContent = "Delete";
-    remove.addEventListener("click", () => deleteFileItem(item));
-    actions.appendChild(remove);
-    els.filesOutput.appendChild(row);
-  });
-}
-
-async function browseFiles(path = state.currentFilesPath) {
-  try {
-    const normalized = normalizePath(path);
-    const payload = await sendCommand("files.list", { path: normalized });
-    state.currentFilesPath = normalized;
-    els.filesPath.value = normalized;
-    renderFiles(payload.items || []);
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function createDirectory() {
-  const name = els.filesNewDirectory.value.trim();
-  if (!name) {
-    showToast("Enter a folder name first.", true);
-    return;
-  }
-  try {
-    await sendCommand("files.create_directory", { path: joinPath(state.currentFilesPath, name) });
-    els.filesNewDirectory.value = "";
-    await browseFiles(state.currentFilesPath);
-    showToast("Folder created.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function renameFileItem(item) {
-  const targetName = window.prompt("Rename item to:", item.name);
-  if (!targetName || targetName === item.name) return;
-  try {
-    await sendCommand("files.rename", { from: item.path, to: joinPath(parentPath(item.path), targetName) });
-    await browseFiles(state.currentFilesPath);
-    showToast("Item renamed.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function deleteFileItem(item) {
-  if (!window.confirm(`Delete ${item.path}?`)) return;
-  try {
-    await sendCommand("files.delete", { path: item.path, is_directory: Boolean(item.is_directory) });
-    await browseFiles(state.currentFilesPath);
-    showToast("Item deleted.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function downloadFile(path) {
-  try {
-    selectedHomeOrThrow();
-    const setup = await api("/v1/home/files/downloads", {
-      method: "POST",
-      body: JSON.stringify({ path }),
-    });
-    const response = await fetch(setup.url);
-    if (!response.ok) throw new Error(await response.text());
-    const blob = await response.blob();
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = href;
-    link.download = path.split("/").pop() || "download";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(href);
-    showToast(`Downloaded ${link.download}.`);
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function uploadFile() {
-  const file = els.filesUpload.files?.[0];
-  if (!file) {
-    showToast("Choose a file to upload first.", true);
-    return;
-  }
-  try {
-    selectedHomeOrThrow();
-    const setup = await api("/v1/home/files/uploads", {
-      method: "POST",
-      body: JSON.stringify({ path: joinPath(state.currentFilesPath, file.name) }),
-    });
-    const response = await fetch(setup.url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
-    if (!response.ok) throw new Error(await response.text());
-    els.filesUpload.value = "";
-    await browseFiles(state.currentFilesPath);
-    showToast(`Uploaded ${file.name}.`);
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
 function clearNoteEditor() {
   els.notesTitle.value = "";
   els.notesID.value = "";
@@ -938,10 +756,6 @@ els.haHealthButton.addEventListener("click", runHAHealth);
 els.haStatesButton.addEventListener("click", runHAFetchStates);
 els.haEntityButton.addEventListener("click", runHAFetchEntity);
 els.haServiceButton.addEventListener("click", runHAServiceCall);
-els.filesRefreshButton.addEventListener("click", () => browseFiles(els.filesPath.value));
-els.filesUpButton.addEventListener("click", () => browseFiles(parentPath(state.currentFilesPath)));
-els.filesCreateDirectoryButton.addEventListener("click", createDirectory);
-els.filesUploadButton.addEventListener("click", uploadFile);
 els.notesListButton?.addEventListener("click", listNotes);
 els.notesSearchButton?.addEventListener("click", searchNotes);
 els.notesTagsButton?.addEventListener("click", listTags);
