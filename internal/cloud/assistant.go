@@ -60,6 +60,7 @@ type assistantPendingNoteAppend struct {
 	TargetNoteID  string `json:"target_note_id"`
 	TargetNoteKey string `json:"target_note_key"`
 	TargetTitle   string `json:"target_title"`
+	TargetScope   string `json:"target_scope,omitempty"`
 	AppendedText  string `json:"appended_text"`
 	MatchHint     string `json:"match_hint"`
 	Confirmation  string `json:"confirmation_message"`
@@ -70,6 +71,20 @@ type assistantPendingCalendarCreate struct {
 	Title        string                     `json:"title"`
 	DateText     string                     `json:"date_text"`
 	Confirmation string                     `json:"confirmation_message"`
+}
+
+type assistantPendingActionSummary struct {
+	Kind         string                         `json:"kind"`
+	Title        string                         `json:"title"`
+	Summary      string                         `json:"summary,omitempty"`
+	Confirmation string                         `json:"confirmation_message"`
+	Details      []assistantPendingActionDetail `json:"details,omitempty"`
+	Destructive  bool                           `json:"is_destructive"`
+}
+
+type assistantPendingActionDetail struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
 }
 
 type assistantRankedNote struct {
@@ -95,12 +110,13 @@ type assistantIntent struct {
 }
 
 type assistantRunResponse struct {
-	ID                   string                      `json:"id"`
-	State                string                      `json:"state"`
-	RequiresClientTools  bool                        `json:"requires_client_tools"`
-	RequiresConfirmation bool                        `json:"requires_confirmation"`
-	AssistantMessage     *assistantAPIMessage        `json:"assistant_message,omitempty"`
-	ClientToolRequest    *assistantClientToolRequest `json:"client_tool_request,omitempty"`
+	ID                   string                         `json:"id"`
+	State                string                         `json:"state"`
+	RequiresClientTools  bool                           `json:"requires_client_tools"`
+	RequiresConfirmation bool                           `json:"requires_confirmation"`
+	AssistantMessage     *assistantAPIMessage           `json:"assistant_message,omitempty"`
+	ClientToolRequest    *assistantClientToolRequest    `json:"client_tool_request,omitempty"`
+	PendingActionSummary *assistantPendingActionSummary `json:"pending_action_summary,omitempty"`
 }
 
 type assistantAPISession struct {
@@ -651,7 +667,7 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 			if err != nil {
 				return assistantRunResponse{}, err
 			}
-			payload, err := json.Marshal(assistantPendingAction{
+			pendingAction := assistantPendingAction{
 				Kind: "calendar_create",
 				CalendarCreate: &assistantPendingCalendarCreate{
 					ToolRequest:  pending.request,
@@ -659,7 +675,8 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 					DateText:     pending.dateText,
 					Confirmation: pending.confirmationMessage,
 				},
-			})
+			}
+			payload, err := json.Marshal(pendingAction)
 			if err != nil {
 				return assistantRunResponse{}, err
 			}
@@ -678,6 +695,7 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 				State:                run.State,
 				RequiresConfirmation: true,
 				AssistantMessage:     &message,
+				PendingActionSummary: assistantPendingActionSummaryFromAction(pendingAction),
 			}, nil
 		}
 
@@ -731,6 +749,7 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 			State:                run.State,
 			RequiresConfirmation: true,
 			AssistantMessage:     &message,
+			PendingActionSummary: assistantPendingActionSummaryFromAction(*pendingAction),
 		}, nil
 	}
 
@@ -924,6 +943,10 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 
 	target := ranked[0].Note
 	if needsNoteAppendConfirmation(ranked) {
+		targetScope := "Personal note"
+		if target.HomeID != "" {
+			targetScope = "Shared Home note"
+		}
 		return assistantMessageContent{
 			Text: fmt.Sprintf("I found more than one likely note for `%s`. Confirm before I add `%s` to `%s`.", matchHint, itemText, target.Title),
 			Cards: []assistantResultCard{
@@ -943,6 +966,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 						TargetNoteID:  target.ID,
 						TargetNoteKey: target.NoteID,
 						TargetTitle:   target.Title,
+						TargetScope:   targetScope,
 						AppendedText:  itemText,
 						MatchHint:     matchHint,
 						Confirmation:  fmt.Sprintf("Confirm adding `%s` to `%s`.", itemText, target.Title),
@@ -1652,6 +1676,81 @@ func assistantPendingActionFromContent(content assistantMessageContent) *assista
 	return &pending
 }
 
+func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *assistantPendingActionSummary {
+	switch pending.Kind {
+	case "note_append":
+		if pending.NoteAppend == nil {
+			return nil
+		}
+		action := pending.NoteAppend
+		details := []assistantPendingActionDetail{
+			{Label: "Target note", Value: action.TargetTitle},
+			{Label: "Text to add", Value: action.AppendedText},
+		}
+		if action.TargetScope != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Scope", Value: action.TargetScope})
+		}
+		if action.MatchHint != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Matched search", Value: action.MatchHint})
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        "Add to note",
+			Summary:      "Hank will append text to an existing note after you approve it.",
+			Confirmation: defaultString(action.Confirmation, fmt.Sprintf("Confirm adding `%s` to `%s`.", action.AppendedText, action.TargetTitle)),
+			Details:      details,
+			Destructive:  false,
+		}
+	case "calendar_create":
+		if pending.CalendarCreate == nil {
+			return nil
+		}
+		action := pending.CalendarCreate
+		details := []assistantPendingActionDetail{
+			{Label: "Event", Value: action.Title},
+			{Label: "Requested date", Value: action.DateText},
+		}
+		if startsAt := assistantToolArgumentString(action.ToolRequest.Arguments, "starts_at"); startsAt != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Starts", Value: startsAt})
+		}
+		if endsAt := assistantToolArgumentString(action.ToolRequest.Arguments, "ends_at"); endsAt != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Ends", Value: endsAt})
+		}
+		if isAllDay, ok := action.ToolRequest.Arguments["is_all_day"].(bool); ok {
+			value := "No"
+			if isAllDay {
+				value = "Yes"
+			}
+			details = append(details, assistantPendingActionDetail{Label: "All day", Value: value})
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        "Create calendar event",
+			Summary:      "Hank will ask this device to create the calendar event after you approve it.",
+			Confirmation: defaultString(action.Confirmation, fmt.Sprintf("Confirm creating `%s` on %s.", action.Title, action.DateText)),
+			Details:      details,
+			Destructive:  false,
+		}
+	default:
+		return nil
+	}
+}
+
+func assistantToolArgumentString(arguments map[string]interface{}, key string) string {
+	value, ok := arguments[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
 func assistantPromptWithContext(prompt string, contexts []domain.AssistantRetrievedContext) string {
 	var builder strings.Builder
 	builder.WriteString("User request:\n")
@@ -1780,6 +1879,12 @@ func (s *Server) assistantRunResponseForSession(ctx context.Context, session dom
 					response.AssistantMessage = &message
 					break
 				}
+			}
+		}
+		if run.RequiresConfirmation && run.PendingActionJSON != "" {
+			var pending assistantPendingAction
+			if json.Unmarshal([]byte(run.PendingActionJSON), &pending) == nil {
+				response.PendingActionSummary = assistantPendingActionSummaryFromAction(pending)
 			}
 		}
 	} else if run.PendingActionJSON != "" {

@@ -411,8 +411,10 @@ For `waiting_client_tool` runs:
 ### Confirmation UX
 
 For `waiting_confirmation` runs:
-- present clear approve/cancel UI with mutation details
+- decode `pending_action_summary` when the server provides it
+- present clear approve/cancel UI with action title, confirmation message, and mutation detail rows
 - call `/v1/home/assistant/runs/{runID}/confirm` with explicit decision
+- treat `pending_action_summary` as display-only; HankServerside still owns the authoritative pending action payload
 
 ### OpenAI OAuth Linking
 
@@ -448,7 +450,7 @@ Expected behavior:
 
 - Verify assistant sessions list/create/send/reload works over app restarts.
 - Verify a calendar-create prompt enters `waiting_client_tool`, executes EventKit call, and resumes to completion.
-- Verify mutation confirmation flow blocks execution until user confirms.
+- Verify mutation confirmation flow shows structured note/calendar action details and blocks execution until user confirms.
 - Verify OpenAI/ChatGPT link flow completes and linked status persists across relaunch.
 - Verify device-code mode is usable without an embedded web callback.
 - Verify assistant source settings persist and affect the next run.

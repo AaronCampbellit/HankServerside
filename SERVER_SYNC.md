@@ -514,6 +514,14 @@ HankServerside now exposes HankAI assistant sessions, per-user source settings, 
   - `completed`
   - `waiting_client_tool`
   - `waiting_confirmation`
+- `waiting_confirmation` run responses may include display-only `pending_action_summary` with:
+  - `kind`
+  - `title`
+  - `summary`
+  - `confirmation_message`
+  - `is_destructive`
+  - `details`: label/value rows for the mutation being reviewed
+- `pending_action_summary` is not the execution source of truth. HankServerside keeps the private pending action payload server-side and only uses the summary for user review UI.
 - The first app-side client tool is calendar creation through EventKit. Hank executes the local tool, then posts the result to `client-tool-results`.
 - Assistant source settings are per Home user and include project docs, assistant conversations, profile notes, Home notes, files, calendar, and Home Assistant context sources.
 
@@ -522,7 +530,7 @@ HankServerside now exposes HankAI assistant sessions, per-user source settings, 
 - Add assistant session list/create/delete/message clients.
 - Add assistant run polling and state handling.
 - For `waiting_client_tool`, execute supported client tools locally and return a normalized result.
-- For `waiting_confirmation`, present approve/cancel UI before calling confirm.
+- For `waiting_confirmation`, render `pending_action_summary` mutation details when provided, then present approve/cancel UI before calling confirm.
 - Add assistant status/settings clients so Hank can show link state and source toggles.
 - Add OpenAI/ChatGPT linking UI that supports both browser authorization URLs and device-code flows.
 - Upload calendar index data with `PUT /v1/home/assistant/calendar-index` when calendar context is enabled.
@@ -536,5 +544,5 @@ HankServerside now exposes HankAI assistant sessions, per-user source settings, 
 - Verify assistant sessions survive app relaunch.
 - Verify a normal prompt completes and stores a message.
 - Verify calendar creation enters `waiting_client_tool`, executes through EventKit, posts the result, and completes.
-- Verify confirmation-required note/calendar mutations do not execute before approval.
+- Verify confirmation-required note/calendar mutations show structured action details and do not execute before approval.
 - Verify both OpenAI auth modes render correctly: browser authorization URL and device-code copy/open flow.

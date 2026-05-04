@@ -218,6 +218,62 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	}
 }
 
+func TestAssistantConfirmationResponseIncludesStructuredSummary(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_assistant_confirm", Email: "assistant-confirm@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_assistant_confirm", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AssistantSession{
+		ID:            "asess_confirm",
+		HomeID:        home.ID,
+		UserID:        user.ID,
+		Title:         "Calendar confirmation",
+		LastMessageAt: now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+
+	response, err := server.processAssistantMessage(ctx, home, membership, auth, session, "create dentist appointment on May 3", "device-confirm", "UTC")
+	if err != nil {
+		t.Fatalf("processAssistantMessage: %v", err)
+	}
+	if !response.RequiresConfirmation {
+		t.Fatalf("RequiresConfirmation = false, response=%#v", response)
+	}
+	if response.PendingActionSummary == nil {
+		t.Fatalf("missing pending action summary: %#v", response)
+	}
+	if response.PendingActionSummary.Kind != "calendar_create" || response.PendingActionSummary.Title != "Create calendar event" {
+		t.Fatalf("unexpected pending action summary: %#v", response.PendingActionSummary)
+	}
+	if !assistantSummaryDetailsContain(response.PendingActionSummary.Details, "Event", "dentist appointment") ||
+		!assistantSummaryDetailsContain(response.PendingActionSummary.Details, "Requested date", "May 3") ||
+		!assistantSummaryDetailsContain(response.PendingActionSummary.Details, "All day", "Yes") {
+		t.Fatalf("summary details missing expected values: %#v", response.PendingActionSummary.Details)
+	}
+
+	run, err := db.GetAssistantRun(ctx, response.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantRun: %v", err)
+	}
+	fetched := server.assistantRunResponseForSession(ctx, session, run)
+	if fetched.PendingActionSummary == nil || fetched.PendingActionSummary.Kind != "calendar_create" {
+		t.Fatalf("fetched run missing pending action summary: %#v", fetched)
+	}
+}
+
 func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	t.Parallel()
 
@@ -406,6 +462,15 @@ func assistantCardsContainTitle(cards []assistantResultCard, title string) bool 
 func assistantCardsContainKindAndSearchText(cards []assistantResultCard, kind string, searchText string) bool {
 	for _, card := range cards {
 		if card.Kind == kind && card.SearchText == searchText {
+			return true
+		}
+	}
+	return false
+}
+
+func assistantSummaryDetailsContain(details []assistantPendingActionDetail, label string, value string) bool {
+	for _, detail := range details {
+		if detail.Label == label && detail.Value == value {
 			return true
 		}
 	}
