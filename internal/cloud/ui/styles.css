@@ -86,7 +86,14 @@ main {
 .shell:has(> .tab-strip) .hero {
   grid-column: 2;
   grid-row: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  align-items: start;
   margin-bottom: 0;
+}
+
+.dashboard-shell .hero .brand-lockup,
+.shell:has(> .tab-strip) .hero .brand-lockup {
+  display: none;
 }
 
 .brand-lockup {
@@ -153,6 +160,48 @@ h3 {
   justify-content: center;
 }
 
+.dashboard-shell .hero-card,
+.shell:has(> .tab-strip) .hero-card {
+  justify-self: end;
+  width: min(100%, 420px);
+  padding: 10px 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+}
+
+.dashboard-shell .hero-card .panel-head,
+.shell:has(> .tab-strip) .hero-card .panel-head {
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.dashboard-shell .hero-card p,
+.shell:has(> .tab-strip) .hero-card p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.dashboard-shell .hero-card .status-row,
+.shell:has(> .tab-strip) .hero-card .status-row {
+  min-width: 0;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.dashboard-shell .hero-card .status-row span:last-child,
+.shell:has(> .tab-strip) .hero-card .status-row span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-shell .hero-card button,
+.shell:has(> .tab-strip) .hero-card button {
+  min-height: 30px;
+  padding: 6px 9px;
+  font-size: 0.78rem;
+}
+
 .status-row {
   display: flex;
   align-items: center;
@@ -216,26 +265,28 @@ h3 {
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 4px 2px 8px;
+  gap: 14px;
+  padding: 8px 6px 14px;
   border-bottom: 1px solid var(--line);
 }
 
 .sidebar-brand-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  box-shadow: 0 8px 22px rgba(58, 112, 212, 0.2);
+  width: 66px;
+  height: 66px;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(58, 112, 212, 0.32);
 }
 
 .sidebar-title {
   font-weight: 800;
   line-height: 1.05;
+  font-size: 1.45rem;
 }
 
 .sidebar-subtitle {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.9rem;
+  font-weight: 650;
 }
 
 .sidebar-search-shell {
@@ -1461,7 +1512,14 @@ button:disabled {
 
   .dashboard-shell .hero,
   .shell:has(> .tab-strip) .hero {
+    grid-template-columns: 1fr;
     margin-bottom: 12px;
+  }
+
+  .dashboard-shell .hero-card,
+  .shell:has(> .tab-strip) .hero-card {
+    justify-self: stretch;
+    width: 100%;
   }
 
   .dashboard-shell .tab-strip,

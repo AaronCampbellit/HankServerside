@@ -27,7 +27,7 @@
     },
     {
       href: "/dashboard/storage",
-      label: "Storage",
+      label: "Backups",
       detail: "Backups, restore tests, checksum checks, and backup schedules.",
       keywords: ["storage", "backup", "backups", "restore", "checksum", "schedule", "encrypted", "retention"],
       adminOnly: true,

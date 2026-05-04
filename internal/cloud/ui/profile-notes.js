@@ -1,4 +1,5 @@
 const AUTOSAVE_DELAY_MS = 700;
+const SELECTED_NOTE_STORAGE_KEY = "hank.remote.profileNotes.selectedNoteID";
 
 const state = {
   user: null,
@@ -79,6 +80,17 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
+function formatModifiedTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const isToday = date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return isToday ? date.toLocaleTimeString() : date.toLocaleString();
+}
+
 function startupParams() {
   return new URLSearchParams(window.location.search);
 }
@@ -89,6 +101,25 @@ function requestedNoteID() {
 
 function requestedSearchText() {
   return startupParams().get("search") || "";
+}
+
+function rememberedNoteID() {
+  try {
+    return window.localStorage.getItem(SELECTED_NOTE_STORAGE_KEY) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function rememberNoteID(noteID) {
+  try {
+    if (noteID) {
+      window.localStorage.setItem(SELECTED_NOTE_STORAGE_KEY, noteID);
+    } else {
+      window.localStorage.removeItem(SELECTED_NOTE_STORAGE_KEY);
+    }
+  } catch (_) {
+  }
 }
 
 function preferredAppSocketURL() {
@@ -256,7 +287,8 @@ function setSaveState(label, mode = "") {
 }
 
 function setLastSaved(value) {
-  els.lastSaved.textContent = value ? `Saved ${formatDate(value)}` : "Not saved yet";
+  const modified = formatModifiedTime(value);
+  els.lastSaved.textContent = modified ? `Modified last ${modified}` : "Not modified yet";
 }
 
 function editorHasFocus() {
@@ -343,6 +375,7 @@ function updateSelectedSummaryDraft() {
 function fillEditor(note) {
   window.clearTimeout(state.autosaveTimer);
   state.selectedNoteID = note.note_id;
+  rememberNoteID(state.selectedNoteID);
   state.currentRevision = note.revision || "";
   state.isDirty = false;
   state.isSaving = false;
@@ -518,12 +551,14 @@ async function deleteNote() {
     showToast("Choose a note first.", true);
     return;
   }
-  if (!window.confirm(`Delete ${els.noteTitle.value || state.selectedNoteID}?`)) {
+  const title = els.noteTitle.value.trim() || "this note";
+  if (!window.confirm(`Delete "${title}"?\n\nThis cannot be undone.`)) {
     return;
   }
   try {
     logLive("deleting profile note", { noteID: state.selectedNoteID });
     await api(`/v1/me/notes/${encodeURIComponent(state.selectedNoteID)}`, { method: "DELETE" });
+    rememberNoteID("");
     clearEditor();
     await loadNotes();
     showToast("Note deleted.");
@@ -552,8 +587,14 @@ async function hydrate() {
     clearEditor();
     await loadNotes();
     const openedRequested = await openRequestedNote();
-    if (!openedRequested && state.notes[0]) {
-      await loadNote(state.notes[0].id);
+    if (!openedRequested) {
+      const remembered = rememberedNoteID();
+      const rememberedExists = remembered && state.notes.some((note) => noteIdentifier(note) === remembered);
+      if (rememberedExists) {
+        await loadNote(remembered);
+      } else if (state.notes[0]) {
+        await loadNote(state.notes[0].id);
+      }
     }
   } catch (_) {
     window.location.replace("/");
@@ -590,8 +631,7 @@ function scheduleLiveRefresh() {
 }
 
 function replaceText(start, end, replacement, selectionStart, selectionEnd) {
-  const value = els.noteContent.value;
-  els.noteContent.value = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+  els.noteContent.setRangeText(replacement, start, end, "preserve");
   els.noteContent.focus();
   els.noteContent.setSelectionRange(selectionStart, selectionEnd);
   markDirty();
@@ -643,7 +683,7 @@ function headingLevel(line) {
 function setHeading(line, level) {
   const text = stripLinePrefix(line);
   if (!text.trim()) {
-    return line;
+    return level > 0 ? `${"#".repeat(level)} ` : line;
   }
   return level > 0 ? `${"#".repeat(level)} ${text}` : text;
 }
@@ -671,7 +711,7 @@ function applyLinePrefix(prefixForLine) {
   transformSelectedLines((line, index) => {
     const text = stripLinePrefix(line);
     if (!text.trim()) {
-      return line;
+      return prefixForLine(index);
     }
     return `${prefixForLine(index)}${text}`;
   });
@@ -725,6 +765,16 @@ function applyLink() {
 
 function applyFormat(format) {
   switch (format) {
+  case "undo":
+    els.noteContent.focus();
+    document.execCommand("undo");
+    markDirty();
+    break;
+  case "redo":
+    els.noteContent.focus();
+    document.execCommand("redo");
+    markDirty();
+    break;
   case "bold":
     wrapSelection("**");
     break;
@@ -795,6 +845,9 @@ els.noteContent.addEventListener("keydown", (event) => {
   }
 });
 els.formatButtons.forEach((button) => {
+  button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
   button.addEventListener("click", () => applyFormat(button.dataset.format));
 });
 
