@@ -71,6 +71,23 @@
   ];
   const preloaded = new Set();
   let canViewAdmin = false;
+  let dashboardFrame = null;
+
+  function isEmbeddedDashboard() {
+    return window.self !== window.top && new URLSearchParams(window.location.search).get("embedded") === "1";
+  }
+
+  function embeddedURL(href) {
+    const url = new URL(href, window.location.origin);
+    url.searchParams.set("embedded", "1");
+    return url;
+  }
+
+  function visibleURL(href) {
+    const url = new URL(href, window.location.origin);
+    url.searchParams.delete("embedded");
+    return url;
+  }
 
   function setAdminOnlyVisible(isVisible) {
     canViewAdmin = isVisible;
@@ -108,6 +125,43 @@
     return normalizedPath(page.href) === window.location.pathname;
   }
 
+  function pageForURL(url) {
+    return dashboardPages.find((page) => normalizedPath(page.href) === url.pathname) || null;
+  }
+
+  function setHeroForPage(page) {
+    if (!page) return;
+    const hero = document.querySelector(".dashboard-shell > .hero");
+    if (!hero) return;
+    const title = hero.querySelector("h1");
+    const lede = hero.querySelector(".lede");
+    if (title) {
+      title.textContent = page.label === "Overview" ? "Remote Dashboard" : page.label;
+    }
+    if (lede) {
+      lede.textContent = page.detail;
+    }
+    document.title = `Hank Remote ${page.label}`;
+  }
+
+  function setActiveShellPage(url) {
+    document.querySelectorAll(".dashboard-shell .tab-link").forEach((link) => {
+      const isActive = normalizedPath(link.href) === url.pathname;
+      link.classList.toggle("active", isActive);
+      if (isActive) {
+        link.setAttribute("aria-current", "page");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    });
+    const page = pageForURL(url);
+    const footer = document.querySelector(".dashboard-shell .sidebar-context");
+    if (footer) {
+      footer.textContent = page?.detail || "Manage Hank Remote from one place.";
+    }
+    setHeroForPage(page);
+  }
+
   function installDashboardShell() {
     const shell = document.querySelector(".shell");
     if (!shell || document.querySelector(".auth-grid")) {
@@ -129,6 +183,30 @@
     shell.classList.add("dashboard-shell");
     nav.classList.add("side-nav");
     renderSideNav();
+  }
+
+  function installEmbeddedMode() {
+    if (!isEmbeddedDashboard()) {
+      return false;
+    }
+    document.documentElement.classList.add("embedded-dashboard");
+    document.body.classList.add("embedded-dashboard");
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("a[href]");
+      if (!link || event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (link.target && link.target !== "_self")) {
+        return;
+      }
+      const url = new URL(link.href, window.location.origin);
+      if (url.origin !== window.location.origin || !url.pathname.startsWith("/dashboard")) {
+        return;
+      }
+      event.preventDefault();
+      window.parent.postMessage({ type: "hank-dashboard:navigate", href: visibleURL(url).toString() }, window.location.origin);
+    });
+    return true;
   }
 
   function renderSideNav() {
@@ -188,6 +266,49 @@
       searchShell.querySelector("#dashboard-settings-search"),
       searchShell.querySelector("#dashboard-settings-results"),
     );
+  }
+
+  function currentFrameSource() {
+    return embeddedURL(window.location.href).toString();
+  }
+
+  function ensureDashboardFrame() {
+    const shell = document.querySelector(".dashboard-shell");
+    const main = shell?.querySelector("main");
+    if (!shell || !main || dashboardFrame) {
+      return dashboardFrame;
+    }
+    main.classList.add("dashboard-frame-main");
+    main.innerHTML = "";
+    dashboardFrame = document.createElement("iframe");
+    dashboardFrame.className = "dashboard-content-frame";
+    dashboardFrame.title = "Dashboard content";
+    dashboardFrame.src = currentFrameSource();
+    dashboardFrame.addEventListener("load", () => {
+      document.body.classList.remove("dashboard-navigating");
+      try {
+        const framedURL = visibleURL(dashboardFrame.contentWindow.location.href);
+        setActiveShellPage(framedURL);
+      } catch (_) {
+      }
+    });
+    main.appendChild(dashboardFrame);
+    return dashboardFrame;
+  }
+
+  function navigateDashboardFrame(href, pushHistory = true) {
+    const frame = ensureDashboardFrame();
+    if (!frame) {
+      window.location.assign(href);
+      return;
+    }
+    const url = visibleURL(href);
+    document.body.classList.add("dashboard-navigating");
+    setActiveShellPage(url);
+    frame.src = embeddedURL(url).toString();
+    if (pushHistory) {
+      window.history.pushState({ dashboardURL: url.toString() }, "", url.pathname + url.search + url.hash);
+    }
   }
 
   function scorePage(page, queryTerms) {
@@ -348,7 +469,7 @@
     if (url.origin !== window.location.origin) {
       return false;
     }
-    if (!url.pathname.startsWith("/dashboard") && !url.pathname.startsWith("/docs/")) {
+    if (!url.pathname.startsWith("/dashboard")) {
       return false;
     }
     return url.pathname !== window.location.pathname || url.search !== window.location.search;
@@ -361,10 +482,18 @@
         return;
       }
       event.preventDefault();
-      document.body.classList.add("dashboard-navigating");
-      window.setTimeout(() => {
-        window.location.assign(link.href);
-      }, 90);
+      navigateDashboardFrame(link.href);
+    });
+
+    window.addEventListener("message", (event) => {
+      if (event.origin !== window.location.origin || event.data?.type !== "hank-dashboard:navigate") {
+        return;
+      }
+      navigateDashboardFrame(event.data.href);
+    });
+
+    window.addEventListener("popstate", () => {
+      navigateDashboardFrame(window.location.href, false);
     });
   }
 
@@ -382,8 +511,12 @@
   }
 
   function start() {
+    if (installEmbeddedMode()) {
+      return;
+    }
     installDashboardShell();
     installSmoothNavigation();
+    ensureDashboardFrame();
     applyAdminVisibility();
     preloadDashboardPages();
   }

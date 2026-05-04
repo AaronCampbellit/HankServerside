@@ -13,6 +13,10 @@
   --shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
 }
 
+@view-transition {
+  navigation: auto;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -25,6 +29,38 @@ body {
   min-height: 100vh;
   line-height: 1.35;
   overflow-y: scroll;
+  animation: page-enter 140ms ease both;
+}
+
+html.embedded-dashboard,
+body.embedded-dashboard {
+  background: transparent;
+  overflow: auto;
+}
+
+body.embedded-dashboard {
+  animation: none;
+}
+
+body.embedded-dashboard .shell,
+body.embedded-dashboard .dashboard-shell,
+body.embedded-dashboard .shell:has(> .tab-strip) {
+  width: 100%;
+  min-height: 0;
+  display: block;
+  padding: 0;
+}
+
+body.embedded-dashboard .hero,
+body.embedded-dashboard .tab-strip {
+  display: none !important;
+}
+
+body.embedded-dashboard main {
+  min-height: 0;
+  opacity: 1;
+  transform: none;
+  transition: none;
 }
 
 html {
@@ -41,22 +77,34 @@ html {
 body.dashboard-navigating .hero,
 body.dashboard-navigating main {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(3px);
 }
 
 .hero,
 main {
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition: opacity 110ms ease, transform 110ms ease;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0.96;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .dashboard-shell,
 .shell:has(> .tab-strip) {
   width: min(1500px, calc(100vw - 20px));
   display: grid;
-  grid-template-columns: minmax(224px, 260px) minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px 14px;
   align-items: start;
+  min-height: calc(100vh - 30px);
 }
 
 .auth-shell {
@@ -88,6 +136,7 @@ main {
   grid-row: 1;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
   align-items: start;
+  min-height: 104px;
   margin-bottom: 0;
 }
 
@@ -232,6 +281,21 @@ h3 {
 .shell:has(> .tab-strip) > main {
   grid-column: 2;
   grid-row: 2;
+  min-height: calc(100vh - 160px);
+}
+
+.dashboard-frame-main {
+  overflow: hidden;
+}
+
+.dashboard-content-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 150px);
+  min-height: 620px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
 }
 
 .tab-strip {
@@ -252,6 +316,7 @@ h3 {
   flex-wrap: nowrap;
   gap: 10px;
   max-height: calc(100vh - 20px);
+  min-height: calc(100vh - 20px);
   margin: 0;
   padding: 10px;
   overflow-y: auto;
@@ -260,6 +325,14 @@ h3 {
   background: rgba(17, 22, 33, 0.94);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
+}
+
+.dashboard-shell .tab-strip:not(.side-nav)::before,
+.shell:has(> .tab-strip) .tab-strip:not(.side-nav)::before {
+  content: "";
+  display: block;
+  min-height: 94px;
+  border-bottom: 1px solid var(--line);
 }
 
 .sidebar-brand {
@@ -1526,7 +1599,13 @@ button:disabled {
   .shell:has(> .tab-strip) .tab-strip {
     position: static;
     max-height: none;
+    min-height: 0;
     margin-bottom: 12px;
+  }
+
+  .dashboard-shell .tab-strip:not(.side-nav)::before,
+  .shell:has(> .tab-strip) .tab-strip:not(.side-nav)::before {
+    display: none;
   }
 
   .sidebar-nav-list {
@@ -1648,5 +1727,16 @@ button:disabled {
 @media (max-width: 560px) {
   .sidebar-nav-list {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    animation: none;
+  }
+
+  .hero,
+  main {
+    transition: none;
   }
 }
