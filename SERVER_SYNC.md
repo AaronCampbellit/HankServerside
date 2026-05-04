@@ -137,8 +137,10 @@ Hank Remote is now modeled as one deployment Home instead of multi-home tenancy.
   - `PUT /v1/home`
 - Home membership and invitation routes:
   - `GET /v1/home/members`
+  - `GET /v1/home/members/invitations`
   - `POST /v1/home/members/invitations`
   - `POST /v1/home/invitations/accept`
+  - `DELETE /v1/home/members/invitations/{invitationID}`
   - `DELETE /v1/home/members/{userID}`
   - `PUT /v1/home/members/{userID}/role`
 - Home permission routes:
@@ -231,6 +233,11 @@ App WebSocket commands now route implicitly against the singleton Home. Hank sho
 
 - Hank app WebSocket endpoint remains:
   - `GET /ws/app`
+- Preferred WebSocket auth is now:
+  - `POST /v1/ws/app-ticket`
+  - connect to the returned `websocket_path`, currently `/ws/app?app_ticket={ticket}`
+- App tickets are one-use and short-lived. Current TTL is 90 seconds.
+- Legacy `/ws/app?session_token={token}` is still accepted by the server for compatibility and tests, but Hank should migrate to app tickets.
 - Requests must now include:
   - `request_id`
   - `command`
@@ -241,6 +248,8 @@ App WebSocket commands now route implicitly against the singleton Home. Hank sho
 
 ### Hank Changes
 
+- For new WebSocket connections, request an app ticket with the regular HTTP bearer session token, then connect with `app_ticket`.
+- Do not persist app tickets. If the WebSocket connect fails or the ticket expires, request a fresh ticket.
 - Remove `home_id` from outgoing `app.command` envelopes.
 - Remove any home-selection dependency from the remote WebSocket client.
 - Keep request correlation by `request_id`.
@@ -276,6 +285,7 @@ Details:
 ### Validation
 
 - Send `system.ping` through `/ws/app` without `home_id`.
+- Verify `/v1/ws/app-ticket` returns `ticket`, `expires_at`, and `websocket_path`, and that Hank uses `websocket_path` for the connection.
 - Send one Home Assistant command, one file command, and one notes command without `home_id`.
 
 ## [Home Members, Roles, And Permissions]
@@ -293,8 +303,10 @@ The singleton Home now supports `admin/member` roles plus Home-wide feature defa
 
 - Membership routes:
   - `GET /v1/home/members`
+  - `GET /v1/home/members/invitations`
   - `POST /v1/home/members/invitations`
   - `POST /v1/home/invitations/accept`
+  - `DELETE /v1/home/members/invitations/{invitationID}`
   - `DELETE /v1/home/members/{userID}`
   - `PUT /v1/home/members/{userID}/role`
 - Permission routes:
@@ -314,6 +326,7 @@ The singleton Home now supports `admin/member` roles plus Home-wide feature defa
   - service-profile edits
   - agent token issuance and revocation
 - Invitation creation now always creates `member` access. Promotion to `admin` is separate.
+- Invitation listing and revocation are admin-only.
 
 ### Hank Changes
 
@@ -395,12 +408,34 @@ Shared Home notes, sync health, and integration settings are still the Remote co
   - `GET /v1/me/notes/{noteID}`
   - `PUT /v1/me/notes/{noteID}`
   - `DELETE /v1/me/notes/{noteID}`
+- Profile sync and backup routes:
+  - `GET /v1/me/profile`
+  - `PUT /v1/me/profile`
+  - `GET /v1/me/profile-secret-vault`
+  - `PUT /v1/me/profile-secret-vault`
+  - `GET /v1/me/profile-backup`
+  - `PUT /v1/me/profile-backup`
+- File transfer setup and transfer routes:
+  - `POST /v1/home/files/downloads`
+  - `POST /v1/home/files/uploads`
+  - `GET /v1/file-transfers/{transferID}?token={transferToken}`
+  - `PUT /v1/file-transfers/{transferID}?token={transferToken}`
+- File transfer setup responses include `transfer_id`, `transfer_token`, `method`, `url`, `expires_at`, `next_offset`, `resumable`, and transfer status fields.
+- Service-profile writes accept:
+  - `public_config`
+  - `secrets`
+  - `persist`
+- Supported service profile types are:
+  - `homeassistant`
+  - `smb`
 
 ### Hank Changes
 
 - Change all shared Remote note HTTP clients from `/v1/homes/{homeID}/...` to `/v1/home/...`.
 - Keep profile notes under `/v1/me/notes`.
+- Add user profile settings, encrypted secret vault, and backup clients under `/v1/me/...` if Hank syncs profile-owned state through Hank Remote.
 - Change sync-status and service-profile clients to the singleton routes.
+- Use file-transfer setup routes to get the short-lived transfer URL and token before performing the actual upload/download request.
 - Gate shared notes, files, and Home Assistant actions on server-returned permission failures.
 - Keep service-profile editing admin-only in the app.
 
@@ -440,3 +475,66 @@ Details:
 - Load sync health from `GET /v1/home/sync`.
 - Load and update service profiles from the singleton routes.
 - Confirm a non-admin member can view status but cannot edit service profiles.
+
+## [Assistant, OpenAI Link, And Hank Context]
+
+- Status: in_progress
+- Date Opened: 2026-05-04
+- Owner: shared
+- Related Ticket/PR: assistant-app-contract
+
+### Summary
+
+HankServerside now exposes HankAI assistant sessions, per-user source settings, ChatGPT/Codex or legacy OpenAI account linking status, and app-assisted tool execution for calendar actions.
+
+### Contract Update
+
+- Assistant routes:
+  - `GET /v1/home/assistant/status`
+  - `GET /v1/home/assistant/settings`
+  - `PUT /v1/home/assistant/settings`
+  - `GET /v1/home/assistant/sessions`
+  - `POST /v1/home/assistant/sessions`
+  - `GET /v1/home/assistant/sessions/{sessionID}`
+  - `DELETE /v1/home/assistant/sessions/{sessionID}`
+  - `GET /v1/home/assistant/sessions/{sessionID}/messages`
+  - `POST /v1/home/assistant/sessions/{sessionID}/messages`
+  - `GET /v1/home/assistant/runs/{runID}`
+  - `POST /v1/home/assistant/runs/{runID}/confirm`
+  - `POST /v1/home/assistant/runs/{runID}/client-tool-results`
+  - `PUT /v1/home/assistant/calendar-index`
+- OpenAI/ChatGPT link routes:
+  - `GET /v1/oauth/openai/status`
+  - `GET /v1/oauth/openai/start`
+  - `GET /v1/oauth/openai/callback`
+- Link status can return `auth_mode: "authorization_url"` or `auth_mode: "device_code"`.
+- For `authorization_url`, `start` returns an `authorization_url`.
+- For `device_code`, `start` returns `auth_mode`, `verification_url`, `user_code`, `expires_at`, and `poll_after_seconds`.
+- Assistant run states currently include:
+  - `completed`
+  - `waiting_client_tool`
+  - `waiting_confirmation`
+- The first app-side client tool is calendar creation through EventKit. Hank executes the local tool, then posts the result to `client-tool-results`.
+- Assistant source settings are per Home user and include project docs, assistant conversations, profile notes, Home notes, files, calendar, and Home Assistant context sources.
+
+### Hank Changes
+
+- Add assistant session list/create/delete/message clients.
+- Add assistant run polling and state handling.
+- For `waiting_client_tool`, execute supported client tools locally and return a normalized result.
+- For `waiting_confirmation`, present approve/cancel UI before calling confirm.
+- Add assistant status/settings clients so Hank can show link state and source toggles.
+- Add OpenAI/ChatGPT linking UI that supports both browser authorization URLs and device-code flows.
+- Upload calendar index data with `PUT /v1/home/assistant/calendar-index` when calendar context is enabled.
+
+### Rollout Order
+
+- server first, then app
+
+### Validation
+
+- Verify assistant sessions survive app relaunch.
+- Verify a normal prompt completes and stores a message.
+- Verify calendar creation enters `waiting_client_tool`, executes through EventKit, posts the result, and completes.
+- Verify confirmation-required note/calendar mutations do not execute before approval.
+- Verify both OpenAI auth modes render correctly: browser authorization URL and device-code copy/open flow.

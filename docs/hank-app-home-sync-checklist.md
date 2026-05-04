@@ -43,6 +43,7 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Add singleton Home clients for:
   - `GET /v1/home`
   - `PUT /v1/home`
+  - `POST /v1/ws/app-ticket`
   - `GET /v1/home/agent`
   - `GET /v1/home/agent/tokens`
   - `POST /v1/home/agent/tokens`
@@ -75,6 +76,11 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 
 ### WebSocket Relay
 
+- Request a short-lived app ticket with `POST /v1/ws/app-ticket` before opening `/ws/app`.
+- Connect to the returned `websocket_path`.
+- Treat app tickets as one-use and expiring. Do not store them in account state.
+- Keep bearer session tokens for regular HTTP requests.
+- Remove app-side reliance on `/ws/app?session_token=...` except as a temporary debug fallback.
 - Stop sending `home_id` on `app.command`.
 - Keep sending:
   - `request_id`
@@ -133,13 +139,16 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 
 ### Invitations
 
+- List pending invitations with:
+  - `GET /v1/home/members/invitations`
 - Create invitations with:
   - `POST /v1/home/members/invitations`
 - Accept invitations with:
   - `POST /v1/home/invitations/accept`
 - Revoke invitations with:
   - `DELETE /v1/home/members/invitations/{invitationID}`
-- Treat invitation creation as member-only. Do not expose role selection during invite creation.
+- Treat invitation creation, pending-invite listing, and revocation as admin-only.
+- Do not expose role selection during invite creation. New invites create `member` access.
 
 ### Role Changes
 
@@ -229,6 +238,13 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 
 - Load singleton service profiles from `GET /v1/home/service-profiles`.
 - Save Home Assistant and SMB settings with `PUT /v1/home/service-profiles/{serviceType}`.
+- Send:
+  - `public_config`
+  - `secrets`
+  - `persist`
+- Support service types:
+  - `homeassistant`
+  - `smb`
 - Keep secret handling the same:
   - never redisplay stored secrets
   - send secrets only when saving
@@ -236,7 +252,80 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Keep editing admin-only.
 - Members may still view profile status if the app already exposes a read-only status surface.
 
-## Workstream 7: Local State And Model Cleanup
+## Workstream 7: Profile Sync, Vault, And Backup
+
+### Profile Settings
+
+- Add profile settings sync clients:
+  - `GET /v1/me/profile`
+  - `PUT /v1/me/profile`
+- Request and response shape:
+  - `revision`
+  - `updated_at`
+  - `settings`
+- Send `expected_revision` on save when Hank has one.
+- Treat HTTP 409 `{ "error": "conflict" }` as a real stale-revision conflict and reload before retrying.
+
+### Profile Secret Vault
+
+- Add encrypted profile vault clients:
+  - `GET /v1/me/profile-secret-vault`
+  - `PUT /v1/me/profile-secret-vault`
+- Request and response shape:
+  - `revision`
+  - `key_id`
+  - `updated_at`
+  - `vault`
+- Keep vault encryption/decryption app-owned. The server stores opaque JSON.
+- Do not log or render decrypted vault contents in diagnostics.
+
+### Profile Backup
+
+- Add profile backup clients:
+  - `GET /v1/me/profile-backup`
+  - `PUT /v1/me/profile-backup`
+- Request and response shape:
+  - `revision`
+  - `updated_at`
+  - `snapshot`
+- `GET` returns 404 when no backup exists yet.
+- `PUT` requires `snapshot` to be valid JSON and supports `expected_revision` conflict checks.
+
+### Validation
+
+- Save profile settings, relaunch, and confirm they reload from `/v1/me/profile`.
+- Save the profile vault with a key id, relaunch, and confirm the encrypted payload round-trips without exposing plaintext.
+- Save and restore a profile backup snapshot.
+- Force a stale expected revision and confirm Hank handles 409 conflict without overwriting newer server state.
+
+## Workstream 8: File Transfers
+
+- Keep file browsing commands on the app WebSocket relay, but use HTTP transfer setup for large upload/download bodies:
+  - `POST /v1/home/files/downloads`
+  - `POST /v1/home/files/uploads`
+- The setup response includes:
+  - `transfer_id`
+  - `transfer_token`
+  - `method`
+  - `url`
+  - `expires_at`
+  - `next_offset`
+  - `resumable`
+- Use the returned `url` for the actual transfer:
+  - download: `GET /v1/file-transfers/{transferID}?token={transferToken}`
+  - upload: `PUT /v1/file-transfers/{transferID}?token={transferToken}`
+- Treat transfer URLs and tokens as short-lived bearer secrets.
+- For resumable uploads/downloads, resume from `next_offset` when the server reports an interrupted transfer.
+- Handle `target home agent is offline` as a user-visible offline state, not an auth failure.
+
+### Validation
+
+- Download a file through setup plus transfer URL.
+- Upload a file through setup plus transfer URL.
+- Interrupt a transfer and confirm the app resumes from the server-provided offset where possible.
+- Confirm transfer tokens are not persisted after completion or expiration.
+
+## Workstream 9: Local State And Model Cleanup
 
 - Remove any Remote cache partitioning keyed by selected `home_id`.
 - Remove model assumptions that the current user owns the Home because `home.user_id == current user`.
@@ -293,11 +382,14 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Hank has no Remote home picker or selected-home dependency.
 - Hank can manage members, roles, permissions, sync status, service profiles, files, and shared notes through the singleton `/v1/home` contract.
 
-## Workstream 8: Hank Assistant + OpenAI Link UX
+## Workstream 10: Hank Assistant + OpenAI Link UX
 
 ### Assistant Session API Integration
 
 Add app client support for assistant routes:
+- `GET /v1/home/assistant/status`
+- `GET /v1/home/assistant/settings`
+- `PUT /v1/home/assistant/settings`
 - `GET /v1/home/assistant/sessions`
 - `POST /v1/home/assistant/sessions`
 - `GET /v1/home/assistant/sessions/{sessionID}`
@@ -324,23 +416,44 @@ For `waiting_confirmation` runs:
 
 ### OpenAI OAuth Linking
 
-Add app-side account linking UX wired to:
+Add app-side account linking/status UX wired to:
+- `GET /v1/oauth/openai/status`
 - `GET /v1/oauth/openai/start`
 - server callback route `GET /v1/oauth/openai/callback`
 
 Expected behavior:
-- open `authorization_url`
-- complete provider login/consent
+- if status/start returns `auth_mode: "authorization_url"`, open `authorization_url` and complete provider login/consent
+- if status/start returns `auth_mode: "device_code"`, show `user_code`, open `verification_url`, and poll based on `poll_after_seconds`
 - return to Hank and refresh assistant link status
+
+### Assistant Settings
+
+- Load settings with `GET /v1/home/assistant/settings`.
+- Save settings with `PUT /v1/home/assistant/settings`.
+- Support source toggles for:
+  - project docs
+  - assistant conversations
+  - profile notes
+  - Home notes
+  - files
+  - calendar
+  - Home Assistant
+- Keep source availability tied to existing permissions:
+  - notes permission controls Home-note assistant access
+  - files permission controls file context access
+  - Home Assistant permission controls Home Assistant context and queries
+  - calendar stays per-user and app-owned
 
 ### Validation Additions
 
 - Verify assistant sessions list/create/send/reload works over app restarts.
 - Verify a calendar-create prompt enters `waiting_client_tool`, executes EventKit call, and resumes to completion.
 - Verify mutation confirmation flow blocks execution until user confirms.
-- Verify OpenAI link flow completes and linked status persists across relaunch.
+- Verify OpenAI/ChatGPT link flow completes and linked status persists across relaunch.
+- Verify device-code mode is usable without an embedded web callback.
+- Verify assistant source settings persist and affect the next run.
 
-## Workstream 9: Server Storage Health
+## Workstream 11: Server Storage Health
 
 ### Storage Status
 
