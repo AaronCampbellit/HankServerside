@@ -163,8 +163,13 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 			t.Fatalf("note list missing %q: %s", want, listed.Text)
 		}
 	}
-	if len(listed.Cards) < 3 {
-		t.Fatalf("note list cards = %#v, want at least 3", listed.Cards)
+	if len(listed.Cards) != 3 {
+		t.Fatalf("note list cards = %#v, want one card per listed note", listed.Cards)
+	}
+	for _, want := range []string{"Grocery List", "Hank Features", "Shared Checklist"} {
+		if !assistantCardsContainTitle(listed.Cards, want) {
+			t.Fatalf("note list cards missing %q: %#v", want, listed.Cards)
+		}
 	}
 
 	found, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "find grocery list note")
@@ -315,6 +320,10 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	if strings.Contains(onRun.AssistantMessage.Text, "Garage Temperature") {
 		t.Fatalf("on query included non-on entity: %q", onRun.AssistantMessage.Text)
 	}
+	if !assistantCardsContainKindAndSearchText(onRun.AssistantMessage.Cards, "homeassistant", "light.garage_overhead") ||
+		!assistantCardsContainKindAndSearchText(onRun.AssistantMessage.Cards, "homeassistant", "switch.kitchen_outlet") {
+		t.Fatalf("on query cards missing live entities: %#v", onRun.AssistantMessage.Cards)
+	}
 
 	var garageRun assistantRunResponse
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
@@ -333,6 +342,10 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	if strings.Contains(garageRun.AssistantMessage.Text, "Kitchen Outlet") {
 		t.Fatalf("garage query included non-garage entity: %q", garageRun.AssistantMessage.Text)
 	}
+	if !assistantCardsContainKindAndSearchText(garageRun.AssistantMessage.Cards, "homeassistant", "light.garage_overhead") ||
+		!assistantCardsContainKindAndSearchText(garageRun.AssistantMessage.Cards, "homeassistant", "sensor.garage_temperature") {
+		t.Fatalf("garage query cards missing garage entities: %#v", garageRun.AssistantMessage.Cards)
+	}
 
 	var garageLightRun assistantRunResponse
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
@@ -350,6 +363,9 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	}
 	if strings.Contains(garageLightRun.AssistantMessage.Text, "Garage Temperature") || strings.Contains(garageLightRun.AssistantMessage.Text, "Kitchen Outlet") {
 		t.Fatalf("garage light query included wrong entity: %q", garageLightRun.AssistantMessage.Text)
+	}
+	if !assistantCardsContainKindAndSearchText(garageLightRun.AssistantMessage.Cards, "homeassistant", "light.garage_overhead") {
+		t.Fatalf("garage light query cards missing garage light: %#v", garageLightRun.AssistantMessage.Cards)
 	}
 
 	var kitchenLightRun assistantRunResponse
@@ -371,6 +387,29 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	if strings.Contains(kitchenLightRun.AssistantMessage.Text, "Kitchen Outlet") || strings.Contains(kitchenLightRun.AssistantMessage.Text, "Porch Light") {
 		t.Fatalf("kitchen light query included wrong entity: %q", kitchenLightRun.AssistantMessage.Text)
 	}
+	for _, want := range []string{"light.kitchenlightshelly", "switch.kitchen_light_scene", "binary_sensor.kitchen_light_motion", "light.kitchen_island"} {
+		if !assistantCardsContainKindAndSearchText(kitchenLightRun.AssistantMessage.Cards, "homeassistant", want) {
+			t.Fatalf("kitchen light query cards missing %q: %#v", want, kitchenLightRun.AssistantMessage.Cards)
+		}
+	}
+}
+
+func assistantCardsContainTitle(cards []assistantResultCard, title string) bool {
+	for _, card := range cards {
+		if card.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func assistantCardsContainKindAndSearchText(cards []assistantResultCard, kind string, searchText string) bool {
+	for _, card := range cards {
+		if card.Kind == kind && card.SearchText == searchText {
+			return true
+		}
+	}
+	return false
 }
 
 func serveAssistantHomeAssistantStates(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, states []protocol.HomeAssistantState) {

@@ -4,6 +4,8 @@ const state = {
   members: [],
   profiles: [],
   currentFilesPath: "/",
+  targetFilesPath: "",
+  targetIsDirectory: false,
   lastTransfer: null,
   dragDepth: 0,
   appSocket: null,
@@ -91,6 +93,18 @@ function formatBytes(value) {
 
 function selectedHomeID() {
   return els.homeSelect.value;
+}
+
+function startupParams() {
+  return new URLSearchParams(window.location.search);
+}
+
+function requestedFilesPath() {
+  return normalizePath(startupParams().get("path") || "/");
+}
+
+function requestedPathIsDirectory() {
+  return startupParams().get("directory") === "true";
 }
 
 function selectedHome() {
@@ -414,7 +428,7 @@ function renderFiles(items) {
   els.filesOutput.innerHTML = "";
   items.forEach((item) => {
     const row = document.createElement("article");
-    row.className = `file-row${item.is_directory ? " directory" : ""}`;
+    row.className = `file-row${item.is_directory ? " directory" : ""}${normalizePath(item.path) === normalizePath(state.targetFilesPath) ? " highlighted" : ""}`;
     row.innerHTML = `
       <button type="button" class="file-main">
         <span class="file-icon" aria-hidden="true">${item.is_directory ? "Folder" : "File"}</span>
@@ -697,9 +711,14 @@ async function uploadOneFile(file, targetFolder) {
     headers: { "Content-Type": "application/octet-stream" },
     body: file,
   });
-  const payload = await response.json();
+  const contentType = response.headers.get("Content-Type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
-    throw new Error(payload.error || payload.message || response.statusText);
+    const message = typeof payload === "string" ? payload.trim() : payload.error || payload.message;
+    throw new Error(message || response.statusText);
+  }
+  if (typeof payload !== "object" || payload === null) {
+    throw new Error("The file server returned an unexpected upload response.");
   }
   state.lastTransfer = {
     ...setup,
@@ -731,6 +750,21 @@ async function uploadFiles(files, targetFolder = state.currentFilesPath) {
 
 async function uploadFile() {
   await uploadFiles(els.filesUpload.files, state.currentFilesPath);
+}
+
+async function browseRequestedPath() {
+  const targetPath = requestedFilesPath();
+  state.targetFilesPath = targetPath === "/" ? "" : targetPath;
+  state.targetIsDirectory = requestedPathIsDirectory();
+  if (!state.targetFilesPath) {
+    await browseFiles("/");
+    return;
+  }
+  if (state.targetIsDirectory) {
+    await browseFiles(state.targetFilesPath);
+    return;
+  }
+  await browseFiles(parentPath(state.targetFilesPath));
 }
 
 async function saveSMBSettings(event) {
@@ -787,7 +821,7 @@ async function hydrate() {
     renderLastTransfer();
     renderBreadcrumbs();
     if (selectedHome()) {
-      await browseFiles("/");
+      await browseRequestedPath();
     }
   } catch (_) {
     window.location.replace("/");

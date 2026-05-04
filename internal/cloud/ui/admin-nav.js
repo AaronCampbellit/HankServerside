@@ -334,6 +334,40 @@
     window.setTimeout(run, 250);
   }
 
+  function shouldSmoothNavigate(event, link) {
+    if (!link || event.defaultPrevented || event.button !== 0) {
+      return false;
+    }
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return false;
+    }
+    if (link.target && link.target !== "_self") {
+      return false;
+    }
+    const url = new URL(link.href, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return false;
+    }
+    if (!url.pathname.startsWith("/dashboard") && !url.pathname.startsWith("/docs/")) {
+      return false;
+    }
+    return url.pathname !== window.location.pathname || url.search !== window.location.search;
+  }
+
+  function installSmoothNavigation() {
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("a[href]");
+      if (!shouldSmoothNavigate(event, link)) {
+        return;
+      }
+      event.preventDefault();
+      document.body.classList.add("dashboard-navigating");
+      window.setTimeout(() => {
+        window.location.assign(link.href);
+      }, 90);
+    });
+  }
+
   async function applyAdminVisibility() {
     setAdminOnlyVisible(false);
     try {
@@ -349,6 +383,7 @@
 
   function start() {
     installDashboardShell();
+    installSmoothNavigation();
     applyAdminVisibility();
     preloadDashboardPages();
   }

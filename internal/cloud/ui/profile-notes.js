@@ -79,6 +79,18 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
+function startupParams() {
+  return new URLSearchParams(window.location.search);
+}
+
+function requestedNoteID() {
+  return startupParams().get("note_id") || "";
+}
+
+function requestedSearchText() {
+  return startupParams().get("search") || "";
+}
+
 function preferredAppSocketURL() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/ws/app`;
@@ -345,6 +357,14 @@ function fillEditor(note) {
   renderNotes();
 }
 
+function noteIdentifier(note) {
+  return note?.id || note?.note_id || "";
+}
+
+function findListedNote(noteID) {
+  return state.notes.find((note) => noteIdentifier(note) === noteID || note.note_id === noteID || note.id === noteID) || null;
+}
+
 async function loadNotes() {
   logLive("loading profile notes list");
   state.notes = (await api("/v1/me/notes")).notes || [];
@@ -368,6 +388,30 @@ async function selectNote(noteID) {
     await saveNote({ force: true });
   }
   await loadNote(noteID);
+}
+
+async function openRequestedNote() {
+  const noteID = requestedNoteID();
+  const searchText = requestedSearchText();
+  if (searchText) {
+    els.noteSearch.value = searchText;
+    renderNotes();
+  }
+  if (!noteID) {
+    return false;
+  }
+  const listed = findListedNote(noteID);
+  try {
+    await loadNote(noteID);
+    return true;
+  } catch (error) {
+    if (listed) {
+      await loadNote(noteIdentifier(listed));
+      return true;
+    }
+    showToast("That note is not available in My Notes yet.", true);
+    return false;
+  }
 }
 
 function markDirty() {
@@ -507,7 +551,8 @@ async function hydrate() {
     renderSession();
     clearEditor();
     await loadNotes();
-    if (state.notes[0]) {
+    const openedRequested = await openRequestedNote();
+    if (!openedRequested && state.notes[0]) {
       await loadNote(state.notes[0].id);
     }
   } catch (_) {

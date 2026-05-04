@@ -41,6 +41,7 @@ type assistantResultCard struct {
 	EventID     string     `json:"event_id,omitempty"`
 	TargetDate  *time.Time `json:"target_date,omitempty"`
 	Path        string     `json:"path,omitempty"`
+	IsDirectory bool       `json:"is_directory,omitempty"`
 	SearchText  string     `json:"search_text,omitempty"`
 }
 
@@ -827,7 +828,7 @@ func (s *Server) answerNoteListPrompt(ctx context.Context, home domain.Home, aut
 
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("You have access to %d notes:", len(notes)))
-	cards := make([]assistantResultCard, 0, min(len(notes), 12))
+	cards := make([]assistantResultCard, 0, len(notes))
 	for _, note := range notes {
 		title := firstNonBlank(note.Title, note.NoteID, "Untitled Note")
 		builder.WriteString("\n- ")
@@ -835,16 +836,14 @@ func (s *Server) answerNoteListPrompt(ctx context.Context, home domain.Home, aut
 		builder.WriteString(" (")
 		builder.WriteString(noteAccessLabel(note))
 		builder.WriteString(")")
-		if len(cards) < 12 {
-			cards = append(cards, assistantResultCard{
-				Kind:        "note",
-				Title:       title,
-				Summary:     notePreview(note.Content),
-				ActionTitle: "Open in Notes",
-				NoteID:      note.NoteID,
-				SearchText:  title,
-			})
-		}
+		cards = append(cards, assistantResultCard{
+			Kind:        "note",
+			Title:       title,
+			Summary:     notePreview(note.Content),
+			ActionTitle: "Open in Notes",
+			NoteID:      note.NoteID,
+			SearchText:  title,
+		})
 	}
 	return assistantMessageContent{Text: builder.String(), Cards: cards}, nil
 }
@@ -1051,6 +1050,7 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, setting
 				Summary:     item.Path,
 				ActionTitle: "Open in File Server",
 				Path:        item.Path,
+				IsDirectory: item.IsDirectory,
 			})
 		}
 		return assistantMessageContent{
@@ -1067,6 +1067,7 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, setting
 				Summary:     best.Path,
 				ActionTitle: "Open in File Server",
 				Path:        best.Path,
+				IsDirectory: best.IsDirectory,
 			},
 		},
 	}, nil
@@ -1123,7 +1124,11 @@ func (s *Server) answerHomeAssistantPrompt(ctx context.Context, home domain.Home
 	if remaining := len(matches) - limit; remaining > 0 {
 		builder.WriteString(fmt.Sprintf("\n- and %d more", remaining))
 	}
-	return assistantMessageContent{Text: builder.String()}, nil
+	cards := make([]assistantResultCard, 0, limit)
+	for _, state := range matches[:limit] {
+		cards = append(cards, assistantResultCardFromHomeAssistantState(state))
+	}
+	return assistantMessageContent{Text: builder.String(), Cards: cards}, nil
 }
 
 func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
@@ -1721,6 +1726,27 @@ func assistantResultCardFromContext(item domain.AssistantRetrievedContext) assis
 		}
 	default:
 		return assistantResultCard{}
+	}
+}
+
+func assistantResultCardFromHomeAssistantState(state protocol.HomeAssistantState) assistantResultCard {
+	entityID := strings.TrimSpace(state.EntityID)
+	title := homeAssistantFriendlyName(state)
+	if title == "" {
+		title = entityID
+	}
+	stateText := strings.TrimSpace(state.State)
+	summary := entityID
+	if stateText != "" {
+		summary = fmt.Sprintf("%s: %s", entityID, stateText)
+	}
+	return assistantResultCard{
+		Kind:        "homeassistant",
+		Title:       title,
+		Summary:     summary,
+		ActionTitle: "Open in Dashboard",
+		Path:        entityID,
+		SearchText:  entityID,
 	}
 }
 

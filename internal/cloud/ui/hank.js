@@ -125,12 +125,42 @@ function renderMessages(messages = []) {
 function renderCards(cards) {
   if (!cards.length) return "";
   return `<div class="card-list hank-result-cards">${cards.map((card) => `
-    <article class="card">
+    <article class="card hank-result-card">
       <div class="card-title">${escapeHTML(card.title)}</div>
       <div class="meta">${escapeHTML(card.summary || "")}</div>
-      <div class="pill">${escapeHTML(card.kind || "result")}</div>
+      <div class="hank-result-card-footer">
+        <div class="pill">${escapeHTML(card.kind || "result")}</div>
+        ${renderCardAction(card)}
+      </div>
     </article>
   `).join("")}</div>`;
+}
+
+function renderCardAction(card) {
+  const href = cardActionHref(card);
+  if (!href) return "";
+  return `<a class="button-link hank-result-action" href="${escapeHTML(href)}">${escapeHTML(card.action_title || "Open")}</a>`;
+}
+
+function cardActionHref(card) {
+  const kind = String(card.kind || "").toLowerCase();
+  if (kind === "note" && card.note_id) {
+    const params = new URLSearchParams({ note_id: card.note_id });
+    if (card.search_text) params.set("search", card.search_text);
+    return `/dashboard/profile-notes?${params.toString()}`;
+  }
+  if (kind === "file" && card.path) {
+    const params = new URLSearchParams({ path: card.path });
+    if (card.is_directory) params.set("directory", "true");
+    return `/dashboard/file-server?${params.toString()}`;
+  }
+  if (kind === "calendar") {
+    const params = new URLSearchParams();
+    if (card.event_id) params.set("event_id", card.event_id);
+    if (card.target_date) params.set("date", card.target_date);
+    return params.toString() ? `/dashboard?${params.toString()}` : "/dashboard";
+  }
+  return "";
 }
 
 async function loadSessions() {
