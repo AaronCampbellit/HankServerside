@@ -279,6 +279,7 @@
       return dashboardFrame;
     }
     main.classList.add("dashboard-frame-main");
+    main.classList.remove("grid", "notes-workspace", "hank-chat-layout", "file-server-grid");
     main.innerHTML = "";
     dashboardFrame = document.createElement("iframe");
     dashboardFrame.className = "dashboard-content-frame";

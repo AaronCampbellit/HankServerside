@@ -285,12 +285,16 @@ h3 {
 }
 
 .dashboard-frame-main {
+  display: block;
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
 }
 
 .dashboard-content-frame {
   display: block;
   width: 100%;
+  max-width: none;
   height: calc(100vh - 150px);
   min-height: 620px;
   border: 0;
