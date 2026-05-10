@@ -21,6 +21,7 @@ type Cloud struct {
 	OpenAIRedirectURI  string
 	OpenAIScopes       string
 	AssistantAI        AssistantAI
+	APNS               APNS
 }
 
 type AssistantAI struct {
@@ -39,6 +40,14 @@ type AssistantAI struct {
 	ChatGPTChatModel      string
 	ProjectDocsDir        string
 	EmbeddingDimension    int
+}
+
+type APNS struct {
+	TeamID      string
+	KeyID       string
+	PrivateKey  string
+	Topic       string
+	Environment string
 }
 
 type DBOps struct {
@@ -109,6 +118,13 @@ func LoadCloud() (Cloud, error) {
 		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
 		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
 		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
+		APNS: APNS{
+			TeamID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TEAM_ID")),
+			KeyID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_KEY_ID")),
+			PrivateKey:  strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_PRIVATE_KEY")),
+			Topic:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TOPIC")),
+			Environment: envOrDefault("HANK_REMOTE_APNS_ENVIRONMENT", "sandbox"),
+		},
 		AssistantAI: AssistantAI{
 			Provider:              strings.ToLower(envOrDefault("HANK_REMOTE_AI_PROVIDER", "auto")),
 			OllamaBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_OLLAMA_BASE_URL")), "/"),

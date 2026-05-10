@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -44,6 +45,8 @@ type Server struct {
 	syncs              *homeSyncController
 	storage            *storageops.Service
 	storageEvents      map[string]struct{}
+	storageEventsMu    sync.Mutex
+	pushSender         PushSender
 	realtimeCancel     context.CancelFunc
 	sessionTTL         time.Duration
 	requestTimeout     time.Duration
@@ -87,6 +90,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		syncs:              newHomeSyncController(),
 		storage:            storageops.NewService("", "", ""),
 		storageEvents:      make(map[string]struct{}),
+		pushSender:         noopPushSender{},
 		realtimeCancel:     realtimeCancel,
 		sessionTTL:         sessionTTL,
 		requestTimeout:     requestTimeout,
@@ -116,6 +120,9 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("/v1/auth/logout", server.handleAuthLogout)
 	mux.HandleFunc("/v1/me", server.handleMe)
+	mux.HandleFunc("/v1/me/devices/apns", server.handleAPNSDeviceRegistration)
+	mux.HandleFunc("/v1/me/devices/", server.handleAPNSDevice)
+	mux.HandleFunc("/v1/me/notification-settings", server.handleNotificationSettings)
 	mux.HandleFunc("/v1/oauth/openai/status", server.handleOpenAIOAuthStatus)
 	mux.HandleFunc("/v1/oauth/openai/start", server.handleOpenAIOAuthStart)
 	mux.HandleFunc("/v1/oauth/openai/callback", server.handleOpenAIOAuthCallback)
@@ -158,6 +165,10 @@ func (s *Server) ConfigureAssistantAI(cfg AssistantAIConfig) {
 
 func (s *Server) ConfigureStorageOps(stateDir, logDir, intentSecret string) {
 	s.storage = storageops.NewService(stateDir, logDir, intentSecret)
+}
+
+func (s *Server) ConfigureAPNS(cfg APNSConfig) {
+	s.pushSender = NewAPNSSender(cfg, s.logger)
 }
 func (s *Server) ListenAndServe() error {
 	s.logger.Info("starting Hank Remote cloud service", "addr", s.addr)
@@ -361,6 +372,9 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.RevokeSession(r.Context(), auth.Session.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if err := s.store.DeleteAPNSDevicesForSession(r.Context(), auth.Session.ID); err != nil {
+		s.logger.Warn("failed to delete APNs devices for revoked session", "session_id", auth.Session.ID, "error", err)
 	}
 	clearSessionCookie(w, r)
 	s.logger.Info("app session revoked", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID)

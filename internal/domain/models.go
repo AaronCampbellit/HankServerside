@@ -99,6 +99,33 @@ type AppSession struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+const (
+	NotificationCategoryStorage           = "storage"
+	NotificationCategoryNotes             = "notes"
+	NotificationCategoryDashboardEntities = "dashboard_entities"
+)
+
+type NotificationSettings struct {
+	UserID                   string    `json:"user_id"`
+	StorageEnabled           bool      `json:"storage"`
+	NotesEnabled             bool      `json:"notes"`
+	DashboardEntitiesEnabled bool      `json:"dashboard_entities"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
+type APNSDevice struct {
+	UserID            string          `json:"user_id"`
+	SessionID         string          `json:"session_id"`
+	DeviceID          string          `json:"device_id"`
+	Token             string          `json:"token"`
+	Environment       string          `json:"environment"`
+	BundleID          string          `json:"bundle_id"`
+	EnabledCategories json.RawMessage `json:"enabled_categories"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	LastRegisteredAt  time.Time       `json:"last_registered_at"`
+}
+
 type UserProfileSettings struct {
 	UserID    string          `json:"user_id"`
 	Revision  int             `json:"revision"`

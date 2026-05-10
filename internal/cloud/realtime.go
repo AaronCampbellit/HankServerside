@@ -59,12 +59,13 @@ func (s *Server) forwardStoreNotifications(ctx context.Context) {
 
 func (s *Server) forwardNoteNotification(ctx context.Context, payload json.RawMessage) {
 	var event struct {
-		Event         string `json:"event"`
-		NoteID        string `json:"note_id"`
-		HomeID        string `json:"home_id"`
-		OwnerUserID   string `json:"owner_user_id"`
-		UpdatedBy     string `json:"updated_by"`
-		CollabVersion int64  `json:"collab_version"`
+		Event          string `json:"event"`
+		NoteID         string `json:"note_id"`
+		NoteInternalID string `json:"note_internal_id"`
+		HomeID         string `json:"home_id"`
+		OwnerUserID    string `json:"owner_user_id"`
+		UpdatedBy      string `json:"updated_by"`
+		CollabVersion  int64  `json:"collab_version"`
 	}
 	if err := json.Unmarshal(payload, &event); err != nil {
 		s.logger.Warn("bad note notification payload", "error", err)
@@ -74,12 +75,13 @@ func (s *Server) forwardNoteNotification(ctx context.Context, payload json.RawMe
 		event.Event = "notes.changed"
 	}
 	body := map[string]any{
-		"note_id":        event.NoteID,
-		"home_id":        event.HomeID,
-		"user_id":        event.OwnerUserID,
-		"owner_user_id":  event.OwnerUserID,
-		"updated_by":     event.UpdatedBy,
-		"collab_version": event.CollabVersion,
+		"note_id":          event.NoteID,
+		"note_internal_id": event.NoteInternalID,
+		"home_id":          event.HomeID,
+		"user_id":          event.OwnerUserID,
+		"owner_user_id":    event.OwnerUserID,
+		"updated_by":       event.UpdatedBy,
+		"collab_version":   event.CollabVersion,
 	}
 	s.broadcastAppEvent(ctx, topicNotesProfile, event.Event, body)
 	if event.HomeID != "" {
@@ -88,6 +90,9 @@ func (s *Server) forwardNoteNotification(ctx context.Context, payload json.RawMe
 	}
 	s.broadcastAppEvent(ctx, noteCollabTopic(event.NoteID), event.Event, body)
 	s.broadcastAppEvent(ctx, scopedNoteCollabTopic("profile", event.NoteID), event.Event, body)
+	if event.Event == "notes.changed" || event.Event == "notes.collab.ops" {
+		s.notifyNoteChanged(ctx, event.NoteInternalID, event.NoteID, event.UpdatedBy)
+	}
 }
 
 func (s *Server) forwardProfileNotification(ctx context.Context, payload json.RawMessage) {
@@ -240,6 +245,7 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 	switch event.Event {
 	case "homeassistant.state_changed":
 		s.broadcastRawAppEvent(ctx, topicHomeAssistantStates, event.Event, event.Body)
+		s.notifyDashboardEntityChanged(ctx, homeID, event.Body)
 	case "files.directory_changed":
 		topic := event.Topic
 		if !strings.HasPrefix(topic, "files.directory:") {

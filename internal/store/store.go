@@ -154,6 +154,29 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at TIMESTAMP NOT NULL,
 			FOREIGN KEY(user_id) REFERENCES users(id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS notification_settings (
+			user_id TEXT PRIMARY KEY,
+			storage_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			notes_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			dashboard_entities_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS apns_devices (
+			user_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			device_id TEXT NOT NULL,
+			token TEXT NOT NULL,
+			environment TEXT NOT NULL,
+			bundle_id TEXT NOT NULL,
+			enabled_categories JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			last_registered_at TIMESTAMP NOT NULL,
+			PRIMARY KEY(user_id, device_id),
+			FOREIGN KEY(user_id) REFERENCES users(id),
+			FOREIGN KEY(session_id) REFERENCES app_sessions(id)
+		);`,
 		`CREATE TABLE IF NOT EXISTS user_profile_backups (
 			user_id TEXT PRIMARY KEY,
 			revision INTEGER NOT NULL,
@@ -459,6 +482,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_agents_home_id ON agents(home_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_tokens_agent_id ON agent_tokens(agent_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id ON app_sessions(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_apns_devices_session ON apns_devices(session_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_apns_devices_token ON apns_devices(token);`,
 		`CREATE INDEX IF NOT EXISTS idx_home_notes_updated_at ON home_notes(home_id, updated_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_user_notes_owner_updated_at ON user_notes(owner_user_id, updated_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_user_notes_home_updated_at ON user_notes(home_id, updated_at);`,

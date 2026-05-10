@@ -85,6 +85,14 @@ HANK_REMOTE_CHATGPT_BACKEND_BASE_URL=https://chatgpt.com/backend-api/codex
 HANK_REMOTE_CHATGPT_CLIENT_ID=app_EMoamEEZ73f0CkXaXp7hrann
 HANK_REMOTE_CHATGPT_CHAT_MODEL=gpt-5.4-mini
 
+# Optional APNs push notifications for the Hank iOS app.
+# Leave blank locally; device registration routes still work with a no-op sender.
+HANK_REMOTE_APNS_TEAM_ID=
+HANK_REMOTE_APNS_KEY_ID=
+HANK_REMOTE_APNS_PRIVATE_KEY=
+HANK_REMOTE_APNS_TOPIC=com.dropfile.Hank
+HANK_REMOTE_APNS_ENVIRONMENT=sandbox
+
 HANK_REMOTE_DB_OPS_STATE_DIR=/var/lib/hank/db-ops/state
 HANK_REMOTE_DB_OPS_LOG_DIR=/var/log/hank/db-ops
 HANK_REMOTE_DB_OPS_INTENT_SECRET=replace-with-real-db-ops-secret

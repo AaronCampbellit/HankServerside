@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/dropfile/hankremote/internal/storageops"
@@ -24,17 +25,35 @@ func (s *Server) forwardStorageEvents(ctx context.Context) {
 				continue
 			}
 			for _, event := range events {
-				if _, ok := s.storageEvents[event.ID]; ok {
+				if !s.markStorageEventSeen(event.ID) {
 					continue
 				}
-				s.storageEvents[event.ID] = struct{}{}
 				if seeded {
-					s.emitStorageEvent(ctx, storageRealtimeEventName(event), storageRealtimePayload(event))
+					s.publishStorageEvent(ctx, event)
 				}
 			}
 			seeded = true
 		}
 	}
+}
+
+func (s *Server) markStorageEventSeen(eventID string) bool {
+	if strings.TrimSpace(eventID) == "" {
+		return false
+	}
+	s.storageEventsMu.Lock()
+	defer s.storageEventsMu.Unlock()
+	if _, ok := s.storageEvents[eventID]; ok {
+		return false
+	}
+	s.storageEvents[eventID] = struct{}{}
+	return true
+}
+
+func (s *Server) publishStorageEvent(ctx context.Context, event storageops.Event) {
+	_ = s.markStorageEventSeen(event.ID)
+	s.emitStorageEvent(ctx, storageRealtimeEventName(event), storageRealtimePayload(event))
+	s.notifyStorageEvent(ctx, event)
 }
 
 func storageRealtimePayload(event storageops.Event) map[string]any {

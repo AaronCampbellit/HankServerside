@@ -32,6 +32,13 @@ func main() {
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
 	server.ConfigureOpenAI(cfg.OpenAIClientID, cfg.OpenAIClientSecret, cfg.OpenAIRedirectURI, cfg.OpenAIScopes)
+	server.ConfigureAPNS(cloud.APNSConfig{
+		TeamID:      cfg.APNS.TeamID,
+		KeyID:       cfg.APNS.KeyID,
+		PrivateKey:  cfg.APNS.PrivateKey,
+		Topic:       cfg.APNS.Topic,
+		Environment: cfg.APNS.Environment,
+	})
 	server.ConfigureAssistantAI(cloud.AssistantAIConfig{
 		Provider:              cfg.AssistantAI.Provider,
 		OllamaBaseURL:         cfg.AssistantAI.OllamaBaseURL,

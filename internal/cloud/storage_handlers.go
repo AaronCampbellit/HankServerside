@@ -56,7 +56,7 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 		event := storageops.NewEvent(storageops.EventOperationConfig, storageops.EventStatusSuccess, storageops.EventSeverityInfo, "Storage settings saved.")
 		event.Details = map[string]any{"home_id": home.ID, "updated_by": auth.User.ID}
 		if storedEvent, err := storageops.AppendEvent(s.storage.LogDir, event); err == nil {
-			s.emitStorageEvent(r.Context(), storageRealtimeEventName(storedEvent), storageRealtimePayload(storedEvent))
+			s.publishStorageEvent(r.Context(), storedEvent)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"config": saved})
 		return true
@@ -106,7 +106,7 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 		event := storageops.NewEvent(storageops.EventOperationBackup, storageops.EventStatusPending, storageops.EventSeverityInfo, "Manual pgBackRest backup requested.")
 		event.Details = map[string]any{"home_id": home.ID, "intent_id": intent.ID, "backup_type": intent.BackupType, "requested_by": auth.User.ID}
 		if storedEvent, err := storageops.AppendEvent(s.storage.LogDir, event); err == nil {
-			s.emitStorageEvent(r.Context(), storageRealtimeEventName(storedEvent), storageRealtimePayload(storedEvent))
+			s.publishStorageEvent(r.Context(), storedEvent)
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"intent": intent})
 		return true
@@ -128,7 +128,7 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 		event.BackupLabel = intent.BackupLabel
 		event.Details = map[string]any{"home_id": home.ID, "intent_id": intent.ID, "requested_by": auth.User.ID}
 		if storedEvent, err := storageops.AppendEvent(s.storage.LogDir, event); err == nil {
-			s.emitStorageEvent(r.Context(), storageRealtimeEventName(storedEvent), storageRealtimePayload(storedEvent))
+			s.publishStorageEvent(r.Context(), storedEvent)
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"intent": intent})
 		return true
@@ -151,7 +151,7 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 		event.BackupLabel = intent.BackupLabel
 		event.Details = map[string]any{"home_id": home.ID, "intent_id": intent.ID, "requested_by": auth.User.ID}
 		if storedEvent, err := storageops.AppendEvent(s.storage.LogDir, event); err == nil {
-			s.emitStorageEvent(r.Context(), storageRealtimeEventName(storedEvent), storageRealtimePayload(storedEvent))
+			s.publishStorageEvent(r.Context(), storedEvent)
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"intent": intent})
 		return true

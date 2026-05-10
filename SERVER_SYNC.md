@@ -119,6 +119,79 @@ Each event has:
 - Older Hank builds can ignore these routes and events.
 - Hank should not call restore routes unless the signed-in user is an admin.
 
+## [APNs Notifications]
+
+- Status: in_progress
+- Date Opened: 2026-05-09
+- Owner: shared
+- Related Ticket/PR: apns-notifications
+
+### Summary
+
+HankServerside now supports native iOS push delivery through APNs. Hank registers an APNs device token after Hank Remote sign-in, users can toggle categories, and the server sends only redacted notification summaries with a Hank deep link for detail.
+
+### Contract Update
+
+- Authenticated user routes:
+  - `POST /v1/me/devices/apns`
+  - `DELETE /v1/me/devices/{deviceID}/apns`
+  - `GET /v1/me/notification-settings`
+  - `PUT /v1/me/notification-settings`
+- `POST /v1/me/devices/apns` body:
+  - `device_id`
+  - `token`
+  - `environment`: `sandbox` or `production`
+  - `bundle_id`
+  - `enabled_categories`: `storage`, `notes`, and/or `dashboard_entities`
+- `GET/PUT /v1/me/notification-settings` fields:
+  - `storage`
+  - `notes`
+  - `dashboard_entities`
+  - responses also include `user_id` and `updated_at`
+- APNs sender config:
+  - `HANK_REMOTE_APNS_TEAM_ID`
+  - `HANK_REMOTE_APNS_KEY_ID`
+  - `HANK_REMOTE_APNS_PRIVATE_KEY`
+  - `HANK_REMOTE_APNS_TOPIC`
+  - `HANK_REMOTE_APNS_ENVIRONMENT`: `sandbox` or `production`
+
+### Recipient Rules
+
+- Storage and PostgreSQL backup notifications go only to Home admins.
+- Note edit notifications go to visible note recipients except the actor.
+- Dashboard entity notifications go only to users whose profile settings contain that entity in `dashboard_tiles`.
+- User category settings and device `enabled_categories` both filter delivery.
+- Logout removes APNs device registrations tied to that app session.
+
+### Payload Privacy
+
+- Notification alert text must stay redacted.
+- Do not include passwords, database URLs, command output, token values, backup encryption values, raw Home Assistant event bodies, or note content.
+- Deep links:
+  - `hank://notifications/storage`
+  - `hank://notifications/notes/{noteID}`
+  - `hank://notifications/dashboard/{entityID}`
+
+### Hank Changes
+
+- Add Push Notifications entitlement and APNs registration through `UserNotifications`.
+- Register the device after Hank Remote sign-in or remembered-session bootstrap.
+- Unregister the device on Hank Remote sign-out/clear and app logout when a Remote context exists.
+- Add notification settings toggles for backups/storage, shared notes, and dashboard entities.
+- Route notification deep links to the Storage, Notes, or Dashboard surfaces.
+- While Hank is open, in-app local presentation may be used as a fallback for the same redacted event summaries.
+
+### Rollout Order
+
+- server first, then app
+- APNs credentials can be absent in local/dev deployments; the server keeps routes active and uses a no-op sender until credentials are configured.
+
+### Compatibility Notes
+
+- Older Hank builds can ignore the notification settings and device routes.
+- New Hank builds should handle `404` from older servers by hiding notification settings.
+- Apple Developer provisioning still needs the Hank app Push Notifications capability and an APNs auth key outside the repo.
+
 ## [Single-Deployment Home Model]
 
 - Status: in_progress

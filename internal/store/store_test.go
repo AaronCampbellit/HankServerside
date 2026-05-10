@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -90,6 +92,156 @@ func TestCreateHomeSeedsOwnerMembership(t *testing.T) {
 	if len(homes) != 1 || homes[0].ID != home.ID {
 		t.Fatalf("homes = %#v, want %q", homes, home.ID)
 	}
+}
+
+func TestNotificationSettingsAndAPNSDevices(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_notify", Email: "notify@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_notify", UserID: user.ID, TokenHash: "hash", ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := db.CreateSession(ctx, session); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	settings, err := db.SaveNotificationSettings(ctx, domain.NotificationSettings{
+		UserID:                   user.ID,
+		StorageEnabled:           false,
+		NotesEnabled:             true,
+		DashboardEntitiesEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("SaveNotificationSettings: %v", err)
+	}
+	if settings.StorageEnabled || !settings.NotesEnabled || settings.DashboardEntitiesEnabled {
+		t.Fatalf("settings = %#v", settings)
+	}
+
+	loaded, err := db.GetNotificationSettings(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetNotificationSettings: %v", err)
+	}
+	if loaded != settings {
+		t.Fatalf("loaded settings = %#v, want %#v", loaded, settings)
+	}
+
+	device, err := db.UpsertAPNSDevice(ctx, domain.APNSDevice{
+		UserID:            user.ID,
+		SessionID:         session.ID,
+		DeviceID:          "device-1",
+		Token:             "token-1",
+		Environment:       "sandbox",
+		BundleID:          "com.dropfile.Hank",
+		EnabledCategories: json.RawMessage(`["notes"]`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertAPNSDevice: %v", err)
+	}
+	if device.DeviceID != "device-1" || string(device.EnabledCategories) != `["notes"]` {
+		t.Fatalf("device = %#v", device)
+	}
+
+	devices, err := db.ListActiveAPNSDevicesForUsers(ctx, []string{user.ID})
+	if err != nil {
+		t.Fatalf("ListActiveAPNSDevicesForUsers: %v", err)
+	}
+	if len(devices) != 1 || devices[0].DeviceID != "device-1" {
+		t.Fatalf("devices = %#v", devices)
+	}
+
+	if err := db.DeleteAPNSDevicesForSession(ctx, session.ID); err != nil {
+		t.Fatalf("DeleteAPNSDevicesForSession: %v", err)
+	}
+	devices, err = db.ListActiveAPNSDevicesForUsers(ctx, []string{user.ID})
+	if err != nil {
+		t.Fatalf("ListActiveAPNSDevicesForUsers after delete: %v", err)
+	}
+	if len(devices) != 0 {
+		t.Fatalf("devices after delete = %#v", devices)
+	}
+}
+
+func TestNotificationRecipientQueries(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	owner := domain.User{ID: "usr_owner_notify", Email: "owner-notify@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	admin := domain.User{ID: "usr_admin_notify", Email: "admin-notify@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_member_notify", Email: "member-notify@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_notify", UserID: owner.ID, Name: "Notify Home", CreatedAt: now, UpdatedAt: now}
+	for _, user := range []domain.User{owner, admin, member} {
+		if err := db.CreateUser(ctx, user); err != nil {
+			t.Fatalf("CreateUser %s: %v", user.ID, err)
+		}
+	}
+	if err := db.CreateHome(ctx, home); err != nil {
+		t.Fatalf("CreateHome: %v", err)
+	}
+	if err := db.AddHomeMembership(ctx, domain.HomeMembership{HomeID: home.ID, UserID: admin.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("AddHomeMembership admin: %v", err)
+	}
+	if err := db.AddHomeMembership(ctx, domain.HomeMembership{HomeID: home.ID, UserID: member.ID, Role: domain.HomeRoleMember, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("AddHomeMembership member: %v", err)
+	}
+
+	storageRecipients, err := db.ListStorageNotificationUserIDs(ctx, home.ID)
+	if err != nil {
+		t.Fatalf("ListStorageNotificationUserIDs: %v", err)
+	}
+	assertSameStrings(t, storageRecipients, []string{owner.ID, admin.ID})
+
+	note := domain.UserNote{
+		ID:            "note_notify_internal",
+		NoteID:        "note-notify.md",
+		OwnerUserID:   owner.ID,
+		HomeID:        home.ID,
+		Title:         "Notify",
+		Content:       "body",
+		BodyMarkdown:  "body",
+		BodyFormat:    "markdown",
+		PageType:      "text",
+		Revision:      "rev-1",
+		Checksum:      "sum-1",
+		CRDTStateJSON: "{}",
+		CollabVersion: 1,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		UpdatedBy:     owner.ID,
+	}
+	if err := db.SaveUserNoteWithOperations(ctx, note, nil); err != nil {
+		t.Fatalf("SaveUserNoteWithOperations: %v", err)
+	}
+	if err := db.AddNoteShare(ctx, domain.NoteShare{NoteID: note.ID, HomeID: home.ID, TargetUserID: member.ID, SharedBy: owner.ID, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("AddNoteShare member: %v", err)
+	}
+	noteRecipients, err := db.ListNoteNotificationUserIDs(ctx, note.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("ListNoteNotificationUserIDs: %v", err)
+	}
+	assertSameStrings(t, noteRecipients, []string{member.ID})
+
+	if _, err := db.SaveUserProfileSettings(ctx, member.ID, nil, json.RawMessage(`{"dashboard_tiles":[{"entity_id":"light.kitchen","is_enabled":true}]}`)); err != nil {
+		t.Fatalf("SaveUserProfileSettings member: %v", err)
+	}
+	if _, err := db.SaveUserProfileSettings(ctx, owner.ID, nil, json.RawMessage(`{"dashboard_tiles":[{"entity_id":"light.kitchen","is_enabled":false}]}`)); err != nil {
+		t.Fatalf("SaveUserProfileSettings owner: %v", err)
+	}
+	dashboardRecipients, err := db.ListDashboardEntityNotificationUserIDs(ctx, home.ID, "light.kitchen")
+	if err != nil {
+		t.Fatalf("ListDashboardEntityNotificationUserIDs: %v", err)
+	}
+	assertSameStrings(t, dashboardRecipients, []string{member.ID})
 }
 
 func TestBootstrapSingletonHomeCreatesAdminAndPermissions(t *testing.T) {
@@ -230,4 +382,13 @@ func openTestStore(t *testing.T) *Store {
 		t.Fatalf("Open: %v", err)
 	}
 	return db
+}
+
+func assertSameStrings(t *testing.T, got []string, want []string) {
+	t.Helper()
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("strings = %#v, want %#v", got, want)
+	}
 }

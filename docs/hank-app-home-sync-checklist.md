@@ -13,6 +13,7 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Home-wide permission defaults
 - per-member permission overrides
 - singleton shared-note, sync, file, and service-profile routes
+- native iOS notification registration and redacted deep links
 
 ## Assumptions
 
@@ -21,6 +22,8 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - The first registered account auto-creates the Home on the server.
 - The app should keep profile notes under `/v1/me/notes`.
 - Shared Home notes stay under `/v1/home/notes`.
+- Push notifications use APNs for locked/closed-device delivery.
+- Notification text stays redacted; detail is shown only after opening Hank.
 - Admin-only editing remains the rule for:
   - Home settings rename
   - member removal
@@ -523,3 +526,75 @@ Expected behavior:
 - Verify admins see checksum and backup logs.
 - Verify corruption and backup failures are visually prominent.
 - Verify restore-primary cannot be called unless the confirmation phrase matches.
+
+## Workstream 12: Native Notifications
+
+### APNs Registration
+
+- Add the Hank app Push Notifications entitlement.
+- Use `UserNotifications` for permission state, foreground presentation, and notification response handling.
+- Register APNs after Hank Remote sign-in and after remembered-session bootstrap when a Remote context exists.
+- Send device registration to:
+  - `POST /v1/me/devices/apns`
+- Registration body:
+  - `device_id`
+  - `token`
+  - `environment`: `sandbox` for debug builds, `production` for release builds
+  - `bundle_id`
+  - `enabled_categories`
+- Unregister on Hank Remote sign-out, Remote clear, and app logout when a Remote context exists:
+  - `DELETE /v1/me/devices/{deviceID}/apns`
+
+### Notification Settings
+
+- Load category settings from:
+  - `GET /v1/me/notification-settings`
+- Save category settings to:
+  - `PUT /v1/me/notification-settings`
+- Settings fields:
+  - `storage`
+  - `notes`
+  - `dashboard_entities`
+- Show plain toggles for:
+  - Backups and Storage
+  - Shared Notes
+  - Dashboard Entities
+- Hide or soften this surface if an older server returns `404`.
+
+### Recipient Rules
+
+- Storage and PostgreSQL backup notifications are admin-only.
+- Shared-note edit notifications go to visible collaborators except the editor.
+- Dashboard entity notifications go only to users who have that Home Assistant entity pinned on their dashboard.
+- User settings and per-device `enabled_categories` both filter delivery.
+
+### Deep Links
+
+- Route notification URLs:
+  - `hank://notifications/storage` opens the Remote storage/admin surface.
+  - `hank://notifications/notes/{noteID}` opens Notes and selects the note.
+  - `hank://notifications/dashboard/{entityID}` opens Dashboard and focuses that entity.
+- Keep import links (`hank://import?...`) separate from notification links.
+
+### Privacy Rules
+
+- Do not show passwords, database URLs, command output, token values, backup encryption values, note body text, or raw Home Assistant event payloads in notification text.
+- Storage messages should use safe status text such as backup started/completed/failed, restore started/completed/failed, or storage integrity warning.
+- Note messages should say a shared Hank note was updated without including note content.
+- Dashboard messages may include the friendly entity name and current state only.
+
+### Local Presentation Fallback
+
+- While Hank is open, realtime events may schedule local notifications for the same redacted summaries.
+- Keep realtime sync behavior intact; local notifications must not replace the existing reload/sync paths.
+
+### Validation Additions
+
+- Verify APNs token registration occurs after Remote sign-in and remembered-session bootstrap.
+- Verify unregister happens on Remote sign-out/clear and logout.
+- Verify notification settings save and reload.
+- Verify notification deep links route to Storage, Notes, and Dashboard.
+- Verify non-admin members do not receive storage notifications.
+- Verify note edits do not notify the editor.
+- Verify dashboard state changes notify only users with that entity pinned.
+- Verify APNs credentials can be absent locally without breaking app registration routes.
