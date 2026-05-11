@@ -125,6 +125,96 @@ func (s *Store) UpsertAssistantFileIndex(ctx context.Context, item domain.Assist
 	return err
 }
 
+func (s *Store) SearchAssistantFileDirectories(ctx context.Context, homeID string, query string, limit int) ([]domain.AssistantFileIndex, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := s.query(ctx, `SELECT id, home_id, service_profile_id, path, name, is_directory, size_bytes,
+			modified_at, search_text, metadata_json, embedding_json, embedding_model, embedding_version, updated_at
+		FROM assistant_file_index
+		WHERE home_id = ? AND is_directory = TRUE
+		ORDER BY updated_at DESC
+		LIMIT 500`, homeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	loweredQuery := strings.ToLower(query)
+	terms := strings.Fields(loweredQuery)
+	type scoredDirectory struct {
+		item  domain.AssistantFileIndex
+		score float64
+	}
+	var scored []scoredDirectory
+	for rows.Next() {
+		item, err := scanAssistantFileIndex(rows)
+		if err != nil {
+			return nil, err
+		}
+		searchText := strings.ToLower(item.Name + " " + item.Path + " " + item.SearchText)
+		score := textScore(loweredQuery, terms, searchText)
+		if strings.EqualFold(item.Name, query) || strings.EqualFold(strings.Trim(item.Path, "/"), strings.Trim(query, "/")) {
+			score += 8
+		}
+		if score <= 0 {
+			continue
+		}
+		scored = append(scored, scoredDirectory{item: item, score: score})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].item.UpdatedAt.After(scored[j].item.UpdatedAt)
+		}
+		return scored[i].score > scored[j].score
+	})
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+
+	results := make([]domain.AssistantFileIndex, 0, len(scored))
+	for _, item := range scored {
+		results = append(results, item.item)
+	}
+	return results, nil
+}
+
+func scanAssistantFileIndex(scanner interface{ Scan(dest ...any) error }) (domain.AssistantFileIndex, error) {
+	var item domain.AssistantFileIndex
+	var modifiedAt sql.NullTime
+	if err := scanner.Scan(
+		&item.ID,
+		&item.HomeID,
+		&item.ServiceProfileID,
+		&item.Path,
+		&item.Name,
+		&item.IsDirectory,
+		&item.SizeBytes,
+		&modifiedAt,
+		&item.SearchText,
+		&item.MetadataJSON,
+		&item.EmbeddingJSON,
+		&item.EmbeddingModel,
+		&item.EmbeddingVersion,
+		&item.UpdatedAt,
+	); err != nil {
+		return domain.AssistantFileIndex{}, err
+	}
+	if modifiedAt.Valid {
+		item.ModifiedAt = &modifiedAt.Time
+	}
+	return item, nil
+}
+
 func (s *Store) SearchAssistantContext(ctx context.Context, homeID string, userID string, query string, queryEmbedding []float64, limit int) ([]domain.AssistantRetrievedContext, error) {
 	if limit <= 0 {
 		limit = 8

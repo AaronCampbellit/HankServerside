@@ -242,6 +242,37 @@ type AssistantRun struct {
 	CompletedAt          *time.Time `json:"completed_at,omitempty"`
 }
 
+type AssistantAttachment struct {
+	ID                 string     `json:"id"`
+	SessionID          string     `json:"session_id"`
+	UserID             string     `json:"user_id"`
+	ClientAttachmentID string     `json:"client_attachment_id"`
+	Filename           string     `json:"filename"`
+	ContentType        string     `json:"content_type"`
+	Kind               string     `json:"kind"`
+	SizeBytes          int64      `json:"size_bytes"`
+	ChecksumSHA256     string     `json:"checksum_sha256"`
+	Status             string     `json:"status"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	CommittedAt        *time.Time `json:"committed_at,omitempty"`
+}
+
+type NoteAttachment struct {
+	ID             string     `json:"id"`
+	NoteID         string     `json:"note_id"`
+	HomeID         string     `json:"home_id,omitempty"`
+	OwnerUserID    string     `json:"owner_user_id"`
+	Filename       string     `json:"filename"`
+	ContentType    string     `json:"content_type"`
+	SizeBytes      int64      `json:"size_bytes"`
+	ChecksumSHA256 string     `json:"checksum_sha256"`
+	StorageKey     string     `json:"storage_key"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
 type AssistantCalendarEntry struct {
 	ID              string    `json:"id"`
 	HomeID          string    `json:"home_id"`

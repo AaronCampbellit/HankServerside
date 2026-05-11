@@ -57,6 +57,7 @@ func main() {
 		EmbeddingDimension:    cfg.AssistantAI.EmbeddingDimension,
 	})
 	server.ConfigureStorageOps(cfg.DBOpsStateDir, cfg.DBOpsLogDir, cfg.DBOpsIntentSecret)
+	server.ConfigureNoteAttachmentStorage(cfg.NoteAttachmentDir)
 
 	errCh := make(chan error, 1)
 	go func() {

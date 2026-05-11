@@ -56,6 +56,7 @@ type Server struct {
 	openAIScopes       string
 	assistantAI        AssistantAIConfig
 	chatGPTDeviceAuths *chatGPTDeviceAuthRegistry
+	noteAttachmentRoot string
 }
 
 type authContext struct {
@@ -95,6 +96,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		sessionTTL:         sessionTTL,
 		requestTimeout:     requestTimeout,
 		chatGPTDeviceAuths: newChatGPTDeviceAuthRegistry(),
+		noteAttachmentRoot: filepath.Join("/tmp", "hank-note-attachments"),
 	}
 
 	mux := http.NewServeMux()
@@ -165,6 +167,14 @@ func (s *Server) ConfigureAssistantAI(cfg AssistantAIConfig) {
 
 func (s *Server) ConfigureStorageOps(stateDir, logDir, intentSecret string) {
 	s.storage = storageops.NewService(stateDir, logDir, intentSecret)
+}
+
+func (s *Server) ConfigureNoteAttachmentStorage(root string) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return
+	}
+	s.noteAttachmentRoot = root
 }
 
 func (s *Server) ConfigureAPNS(cfg APNSConfig) {

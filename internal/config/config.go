@@ -16,6 +16,7 @@ type Cloud struct {
 	DBOpsStateDir      string
 	DBOpsLogDir        string
 	DBOpsIntentSecret  string
+	NoteAttachmentDir  string
 	OpenAIClientID     string
 	OpenAIClientSecret string
 	OpenAIRedirectURI  string
@@ -114,6 +115,7 @@ func LoadCloud() (Cloud, error) {
 		DBOpsStateDir:      envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
 		DBOpsLogDir:        envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
 		DBOpsIntentSecret:  envOrDefault("HANK_REMOTE_DB_OPS_INTENT_SECRET", "replace-with-a-long-random-db-ops-secret"),
+		NoteAttachmentDir:  envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
 		OpenAIClientID:     strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_ID")),
 		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
 		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),

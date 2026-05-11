@@ -67,6 +67,9 @@ func (s *Store) DeleteAssistantSession(ctx context.Context, sessionID string) er
 		WHERE source_type = 'assistant_conversation' AND source_id = ?`, sessionID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_attachments WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM assistant_tool_calls
 		WHERE run_id IN (SELECT id FROM assistant_runs WHERE session_id = ?)`, sessionID); err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -271,6 +272,215 @@ func TestAssistantConfirmationResponseIncludesStructuredSummary(t *testing.T) {
 	fetched := server.assistantRunResponseForSession(ctx, session, run)
 	if fetched.PendingActionSummary == nil || fetched.PendingActionSummary.Kind != "calendar_create" {
 		t.Fatalf("fetched run missing pending action summary: %#v", fetched)
+	}
+}
+
+func TestAssistantAttachmentClarificationReusesStagedMetadata(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_attachment_followup", Email: "attachment-followup@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_attachment_followup", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AssistantSession{ID: "asess_attachment_followup", HomeID: home.ID, UserID: user.ID, Title: "Uploads", LastMessageAt: now, CreatedAt: now, UpdatedAt: now}
+	note := domain.UserNote{
+		ID:           "note_attachment_project_ideas",
+		NoteID:       "11111111-3333-4333-8333-111111111111",
+		OwnerUserID:  user.ID,
+		Title:        "Project Ideas",
+		Content:      "Ideas",
+		BodyMarkdown: "Ideas",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		UpdatedBy:    user.ID,
+	}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.UpsertUserNote(ctx, note))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+	attachments := []assistantMessageAttachment{{
+		ClientAttachmentID: "client_attachment_project",
+		Filename:           "idea.png",
+		ContentType:        "image/png",
+		SizeBytes:          12,
+		ChecksumSHA256:     "abc123",
+		Kind:               "image",
+	}}
+
+	first, err := server.processAssistantMessageWithAttachments(ctx, home, membership, auth, session, "uploaded this", attachments, "device", "UTC")
+	if err != nil {
+		t.Fatalf("process first attachment message: %v", err)
+	}
+	if first.RequiresConfirmation {
+		t.Fatalf("first response unexpectedly requires confirmation: %#v", first)
+	}
+	if first.AssistantMessage == nil || !strings.Contains(first.AssistantMessage.Text, "Where should I store") {
+		t.Fatalf("first response did not ask for destination: %#v", first.AssistantMessage)
+	}
+
+	followup, err := server.processAssistantMessageWithAttachments(ctx, home, membership, auth, session, "Project Ideas note", nil, "device", "UTC")
+	if err != nil {
+		t.Fatalf("process follow-up message: %v", err)
+	}
+	if !followup.RequiresConfirmation || followup.PendingActionSummary == nil {
+		t.Fatalf("follow-up did not reuse staged attachment for confirmation: %#v", followup)
+	}
+	if followup.PendingActionSummary.Kind != "attachment_commit" {
+		t.Fatalf("pending kind = %q, want attachment_commit", followup.PendingActionSummary.Kind)
+	}
+}
+
+func TestAssistantAttachmentToolErrorCompletesAndExpiresMissingStagedBytes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_attachment_error", Email: "attachment-error@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_attachment_error", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	appSession := domain.AppSession{ID: "sess_attachment_error", UserID: user.ID, TokenHash: hashToken("attachment-error-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	note := domain.UserNote{
+		ID:           "note_attachment_error_project",
+		NoteID:       "22222222-3333-4333-8333-111111111111",
+		OwnerUserID:  user.ID,
+		Title:        "Project Ideas",
+		Content:      "Ideas",
+		BodyMarkdown: "Ideas",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		UpdatedBy:    user.ID,
+	}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, appSession))
+	must(t, db.UpsertUserNote(ctx, note))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var apiSession assistantAPISession
+	requestJSON(t, testServer, "attachment-error-token", http.MethodPost, "/v1/home/assistant/sessions", nil, &apiSession)
+
+	var initial assistantRunResponse
+	requestJSON(t, testServer, "attachment-error-token", http.MethodPost, "/v1/home/assistant/sessions/"+apiSession.ID+"/messages", map[string]any{
+		"content": "put this in Project Ideas note",
+		"attachments": []map[string]any{
+			{
+				"client_attachment_id": "client_attachment_missing",
+				"filename":             "missing.pdf",
+				"content_type":         "application/pdf",
+				"size_bytes":           24,
+				"checksum_sha256":      "abc123",
+				"kind":                 "document",
+			},
+		},
+	}, &initial)
+	if !initial.RequiresConfirmation {
+		t.Fatalf("initial run did not request confirmation: %#v", initial)
+	}
+
+	var toolRun assistantRunResponse
+	requestJSON(t, testServer, "attachment-error-token", http.MethodPost, "/v1/home/assistant/runs/"+initial.ID+"/confirm", map[string]any{"approved": true}, &toolRun)
+	if !toolRun.RequiresClientTools || toolRun.ClientToolRequest == nil || toolRun.ClientToolRequest.ToolName != "attachments.commit" {
+		t.Fatalf("confirmed run did not request attachment client tool: %#v", toolRun)
+	}
+
+	var completed assistantRunResponse
+	requestJSON(t, testServer, "attachment-error-token", http.MethodPost, "/v1/home/assistant/runs/"+toolRun.ID+"/client-tool-results", map[string]any{
+		"results": []map[string]any{
+			{
+				"tool_name": "attachments.commit",
+				"error":     "The staged upload is no longer available on this device.",
+				"result": map[string]any{
+					"destination_kind":       "note_attachment",
+					"attachment_ids":         []string{"client_attachment_missing"},
+					"expired_attachment_ids": []string{"client_attachment_missing"},
+					"error_code":             "missing_staged_attachment",
+				},
+			},
+		},
+	}, &completed)
+	if completed.State != assistantStateCompleted || completed.AssistantMessage == nil {
+		t.Fatalf("tool error did not complete run: %#v", completed)
+	}
+	if !strings.Contains(completed.AssistantMessage.Text, "could not store") {
+		t.Fatalf("unexpected completion text: %#v", completed.AssistantMessage)
+	}
+	records, err := db.ListAssistantAttachments(ctx, apiSession.ID)
+	if err != nil {
+		t.Fatalf("ListAssistantAttachments: %v", err)
+	}
+	if len(records) != 1 || records[0].Status != "expired" {
+		t.Fatalf("attachment status = %#v, want one expired record", records)
+	}
+}
+
+func TestAssistantAttachmentSMBFolderResolutionUsesFileIndex(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_attachment_smb", Email: "attachment-smb@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_attachment_smb", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AssistantSession{ID: "asess_attachment_smb", HomeID: home.ID, UserID: user.ID, Title: "SMB uploads", LastMessageAt: now, CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.UpsertAssistantFileIndex(ctx, domain.AssistantFileIndex{
+		ID:             "afile_tax_folder",
+		HomeID:         home.ID,
+		Path:           "Documents/Taxes",
+		Name:           "Taxes",
+		IsDirectory:    true,
+		SearchText:     "Documents Taxes",
+		MetadataJSON:   "{}",
+		EmbeddingJSON:  "[]",
+		UpdatedAt:      now,
+		EmbeddingModel: "test",
+	}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+	attachments := []assistantMessageAttachment{{
+		ClientAttachmentID: "client_attachment_tax",
+		Filename:           "tax.pdf",
+		ContentType:        "application/pdf",
+		SizeBytes:          12,
+		ChecksumSHA256:     "abc123",
+		Kind:               "document",
+	}}
+
+	response, err := server.processAssistantMessageWithAttachments(ctx, home, membership, auth, session, "store this in the Taxes folder on SMB share", attachments, "device", "UTC")
+	if err != nil {
+		t.Fatalf("process smb attachment message: %v", err)
+	}
+	if !response.RequiresConfirmation || response.PendingActionSummary == nil {
+		t.Fatalf("SMB folder did not resolve to confirmation: %#v", response)
+	}
+	if !assistantSummaryDetailsContain(response.PendingActionSummary.Details, "Target folder", "Documents/Taxes") {
+		t.Fatalf("confirmation details did not include resolved folder: %#v", response.PendingActionSummary.Details)
 	}
 }
 

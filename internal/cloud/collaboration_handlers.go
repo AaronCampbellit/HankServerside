@@ -366,6 +366,10 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 	}
 
 	if len(parts) >= 2 {
+		if noteID, attachmentID, ok := splitNoteAttachmentRoute(parts); ok {
+			s.handleHomeNoteAttachmentsHTTP(w, r, home, auth, noteID, attachmentID)
+			return true
+		}
 		noteID := strings.Join(parts[1:], "/")
 		if len(parts) >= 4 && parts[len(parts)-2] == "shares" {
 			baseNoteID := strings.Join(parts[1:len(parts)-2], "/")
@@ -449,6 +453,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				}
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return true
+			}
+			if noteRecord, err := s.store.GetHomeNoteVisibleToUser(r.Context(), home.ID, auth.User.ID, noteID); err == nil {
+				note = s.addNoteAttachmentsToResponse(r.Context(), note, noteRecord, "home")
 			}
 			writeJSON(w, http.StatusOK, note)
 			return true
@@ -540,6 +547,13 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if parts := strings.Split(path, "/"); len(parts) >= 2 {
+		if noteID, attachmentID, ok := splitNoteAttachmentRoute(append([]string{"notes"}, parts...)); ok {
+			s.handleProfileNoteAttachmentsHTTP(w, r, auth, noteID, attachmentID)
+			return
+		}
+	}
+
 	noteID := path
 	switch r.Method {
 	case http.MethodGet:
@@ -551,6 +565,9 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if noteRecord, err := s.store.GetProfileNote(r.Context(), auth.User.ID, noteID); err == nil {
+			note = s.addNoteAttachmentsToResponse(r.Context(), note, noteRecord, "profile")
 		}
 		s.logger.Info("profile note fetched", "user_id", auth.User.ID, "note_id", noteID, "revision", note.Revision)
 		writeJSON(w, http.StatusOK, note)

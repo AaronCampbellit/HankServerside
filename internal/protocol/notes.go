@@ -39,6 +39,7 @@ type NoteSummary struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 	Revision    string    `json:"revision"`
 	Size        int64     `json:"size"`
+	Attachments int       `json:"attachments,omitempty"`
 	StorageKey  string    `json:"storage_key,omitempty"`
 	PageType    string    `json:"page_type,omitempty"`
 	ParentID    string    `json:"parent_id,omitempty"`
@@ -59,21 +60,38 @@ type NotesFetchRequest struct {
 }
 
 type NotesFetchResponse struct {
-	NoteID       string       `json:"note_id"`
-	Title        string       `json:"title"`
-	Content      string       `json:"content"`
-	BodyMarkdown string       `json:"body_markdown,omitempty"`
-	BodyFormat   string       `json:"body_format,omitempty"`
-	Revision     string       `json:"revision"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	PageType     string       `json:"page_type,omitempty"`
-	ParentID     string       `json:"parent_id,omitempty"`
-	SortOrder    int          `json:"sort_order"`
-	OwnerUserID  string       `json:"owner_user_id,omitempty"`
-	Shared       bool         `json:"shared,omitempty"`
-	Preview      string       `json:"preview,omitempty"`
-	Tags         []string     `json:"tags,omitempty"`
-	Board        *KanbanBoard `json:"board,omitempty"`
+	NoteID       string           `json:"note_id"`
+	Title        string           `json:"title"`
+	Content      string           `json:"content"`
+	BodyMarkdown string           `json:"body_markdown,omitempty"`
+	BodyFormat   string           `json:"body_format,omitempty"`
+	Revision     string           `json:"revision"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	PageType     string           `json:"page_type,omitempty"`
+	ParentID     string           `json:"parent_id,omitempty"`
+	SortOrder    int              `json:"sort_order"`
+	OwnerUserID  string           `json:"owner_user_id,omitempty"`
+	Shared       bool             `json:"shared,omitempty"`
+	Preview      string           `json:"preview,omitempty"`
+	Tags         []string         `json:"tags,omitempty"`
+	Board        *KanbanBoard     `json:"board,omitempty"`
+	Attachments  []NoteAttachment `json:"attachments,omitempty"`
+}
+
+type NoteAttachment struct {
+	ID             string    `json:"id"`
+	NoteID         string    `json:"note_id"`
+	Filename       string    `json:"filename"`
+	ContentType    string    `json:"content_type"`
+	SizeBytes      int64     `json:"size_bytes"`
+	ChecksumSHA256 string    `json:"checksum_sha256"`
+	DownloadURL    string    `json:"download_url,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type NoteAttachmentsResponse struct {
+	Attachments []NoteAttachment `json:"attachments"`
 }
 
 type NotesSaveRequest struct {

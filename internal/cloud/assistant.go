@@ -27,9 +27,19 @@ const (
 )
 
 type assistantMessageContent struct {
-	Text  string                 `json:"text"`
-	Cards []assistantResultCard  `json:"cards,omitempty"`
-	Meta  map[string]interface{} `json:"meta,omitempty"`
+	Text        string                       `json:"text"`
+	Cards       []assistantResultCard        `json:"cards,omitempty"`
+	Attachments []assistantMessageAttachment `json:"attachments,omitempty"`
+	Meta        map[string]interface{}       `json:"meta,omitempty"`
+}
+
+type assistantMessageAttachment struct {
+	ClientAttachmentID string `json:"client_attachment_id"`
+	Filename           string `json:"filename"`
+	ContentType        string `json:"content_type"`
+	SizeBytes          int64  `json:"size_bytes"`
+	ChecksumSHA256     string `json:"checksum_sha256"`
+	Kind               string `json:"kind"`
 }
 
 type assistantResultCard struct {
@@ -51,9 +61,10 @@ type assistantClientToolRequest struct {
 }
 
 type assistantPendingAction struct {
-	Kind           string                          `json:"kind"`
-	NoteAppend     *assistantPendingNoteAppend     `json:"note_append,omitempty"`
-	CalendarCreate *assistantPendingCalendarCreate `json:"calendar_create,omitempty"`
+	Kind             string                            `json:"kind"`
+	NoteAppend       *assistantPendingNoteAppend       `json:"note_append,omitempty"`
+	CalendarCreate   *assistantPendingCalendarCreate   `json:"calendar_create,omitempty"`
+	AttachmentCommit *assistantPendingAttachmentCommit `json:"attachment_commit,omitempty"`
 }
 
 type assistantPendingNoteAppend struct {
@@ -71,6 +82,19 @@ type assistantPendingCalendarCreate struct {
 	Title        string                     `json:"title"`
 	DateText     string                     `json:"date_text"`
 	Confirmation string                     `json:"confirmation_message"`
+}
+
+type assistantPendingAttachmentCommit struct {
+	ToolRequest     assistantClientToolRequest `json:"tool_request"`
+	AttachmentIDs   []string                   `json:"attachment_ids"`
+	DestinationKind string                     `json:"destination_kind"`
+	TargetNoteID    string                     `json:"target_note_id,omitempty"`
+	TargetNoteKey   string                     `json:"target_note_key,omitempty"`
+	TargetTitle     string                     `json:"target_title,omitempty"`
+	TargetScope     string                     `json:"target_scope,omitempty"`
+	TargetPath      string                     `json:"target_path,omitempty"`
+	ConflictMode    string                     `json:"conflict_mode"`
+	Confirmation    string                     `json:"confirmation_message"`
 }
 
 type assistantPendingActionSummary struct {
@@ -160,6 +184,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 		return true
 	case len(parts) == 4 && parts[1] == "sessions" && parts[3] == "messages":
 		s.handleAssistantSessionMessages(w, r, home, membership, auth, parts[2])
+		return true
+	case len(parts) == 6 && parts[1] == "sessions" && parts[3] == "attachments" && parts[5] == "discard":
+		s.handleAssistantAttachmentDiscard(w, r, home, auth, parts[2], parts[4])
 		return true
 	case len(parts) == 3 && parts[1] == "sessions":
 		s.handleAssistantSession(w, r, home, auth, parts[2])
@@ -278,6 +305,36 @@ func (s *Server) handleAssistantSession(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+func (s *Server) handleAssistantAttachmentDiscard(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, sessionID string, clientAttachmentID string) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session, err := s.store.GetAssistantSession(r.Context(), sessionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if session.HomeID != home.ID || session.UserID != auth.User.ID {
+		http.NotFound(w, r)
+		return
+	}
+	clientAttachmentID = strings.TrimSpace(clientAttachmentID)
+	if clientAttachmentID == "" {
+		http.Error(w, "attachment id is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.MarkAssistantAttachmentsExpired(r.Context(), session.ID, []string{clientAttachmentID}, time.Now().UTC()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "expired"})
+}
+
 func (s *Server) handleAssistantSessionMessages(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, auth authContext, sessionID string) {
 	session, err := s.store.GetAssistantSession(r.Context(), sessionID)
 	if err != nil {
@@ -307,8 +364,9 @@ func (s *Server) handleAssistantSessionMessages(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodPost:
 		var body struct {
-			Content            string          `json:"content"`
-			ClientCapabilities map[string]bool `json:"client_capabilities"`
+			Content            string                       `json:"content"`
+			Attachments        []assistantMessageAttachment `json:"attachments"`
+			ClientCapabilities map[string]bool              `json:"client_capabilities"`
 			DeviceContext      struct {
 				DeviceID string `json:"device_id"`
 				Timezone string `json:"timezone"`
@@ -319,12 +377,15 @@ func (s *Server) handleAssistantSessionMessages(w http.ResponseWriter, r *http.R
 			return
 		}
 		content := strings.TrimSpace(body.Content)
-		if content == "" {
+		if content == "" && len(body.Attachments) == 0 {
 			http.Error(w, "content is required", http.StatusBadRequest)
 			return
 		}
+		if content == "" {
+			content = fmt.Sprintf("Uploaded %d attachment(s).", len(body.Attachments))
+		}
 
-		runResponse, err := s.processAssistantMessage(r.Context(), home, membership, auth, session, content, body.DeviceContext.DeviceID, body.DeviceContext.Timezone)
+		runResponse, err := s.processAssistantMessageWithAttachments(r.Context(), home, membership, auth, session, content, body.Attachments, body.DeviceContext.DeviceID, body.DeviceContext.Timezone)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -358,29 +419,7 @@ func (s *Server) handleAssistantRun(w http.ResponseWriter, r *http.Request, home
 		http.NotFound(w, r)
 		return
 	}
-	response := assistantRunResponse{
-		ID:                   run.ID,
-		State:                run.State,
-		RequiresClientTools:  run.RequiresClientTools,
-		RequiresConfirmation: run.RequiresConfirmation,
-	}
-	if run.State == assistantStateCompleted {
-		if messages, err := s.store.ListAssistantMessages(r.Context(), session.ID); err == nil {
-			for i := len(messages) - 1; i >= 0; i-- {
-				if messages[i].Role == assistantRoleAssistant {
-					message := assistantMessageToAPI(messages[i])
-					response.AssistantMessage = &message
-					break
-				}
-			}
-		}
-	} else if run.PendingActionJSON != "" {
-		var pending assistantClientToolRequest
-		if json.Unmarshal([]byte(run.PendingActionJSON), &pending) == nil {
-			response.ClientToolRequest = &pending
-		}
-	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, s.assistantRunResponseForSession(r.Context(), session, run))
 }
 
 func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, runID string) {
@@ -410,6 +449,7 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 	var request struct {
 		ToolName string                 `json:"tool_name"`
 		Result   map[string]interface{} `json:"result"`
+		Error    string                 `json:"error"`
 		Results  []struct {
 			ToolName string                 `json:"tool_name"`
 			Result   map[string]interface{} `json:"result"`
@@ -429,13 +469,19 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 	if request.ToolName == "" && len(request.Results) > 0 {
 		request.ToolName = request.Results[0].ToolName
 		request.Result = request.Results[0].Result
+		request.Error = request.Results[0].Error
 	}
 	if request.ToolName != pending.ToolName {
 		http.Error(w, "client tool does not match pending run", http.StatusBadRequest)
 		return
 	}
 
-	content, err := s.finalizeAssistantClientToolRun(r.Context(), session, run, request.ToolName, request.Result)
+	var content assistantMessageContent
+	if strings.TrimSpace(request.Error) != "" {
+		content, err = s.finalizeAssistantClientToolErrorRun(r.Context(), session, request.ToolName, request.Result, request.Error)
+	} else {
+		content, err = s.finalizeAssistantClientToolRun(r.Context(), session, run, request.ToolName, request.Result)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -613,6 +659,10 @@ func (s *Server) handleAssistantCalendarIndex(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, session domain.AssistantSession, content string, deviceID string, timezone string) (assistantRunResponse, error) {
+	return s.processAssistantMessageWithAttachments(ctx, home, membership, auth, session, content, nil, deviceID, timezone)
+}
+
+func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, session domain.AssistantSession, content string, attachments []assistantMessageAttachment, deviceID string, timezone string) (assistantRunResponse, error) {
 	settings, err := s.currentAssistantSettings(ctx, home.ID, auth.User.ID)
 	if err != nil {
 		return assistantRunResponse{}, err
@@ -620,9 +670,22 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 	if strings.TrimSpace(session.Title) == "" || session.Title == "New Conversation" {
 		session.Title = assistantSessionTitle(content)
 	}
-	userContent := assistantMessageContent{Text: content}
+	cleanAttachments := normalizedAssistantMessageAttachments(attachments)
+	defaultAttachmentDestination := ""
+	if len(cleanAttachments) == 0 {
+		stagedAttachments, destination, err := s.reusableAssistantAttachments(ctx, session, content)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		cleanAttachments = assistantMessageAttachmentsFromRecords(stagedAttachments)
+		defaultAttachmentDestination = destination
+	}
+	userContent := assistantMessageContent{Text: content, Attachments: cleanAttachments}
 	userMessage, err := s.persistAssistantMessage(ctx, session, assistantRoleUser, userContent)
 	if err != nil {
+		return assistantRunResponse{}, err
+	}
+	if err := s.persistAssistantAttachments(ctx, session, auth.User.ID, cleanAttachments); err != nil {
 		return assistantRunResponse{}, err
 	}
 
@@ -635,6 +698,12 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 		RequiresConfirmation: false,
 		PendingActionJSON:    "",
 		CreatedAt:            time.Now().UTC(),
+	}
+
+	if len(cleanAttachments) > 0 {
+		if runResponse, handled, err := s.planAttachmentCommit(ctx, home, membership, auth, session, settings, run, cleanAttachments, content, defaultAttachmentDestination); handled || err != nil {
+			return runResponse, err
+		}
 	}
 
 	if pending, ok := s.planCalendarTool(content, timezone, deviceID); ok {
@@ -768,6 +837,450 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 		State:            run.State,
 		AssistantMessage: &message,
 	}, nil
+}
+
+func normalizedAssistantMessageAttachments(attachments []assistantMessageAttachment) []assistantMessageAttachment {
+	clean := make([]assistantMessageAttachment, 0, len(attachments))
+	seen := map[string]bool{}
+	for _, attachment := range attachments {
+		clientID := strings.TrimSpace(attachment.ClientAttachmentID)
+		if clientID == "" || seen[clientID] {
+			continue
+		}
+		seen[clientID] = true
+		filename := strings.TrimSpace(attachment.Filename)
+		if filename == "" {
+			filename = "Attachment"
+		}
+		contentType := strings.TrimSpace(attachment.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		kind := strings.TrimSpace(attachment.Kind)
+		if kind == "" {
+			kind = assistantAttachmentKind(contentType)
+		}
+		clean = append(clean, assistantMessageAttachment{
+			ClientAttachmentID: clientID,
+			Filename:           filename,
+			ContentType:        contentType,
+			SizeBytes:          attachment.SizeBytes,
+			ChecksumSHA256:     strings.TrimSpace(attachment.ChecksumSHA256),
+			Kind:               kind,
+		})
+	}
+	return clean
+}
+
+func assistantAttachmentKind(contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		return "image"
+	case strings.Contains(contentType, "pdf"):
+		return "pdf"
+	default:
+		return "document"
+	}
+}
+
+func (s *Server) persistAssistantAttachments(ctx context.Context, session domain.AssistantSession, userID string, attachments []assistantMessageAttachment) error {
+	if len(attachments) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	records := make([]domain.AssistantAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		records = append(records, domain.AssistantAttachment{
+			ID:                 newID("aat"),
+			SessionID:          session.ID,
+			UserID:             userID,
+			ClientAttachmentID: attachment.ClientAttachmentID,
+			Filename:           attachment.Filename,
+			ContentType:        attachment.ContentType,
+			Kind:               attachment.Kind,
+			SizeBytes:          attachment.SizeBytes,
+			ChecksumSHA256:     attachment.ChecksumSHA256,
+			Status:             "staged",
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		})
+	}
+	return s.store.UpsertAssistantAttachments(ctx, records)
+}
+
+func (s *Server) reusableAssistantAttachments(ctx context.Context, session domain.AssistantSession, prompt string) ([]domain.AssistantAttachment, string, error) {
+	destination := attachmentDestinationKind(prompt)
+	clarificationDestination, err := s.latestAttachmentClarificationDestination(ctx, session.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	if destination == "" {
+		destination = clarificationDestination
+	}
+	if destination == "" && clarificationDestination == "" {
+		return nil, "", nil
+	}
+	attachments, err := s.store.ListStagedAssistantAttachments(ctx, session.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	return attachments, destination, nil
+}
+
+func (s *Server) latestAttachmentClarificationDestination(ctx context.Context, sessionID string) (string, error) {
+	messages, err := s.store.ListAssistantMessages(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != assistantRoleAssistant {
+			continue
+		}
+		var content assistantMessageContent
+		if err := json.Unmarshal([]byte(messages[i].ContentJSON), &content); err != nil || content.Meta == nil {
+			continue
+		}
+		clarification, _ := content.Meta["attachment_clarification"].(bool)
+		if !clarification {
+			continue
+		}
+		destination, _ := content.Meta["attachment_clarification_destination"].(string)
+		return strings.TrimSpace(destination), nil
+	}
+	return "", nil
+}
+
+func assistantMessageAttachmentsFromRecords(records []domain.AssistantAttachment) []assistantMessageAttachment {
+	attachments := make([]assistantMessageAttachment, 0, len(records))
+	for _, record := range records {
+		attachments = append(attachments, assistantMessageAttachment{
+			ClientAttachmentID: record.ClientAttachmentID,
+			Filename:           record.Filename,
+			ContentType:        record.ContentType,
+			SizeBytes:          record.SizeBytes,
+			ChecksumSHA256:     record.ChecksumSHA256,
+			Kind:               record.Kind,
+		})
+	}
+	return attachments
+}
+
+func (s *Server) planAttachmentCommit(
+	ctx context.Context,
+	home domain.Home,
+	_ domain.HomeMembership,
+	auth authContext,
+	session domain.AssistantSession,
+	settings domain.AssistantSettings,
+	run domain.AssistantRun,
+	attachments []assistantMessageAttachment,
+	prompt string,
+	defaultDestination string,
+) (assistantRunResponse, bool, error) {
+	destination := attachmentDestinationKind(prompt)
+	if destination == "" {
+		destination = defaultDestination
+	}
+	if destination == "" {
+		message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+			Text: "Where should I store the uploaded file: a note, or a folder in File Server?",
+			Meta: map[string]interface{}{
+				"attachment_clarification": true,
+			},
+		})
+		if err != nil {
+			return assistantRunResponse{}, true, err
+		}
+		completedAt := time.Now().UTC()
+		run.MessageID = message.ID
+		run.CompletedAt = &completedAt
+		if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, true, err
+		}
+		if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+			return assistantRunResponse{}, true, err
+		}
+		return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+	}
+
+	attachmentIDs := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		attachmentIDs = append(attachmentIDs, attachment.ClientAttachmentID)
+	}
+	fileLabel := assistantAttachmentListLabel(attachments)
+
+	switch destination {
+	case "note_attachment":
+		if !settings.ProfileNotesEnabled && !settings.HomeNotesEnabled {
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: "Notes access is turned off in HankAI settings.",
+			})
+			if err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+		}
+		query := attachmentNoteQuery(prompt)
+		if query == "" {
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: "Which note should I attach the uploaded file to?",
+				Meta: map[string]interface{}{
+					"attachment_clarification":             true,
+					"attachment_clarification_destination": "note_attachment",
+				},
+			})
+			if err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+		}
+		notes, err := s.assistantVisibleNotes(ctx, home.ID, auth.User.ID, settings)
+		if err != nil {
+			return assistantRunResponse{}, true, err
+		}
+		ranked := rankScoredNotes(notes, query)
+		if len(ranked) == 0 || needsNoteAppendConfirmation(ranked) {
+			messageText := fmt.Sprintf("I need a clearer note destination for `%s` before I can store %s.", query, fileLabel)
+			if len(ranked) > 0 {
+				messageText = fmt.Sprintf("I found more than one likely note for `%s`. Which note should receive %s?", query, fileLabel)
+			}
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: messageText,
+				Meta: map[string]interface{}{
+					"attachment_clarification":             true,
+					"attachment_clarification_destination": "note_attachment",
+				},
+			})
+			if err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+		}
+
+		target := ranked[0].Note
+		scope := "profile"
+		scopeLabel := "Personal note"
+		if target.HomeID != "" {
+			scope = "home"
+			scopeLabel = "Shared Home note"
+		}
+		arguments := map[string]interface{}{
+			"attachment_ids":   attachmentIDs,
+			"destination_kind": "note_attachment",
+			"note_scope":       scope,
+			"note_id":          target.NoteID,
+			"note_title":       target.Title,
+			"conflict_mode":    "rename",
+		}
+		pending := assistantPendingAction{
+			Kind: "attachment_commit",
+			AttachmentCommit: &assistantPendingAttachmentCommit{
+				ToolRequest: assistantClientToolRequest{
+					ToolName:  "attachments.commit",
+					Arguments: arguments,
+				},
+				AttachmentIDs:   attachmentIDs,
+				DestinationKind: "note_attachment",
+				TargetNoteID:    target.ID,
+				TargetNoteKey:   target.NoteID,
+				TargetTitle:     target.Title,
+				TargetScope:     scopeLabel,
+				ConflictMode:    "rename",
+				Confirmation:    fmt.Sprintf("Confirm attaching %s to `%s`.", fileLabel, target.Title),
+			},
+		}
+		return s.createAttachmentConfirmationRun(ctx, session, run, pending, fmt.Sprintf("I can attach %s to `%s`. Confirm before I continue.", fileLabel, target.Title))
+
+	case "smb":
+		if !settings.FilesEnabled {
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: "File Server access is turned off in HankAI settings.",
+			})
+			if err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+		}
+		targetPath := attachmentSMBPath(prompt)
+		if targetPath == "" && defaultDestination == "smb" {
+			targetPath = cleanAttachmentSMBPath(prompt)
+		}
+		if targetPath == "" {
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: "Which File Server folder should receive the uploaded file?",
+				Meta: map[string]interface{}{
+					"attachment_clarification":             true,
+					"attachment_clarification_destination": "smb",
+				},
+			})
+			if err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+		}
+		resolvedPath, ambiguousMatches, err := s.resolveAssistantSMBTargetPath(ctx, home.ID, targetPath)
+		if err != nil {
+			return assistantRunResponse{}, true, err
+		}
+		if resolvedPath == "" {
+			messageText := fmt.Sprintf("I need a clearer File Server folder destination for `%s` before I can store %s.", targetPath, fileLabel)
+			if len(ambiguousMatches) > 0 {
+				messageText = fmt.Sprintf("I found more than one File Server folder matching `%s`. Which folder should receive %s?", targetPath, fileLabel)
+			}
+			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
+				Text: messageText,
+				Meta: map[string]interface{}{
+					"attachment_clarification":             true,
+					"attachment_clarification_destination": "smb",
+				},
+			})
+			if err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			completedAt := time.Now().UTC()
+			run.MessageID = message.ID
+			run.CompletedAt = &completedAt
+			if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+				return assistantRunResponse{}, true, err
+			}
+			return assistantRunResponse{ID: run.ID, State: run.State, AssistantMessage: &message}, true, nil
+		}
+		targetPath = resolvedPath
+		arguments := map[string]interface{}{
+			"attachment_ids":   attachmentIDs,
+			"destination_kind": "smb",
+			"target_path":      targetPath,
+			"conflict_mode":    "rename",
+		}
+		pending := assistantPendingAction{
+			Kind: "attachment_commit",
+			AttachmentCommit: &assistantPendingAttachmentCommit{
+				ToolRequest: assistantClientToolRequest{
+					ToolName:  "attachments.commit",
+					Arguments: arguments,
+				},
+				AttachmentIDs:   attachmentIDs,
+				DestinationKind: "smb",
+				TargetPath:      targetPath,
+				ConflictMode:    "rename",
+				Confirmation:    fmt.Sprintf("Confirm storing %s in `%s`.", fileLabel, targetPath),
+			},
+		}
+		return s.createAttachmentConfirmationRun(ctx, session, run, pending, fmt.Sprintf("I can store %s in `%s` on File Server. Confirm before I continue.", fileLabel, targetPath))
+	default:
+		return assistantRunResponse{}, false, nil
+	}
+}
+
+func (s *Server) createAttachmentConfirmationRun(ctx context.Context, session domain.AssistantSession, run domain.AssistantRun, pending assistantPendingAction, text string) (assistantRunResponse, bool, error) {
+	message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{Text: text})
+	if err != nil {
+		return assistantRunResponse{}, true, err
+	}
+	payload, err := json.Marshal(pending)
+	if err != nil {
+		return assistantRunResponse{}, true, err
+	}
+	run.State = assistantStateWaitingConfirm
+	run.MessageID = message.ID
+	run.RequiresConfirmation = true
+	run.PendingActionJSON = string(payload)
+	if err := s.store.CreateAssistantRun(ctx, run); err != nil {
+		return assistantRunResponse{}, true, err
+	}
+	if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, run.CreatedAt); err != nil {
+		return assistantRunResponse{}, true, err
+	}
+	return assistantRunResponse{
+		ID:                   run.ID,
+		State:                run.State,
+		RequiresConfirmation: true,
+		AssistantMessage:     &message,
+		PendingActionSummary: assistantPendingActionSummaryFromAction(pending),
+	}, true, nil
+}
+
+func (s *Server) resolveAssistantSMBTargetPath(ctx context.Context, homeID string, targetPath string) (string, []domain.AssistantFileIndex, error) {
+	targetPath = cleanAttachmentSMBPath(targetPath)
+	if targetPath == "" {
+		return "", nil, nil
+	}
+	if strings.Contains(targetPath, "/") {
+		return targetPath, nil, nil
+	}
+	matches, err := s.store.SearchAssistantFileDirectories(ctx, homeID, targetPath, 6)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(matches) == 0 {
+		return "", nil, nil
+	}
+	exact := make([]domain.AssistantFileIndex, 0, len(matches))
+	normalizedTarget := strings.Trim(strings.ToLower(targetPath), "/")
+	for _, match := range matches {
+		if strings.EqualFold(match.Name, targetPath) || strings.EqualFold(strings.Trim(match.Path, "/"), normalizedTarget) {
+			exact = append(exact, match)
+		}
+	}
+	if len(exact) == 1 {
+		return strings.Trim(exact[0].Path, "/"), nil, nil
+	}
+	if len(exact) > 1 {
+		return "", exact, nil
+	}
+	if len(matches) == 1 {
+		return strings.Trim(matches[0].Path, "/"), nil, nil
+	}
+	return "", matches, nil
 }
 
 func (s *Server) persistAssistantMessage(ctx context.Context, session domain.AssistantSession, role string, content assistantMessageContent) (assistantAPIMessage, error) {
@@ -1426,6 +1939,8 @@ func (s *Server) finalizeAssistantClientToolRun(ctx context.Context, session dom
 		return assistantMessageContent{
 			Text: fmt.Sprintf("I checked your device calendar but did not find a match for `%s`.", query),
 		}, nil
+	case "attachments.commit":
+		return s.finalizeAssistantAttachmentCommit(ctx, session, result)
 	default:
 		_ = ctx
 		_ = session
@@ -1434,6 +1949,214 @@ func (s *Server) finalizeAssistantClientToolRun(ctx context.Context, session dom
 			Text: "The client tool finished, but I do not have a formatter for that result yet.",
 		}, nil
 	}
+}
+
+func (s *Server) finalizeAssistantClientToolErrorRun(ctx context.Context, session domain.AssistantSession, toolName string, result map[string]interface{}, toolError string) (assistantMessageContent, error) {
+	toolError = strings.TrimSpace(toolError)
+	if toolName == "attachments.commit" {
+		return s.finalizeAssistantAttachmentCommitError(ctx, session, result, toolError)
+	}
+	return assistantMessageContent{
+		Text: fmt.Sprintf("The `%s` action could not be completed: %s", toolName, toolError),
+	}, nil
+}
+
+func (s *Server) finalizeAssistantAttachmentCommit(ctx context.Context, session domain.AssistantSession, result map[string]interface{}) (assistantMessageContent, error) {
+	destinationKind, _ := result["destination_kind"].(string)
+	files := assistantToolResultFiles(result)
+	clientIDs := make([]string, 0, len(files))
+	for _, file := range files {
+		if id := strings.TrimSpace(file["client_attachment_id"]); id != "" {
+			clientIDs = append(clientIDs, id)
+		}
+	}
+	if err := s.store.MarkAssistantAttachmentsCommitted(ctx, session.ID, clientIDs, time.Now().UTC()); err != nil {
+		return assistantMessageContent{}, err
+	}
+
+	switch destinationKind {
+	case "note_attachment":
+		noteTitle := assistantResultString(result, "note_title", "Note")
+		noteID := assistantResultString(result, "note_id", "")
+		text := fmt.Sprintf("Stored %d attachment(s) in `%s`.", max(1, len(files)), noteTitle)
+		cards := []assistantResultCard{
+			{
+				Kind:        "note",
+				Title:       noteTitle,
+				Summary:     "Attachment stored in Notes.",
+				ActionTitle: "Open in Notes",
+				NoteID:      noteID,
+			},
+		}
+		return assistantMessageContent{Text: text, Cards: cards}, nil
+	case "smb":
+		cards := make([]assistantResultCard, 0, len(files))
+		for _, file := range files {
+			path := strings.TrimSpace(file["path"])
+			title := strings.TrimSpace(file["filename"])
+			if title == "" {
+				title = filepathBase(path)
+			}
+			cards = append(cards, assistantResultCard{
+				Kind:        "file",
+				Title:       defaultString(title, "Uploaded file"),
+				Summary:     path,
+				ActionTitle: "Open in File Server",
+				Path:        path,
+			})
+		}
+		targetPath := assistantResultString(result, "target_path", "File Server")
+		return assistantMessageContent{
+			Text:  fmt.Sprintf("Stored %d attachment(s) in `%s`.", max(1, len(files)), targetPath),
+			Cards: cards,
+		}, nil
+	default:
+		return assistantMessageContent{
+			Text: fmt.Sprintf("Stored %d attachment(s).", max(1, len(files))),
+		}, nil
+	}
+}
+
+func (s *Server) finalizeAssistantAttachmentCommitError(ctx context.Context, session domain.AssistantSession, result map[string]interface{}, toolError string) (assistantMessageContent, error) {
+	files := assistantToolResultFiles(result)
+	clientIDs := make([]string, 0, len(files))
+	for _, file := range files {
+		if id := strings.TrimSpace(file["client_attachment_id"]); id != "" {
+			clientIDs = append(clientIDs, id)
+		}
+	}
+	if err := s.store.MarkAssistantAttachmentsCommitted(ctx, session.ID, clientIDs, time.Now().UTC()); err != nil {
+		return assistantMessageContent{}, err
+	}
+	if code := assistantResultString(result, "error_code", ""); code == "missing_staged_attachment" {
+		expiredIDs := assistantStringListFromResult(result["expired_attachment_ids"])
+		if len(expiredIDs) == 0 {
+			expiredIDs = assistantStringListFromResult(result["attachment_ids"])
+		}
+		if err := s.store.MarkAssistantAttachmentsExpired(ctx, session.ID, expiredIDs, time.Now().UTC()); err != nil {
+			return assistantMessageContent{}, err
+		}
+	}
+	if len(files) > 0 {
+		content, err := s.attachmentCommitResultContent(result, files)
+		if err != nil {
+			return assistantMessageContent{}, err
+		}
+		content.Text = fmt.Sprintf("%s Some files still need attention: %s", content.Text, toolError)
+		return content, nil
+	}
+	return assistantMessageContent{
+		Text: fmt.Sprintf("I could not store the uploaded attachment(s): %s", toolError),
+	}, nil
+}
+
+func (s *Server) attachmentCommitResultContent(result map[string]interface{}, files []map[string]string) (assistantMessageContent, error) {
+	destinationKind, _ := result["destination_kind"].(string)
+	switch destinationKind {
+	case "note_attachment":
+		noteTitle := assistantResultString(result, "note_title", "Note")
+		noteID := assistantResultString(result, "note_id", "")
+		text := fmt.Sprintf("Stored %d attachment(s) in `%s`.", max(1, len(files)), noteTitle)
+		cards := []assistantResultCard{
+			{
+				Kind:        "note",
+				Title:       noteTitle,
+				Summary:     "Attachment stored in Notes.",
+				ActionTitle: "Open in Notes",
+				NoteID:      noteID,
+			},
+		}
+		return assistantMessageContent{Text: text, Cards: cards}, nil
+	case "smb":
+		cards := make([]assistantResultCard, 0, len(files))
+		for _, file := range files {
+			path := strings.TrimSpace(file["path"])
+			title := strings.TrimSpace(file["filename"])
+			if title == "" {
+				title = filepathBase(path)
+			}
+			cards = append(cards, assistantResultCard{
+				Kind:        "file",
+				Title:       defaultString(title, "Uploaded file"),
+				Summary:     path,
+				ActionTitle: "Open in File Server",
+				Path:        path,
+			})
+		}
+		targetPath := assistantResultString(result, "target_path", "File Server")
+		return assistantMessageContent{
+			Text:  fmt.Sprintf("Stored %d attachment(s) in `%s`.", max(1, len(files)), targetPath),
+			Cards: cards,
+		}, nil
+	default:
+		return assistantMessageContent{
+			Text: fmt.Sprintf("Stored %d attachment(s).", max(1, len(files))),
+		}, nil
+	}
+}
+
+func assistantToolResultFiles(result map[string]interface{}) []map[string]string {
+	raw, ok := result["files"].([]interface{})
+	if !ok {
+		return nil
+	}
+	files := make([]map[string]string, 0, len(raw))
+	for _, item := range raw {
+		values, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		file := map[string]string{}
+		for key, value := range values {
+			file[key] = strings.TrimSpace(fmt.Sprint(value))
+		}
+		files = append(files, file)
+	}
+	return files
+}
+
+func assistantStringListFromResult(value interface{}) []string {
+	if raw, ok := value.([]string); ok {
+		values := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if text := strings.TrimSpace(item); text != "" {
+				values = append(values, text)
+			}
+		}
+		return values
+	}
+	raw, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+			values = append(values, text)
+		}
+	}
+	return values
+}
+
+func assistantResultString(result map[string]interface{}, key string, fallback string) string {
+	if value, ok := result[key]; ok {
+		if text := strings.TrimSpace(fmt.Sprint(value)); text != "" {
+			return text
+		}
+	}
+	return fallback
+}
+
+func filepathBase(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	path = strings.TrimRight(path, "/")
+	if index := strings.LastIndex(path, "/"); index >= 0 {
+		return path[index+1:]
+	}
+	return path
 }
 
 func (s *Server) executeConfirmedAssistantAction(
@@ -1529,6 +2252,28 @@ func (s *Server) executeConfirmedAssistantAction(
 			State:               run.State,
 			RequiresClientTools: true,
 			ClientToolRequest:   &pending.CalendarCreate.ToolRequest,
+		}, nil
+	case "attachment_commit":
+		if pending.AttachmentCommit == nil {
+			return assistantRunResponse{}, errors.New("pending attachment commit is missing")
+		}
+		payload, err := json.Marshal(pending.AttachmentCommit.ToolRequest)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		run.State = assistantStateWaitingClientTool
+		run.RequiresConfirmation = false
+		run.RequiresClientTools = true
+		run.PendingActionJSON = string(payload)
+		run.CompletedAt = nil
+		if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, err
+		}
+		return assistantRunResponse{
+			ID:                  run.ID,
+			State:               run.State,
+			RequiresClientTools: true,
+			ClientToolRequest:   &pending.AttachmentCommit.ToolRequest,
 		}, nil
 	default:
 		return assistantRunResponse{}, fmt.Errorf("unsupported pending action kind %q", pending.Kind)
@@ -1728,6 +2473,36 @@ func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *as
 			Title:        "Create calendar event",
 			Summary:      "Hank will ask this device to create the calendar event after you approve it.",
 			Confirmation: defaultString(action.Confirmation, fmt.Sprintf("Confirm creating `%s` on %s.", action.Title, action.DateText)),
+			Details:      details,
+			Destructive:  false,
+		}
+	case "attachment_commit":
+		if pending.AttachmentCommit == nil {
+			return nil
+		}
+		action := pending.AttachmentCommit
+		title := "Store attachment"
+		summary := "Hank will ask this device to store the staged upload after you approve it."
+		details := []assistantPendingActionDetail{
+			{Label: "Files", Value: fmt.Sprintf("%d", len(action.AttachmentIDs))},
+			{Label: "Conflict mode", Value: defaultString(action.ConflictMode, "rename")},
+		}
+		if action.DestinationKind == "note_attachment" {
+			title = "Attach to note"
+			details = append(details,
+				assistantPendingActionDetail{Label: "Target note", Value: action.TargetTitle},
+				assistantPendingActionDetail{Label: "Scope", Value: action.TargetScope},
+			)
+		}
+		if action.DestinationKind == "smb" {
+			title = "Store in File Server"
+			details = append(details, assistantPendingActionDetail{Label: "Target folder", Value: action.TargetPath})
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        title,
+			Summary:      summary,
+			Confirmation: action.Confirmation,
 			Details:      details,
 			Destructive:  false,
 		}
@@ -2148,6 +2923,113 @@ func noteSearchQuery(prompt string) string {
 		return strings.TrimSpace(prompt)
 	}
 	return query
+}
+
+func attachmentDestinationKind(prompt string) string {
+	lowered := strings.ToLower(prompt)
+	if strings.Contains(lowered, "note") || strings.Contains(lowered, "notes") {
+		return "note_attachment"
+	}
+	if strings.Contains(lowered, "smb") ||
+		strings.Contains(lowered, "file server") ||
+		strings.Contains(lowered, "share") ||
+		strings.Contains(lowered, "folder") ||
+		strings.Contains(lowered, "directory") {
+		return "smb"
+	}
+	return ""
+}
+
+func attachmentNoteQuery(prompt string) string {
+	query := noteSearchQuery(prompt)
+	query = removeQueryWords(query, map[string]bool{
+		"put": true, "store": true, "save": true, "upload": true,
+		"attach": true, "attachment": true, "file": true, "image": true,
+		"document": true, "this": true, "these": true, "my": true, "in": true,
+		"into": true, "to": true, "on": true,
+	})
+	return strings.TrimSpace(query)
+}
+
+func attachmentSMBPath(prompt string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(prompt, "."))
+	if trimmed == "" {
+		return ""
+	}
+	if quoted := firstQuotedValue(trimmed); quoted != "" {
+		return cleanAttachmentSMBPath(quoted)
+	}
+	lowered := strings.ToLower(trimmed)
+	if folderIndex := strings.Index(lowered, " folder"); folderIndex > 0 {
+		prefix := strings.TrimSpace(trimmed[:folderIndex])
+		prefixLowered := strings.ToLower(prefix)
+		if inIndex := strings.LastIndex(prefixLowered, " in "); inIndex >= 0 {
+			prefix = prefix[inIndex+len(" in "):]
+		} else if intoIndex := strings.LastIndex(prefixLowered, " into "); intoIndex >= 0 {
+			prefix = prefix[intoIndex+len(" into "):]
+		} else if toIndex := strings.LastIndex(prefixLowered, " to "); toIndex >= 0 {
+			prefix = prefix[toIndex+len(" to "):]
+		}
+		prefix = strings.TrimPrefix(strings.TrimSpace(prefix), "the ")
+		prefix = strings.TrimPrefix(strings.TrimSpace(prefix), "my ")
+		if cleaned := cleanAttachmentSMBPath(prefix); cleaned != "" {
+			return cleaned
+		}
+	}
+	for _, marker := range []string{" folder on", " folder in", " folder", " directory", " smb share", " share", " file server", " in ", " into ", " to "} {
+		index := strings.Index(lowered, marker)
+		if index < 0 {
+			continue
+		}
+		value := strings.TrimSpace(trimmed[index+len(marker):])
+		value = strings.TrimPrefix(value, "the ")
+		value = strings.TrimPrefix(value, "my ")
+		value = strings.TrimSuffix(value, " on the SMB share")
+		value = strings.TrimSuffix(value, " on smb share")
+		value = strings.TrimSuffix(value, " in file server")
+		value = strings.TrimSuffix(value, " on file server")
+		if cleaned := cleanAttachmentSMBPath(value); cleaned != "" {
+			return cleaned
+		}
+	}
+	return ""
+}
+
+func firstQuotedValue(value string) string {
+	for _, quote := range []string{"\"", "'", "`"} {
+		start := strings.Index(value, quote)
+		if start < 0 {
+			continue
+		}
+		end := strings.Index(value[start+1:], quote)
+		if end < 0 {
+			continue
+		}
+		return value[start+1 : start+1+end]
+	}
+	return ""
+}
+
+func cleanAttachmentSMBPath(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "\"'` ")
+	value = strings.TrimPrefix(value, "/")
+	value = strings.TrimSuffix(value, "/")
+	lowered := strings.ToLower(value)
+	for _, suffix := range []string{" folder", " directory", " smb share", " share"} {
+		if strings.HasSuffix(lowered, suffix) {
+			value = strings.TrimSpace(value[:len(value)-len(suffix)])
+			lowered = strings.ToLower(value)
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+func assistantAttachmentListLabel(attachments []assistantMessageAttachment) string {
+	if len(attachments) == 1 {
+		return fmt.Sprintf("`%s`", attachments[0].Filename)
+	}
+	return fmt.Sprintf("%d uploaded files", len(attachments))
 }
 
 func fileQuery(prompt string) string {
