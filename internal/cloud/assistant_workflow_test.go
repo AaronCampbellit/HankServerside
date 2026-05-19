@@ -433,6 +433,200 @@ func TestAssistantAttachmentToolErrorCompletesAndExpiresMissingStagedBytes(t *te
 	}
 }
 
+func TestAssistantAttachmentNoteCommitCompletesAndMarksCommitted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_attachment_note_success", Email: "attachment-note-success@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_attachment_note_success", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	appSession := domain.AppSession{ID: "sess_attachment_note_success", UserID: user.ID, TokenHash: hashToken("attachment-note-success-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	note := domain.UserNote{
+		ID:           "note_attachment_note_success",
+		NoteID:       "33333333-3333-4333-8333-111111111111",
+		OwnerUserID:  user.ID,
+		Title:        "Project Ideas",
+		Content:      "Ideas",
+		BodyMarkdown: "Ideas",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		UpdatedBy:    user.ID,
+	}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, appSession))
+	must(t, db.UpsertUserNote(ctx, note))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var apiSession assistantAPISession
+	requestJSON(t, testServer, "attachment-note-success-token", http.MethodPost, "/v1/home/assistant/sessions", nil, &apiSession)
+
+	var initial assistantRunResponse
+	requestJSON(t, testServer, "attachment-note-success-token", http.MethodPost, "/v1/home/assistant/sessions/"+apiSession.ID+"/messages", map[string]any{
+		"content": "attach this to the Project Ideas note",
+		"attachments": []map[string]any{
+			{
+				"client_attachment_id": "client_attachment_note_success",
+				"filename":             "idea.png",
+				"content_type":         "image/png",
+				"size_bytes":           12,
+				"checksum_sha256":      "abc123",
+				"kind":                 "image",
+			},
+		},
+	}, &initial)
+	if !initial.RequiresConfirmation || initial.PendingActionSummary == nil {
+		t.Fatalf("initial run did not request attachment confirmation: %#v", initial)
+	}
+
+	var toolRun assistantRunResponse
+	requestJSON(t, testServer, "attachment-note-success-token", http.MethodPost, "/v1/home/assistant/runs/"+initial.ID+"/confirm", map[string]any{"approved": true}, &toolRun)
+	if !toolRun.RequiresClientTools || toolRun.ClientToolRequest == nil || toolRun.ClientToolRequest.ToolName != "attachments.commit" {
+		t.Fatalf("confirmed run did not request attachment client tool: %#v", toolRun)
+	}
+
+	var completed assistantRunResponse
+	requestJSON(t, testServer, "attachment-note-success-token", http.MethodPost, "/v1/home/assistant/runs/"+toolRun.ID+"/client-tool-results", map[string]any{
+		"tool_name": "attachments.commit",
+		"result": map[string]any{
+			"destination_kind": "note_attachment",
+			"note_id":          note.NoteID,
+			"note_scope":       "profile",
+			"note_title":       note.Title,
+			"attachment_ids":   []string{"client_attachment_note_success"},
+			"files": []map[string]any{
+				{
+					"client_attachment_id": "client_attachment_note_success",
+					"attachment_id":        "natt_success",
+					"filename":             "idea.png",
+					"content_type":         "image/png",
+					"size_bytes":           12,
+				},
+			},
+		},
+	}, &completed)
+	if completed.State != assistantStateCompleted || completed.AssistantMessage == nil {
+		t.Fatalf("note commit did not complete: %#v", completed)
+	}
+	if !strings.Contains(completed.AssistantMessage.Text, "Stored 1 attachment(s) in `Project Ideas`.") {
+		t.Fatalf("unexpected completion text: %#v", completed.AssistantMessage.Text)
+	}
+	if len(completed.AssistantMessage.Cards) != 1 || completed.AssistantMessage.Cards[0].Kind != "note" || completed.AssistantMessage.Cards[0].NoteID != note.NoteID {
+		t.Fatalf("completion cards = %#v, want note card", completed.AssistantMessage.Cards)
+	}
+	records, err := db.ListAssistantAttachments(ctx, apiSession.ID)
+	if err != nil {
+		t.Fatalf("ListAssistantAttachments: %v", err)
+	}
+	if len(records) != 1 || records[0].Status != "committed" || records[0].CommittedAt == nil {
+		t.Fatalf("attachment status = %#v, want one committed record", records)
+	}
+}
+
+func TestAssistantAttachmentSMBCommitCompletesAndMarksCommitted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_attachment_smb_success", Email: "attachment-smb-success@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_attachment_smb_success", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	appSession := domain.AppSession{ID: "sess_attachment_smb_success", UserID: user.ID, TokenHash: hashToken("attachment-smb-success-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, appSession))
+	must(t, db.UpsertAssistantFileIndex(ctx, domain.AssistantFileIndex{
+		ID:             "afile_tax_folder_success",
+		HomeID:         home.ID,
+		Path:           "Documents/Taxes",
+		Name:           "Taxes",
+		IsDirectory:    true,
+		SearchText:     "Documents Taxes",
+		MetadataJSON:   "{}",
+		EmbeddingJSON:  "[]",
+		UpdatedAt:      now,
+		EmbeddingModel: "test",
+	}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var apiSession assistantAPISession
+	requestJSON(t, testServer, "attachment-smb-success-token", http.MethodPost, "/v1/home/assistant/sessions", nil, &apiSession)
+
+	var initial assistantRunResponse
+	requestJSON(t, testServer, "attachment-smb-success-token", http.MethodPost, "/v1/home/assistant/sessions/"+apiSession.ID+"/messages", map[string]any{
+		"content": "store this in the Taxes folder on SMB share",
+		"attachments": []map[string]any{
+			{
+				"client_attachment_id": "client_attachment_smb_success",
+				"filename":             "tax.pdf",
+				"content_type":         "application/pdf",
+				"size_bytes":           24,
+				"checksum_sha256":      "def456",
+				"kind":                 "document",
+			},
+		},
+	}, &initial)
+	if !initial.RequiresConfirmation || initial.PendingActionSummary == nil {
+		t.Fatalf("initial run did not request attachment confirmation: %#v", initial)
+	}
+
+	var toolRun assistantRunResponse
+	requestJSON(t, testServer, "attachment-smb-success-token", http.MethodPost, "/v1/home/assistant/runs/"+initial.ID+"/confirm", map[string]any{"approved": true}, &toolRun)
+	if !toolRun.RequiresClientTools || toolRun.ClientToolRequest == nil || toolRun.ClientToolRequest.ToolName != "attachments.commit" {
+		t.Fatalf("confirmed run did not request attachment client tool: %#v", toolRun)
+	}
+
+	var completed assistantRunResponse
+	requestJSON(t, testServer, "attachment-smb-success-token", http.MethodPost, "/v1/home/assistant/runs/"+toolRun.ID+"/client-tool-results", map[string]any{
+		"tool_name": "attachments.commit",
+		"result": map[string]any{
+			"destination_kind": "smb",
+			"target_path":      "Documents/Taxes",
+			"attachment_ids":   []string{"client_attachment_smb_success"},
+			"files": []map[string]any{
+				{
+					"client_attachment_id": "client_attachment_smb_success",
+					"filename":             "tax.pdf",
+					"path":                 "Documents/Taxes/tax.pdf",
+					"content_type":         "application/pdf",
+					"size_bytes":           24,
+				},
+			},
+		},
+	}, &completed)
+	if completed.State != assistantStateCompleted || completed.AssistantMessage == nil {
+		t.Fatalf("SMB commit did not complete: %#v", completed)
+	}
+	if !strings.Contains(completed.AssistantMessage.Text, "Stored 1 attachment(s) in `Documents/Taxes`.") {
+		t.Fatalf("unexpected completion text: %#v", completed.AssistantMessage.Text)
+	}
+	if len(completed.AssistantMessage.Cards) != 1 || completed.AssistantMessage.Cards[0].Kind != "file" || completed.AssistantMessage.Cards[0].Path != "Documents/Taxes/tax.pdf" {
+		t.Fatalf("completion cards = %#v, want file card", completed.AssistantMessage.Cards)
+	}
+	records, err := db.ListAssistantAttachments(ctx, apiSession.ID)
+	if err != nil {
+		t.Fatalf("ListAssistantAttachments: %v", err)
+	}
+	if len(records) != 1 || records[0].Status != "committed" || records[0].CommittedAt == nil {
+		t.Fatalf("attachment status = %#v, want one committed record", records)
+	}
+}
+
 func TestAssistantAttachmentSMBFolderResolutionUsesFileIndex(t *testing.T) {
 	t.Parallel()
 

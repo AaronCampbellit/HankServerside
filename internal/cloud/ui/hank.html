@@ -74,8 +74,15 @@
             </div>
           </div>
           <form id="message-form" class="hank-message-form">
-            <textarea id="message-input" rows="3" placeholder="Ask Hank"></textarea>
-            <button id="send-button" type="submit">Send</button>
+            <div id="attachment-tray" class="hank-attachment-tray" hidden></div>
+            <div class="hank-composer-row">
+              <textarea id="message-input" rows="3" placeholder="Ask Hank"></textarea>
+              <div class="hank-composer-actions">
+                <input id="attachment-input" type="file" multiple hidden>
+                <button id="attach-button" type="button" class="ghost" title="Attach file" aria-label="Attach file">Attach</button>
+                <button id="send-button" type="submit">Send</button>
+              </div>
+            </div>
           </form>
         </section>
       </main>

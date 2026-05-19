@@ -1570,14 +1570,75 @@ button:disabled {
 
 .hank-message-form {
   display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.hank-composer-row {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  margin-top: 14px;
+  align-items: stretch;
+}
+
+.hank-composer-actions {
+  display: grid;
+  gap: 8px;
+  align-content: start;
 }
 
 .hank-message-form textarea {
   min-height: 76px;
   resize: vertical;
+}
+
+.hank-attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.hank-attachment-chip {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  max-width: min(100%, 340px);
+  min-height: 34px;
+  padding: 5px 6px 5px 8px;
+  border: 1px solid rgba(232, 214, 195, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hank-attachment-chip .file-icon {
+  width: 22px;
+  height: 22px;
+  font-size: 0.7rem;
+}
+
+.hank-attachment-chip strong,
+.hank-attachment-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hank-attachment-chip strong {
+  color: #fff;
+  font-size: 0.76rem;
+}
+
+.hank-attachment-chip span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.hank-attachment-remove {
+  min-height: 24px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  font-size: 0.7rem;
 }
 
 @media (max-width: 980px) {
