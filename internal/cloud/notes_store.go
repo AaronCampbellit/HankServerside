@@ -481,7 +481,10 @@ func noteSummaries(notes []domain.UserNote) []protocol.NoteSummary {
 		summaries = append(summaries, noteSummary(note))
 	}
 	sort.Slice(summaries, func(i, j int) bool {
-		return strings.ToLower(summaries[i].Title) < strings.ToLower(summaries[j].Title)
+		if summaries[i].UpdatedAt.Equal(summaries[j].UpdatedAt) {
+			return strings.ToLower(summaries[i].Title) < strings.ToLower(summaries[j].Title)
+		}
+		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
 	})
 	return summaries
 }

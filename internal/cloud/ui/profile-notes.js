@@ -1,5 +1,7 @@
 const AUTOSAVE_DELAY_MS = 700;
+const HISTORY_LIMIT = 20;
 const SELECTED_NOTE_STORAGE_KEY = "hank.remote.profileNotes.selectedNoteID";
+const DRAFT_HISTORY_KEY = "__draft__";
 
 const state = {
   user: null,
@@ -17,6 +19,8 @@ const state = {
   isSaving: false,
   lastSavedHash: "",
   suppressInput: false,
+  historyRestore: false,
+  noteHistories: new Map(),
 };
 
 const els = {
@@ -30,6 +34,8 @@ const els = {
   noteTabs: document.getElementById("note-tabs") || document.getElementById("note-list"),
   noteTitle: document.getElementById("note-title"),
   noteContent: document.getElementById("note-content"),
+  noteLinks: document.getElementById("note-link-strip"),
+  noteChecklist: document.getElementById("note-checklist-strip"),
   saveState: document.getElementById("save-state"),
   lastSaved: document.getElementById("last-saved"),
   deleteButton: document.getElementById("delete-button"),
@@ -270,6 +276,134 @@ function currentEditorHash() {
   return `${state.selectedNoteID}\n${normalizedTitle()}\n${currentMarkdown()}`;
 }
 
+function activeHistoryKey() {
+  return state.selectedNoteID || DRAFT_HISTORY_KEY;
+}
+
+function currentEditorSnapshot() {
+  return {
+    title: els.noteTitle.value,
+    content: els.noteContent.value,
+    selectionStart: els.noteContent.selectionStart || 0,
+    selectionEnd: els.noteContent.selectionEnd || 0,
+  };
+}
+
+function sameEditorSnapshot(left, right) {
+  return Boolean(left && right && left.title === right.title && left.content === right.content);
+}
+
+function ensureNoteHistory(noteID = activeHistoryKey()) {
+  const key = noteID || DRAFT_HISTORY_KEY;
+  if (!state.noteHistories.has(key)) {
+    state.noteHistories.set(key, { undo: [], redo: [], current: null });
+  }
+  return state.noteHistories.get(key);
+}
+
+function updateHistoryButtons() {
+  const history = ensureNoteHistory();
+  for (const button of els.formatButtons) {
+    if (button.dataset.format === "undo") {
+      button.disabled = history.undo.length === 0;
+    } else if (button.dataset.format === "redo") {
+      button.disabled = history.redo.length === 0;
+    }
+  }
+}
+
+function trimHistoryStack(stack) {
+  while (stack.length > HISTORY_LIMIT) {
+    stack.shift();
+  }
+}
+
+function setHistoryCurrent(noteID = activeHistoryKey()) {
+  const history = ensureNoteHistory(noteID);
+  history.current = currentEditorSnapshot();
+  updateHistoryButtons();
+}
+
+function recordEditorHistoryChange() {
+  if (state.suppressInput || state.historyRestore) {
+    return;
+  }
+  const history = ensureNoteHistory();
+  const next = currentEditorSnapshot();
+  if (!history.current) {
+    history.current = next;
+    updateHistoryButtons();
+    return;
+  }
+  if (sameEditorSnapshot(history.current, next)) {
+    return;
+  }
+  history.undo.push(history.current);
+  trimHistoryStack(history.undo);
+  history.redo = [];
+  history.current = next;
+  updateHistoryButtons();
+}
+
+function restoreEditorSnapshot(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+  state.historyRestore = true;
+  els.noteTitle.value = snapshot.title || "";
+  els.noteContent.value = snapshot.content || "";
+  const selectionStart = Math.min(snapshot.selectionStart || 0, els.noteContent.value.length);
+  const selectionEnd = Math.min(snapshot.selectionEnd || selectionStart, els.noteContent.value.length);
+  els.noteContent.focus();
+  els.noteContent.setSelectionRange(selectionStart, selectionEnd);
+  state.historyRestore = false;
+  renderEditorExtras();
+  markDirty();
+}
+
+function undoEditor() {
+  const history = ensureNoteHistory();
+  if (!history.undo.length) {
+    return;
+  }
+  const current = currentEditorSnapshot();
+  const snapshot = history.undo.pop();
+  history.redo.push(current);
+  trimHistoryStack(history.redo);
+  history.current = snapshot;
+  restoreEditorSnapshot(snapshot);
+  updateHistoryButtons();
+}
+
+function redoEditor() {
+  const history = ensureNoteHistory();
+  if (!history.redo.length) {
+    return;
+  }
+  const current = currentEditorSnapshot();
+  const snapshot = history.redo.pop();
+  history.undo.push(current);
+  trimHistoryStack(history.undo);
+  history.current = snapshot;
+  restoreEditorSnapshot(snapshot);
+  updateHistoryButtons();
+}
+
+function moveNoteHistory(fromNoteID, toNoteID) {
+  if (!fromNoteID || !toNoteID || fromNoteID === toNoteID || !state.noteHistories.has(fromNoteID)) {
+    return;
+  }
+  state.noteHistories.set(toNoteID, state.noteHistories.get(fromNoteID));
+  state.noteHistories.delete(fromNoteID);
+  updateHistoryButtons();
+}
+
+function deleteNoteHistory(noteID) {
+  if (noteID) {
+    state.noteHistories.delete(noteID);
+  }
+}
+
 function previewFromMarkdown(markdown) {
   return markdown
     .replace(/^#{1,6}\s+/gm, "")
@@ -307,6 +441,8 @@ function clearEditor() {
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
   els.deleteButton.disabled = true;
+  setHistoryCurrent(DRAFT_HISTORY_KEY);
+  renderEditorExtras();
   setSaveState("Saved");
   setLastSaved("");
   renderNotes();
@@ -314,10 +450,11 @@ function clearEditor() {
 
 function filteredNotes() {
   const query = els.noteSearch.value.trim().toLowerCase();
+  const notes = sortNotesByRecency(state.notes);
   if (!query) {
-    return state.notes;
+    return notes;
   }
-  return state.notes.filter((note) => {
+  return notes.filter((note) => {
     const haystack = [
       note.title,
       note.id,
@@ -325,6 +462,22 @@ function filteredNotes() {
       ...(note.tags || []),
     ].join(" ").toLowerCase();
     return haystack.includes(query);
+  });
+}
+
+function noteUpdatedAt(note) {
+  const timestamp = Date.parse(note?.updated_at || "");
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function sortNotesByRecency(notes) {
+  return [...notes].sort((left, right) => {
+    const rightUpdated = noteUpdatedAt(right);
+    const leftUpdated = noteUpdatedAt(left);
+    if (rightUpdated === leftUpdated) {
+      return String(left.title || left.id || "").localeCompare(String(right.title || right.id || ""));
+    }
+    return rightUpdated - leftUpdated;
   });
 }
 
@@ -369,6 +522,7 @@ function updateSelectedSummaryDraft() {
   }
   note.title = normalizedTitle();
   note.preview = previewFromMarkdown(currentMarkdown());
+  note.updated_at = new Date().toISOString();
   renderNotes();
 }
 
@@ -385,6 +539,8 @@ function fillEditor(note) {
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
   els.deleteButton.disabled = false;
+  setHistoryCurrent(state.selectedNoteID);
+  renderEditorExtras();
   setSaveState("Saved");
   setLastSaved(note.updated_at);
   renderNotes();
@@ -400,7 +556,7 @@ function findListedNote(noteID) {
 
 async function loadNotes() {
   logLive("loading profile notes list");
-  state.notes = (await api("/v1/me/notes")).notes || [];
+  state.notes = sortNotesByRecency((await api("/v1/me/notes")).notes || []);
   if (state.selectedNoteID && !state.notes.some((note) => note.id === state.selectedNoteID)) {
     clearEditor();
   }
@@ -484,6 +640,7 @@ async function saveNote(options = {}) {
 
   state.isSaving = true;
   setSaveState("Saving", "saving");
+  const previousNoteID = state.selectedNoteID;
 
   const payload = {
     note_id: state.selectedNoteID,
@@ -512,9 +669,14 @@ async function saveNote(options = {}) {
     }
 
     state.selectedNoteID = response.note_id || state.selectedNoteID;
+    if (!previousNoteID && state.selectedNoteID) {
+      moveNoteHistory(DRAFT_HISTORY_KEY, state.selectedNoteID);
+    }
     state.currentRevision = response.revision || "";
     state.isDirty = false;
     state.lastSavedHash = currentEditorHash();
+    setHistoryCurrent(state.selectedNoteID);
+    renderEditorExtras();
     setSaveState("Saved");
     setLastSaved(response.updated_at || new Date().toISOString());
     await loadNotes();
@@ -557,7 +719,9 @@ async function deleteNote() {
   }
   try {
     logLive("deleting profile note", { noteID: state.selectedNoteID });
+    const deletedNoteID = state.selectedNoteID;
     await api(`/v1/me/notes/${encodeURIComponent(state.selectedNoteID)}`, { method: "DELETE" });
+    deleteNoteHistory(deletedNoteID);
     rememberNoteID("");
     clearEditor();
     await loadNotes();
@@ -634,6 +798,8 @@ function replaceText(start, end, replacement, selectionStart, selectionEnd) {
   els.noteContent.setRangeText(replacement, start, end, "preserve");
   els.noteContent.focus();
   els.noteContent.setSelectionRange(selectionStart, selectionEnd);
+  recordEditorHistoryChange();
+  renderEditorExtras();
   markDirty();
 }
 
@@ -746,6 +912,128 @@ function isLikelyURL(value) {
   return /^(https?:\/\/|www\.|[A-Za-z0-9-]+\.[A-Za-z]{2,})/.test(String(value || "").trim());
 }
 
+function cleanLinkToken(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["'`<([{]+/, "")
+    .replace(/[>"'`)\]},.;!?]+$/g, "");
+}
+
+function extractNoteLinks(markdown) {
+  const links = [];
+  const seen = new Set();
+  const addLink = (label, rawURL) => {
+    const cleaned = cleanLinkToken(rawURL);
+    if (!cleaned || !isLikelyURL(cleaned)) {
+      return;
+    }
+    const href = normalizeURL(cleaned);
+    if (seen.has(href)) {
+      return;
+    }
+    seen.add(href);
+    links.push({
+      href,
+      label: String(label || cleaned).trim() || href,
+    });
+  };
+
+  const withoutMarkdownLinks = String(markdown || "").replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, label, url) => {
+    addLink(label, url);
+    return " ";
+  });
+  const barePattern = /\b((?:https?:\/\/|www\.)[^\s<>()]+|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9-]+)+(?:\/[^\s<>()]*)?)/g;
+  for (const match of withoutMarkdownLinks.matchAll(barePattern)) {
+    addLink(match[1], match[1]);
+  }
+  return links.slice(0, 12);
+}
+
+function renderNoteLinks() {
+  const links = extractNoteLinks(currentMarkdown());
+  els.noteLinks.hidden = links.length === 0;
+  els.noteLinks.innerHTML = "";
+  if (!links.length) {
+    return;
+  }
+  const label = document.createElement("span");
+  label.className = "note-link-strip-label";
+  label.textContent = "Links";
+  els.noteLinks.appendChild(label);
+  for (const link of links) {
+    const anchor = document.createElement("a");
+    anchor.href = link.href;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.textContent = link.label;
+    els.noteLinks.appendChild(anchor);
+  }
+}
+
+function checklistItemsFromMarkdown(markdown) {
+  return String(markdown || "")
+    .split("\n")
+    .map((line, index) => {
+      const match = line.match(/^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/);
+      if (!match) {
+        return null;
+      }
+      return {
+        lineIndex: index,
+        checked: match[2].toLowerCase() === "x",
+        text: match[4] || "Checklist item",
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function renderChecklistControls() {
+  const items = checklistItemsFromMarkdown(currentMarkdown());
+  els.noteChecklist.hidden = items.length === 0;
+  els.noteChecklist.innerHTML = "";
+  if (!items.length) {
+    return;
+  }
+  for (const item of items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `note-check-toggle${item.checked ? " checked" : ""}`;
+    button.innerHTML = `
+      <span class="note-check-circle" aria-hidden="true"></span>
+      <span class="note-check-text">${escapeHTML(item.text)}</span>
+    `;
+    button.setAttribute("aria-pressed", item.checked ? "true" : "false");
+    button.addEventListener("click", () => toggleChecklistLine(item.lineIndex));
+    els.noteChecklist.appendChild(button);
+  }
+}
+
+function renderEditorExtras() {
+  renderNoteLinks();
+  renderChecklistControls();
+}
+
+function lineRangeForIndex(lines, lineIndex) {
+  let start = 0;
+  for (let index = 0; index < lineIndex; index += 1) {
+    start += lines[index].length + 1;
+  }
+  return { start, end: start + lines[lineIndex].length };
+}
+
+function toggleChecklistLine(lineIndex) {
+  const lines = currentMarkdown().split("\n");
+  const line = lines[lineIndex] || "";
+  const match = line.match(/^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/);
+  if (!match) {
+    return;
+  }
+  const replacement = `${match[1]}${match[2].toLowerCase() === "x" ? " " : "x"}${match[3]}${match[4]}`;
+  const range = lineRangeForIndex(lines, lineIndex);
+  replaceText(range.start, range.end, replacement, range.start, range.start + replacement.length);
+}
+
 function applyLink() {
   const start = els.noteContent.selectionStart;
   const end = els.noteContent.selectionEnd;
@@ -766,14 +1054,10 @@ function applyLink() {
 function applyFormat(format) {
   switch (format) {
   case "undo":
-    els.noteContent.focus();
-    document.execCommand("undo");
-    markDirty();
+    undoEditor();
     break;
   case "redo":
-    els.noteContent.focus();
-    document.execCommand("redo");
-    markDirty();
+    redoEditor();
     break;
   case "bold":
     wrapSelection("**");
@@ -836,8 +1120,13 @@ els.newButton.addEventListener("click", () => {
 });
 els.deleteButton.addEventListener("click", deleteNote);
 els.noteSearch.addEventListener("input", renderNotes);
-els.noteTitle.addEventListener("input", markDirty);
-els.noteContent.addEventListener("input", markDirty);
+function handleEditorInput() {
+  recordEditorHistoryChange();
+  renderEditorExtras();
+  markDirty();
+}
+els.noteTitle.addEventListener("input", handleEditorInput);
+els.noteContent.addEventListener("input", handleEditorInput);
 els.noteContent.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();

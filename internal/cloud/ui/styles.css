@@ -11,6 +11,7 @@
   --success: #63db9b;
   --danger: #ff7575;
   --shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --side-nav-width: 228px;
 }
 
 @view-transition {
@@ -100,7 +101,7 @@ main {
 .shell:has(> .tab-strip) {
   width: min(1500px, calc(100vw - 20px));
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--side-nav-width) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px 14px;
   align-items: start;
@@ -322,7 +323,7 @@ h3 {
   max-height: calc(100vh - 20px);
   min-height: calc(100vh - 20px);
   margin: 0;
-  padding: 10px;
+  padding: 9px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -342,27 +343,28 @@ h3 {
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 8px 6px 14px;
+  gap: 10px;
+  padding: 8px 4px 12px;
   border-bottom: 1px solid var(--line);
 }
 
 .sidebar-brand-icon {
-  width: 66px;
-  height: 66px;
-  border-radius: 14px;
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
   box-shadow: 0 12px 30px rgba(58, 112, 212, 0.32);
 }
 
 .sidebar-title {
   font-weight: 800;
   line-height: 1.05;
-  font-size: 1.45rem;
+  font-size: 1.25rem;
+  white-space: nowrap;
 }
 
 .sidebar-subtitle {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   font-weight: 650;
 }
 
@@ -691,6 +693,12 @@ button:hover {
   background: var(--brand-dark);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
 button.secondary {
   background: #293345;
   color: #eef4ff;
@@ -990,7 +998,7 @@ button.ghost {
 
 .document-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--surface);
@@ -998,6 +1006,7 @@ button.ghost {
 }
 
 .document-head {
+  grid-row: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
@@ -1064,6 +1073,7 @@ button.ghost {
 }
 
 .formatting-toolbar {
+  grid-row: 2;
   display: flex;
   gap: 6px;
   overflow-x: auto;
@@ -1089,7 +1099,124 @@ button.ghost {
   background: #344057;
 }
 
+.checklist-format-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toolbar-check-circle,
+.note-check-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 2px solid var(--brand-dark);
+  border-radius: 999px;
+}
+
+.note-link-strip,
+.note-checklist-strip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(20, 26, 38, 0.86);
+  overflow-x: auto;
+}
+
+.note-link-strip {
+  grid-row: 3;
+}
+
+.note-checklist-strip {
+  grid-row: 4;
+}
+
+.note-link-strip[hidden],
+.note-checklist-strip[hidden] {
+  display: none;
+}
+
+.note-link-strip-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.note-link-strip a {
+  flex: 0 0 auto;
+  max-width: min(360px, 54vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border: 1px solid rgba(107, 189, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(107, 189, 255, 0.12);
+  color: var(--brand-dark);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.note-link-strip a:hover {
+  background: rgba(107, 189, 255, 0.2);
+}
+
+.note-check-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(420px, 64vw);
+  min-height: 32px;
+  padding: 5px 9px 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.note-check-toggle:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.note-check-toggle.checked .note-check-circle {
+  position: relative;
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.note-check-toggle.checked .note-check-circle::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  border: solid #08111c;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.note-check-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.note-check-toggle.checked .note-check-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 .document-editor {
+  grid-row: 5;
   min-height: 0;
   height: 100%;
   resize: none;

@@ -18,6 +18,46 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
+func TestNoteSummariesSortByMostRecentFirst(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	summaries := noteSummaries([]domain.UserNote{
+		{
+			ID:        "stored_old",
+			NoteID:    "old",
+			Title:     "Alpha",
+			Content:   "old",
+			PageType:  protocol.NotePageTypeText,
+			UpdatedAt: now.Add(-2 * time.Hour),
+		},
+		{
+			ID:        "stored_new",
+			NoteID:    "new",
+			Title:     "Zulu",
+			Content:   "new",
+			PageType:  protocol.NotePageTypeText,
+			UpdatedAt: now,
+		},
+		{
+			ID:        "stored_middle",
+			NoteID:    "middle",
+			Title:     "Beta",
+			Content:   "middle",
+			PageType:  protocol.NotePageTypeText,
+			UpdatedAt: now.Add(-time.Hour),
+		},
+	})
+
+	got := []string{summaries[0].ID, summaries[1].ID, summaries[2].ID}
+	want := []string{"new", "middle", "old"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("note order = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestProfileNotesRequireExplicitHomeShare(t *testing.T) {
 	t.Parallel()
 

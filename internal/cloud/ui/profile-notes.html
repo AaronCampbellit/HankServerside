@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote Notes</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260504-frame-full-width">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260519-notes-ui">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -81,11 +81,15 @@
             <button type="button" data-format="heading" title="Heading" aria-label="Heading">H</button>
             <button type="button" data-format="bullet" title="Bullets" aria-label="Bullets">-</button>
             <button type="button" data-format="number" title="Numbers" aria-label="Numbers">1.</button>
-            <button type="button" data-format="checklist" title="Checklist" aria-label="Checklist">[ ]</button>
+            <button type="button" data-format="checklist" class="checklist-format-button" title="Checklist" aria-label="Checklist">
+              <span class="toolbar-check-circle" aria-hidden="true"></span>
+            </button>
             <button type="button" data-format="tag" title="Tag" aria-label="Tag">#</button>
             <button type="button" data-format="link" title="Link" aria-label="Link">Link</button>
           </div>
 
+          <div id="note-link-strip" class="note-link-strip" hidden></div>
+          <div id="note-checklist-strip" class="note-checklist-strip" hidden></div>
           <textarea id="note-content" class="document-editor" rows="24" spellcheck="true" placeholder="Start writing"></textarea>
         </section>
       </main>
@@ -93,7 +97,7 @@
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/profile-notes.js?v=20260504-toolbar-undo-redo" defer></script>
+    <script src="/assets/profile-notes.js?v=20260519-note-history-links" defer></script>
     <script src="/assets/admin-nav.js?v=20260504-frame-full-width" defer></script>
   </body>
 </html>
