@@ -2185,6 +2185,10 @@ func (s *Server) executeConfirmedAssistantAction(
 			return assistantRunResponse{}, err
 		}
 		note.Content = newContent
+		note.BodyMarkdown = newContent
+		if note.BodyFormat == "" {
+			note.BodyFormat = "markdown"
+		}
 		note.Revision = revision
 		note.Checksum = checksum
 		note.UpdatedAt = time.Now().UTC()
@@ -2883,24 +2887,149 @@ func rankNotes(notes []domain.UserNote, query string) []domain.UserNote {
 
 func extractAppendIntent(prompt string) (string, string) {
 	trimmed := strings.TrimSpace(prompt)
-	lowered := strings.ToLower(trimmed)
+	if itemText, noteHint, ok := extractLeadingAppendIntent(trimmed, trimmed); ok {
+		return itemText, noteHint
+	}
+	for _, candidate := range appendInstructionCandidates(trimmed) {
+		if itemText, noteHint, ok := extractLeadingAppendIntent(candidate, trimmed); ok {
+			return itemText, noteHint
+		}
+	}
+	return trimmed, ""
+}
+
+func extractLeadingAppendIntent(candidate string, fullPrompt string) (string, string, bool) {
+	candidate = strings.TrimSpace(candidate)
+	lowered := strings.ToLower(candidate)
 	prefixLength := 0
 	switch {
 	case strings.HasPrefix(lowered, "add "):
 		prefixLength = len("add ")
 	case strings.HasPrefix(lowered, "append "):
 		prefixLength = len("append ")
+	case strings.HasPrefix(lowered, "attach "):
+		prefixLength = len("attach ")
 	default:
-		return trimmed, ""
+		return "", "", false
 	}
-	rest := strings.TrimSpace(trimmed[prefixLength:])
+	rest := strings.TrimSpace(candidate[prefixLength:])
 	loweredRest := strings.ToLower(rest)
 	for _, delimiter := range []string{" to the ", " to ", " into the ", " into ", " onto the ", " onto ", " the the "} {
 		if index := strings.Index(loweredRest, delimiter); index >= 0 {
-			return strings.TrimSpace(strings.TrimSuffix(rest[:index], ".")), cleanNoteHint(rest[index+len(delimiter):])
+			itemText := strings.TrimSpace(strings.TrimSuffix(rest[:index], "."))
+			noteHint := cleanNoteHint(removeAssistantURLs(rest[index+len(delimiter):]))
+			if noteHint == "" {
+				return "", "", false
+			}
+			return resolveReferencedAppendText(fullPrompt, itemText), noteHint, true
 		}
 	}
-	return trimmed, ""
+	return "", "", false
+}
+
+func appendInstructionCandidates(value string) []string {
+	seen := map[string]bool{}
+	var candidates []string
+	addCandidate := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			return
+		}
+		seen[candidate] = true
+		candidates = append(candidates, candidate)
+	}
+	for _, line := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	}) {
+		addCandidate(line)
+	}
+	lowered := strings.ToLower(value)
+	for _, prefix := range []string{"add ", "append ", "attach "} {
+		start := 0
+		for {
+			index := strings.Index(lowered[start:], prefix)
+			if index < 0 {
+				break
+			}
+			index += start
+			if index == 0 || isAssistantInstructionBoundary(value[index-1]) {
+				addCandidate(value[index:])
+			}
+			start = index + len(prefix)
+		}
+	}
+	return candidates
+}
+
+func isAssistantInstructionBoundary(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r' || value == '.' || value == ';' || value == ':'
+}
+
+func resolveReferencedAppendText(prompt string, itemText string) string {
+	itemText = strings.TrimSpace(itemText)
+	if !isReferencedAppendText(itemText) {
+		return itemText
+	}
+	urls := extractAssistantURLs(prompt)
+	if len(urls) == 0 {
+		return itemText
+	}
+	return strings.Join(urls, "\n")
+}
+
+func isReferencedAppendText(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Trim(value, "\"'` .")))
+	switch normalized {
+	case "it", "this", "that",
+		"link", "this link", "that link", "the link",
+		"url", "this url", "that url", "the url",
+		"website", "this website", "that website", "the website":
+		return true
+	default:
+		return false
+	}
+}
+
+func extractAssistantURLs(value string) []string {
+	var urls []string
+	seen := map[string]bool{}
+	for _, field := range strings.Fields(value) {
+		candidate := cleanAssistantURLToken(field)
+		lowered := strings.ToLower(candidate)
+		if !(strings.HasPrefix(lowered, "https://") || strings.HasPrefix(lowered, "http://")) {
+			continue
+		}
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		urls = append(urls, candidate)
+	}
+	return urls
+}
+
+func removeAssistantURLs(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	kept := make([]string, 0, len(fields))
+	for _, field := range fields {
+		candidate := cleanAssistantURLToken(field)
+		lowered := strings.ToLower(candidate)
+		if strings.HasPrefix(lowered, "https://") || strings.HasPrefix(lowered, "http://") {
+			continue
+		}
+		kept = append(kept, field)
+	}
+	return strings.Join(kept, " ")
+}
+
+func cleanAssistantURLToken(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "\"'`<>()[]{}")
+	value = strings.TrimRight(value, ".,;!?")
+	return strings.TrimSpace(value)
 }
 
 func cleanNoteHint(value string) string {
@@ -2943,11 +3072,13 @@ func attachmentDestinationKind(prompt string) string {
 func attachmentNoteQuery(prompt string) string {
 	query := noteSearchQuery(prompt)
 	query = removeQueryWords(query, map[string]bool{
-		"put": true, "store": true, "save": true, "upload": true,
+		"add": true, "append": true, "put": true, "store": true, "save": true, "upload": true,
 		"attach": true, "attachment": true, "file": true, "image": true,
+		"photo": true, "picture": true, "link": true, "url": true, "uploaded": true,
 		"document": true, "this": true, "these": true, "my": true, "in": true,
 		"into": true, "to": true, "on": true,
 	})
+	query = removeAssistantURLs(query)
 	return strings.TrimSpace(query)
 }
 

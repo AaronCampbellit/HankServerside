@@ -29,6 +29,7 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "note search", prompt: "find grocery list note", want: assistantIntentNotesSearch},
 		{name: "note append", prompt: "add eggs to the grocery list", want: assistantIntentNotesAppend},
 		{name: "note append typo delimiter", prompt: "add fix hankai conversation output the the hank features note", want: assistantIntentNotesAppend},
+		{name: "note append referenced link", prompt: "https://docs.gitlab.com/install/docker/installation/\nAdd this link to work note", want: assistantIntentNotesAppend},
 		{name: "home assistant on", prompt: "what entities are on", want: assistantIntentHomeAssistantQuery},
 		{name: "home assistant garage", prompt: "garage entities", want: assistantIntentHomeAssistantQuery},
 		{name: "home assistant conversational query", prompt: "can you find all the garage light entities", want: assistantIntentHomeAssistantQuery},
@@ -118,6 +119,21 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 		UpdatedAt:    now.Add(-time.Minute),
 		UpdatedBy:    user.ID,
 	}
+	workNote := domain.UserNote{
+		ID:           "note_assistant_work",
+		NoteID:       "44444444-4444-4444-8444-444444444444",
+		OwnerUserID:  user.ID,
+		Title:        "Work",
+		Content:      "- deployment notes",
+		BodyMarkdown: "- deployment notes",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now.Add(-3 * time.Minute),
+		UpdatedBy:    user.ID,
+	}
 	sharedNote := domain.UserNote{
 		ID:           "note_assistant_shared",
 		NoteID:       "33333333-3333-3333-3333-333333333333",
@@ -139,6 +155,7 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	must(t, db.CreateHome(ctx, home))
 	must(t, db.UpsertUserNote(ctx, note))
 	must(t, db.UpsertUserNote(ctx, featuresNote))
+	must(t, db.UpsertUserNote(ctx, workNote))
 	must(t, db.UpsertUserNote(ctx, sharedNote))
 	must(t, db.AddNoteShare(ctx, domain.NoteShare{
 		NoteID:       sharedNote.ID,
@@ -159,15 +176,15 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateAssistantResponse list: %v", err)
 	}
-	for _, want := range []string{"Grocery List", "Hank Features", "Shared Checklist"} {
+	for _, want := range []string{"Grocery List", "Hank Features", "Work", "Shared Checklist"} {
 		if !strings.Contains(listed.Text, want) {
 			t.Fatalf("note list missing %q: %s", want, listed.Text)
 		}
 	}
-	if len(listed.Cards) != 3 {
+	if len(listed.Cards) != 4 {
 		t.Fatalf("note list cards = %#v, want one card per listed note", listed.Cards)
 	}
-	for _, want := range []string{"Grocery List", "Hank Features", "Shared Checklist"} {
+	for _, want := range []string{"Grocery List", "Hank Features", "Work", "Shared Checklist"} {
 		if !assistantCardsContainTitle(listed.Cards, want) {
 			t.Fatalf("note list cards missing %q: %#v", want, listed.Cards)
 		}
@@ -216,6 +233,23 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	}
 	if !strings.Contains(updatedFeatures.Content, "- fix hankai conversation output") {
 		t.Fatalf("features note did not include appended item: %#v", updatedFeatures)
+	}
+
+	linkPrompt := "https://docs.gitlab.com/install/docker/installation/\nAdd this link to work note"
+	appendedLink, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, linkPrompt)
+	if err != nil {
+		t.Fatalf("generateAssistantResponse append link: %v", err)
+	}
+	if !strings.Contains(appendedLink.Text, "Added `https://docs.gitlab.com/install/docker/installation/`") {
+		t.Fatalf("append link text = %q", appendedLink.Text)
+	}
+	updatedWork, err := db.GetUserNoteByID(ctx, workNote.ID)
+	if err != nil {
+		t.Fatalf("GetUserNoteByID work: %v", err)
+	}
+	if !strings.Contains(updatedWork.Content, "- https://docs.gitlab.com/install/docker/installation/") ||
+		strings.Contains(updatedWork.Content, "- this link") {
+		t.Fatalf("work note did not include appended URL: %#v", updatedWork)
 	}
 }
 
@@ -473,7 +507,7 @@ func TestAssistantAttachmentNoteCommitCompletesAndMarksCommitted(t *testing.T) {
 
 	var initial assistantRunResponse
 	requestJSON(t, testServer, "attachment-note-success-token", http.MethodPost, "/v1/home/assistant/sessions/"+apiSession.ID+"/messages", map[string]any{
-		"content": "attach this to the Project Ideas note",
+		"content": "Add this photo to the Project Ideas note",
 		"attachments": []map[string]any{
 			{
 				"client_attachment_id": "client_attachment_note_success",
