@@ -634,6 +634,22 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if s.handleRealtimeCommand(ctx, appConn, appPeer, envelope, command) {
+			continue
+		}
+
+		profileScopedNotes, err := isProfileScopedNotesCommand(command)
+		if err != nil {
+			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "bad_command_payload", err.Error(), nil)
+			continue
+		}
+		if profileScopedNotes {
+			if err := s.handleCloudNotesCommand(ctx, appPeer, envelope, auth, command); err != nil {
+				s.logger.Warn("cloud profile notes command failed", "request_id", envelope.RequestID, "command", command.Command, "error", err)
+			}
+			continue
+		}
+
 		home, membership, err := s.requireSingletonHomeMembership(ctx, auth.User.ID)
 		if err != nil {
 			s.metrics.IncRouteFailure("home_not_found")
@@ -641,10 +657,6 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		envelope.HomeID = home.ID
-
-		if s.handleRealtimeCommand(ctx, appConn, appPeer, envelope, command) {
-			continue
-		}
 
 		if feature := featureForCommand(command.Command); feature != "" {
 			if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, feature); err != nil {

@@ -180,3 +180,20 @@ func decodeBody[T any](body json.RawMessage) (T, error) {
 	err := json.Unmarshal(body, &out)
 	return out, err
 }
+
+func isProfileScopedNotesCommand(command protocol.RoutedCommand) (bool, error) {
+	switch command.Command {
+	case "notes.collab.join", "notes.collab.leave", "notes.collab.sync", "notes.collab.submit_ops":
+		var body struct {
+			Scope string `json:"scope"`
+		}
+		if len(command.Body) > 0 {
+			if err := json.Unmarshal(command.Body, &body); err != nil {
+				return false, err
+			}
+		}
+		return normalizeCollabScope(body.Scope) == "profile", nil
+	default:
+		return false, nil
+	}
+}

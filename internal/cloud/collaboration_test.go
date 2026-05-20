@@ -607,6 +607,95 @@ func TestProfileNoteHTTPWriteBroadcastsRealtimeEvent(t *testing.T) {
 	}
 }
 
+func TestProfileScopedCollaborationDoesNotRequireHome(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_desktop", Email: "desktop@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_desktop", UserID: user.ID, TokenHash: hashToken("desktop-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, session))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	requestJSON(t, testServer, "desktop-token", http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":     "desktop-note",
+		"title":       "Desktop Note",
+		"content":     "hello",
+		"page_type":   "text",
+		"body_format": "markdown",
+	}, nil)
+
+	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=desktop-token"), nil)
+	if err != nil {
+		t.Fatalf("app websocket dial: %v", err)
+	}
+	defer appConn.Close(websocket.StatusNormalClosure, "done")
+
+	join, err := protocol.NewEnvelope(protocol.TypeAppCommand, "join_profile", "", "", protocol.RoutedCommand{
+		Command: "notes.collab.join",
+		Body: mustEncodeBody(t, protocol.NoteCollaborationJoinRequest{
+			NoteID:    "desktop-note",
+			SessionID: "desktop-live",
+			Scope:     "profile",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope join: %v", err)
+	}
+	must(t, wsjson.Write(ctx, appConn, join))
+	joinResponse := readUntilRequestID(t, ctx, appConn, "join_profile")
+	if joinResponse.Type != protocol.TypeAppResponse {
+		t.Fatalf("join response type = %q, want %q", joinResponse.Type, protocol.TypeAppResponse)
+	}
+	snapshot, err := protocol.DecodePayload[protocol.NoteCollaborationSnapshot](joinResponse)
+	if err != nil {
+		t.Fatalf("DecodePayload join: %v", err)
+	}
+	if snapshot.Note.Content != "hello" {
+		t.Fatalf("snapshot content = %q, want hello", snapshot.Note.Content)
+	}
+
+	submit, err := protocol.NewEnvelope(protocol.TypeAppCommand, "submit_profile_ops", "", "", protocol.RoutedCommand{
+		Command: "notes.collab.submit_ops",
+		Body: mustEncodeBody(t, protocol.NoteCollaborationSubmitOpsRequest{
+			NoteID:      "desktop-note",
+			SessionID:   "desktop-live",
+			Scope:       "profile",
+			BaseVersion: snapshot.AppliedVersion,
+			Ops: []protocol.NoteCollaborationOperation{{
+				OpID:  "desktop-op-1",
+				Type:  "text_insert",
+				Index: 5,
+				Text:  " desktop",
+			}},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope submit: %v", err)
+	}
+	must(t, wsjson.Write(ctx, appConn, submit))
+	submitResponse := readUntilRequestID(t, ctx, appConn, "submit_profile_ops")
+	if submitResponse.Type != protocol.TypeAppResponse {
+		t.Fatalf("submit response type = %q, want %q", submitResponse.Type, protocol.TypeAppResponse)
+	}
+
+	var fetched protocol.NotesFetchResponse
+	requestJSON(t, testServer, "desktop-token", http.MethodGet, "/v1/me/notes/desktop-note", nil, &fetched)
+	if fetched.Content != "hello desktop" {
+		t.Fatalf("fetched content = %q, want hello desktop", fetched.Content)
+	}
+}
+
 func requestJSONStatus(t *testing.T, server *httptest.Server, sessionToken string, method string, path string, body any, wantStatus int) *http.Response {
 	t.Helper()
 
