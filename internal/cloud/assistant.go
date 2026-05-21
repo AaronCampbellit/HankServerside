@@ -112,8 +112,9 @@ type assistantPendingActionDetail struct {
 }
 
 type assistantRankedNote struct {
-	Note  domain.UserNote
-	Score int
+	Note      domain.UserNote
+	Score     int
+	MatchTier int
 }
 
 type assistantIntentKind string
@@ -1450,7 +1451,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 	ranked := rankScoredNotes(notes, matchHint)
 	if len(ranked) == 0 {
 		return assistantMessageContent{
-			Text: fmt.Sprintf("I couldn't find a shared note matching `%s`.", matchHint),
+			Text: fmt.Sprintf("I couldn't find a note matching `%s`.", matchHint),
 		}, nil
 	}
 
@@ -2679,10 +2680,9 @@ func needsNoteAppendConfirmation(ranked []assistantRankedNote) bool {
 	if len(ranked) == 0 {
 		return false
 	}
-	if ranked[0].Score < 6 {
-		return true
-	}
-	if len(ranked) > 1 && ranked[1].Score >= ranked[0].Score-1 {
+	if len(ranked) > 1 &&
+		ranked[1].MatchTier == ranked[0].MatchTier &&
+		ranked[1].Score >= ranked[0].Score-50 {
 		return true
 	}
 	return false
@@ -2846,34 +2846,108 @@ func assistantPromptAllowsProjectDocs(prompt string) bool {
 }
 
 func rankScoredNotes(notes []domain.UserNote, query string) []assistantRankedNote {
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = normalizeAssistantNoteQuery(query)
+	if query == "" {
+		return nil
+	}
+	queryTokens := assistantQueryTokens(query)
 	scoredNotes := make([]assistantRankedNote, 0, len(notes))
 	for _, note := range notes {
-		score := 0
-		title := strings.ToLower(note.Title)
-		content := strings.ToLower(note.Content)
-		if strings.Contains(title, query) {
-			score += 6
-		}
-		for _, token := range strings.Fields(query) {
-			if strings.Contains(title, token) {
-				score += 3
-			}
-			if strings.Contains(content, token) {
-				score++
-			}
-		}
+		tier, score := scoreAssistantNoteMatch(note, query, queryTokens)
 		if score > 0 {
-			scoredNotes = append(scoredNotes, assistantRankedNote{Note: note, Score: score})
+			scoredNotes = append(scoredNotes, assistantRankedNote{Note: note, Score: score, MatchTier: tier})
 		}
 	}
 	sort.Slice(scoredNotes, func(i, j int) bool {
+		if scoredNotes[i].MatchTier != scoredNotes[j].MatchTier {
+			return scoredNotes[i].MatchTier > scoredNotes[j].MatchTier
+		}
 		if scoredNotes[i].Score == scoredNotes[j].Score {
 			return scoredNotes[i].Note.UpdatedAt.After(scoredNotes[j].Note.UpdatedAt)
 		}
 		return scoredNotes[i].Score > scoredNotes[j].Score
 	})
 	return scoredNotes
+}
+
+func scoreAssistantNoteMatch(note domain.UserNote, query string, queryTokens []string) (int, int) {
+	title := normalizeAssistantNoteQuery(note.Title)
+	noteKey := normalizeAssistantNoteQuery(note.NoteID)
+	content := normalizeAssistantNoteQuery(strings.Join([]string{note.Content, note.BodyMarkdown}, " "))
+
+	switch {
+	case title == query || noteKey == query:
+		return 4, 4000 + noteTitleTokenScore(title, queryTokens)
+	case strings.Contains(title, query):
+		return 3, 3000 + noteTitleTokenScore(title, queryTokens)
+	case allAssistantTokensInText(queryTokens, title):
+		return 3, 2600 + noteTitleTokenScore(title, queryTokens)
+	case strings.Contains(content, query):
+		return 2, 1800 + noteContentTokenScore(content, queryTokens)
+	default:
+		contentScore := noteContentTokenScore(content, queryTokens)
+		if contentScore > 0 {
+			return 1, 900 + contentScore
+		}
+	}
+	return 0, 0
+}
+
+func normalizeAssistantNoteQuery(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer("_", " ", "-", " ", "/", " ").Replace(value)
+	value = removeQueryWords(value, map[string]bool{
+		"a": true, "an": true, "the": true,
+		"note": true, "notes": true,
+		"list": true, "called": true, "named": true, "titled": true,
+	})
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func assistantQueryTokens(query string) []string {
+	seen := map[string]bool{}
+	tokens := make([]string, 0)
+	for _, token := range strings.Fields(query) {
+		token = strings.TrimSpace(token)
+		if token == "" || seen[token] {
+			continue
+		}
+		seen[token] = true
+		tokens = append(tokens, token)
+	}
+	return tokens
+}
+
+func noteTitleTokenScore(title string, tokens []string) int {
+	score := 0
+	for _, token := range tokens {
+		if strings.Contains(title, token) {
+			score += 20
+		}
+	}
+	return score
+}
+
+func noteContentTokenScore(content string, tokens []string) int {
+	score := 0
+	for _, token := range tokens {
+		if strings.Contains(content, token) {
+			score += 5
+		}
+	}
+	return score
+}
+
+func allAssistantTokensInText(tokens []string, text string) bool {
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, token := range tokens {
+		if !strings.Contains(text, token) {
+			return false
+		}
+	}
+	return true
 }
 
 func rankNotes(notes []domain.UserNote, query string) []domain.UserNote {

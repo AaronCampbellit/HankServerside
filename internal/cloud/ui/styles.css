@@ -998,7 +998,7 @@ button.ghost {
 
 .document-panel {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--surface);
@@ -1116,76 +1116,82 @@ button.ghost {
   border-radius: 999px;
 }
 
-.note-link-strip,
-.note-checklist-strip {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(20, 26, 38, 0.86);
-  overflow-x: auto;
-}
-
-.note-link-strip {
+.document-editor-shell {
   grid-row: 3;
-}
-
-.note-checklist-strip {
-  grid-row: 4;
-}
-
-.note-link-strip[hidden],
-.note-checklist-strip[hidden] {
-  display: none;
-}
-
-.note-link-strip-label {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.note-link-strip a {
-  flex: 0 0 auto;
-  max-width: min(360px, 54vw);
+  position: relative;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 5px 8px;
-  border: 1px solid rgba(107, 189, 255, 0.28);
-  border-radius: 999px;
-  background: rgba(107, 189, 255, 0.12);
+  background: var(--surface-strong);
+}
+
+.note-inline-layer,
+.document-editor {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  padding: 22px 24px 48px;
+  border: 0;
+  border-radius: 0;
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 1.04rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.note-inline-layer {
+  z-index: 3;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.note-inline-line {
+  min-height: 1.65em;
+}
+
+.note-inline-link,
+.note-check-toggle.inline {
+  pointer-events: auto;
+}
+
+.note-inline-link {
   color: var(--brand-dark);
-  font-size: 0.76rem;
-  font-weight: 700;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.14em;
+  border-radius: 4px;
 }
 
-.note-link-strip a:hover {
-  background: rgba(107, 189, 255, 0.2);
+.note-inline-link:hover {
+  background: rgba(107, 189, 255, 0.14);
 }
 
-.note-check-toggle {
-  flex: 0 0 auto;
+.note-check-toggle.inline {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  max-width: min(420px, 64vw);
-  min-height: 32px;
-  padding: 5px 9px 5px 7px;
-  border: 1px solid var(--line);
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  margin: 0 7px 0 0;
+  padding: 0;
+  vertical-align: -2px;
+  border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: transparent;
   color: var(--ink);
   box-shadow: none;
 }
 
-.note-check-toggle:hover {
+.note-check-toggle.inline:hover {
   transform: none;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(107, 189, 255, 0.16);
 }
 
 .note-check-toggle.checked .note-check-circle {
@@ -1204,34 +1210,34 @@ button.ghost {
 }
 
 .note-check-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.8rem;
+  font-size: inherit;
 }
 
-.note-check-toggle.checked .note-check-text {
+.note-check-toggle.checked + .note-check-text {
   color: var(--muted);
   text-decoration: line-through;
 }
 
 .document-editor {
-  grid-row: 5;
-  min-height: 0;
-  height: 100%;
+  z-index: 2;
   resize: none;
-  padding: 22px 24px 48px;
-  border: 0;
-  border-radius: 0;
-  background: var(--surface-strong);
-  color: var(--ink);
-  font-family: ui-serif, Georgia, "Times New Roman", serif;
-  font-size: 1.04rem;
-  line-height: 1.65;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--ink);
 }
 
 .document-editor:focus {
   outline: none;
+}
+
+.document-editor::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.document-editor::selection {
+  background: rgba(107, 189, 255, 0.28);
+  color: transparent;
 }
 
 .tool-shell {
@@ -1896,6 +1902,7 @@ button:disabled {
     grid-template-rows: auto minmax(520px, calc(100vh - 250px));
   }
 
+  .note-inline-layer,
   .document-editor {
     padding: 18px 16px 40px;
   }

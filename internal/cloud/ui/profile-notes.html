@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote Notes</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260519-notes-ui">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260521-inline-note-controls">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -88,16 +88,17 @@
             <button type="button" data-format="link" title="Link" aria-label="Link">Link</button>
           </div>
 
-          <div id="note-link-strip" class="note-link-strip" hidden></div>
-          <div id="note-checklist-strip" class="note-checklist-strip" hidden></div>
-          <textarea id="note-content" class="document-editor" rows="24" spellcheck="true" placeholder="Start writing"></textarea>
+          <div class="document-editor-shell">
+            <div id="note-inline-layer" class="note-inline-layer"></div>
+            <textarea id="note-content" class="document-editor" rows="24" spellcheck="true" placeholder="Start writing"></textarea>
+          </div>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/profile-notes.js?v=20260519-note-history-links" defer></script>
+    <script src="/assets/profile-notes.js?v=20260521-inline-note-controls" defer></script>
     <script src="/assets/admin-nav.js?v=20260504-frame-full-width" defer></script>
   </body>
 </html>

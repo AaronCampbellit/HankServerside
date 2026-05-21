@@ -34,8 +34,7 @@ const els = {
   noteTabs: document.getElementById("note-tabs") || document.getElementById("note-list"),
   noteTitle: document.getElementById("note-title"),
   noteContent: document.getElementById("note-content"),
-  noteLinks: document.getElementById("note-link-strip"),
-  noteChecklist: document.getElementById("note-checklist-strip"),
+  noteInline: document.getElementById("note-inline-layer"),
   saveState: document.getElementById("save-state"),
   lastSaved: document.getElementById("last-saved"),
   deleteButton: document.getElementById("delete-button"),
@@ -272,6 +271,11 @@ function currentMarkdown() {
   return els.noteContent.value.replace(/\r\n/g, "\n");
 }
 
+function setEditorValue(value) {
+  els.noteContent.value = value || "";
+  renderEditorExtras();
+}
+
 function currentEditorHash() {
   return `${state.selectedNoteID}\n${normalizedTitle()}\n${currentMarkdown()}`;
 }
@@ -437,7 +441,7 @@ function clearEditor() {
   state.isSaving = false;
   state.suppressInput = true;
   els.noteTitle.value = "";
-  els.noteContent.value = "";
+  setEditorValue("");
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
   els.deleteButton.disabled = true;
@@ -535,7 +539,7 @@ function fillEditor(note) {
   state.isSaving = false;
   state.suppressInput = true;
   els.noteTitle.value = note.title || "";
-  els.noteContent.value = note.body_markdown || note.content || "";
+  setEditorValue(note.body_markdown || note.content || "");
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
   els.deleteButton.disabled = false;
@@ -919,99 +923,72 @@ function cleanLinkToken(value) {
     .replace(/[>"'`)\]},.;!?]+$/g, "");
 }
 
-function extractNoteLinks(markdown) {
-  const links = [];
-  const seen = new Set();
-  const addLink = (label, rawURL) => {
-    const cleaned = cleanLinkToken(rawURL);
-    if (!cleaned || !isLikelyURL(cleaned)) {
-      return;
-    }
-    const href = normalizeURL(cleaned);
-    if (seen.has(href)) {
-      return;
-    }
-    seen.add(href);
-    links.push({
-      href,
-      label: String(label || cleaned).trim() || href,
-    });
-  };
+function inlineLinkHTML(label, rawURL) {
+  const cleaned = cleanLinkToken(rawURL);
+  if (!cleaned || !isLikelyURL(cleaned)) {
+    return escapeHTML(label || rawURL);
+  }
+  const href = normalizeURL(cleaned);
+  const text = String(label || cleaned).trim() || href;
+  return `<a class="note-inline-link" href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(text)}</a>`;
+}
 
-  const withoutMarkdownLinks = String(markdown || "").replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, label, url) => {
-    addLink(label, url);
-    return " ";
-  });
+function renderBareLinks(text) {
+  const source = String(text || "");
   const barePattern = /\b((?:https?:\/\/|www\.)[^\s<>()]+|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9-]+)+(?:\/[^\s<>()]*)?)/g;
-  for (const match of withoutMarkdownLinks.matchAll(barePattern)) {
-    addLink(match[1], match[1]);
+  let html = "";
+  let lastIndex = 0;
+  for (const match of source.matchAll(barePattern)) {
+    const raw = match[1];
+    const index = match.index || 0;
+    html += escapeHTML(source.slice(lastIndex, index));
+    html += inlineLinkHTML(raw, raw);
+    lastIndex = index + raw.length;
   }
-  return links.slice(0, 12);
+  html += escapeHTML(source.slice(lastIndex));
+  return html;
 }
 
-function renderNoteLinks() {
-  const links = extractNoteLinks(currentMarkdown());
-  els.noteLinks.hidden = links.length === 0;
-  els.noteLinks.innerHTML = "";
-  if (!links.length) {
-    return;
+function renderInlineText(text) {
+  const source = String(text || "");
+  const markdownLinkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  let html = "";
+  let lastIndex = 0;
+  for (const match of source.matchAll(markdownLinkPattern)) {
+    const index = match.index || 0;
+    html += renderBareLinks(source.slice(lastIndex, index));
+    html += inlineLinkHTML(match[1], match[2]);
+    lastIndex = index + match[0].length;
   }
-  const label = document.createElement("span");
-  label.className = "note-link-strip-label";
-  label.textContent = "Links";
-  els.noteLinks.appendChild(label);
-  for (const link of links) {
-    const anchor = document.createElement("a");
-    anchor.href = link.href;
-    anchor.target = "_blank";
-    anchor.rel = "noopener noreferrer";
-    anchor.textContent = link.label;
-    els.noteLinks.appendChild(anchor);
-  }
+  html += renderBareLinks(source.slice(lastIndex));
+  return html || "&nbsp;";
 }
 
-function checklistItemsFromMarkdown(markdown) {
-  return String(markdown || "")
-    .split("\n")
-    .map((line, index) => {
-      const match = line.match(/^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/);
-      if (!match) {
-        return null;
-      }
-      return {
-        lineIndex: index,
-        checked: match[2].toLowerCase() === "x",
-        text: match[4] || "Checklist item",
-      };
-    })
-    .filter(Boolean)
-    .slice(0, 20);
+function renderInlineLine(line, lineIndex) {
+  const checklist = String(line || "").match(/^(\s*)([-*]\s+\[)([ xX])(\]\s+)(.*)$/);
+  if (!checklist) {
+    return renderInlineText(line);
+  }
+  const checked = checklist[3].toLowerCase() === "x";
+  const text = checklist[5] || "Checklist item";
+  return `${escapeHTML(checklist[1])}<button type="button" class="note-check-toggle inline${checked ? " checked" : ""}" data-line-index="${lineIndex}" aria-pressed="${checked ? "true" : "false"}" title="${checked ? "Mark incomplete" : "Mark complete"}"><span class="note-check-circle" aria-hidden="true"></span></button><span class="note-check-text">${renderInlineText(text)}</span>`;
 }
 
-function renderChecklistControls() {
-  const items = checklistItemsFromMarkdown(currentMarkdown());
-  els.noteChecklist.hidden = items.length === 0;
-  els.noteChecklist.innerHTML = "";
-  if (!items.length) {
-    return;
-  }
-  for (const item of items) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `note-check-toggle${item.checked ? " checked" : ""}`;
-    button.innerHTML = `
-      <span class="note-check-circle" aria-hidden="true"></span>
-      <span class="note-check-text">${escapeHTML(item.text)}</span>
-    `;
-    button.setAttribute("aria-pressed", item.checked ? "true" : "false");
-    button.addEventListener("click", () => toggleChecklistLine(item.lineIndex));
-    els.noteChecklist.appendChild(button);
-  }
+function renderInlineEditor() {
+  const lines = currentMarkdown().split("\n");
+  els.noteInline.innerHTML = lines
+    .map((line, index) => `<div class="note-inline-line">${renderInlineLine(line, index)}</div>`)
+    .join("");
+}
+
+function syncEditorScroll() {
+  els.noteInline.scrollTop = els.noteContent.scrollTop;
+  els.noteInline.scrollLeft = els.noteContent.scrollLeft;
 }
 
 function renderEditorExtras() {
-  renderNoteLinks();
-  renderChecklistControls();
+  renderInlineEditor();
+  syncEditorScroll();
 }
 
 function lineRangeForIndex(lines, lineIndex) {
@@ -1127,11 +1104,21 @@ function handleEditorInput() {
 }
 els.noteTitle.addEventListener("input", handleEditorInput);
 els.noteContent.addEventListener("input", handleEditorInput);
+els.noteContent.addEventListener("scroll", syncEditorScroll);
 els.noteContent.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     saveNote({ force: true }).catch((error) => showToast(error.message, true));
   }
+});
+els.noteInline.addEventListener("click", (event) => {
+  const checklistButton = event.target.closest("[data-line-index]");
+  if (!checklistButton) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  toggleChecklistLine(Number(checklistButton.dataset.lineIndex));
 });
 els.formatButtons.forEach((button) => {
   button.addEventListener("mousedown", (event) => {

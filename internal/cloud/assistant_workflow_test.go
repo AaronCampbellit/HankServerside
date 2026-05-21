@@ -28,6 +28,7 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "note list", prompt: "what notes do I have", want: assistantIntentNotesList},
 		{name: "note search", prompt: "find grocery list note", want: assistantIntentNotesSearch},
 		{name: "note append", prompt: "add eggs to the grocery list", want: assistantIntentNotesAppend},
+		{name: "note append work note", prompt: "add call patrick to the work note", want: assistantIntentNotesAppend},
 		{name: "note append typo delimiter", prompt: "add fix hankai conversation output the the hank features note", want: assistantIntentNotesAppend},
 		{name: "note append referenced link", prompt: "https://docs.gitlab.com/install/docker/installation/\nAdd this link to work note", want: assistantIntentNotesAppend},
 		{name: "home assistant on", prompt: "what entities are on", want: assistantIntentHomeAssistantQuery},
@@ -75,6 +76,46 @@ func TestAssistantToolRegistryShape(t *testing.T) {
 	last := assistantToolRegistry[len(assistantToolRegistry)-1]
 	if last.Kind != assistantIntentGeneral {
 		t.Fatalf("last registry tool = %s, want %s fallback", last.Kind, assistantIntentGeneral)
+	}
+}
+
+func TestAssistantNoteRankingPrefersExactTitleThenTitleThenBody(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	results := rankScoredNotes([]domain.UserNote{
+		{
+			ID:        "note_body",
+			NoteID:    "body",
+			Title:     "Personal Reminders",
+			Content:   "Call Patrick about work tomorrow.",
+			PageType:  protocol.NotePageTypeText,
+			UpdatedAt: now.Add(2 * time.Hour),
+		},
+		{
+			ID:        "note_title",
+			NoteID:    "title",
+			Title:     "Work Projects",
+			Content:   "Deployment notes.",
+			PageType:  protocol.NotePageTypeText,
+			UpdatedAt: now.Add(time.Hour),
+		},
+		{
+			ID:        "note_exact",
+			NoteID:    "exact",
+			Title:     "Work",
+			Content:   "Deployment notes.",
+			PageType:  protocol.NotePageTypeText,
+			UpdatedAt: now,
+		},
+	}, "work")
+
+	got := []string{results[0].Note.Title, results[1].Note.Title, results[2].Note.Title}
+	want := []string{"Work", "Work Projects", "Personal Reminders"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ranked notes = %v, want %v", got, want)
+		}
 	}
 }
 
@@ -134,6 +175,36 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 		UpdatedAt:    now.Add(-3 * time.Minute),
 		UpdatedBy:    user.ID,
 	}
+	workProjectsNote := domain.UserNote{
+		ID:           "note_assistant_work_projects",
+		NoteID:       "55555555-5555-5555-8555-555555555555",
+		OwnerUserID:  user.ID,
+		Title:        "Work Projects",
+		Content:      "- planning",
+		BodyMarkdown: "- planning",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now.Add(5 * time.Minute),
+		UpdatedBy:    user.ID,
+	}
+	workBodyNote := domain.UserNote{
+		ID:           "note_assistant_work_body",
+		NoteID:       "66666666-6666-6666-8666-666666666666",
+		OwnerUserID:  user.ID,
+		Title:        "Personal Reminders",
+		Content:      "- work follow up",
+		BodyMarkdown: "- work follow up",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now.Add(6 * time.Minute),
+		UpdatedBy:    user.ID,
+	}
 	sharedNote := domain.UserNote{
 		ID:           "note_assistant_shared",
 		NoteID:       "33333333-3333-3333-3333-333333333333",
@@ -156,6 +227,8 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	must(t, db.UpsertUserNote(ctx, note))
 	must(t, db.UpsertUserNote(ctx, featuresNote))
 	must(t, db.UpsertUserNote(ctx, workNote))
+	must(t, db.UpsertUserNote(ctx, workProjectsNote))
+	must(t, db.UpsertUserNote(ctx, workBodyNote))
 	must(t, db.UpsertUserNote(ctx, sharedNote))
 	must(t, db.AddNoteShare(ctx, domain.NoteShare{
 		NoteID:       sharedNote.ID,
@@ -176,15 +249,15 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateAssistantResponse list: %v", err)
 	}
-	for _, want := range []string{"Grocery List", "Hank Features", "Work", "Shared Checklist"} {
+	for _, want := range []string{"Grocery List", "Hank Features", "Work", "Work Projects", "Personal Reminders", "Shared Checklist"} {
 		if !strings.Contains(listed.Text, want) {
 			t.Fatalf("note list missing %q: %s", want, listed.Text)
 		}
 	}
-	if len(listed.Cards) != 4 {
+	if len(listed.Cards) != 6 {
 		t.Fatalf("note list cards = %#v, want one card per listed note", listed.Cards)
 	}
-	for _, want := range []string{"Grocery List", "Hank Features", "Work", "Shared Checklist"} {
+	for _, want := range []string{"Grocery List", "Hank Features", "Work", "Work Projects", "Personal Reminders", "Shared Checklist"} {
 		if !assistantCardsContainTitle(listed.Cards, want) {
 			t.Fatalf("note list cards missing %q: %#v", want, listed.Cards)
 		}
@@ -250,6 +323,35 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	if !strings.Contains(updatedWork.Content, "- https://docs.gitlab.com/install/docker/installation/") ||
 		strings.Contains(updatedWork.Content, "- this link") {
 		t.Fatalf("work note did not include appended URL: %#v", updatedWork)
+	}
+
+	appendedCall, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "add call patrick to the work note")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse append call: %v", err)
+	}
+	if !strings.Contains(appendedCall.Text, "Added `call patrick` to `Work`") {
+		t.Fatalf("append call text = %q", appendedCall.Text)
+	}
+	updatedWork, err = db.GetUserNoteByID(ctx, workNote.ID)
+	if err != nil {
+		t.Fatalf("GetUserNoteByID work after call: %v", err)
+	}
+	if !strings.Contains(updatedWork.Content, "- call patrick") {
+		t.Fatalf("work note did not include appended call item: %#v", updatedWork)
+	}
+	updatedWorkProjects, err := db.GetUserNoteByID(ctx, workProjectsNote.ID)
+	if err != nil {
+		t.Fatalf("GetUserNoteByID work projects: %v", err)
+	}
+	if strings.Contains(updatedWorkProjects.Content, "- call patrick") {
+		t.Fatalf("work projects note received exact-title append: %#v", updatedWorkProjects)
+	}
+	updatedWorkBody, err := db.GetUserNoteByID(ctx, workBodyNote.ID)
+	if err != nil {
+		t.Fatalf("GetUserNoteByID work body: %v", err)
+	}
+	if strings.Contains(updatedWorkBody.Content, "- call patrick") {
+		t.Fatalf("body-only work note received exact-title append: %#v", updatedWorkBody)
 	}
 }
 
