@@ -14,6 +14,7 @@ type assistantToolRuntime struct {
 	Auth       authContext
 	Settings   domain.AssistantSettings
 	Prompt     string
+	Session    *domain.AssistantSession
 }
 
 type assistantTool struct {
@@ -113,6 +114,18 @@ var assistantToolRegistry = []assistantTool{
 		Execute: executeAssistantFilesSearchTool,
 	},
 	{
+		Kind:        assistantIntentMediaSearch,
+		Description: "Search authorized media downloads through the home agent.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			query, ok := mediaAvailabilityQuery(prompt)
+			if !ok {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentMediaSearch, Query: query}, true
+		},
+		Execute: executeAssistantMediaSearchTool,
+	},
+	{
 		Kind:        assistantIntentGeneral,
 		Description: "Answer from already enabled Hank context when no specific tool matches.",
 		Match: func(prompt string) (assistantIntent, bool) {
@@ -151,6 +164,25 @@ func executeAssistantFilesSearchTool(ctx context.Context, server *Server, runtim
 		return assistantMessageContent{}, err
 	}
 	return server.answerFilePrompt(ctx, runtime.Home, runtime.Settings, runtime.Prompt)
+}
+
+func executeAssistantMediaSearchTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	if !runtime.Settings.FilesEnabled {
+		return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
+	}
+	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
+		if errors.Is(err, errFeaturePermissionDenied) {
+			return assistantMessageContent{Text: "File access is disabled for your Home membership right now."}, nil
+		}
+		return assistantMessageContent{}, err
+	}
+	if intent.Kind == assistantIntentMediaSelection {
+		if intent.MediaSelection == nil {
+			return assistantMessageContent{Text: "I need a media option number or title from the last result list."}, nil
+		}
+		return server.answerMediaSelection(ctx, runtime.Home, *intent.MediaSelection)
+	}
+	return server.answerMediaSearch(ctx, runtime.Home, intent.Query)
 }
 
 func executeAssistantNotesAppendTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {

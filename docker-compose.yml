@@ -141,6 +141,7 @@ services:
     depends_on:
       - cloud
     volumes:
+      - ./.env.agent:/app/.env.agent
       - hank_agent_files:/srv/hank/files
       - hank_agent_notes:/srv/hank/notes
     command: ["/usr/local/bin/hank-remote-agent"]

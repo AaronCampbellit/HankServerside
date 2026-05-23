@@ -114,6 +114,7 @@ function agentEnvFile(payload, home) {
     `HANK_REMOTE_AGENT_ID=${dotenvValue(payload.agent_id || agentIDFromHomeName(home?.name))}`,
     `HANK_REMOTE_AGENT_TOKEN=${dotenvValue(payload.token)}`,
     `HANK_REMOTE_AGENT_HOME_NAME=${dotenvValue(home?.name || "Home")}`,
+    "HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent",
     "",
     "# Optional Home Assistant connection.",
     "HANK_REMOTE_HA_BASE_URL=http://homeassistant:8123",
@@ -129,6 +130,13 @@ function agentEnvFile(payload, home) {
     "",
     "HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files",
     "HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes",
+    "",
+    "# Optional media download workflow. Credentials can be edited later from AI Settings.",
+    "HANK_REMOTE_MEDIA_GRAMATON_ENABLED=false",
+    "HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=https://gramaton.io",
+    "HANK_REMOTE_MEDIA_GRAMATON_USERNAME=",
+    "HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=",
+    "HANK_REMOTE_MEDIA_DESTINATION_PATH=",
   ].join("\n");
 }
 

@@ -53,6 +53,9 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if !strings.Contains(defaults.Settings.SystemPrompt, "You are HankAI") || !strings.Contains(defaults.Settings.SystemPrompt, "privacy boundary") {
 		t.Fatalf("default prompt does not include harness guidance: %q", defaults.Settings.SystemPrompt)
 	}
+	if toolStatus(defaults.Tools, "media_download") != "Agent setup needed" {
+		t.Fatalf("default media tool status = %#v", defaults.Tools)
+	}
 	legacySettings := normalizeAssistantSettings(domain.AssistantSettings{SystemPrompt: legacyAssistantSystemPrompt})
 	if legacySettings.SystemPrompt != defaultAssistantSystemPrompt {
 		t.Fatalf("legacy prompt was not upgraded")
@@ -77,12 +80,24 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if updated.Settings.SystemPrompt != "Use only the supplied Hank test context." || updated.Settings.MaxContextItems != maxAssistantContextItems {
 		t.Fatalf("prompt/context settings = %#v", updated.Settings)
 	}
+	if toolStatus(updated.Tools, "media_download") != "Files off" {
+		t.Fatalf("media tool status after disabling files = %#v", updated.Tools)
+	}
 
 	var persisted assistantSettingsResponse
 	requestJSON(t, testServer, "harness-settings-token", http.MethodGet, "/v1/home/assistant/settings", nil, &persisted)
 	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems {
 		t.Fatalf("persisted settings = %#v", persisted.Settings)
 	}
+}
+
+func toolStatus(tools []assistantSettingsTool, key string) string {
+	for _, tool := range tools {
+		if tool.Key == key {
+			return tool.Status
+		}
+	}
+	return ""
 }
 
 func TestAssistantSessionCanBeDeleted(t *testing.T) {

@@ -1,0 +1,151 @@
+package protocol
+
+import "time"
+
+const (
+	CommandMediaSearch         = "media.search"
+	CommandMediaPlanDownload   = "media.plan_download"
+	CommandMediaDownloadStart  = "media.download_start"
+	CommandMediaDownloadStatus = "media.download_status"
+	CommandMediaSettingsStatus = "media.settings_status"
+	CommandMediaSettingsApply  = "media.settings_apply"
+	CommandMediaDownloadJobs   = "media.download_jobs"
+	CommandMediaDownloadCancel = "media.download_cancel"
+
+	MediaTypeMovie  = "movie"
+	MediaTypeSeries = "series"
+
+	MediaJobStatusQueued    = "queued"
+	MediaJobStatusRunning   = "running"
+	MediaJobStatusCompleted = "completed"
+	MediaJobStatusFailed    = "failed"
+	MediaJobStatusCancelled = "cancelled"
+)
+
+type MediaSearchRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type MediaSettings struct {
+	Enabled             bool   `json:"enabled"`
+	BaseURL             string `json:"base_url"`
+	Username            string `json:"username,omitempty"`
+	HasPassword         bool   `json:"has_password"`
+	DestinationPath     string `json:"destination_path,omitempty"`
+	PreferredQuality    string `json:"preferred_quality"`
+	RequireConfirmation bool   `json:"require_confirmation"`
+}
+
+type MediaSettingsStatusRequest struct{}
+
+type MediaSettingsStatusResponse struct {
+	Settings MediaSettings            `json:"settings"`
+	Jobs     []MediaDownloadJobStatus `json:"jobs"`
+}
+
+type MediaSettingsApplyRequest struct {
+	Settings MediaSettings `json:"settings"`
+	Password string        `json:"password,omitempty"`
+	Persist  bool          `json:"persist"`
+}
+
+type MediaSettingsApplyResponse struct {
+	Settings MediaSettings `json:"settings"`
+}
+
+type MediaSearchResult struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Year       int      `json:"year,omitempty"`
+	Type       string   `json:"type"`
+	Summary    string   `json:"summary,omitempty"`
+	Rating     string   `json:"rating,omitempty"`
+	Genres     []string `json:"genres,omitempty"`
+	PagePath   string   `json:"page_path"`
+	SearchText string   `json:"search_text,omitempty"`
+}
+
+type MediaSearchResponse struct {
+	Query   string              `json:"query"`
+	Results []MediaSearchResult `json:"results"`
+}
+
+type MediaPlanDownloadRequest struct {
+	Selection MediaSearchResult `json:"selection"`
+}
+
+type MediaDownloadItem struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	MediaType   string `json:"media_type"`
+	Season      int    `json:"season,omitempty"`
+	Episode     int    `json:"episode,omitempty"`
+	Quality     string `json:"quality,omitempty"`
+	Filename    string `json:"filename"`
+	PagePath    string `json:"page_path"`
+	Existing    bool   `json:"existing,omitempty"`
+	DownloadOK  bool   `json:"download_ok"`
+	ErrorReason string `json:"error_reason,omitempty"`
+}
+
+type MediaDownloadPlan struct {
+	Selection             MediaSearchResult   `json:"selection"`
+	Items                 []MediaDownloadItem `json:"items"`
+	ItemCount             int                 `json:"item_count"`
+	PreferredQualityCount int                 `json:"preferred_quality_count"`
+	FallbackQualityCount  int                 `json:"fallback_quality_count"`
+	MissingLinkCount      int                 `json:"missing_link_count"`
+	ExistingCount         int                 `json:"existing_count"`
+	DestinationPath       string              `json:"destination_path"`
+}
+
+type MediaPlanDownloadResponse struct {
+	Plan MediaDownloadPlan `json:"plan"`
+}
+
+type MediaDownloadStartRequest struct {
+	Selection MediaSearchResult `json:"selection"`
+}
+
+type MediaDownloadStartResponse struct {
+	Job MediaDownloadJobStatus `json:"job"`
+}
+
+type MediaDownloadStatusRequest struct {
+	JobID string `json:"job_id"`
+}
+
+type MediaDownloadStatusResponse struct {
+	Job MediaDownloadJobStatus `json:"job"`
+}
+
+type MediaDownloadJobsRequest struct{}
+
+type MediaDownloadJobsResponse struct {
+	Jobs []MediaDownloadJobStatus `json:"jobs"`
+}
+
+type MediaDownloadCancelRequest struct {
+	JobID string `json:"job_id"`
+}
+
+type MediaDownloadCancelResponse struct {
+	Job MediaDownloadJobStatus `json:"job"`
+}
+
+type MediaDownloadJobStatus struct {
+	JobID          string    `json:"job_id"`
+	Status         string    `json:"status"`
+	Title          string    `json:"title"`
+	TotalCount     int       `json:"total_count"`
+	CompletedCount int       `json:"completed_count"`
+	SkippedCount   int       `json:"skipped_count"`
+	FailedCount    int       `json:"failed_count"`
+	CurrentIndex   int       `json:"current_index,omitempty"`
+	CurrentFile    string    `json:"current_file,omitempty"`
+	BytesWritten   int64     `json:"bytes_written,omitempty"`
+	ErrorMessage   string    `json:"error_message,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	CompletedAt    time.Time `json:"completed_at,omitempty"`
+}

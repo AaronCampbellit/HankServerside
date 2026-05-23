@@ -10,6 +10,7 @@ import (
 	"github.com/dropfile/hankremote/internal/agent"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
+	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
 	"github.com/dropfile/hankremote/internal/config"
 )
@@ -34,9 +35,17 @@ func main() {
 			Domain:   cfg.SMB.Domain,
 		},
 	})
+	media := agentmedia.New(agentmedia.Config{
+		Enabled:         cfg.Media.GramatonEnabled,
+		BaseURL:         cfg.Media.GramatonBaseURL,
+		Username:        cfg.Media.Username,
+		Password:        cfg.Media.Password,
+		DestinationPath: cfg.Media.DestinationPath,
+		EnvPath:         cfg.ConfigPath,
+	}, files, logger)
 	notes := agentnotes.New(cfg.NotesRoot)
 
-	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, notes, logger)
+	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, media, notes, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

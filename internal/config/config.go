@@ -74,6 +74,7 @@ type Agent struct {
 	SMB        SMB
 	FilesRoot  string
 	NotesRoot  string
+	Media      Media
 }
 
 type HomeAssistant struct {
@@ -88,6 +89,14 @@ type SMB struct {
 	Username string
 	Password string
 	Domain   string
+}
+
+type Media struct {
+	GramatonEnabled bool
+	GramatonBaseURL string
+	Username        string
+	Password        string
+	DestinationPath string
 }
 
 func LoadCloud() (Cloud, error) {
@@ -181,6 +190,13 @@ func LoadAgent() (Agent, error) {
 		ConfigPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_CONFIG_PATH")),
 		FilesRoot:  strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
 		NotesRoot:  strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
+		Media: Media{
+			GramatonEnabled: boolEnvOrDefault("HANK_REMOTE_MEDIA_GRAMATON_ENABLED", false),
+			GramatonBaseURL: strings.TrimRight(envOrDefault("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL", "https://gramaton.io"), "/"),
+			Username:        strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME")),
+			Password:        os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"),
+			DestinationPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_DESTINATION_PATH")),
+		},
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),
 			Token:   strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_TOKEN")),

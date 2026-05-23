@@ -179,6 +179,7 @@ Use `docker compose --env-file .env.cloud ...` for deployment commands so Compos
 
 ```env
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
+HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent
 ```
 
 If host port `18080` is already taken, set this in `.env.cloud` and keep the agent URL unchanged:

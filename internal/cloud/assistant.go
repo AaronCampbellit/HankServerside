@@ -43,16 +43,20 @@ type assistantMessageAttachment struct {
 }
 
 type assistantResultCard struct {
-	Kind        string     `json:"kind"`
-	Title       string     `json:"title"`
-	Summary     string     `json:"summary"`
-	ActionTitle string     `json:"action_title"`
-	NoteID      string     `json:"note_id,omitempty"`
-	EventID     string     `json:"event_id,omitempty"`
-	TargetDate  *time.Time `json:"target_date,omitempty"`
-	Path        string     `json:"path,omitempty"`
-	IsDirectory bool       `json:"is_directory,omitempty"`
-	SearchText  string     `json:"search_text,omitempty"`
+	Kind          string     `json:"kind"`
+	Title         string     `json:"title"`
+	Summary       string     `json:"summary"`
+	ActionTitle   string     `json:"action_title"`
+	NoteID        string     `json:"note_id,omitempty"`
+	EventID       string     `json:"event_id,omitempty"`
+	TargetDate    *time.Time `json:"target_date,omitempty"`
+	Path          string     `json:"path,omitempty"`
+	IsDirectory   bool       `json:"is_directory,omitempty"`
+	SearchText    string     `json:"search_text,omitempty"`
+	MediaOptionID string     `json:"media_option_id,omitempty"`
+	MediaType     string     `json:"media_type,omitempty"`
+	Year          int        `json:"year,omitempty"`
+	JobID         string     `json:"job_id,omitempty"`
 }
 
 type assistantClientToolRequest struct {
@@ -65,6 +69,7 @@ type assistantPendingAction struct {
 	NoteAppend       *assistantPendingNoteAppend       `json:"note_append,omitempty"`
 	CalendarCreate   *assistantPendingCalendarCreate   `json:"calendar_create,omitempty"`
 	AttachmentCommit *assistantPendingAttachmentCommit `json:"attachment_commit,omitempty"`
+	MediaDownload    *assistantPendingMediaDownload    `json:"media_download,omitempty"`
 }
 
 type assistantPendingNoteAppend struct {
@@ -97,6 +102,19 @@ type assistantPendingAttachmentCommit struct {
 	Confirmation    string                     `json:"confirmation_message"`
 }
 
+type assistantPendingMediaDownload struct {
+	Selection             protocol.MediaSearchResult `json:"selection"`
+	Title                 string                     `json:"title"`
+	MediaType             string                     `json:"media_type"`
+	ItemCount             int                        `json:"item_count"`
+	PreferredQualityCount int                        `json:"preferred_quality_count"`
+	FallbackQualityCount  int                        `json:"fallback_quality_count"`
+	MissingLinkCount      int                        `json:"missing_link_count"`
+	ExistingCount         int                        `json:"existing_count"`
+	DestinationPath       string                     `json:"destination_path"`
+	Confirmation          string                     `json:"confirmation_message"`
+}
+
 type assistantPendingActionSummary struct {
 	Kind         string                         `json:"kind"`
 	Title        string                         `json:"title"`
@@ -125,13 +143,16 @@ const (
 	assistantIntentNotesSearch        assistantIntentKind = "notes.search"
 	assistantIntentNotesAppend        assistantIntentKind = "notes.append"
 	assistantIntentFilesSearch        assistantIntentKind = "files.search"
+	assistantIntentMediaSearch        assistantIntentKind = "media.search"
+	assistantIntentMediaSelection     assistantIntentKind = "media.selection"
 	assistantIntentHomeAssistantQuery assistantIntentKind = "homeassistant.query"
 	assistantIntentProjectDocs        assistantIntentKind = "project_docs"
 )
 
 type assistantIntent struct {
-	Kind  assistantIntentKind
-	Query string
+	Kind           assistantIntentKind
+	Query          string
+	MediaSelection *assistantResultCard
 }
 
 type assistantRunResponse struct {
@@ -182,6 +203,12 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 		return true
 	case len(parts) == 2 && parts[1] == "settings":
 		s.handleAssistantSettings(w, r, home, auth)
+		return true
+	case len(parts) == 2 && parts[1] == "media-settings":
+		s.handleAssistantMediaSettings(w, r, home, membership)
+		return true
+	case len(parts) == 4 && parts[1] == "media-jobs" && parts[3] == "cancel":
+		s.handleAssistantMediaJobCancel(w, r, home, membership, parts[2])
 		return true
 	case len(parts) == 4 && parts[1] == "sessions" && parts[3] == "messages":
 		s.handleAssistantSessionMessages(w, r, home, membership, auth, parts[2])
@@ -790,7 +817,7 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 		}, nil
 	}
 
-	assistantContent, err := s.generateAssistantResponse(ctx, home, membership, auth, settings, content)
+	assistantContent, err := s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, &session, content)
 	if err != nil {
 		return assistantRunResponse{}, err
 	}
@@ -1321,14 +1348,30 @@ func (s *Server) touchAssistantSessionAndMemory(ctx context.Context, session dom
 }
 
 func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
+	return s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, nil, prompt)
+}
+
+func (s *Server) generateAssistantResponseForSession(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, session *domain.AssistantSession, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
 	tool, intent := resolveAssistantTool(prompt)
+	if session != nil {
+		if selected, ok := s.resolvePreviousMediaSelection(ctx, session.ID, prompt); ok {
+			intent = assistantIntent{Kind: assistantIntentMediaSelection, MediaSelection: &selected}
+			for _, candidate := range assistantToolRegistry {
+				if candidate.Kind == assistantIntentMediaSearch {
+					tool = candidate
+					break
+				}
+			}
+		}
+	}
 	runtime := assistantToolRuntime{
 		Home:       home,
 		Membership: membership,
 		Auth:       auth,
 		Settings:   settings,
 		Prompt:     prompt,
+		Session:    session,
 	}
 	s.refreshAssistantIndex(ctx, runtime, tool, intent)
 	if tool.Execute == nil {
@@ -2280,6 +2323,54 @@ func (s *Server) executeConfirmedAssistantAction(
 			RequiresClientTools: true,
 			ClientToolRequest:   &pending.AttachmentCommit.ToolRequest,
 		}, nil
+	case "media_download":
+		if pending.MediaDownload == nil {
+			return assistantRunResponse{}, errors.New("pending media download is missing")
+		}
+		response, err := s.startMediaDownload(ctx, session.HomeID, pending.MediaDownload.Selection)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		job := response.Job
+		content := assistantMessageContent{
+			Text: fmt.Sprintf("Started the media download job for `%s`.", pending.MediaDownload.Title),
+			Cards: []assistantResultCard{
+				{
+					Kind:        "media",
+					Title:       pending.MediaDownload.Title,
+					Summary:     fmt.Sprintf("Job %s is %s. %d item(s) queued for the Media share root.", job.JobID, job.Status, job.TotalCount),
+					ActionTitle: "Downloading",
+					Path:        pending.MediaDownload.Selection.PagePath,
+					MediaType:   pending.MediaDownload.MediaType,
+					JobID:       job.JobID,
+				},
+			},
+		}
+		message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, content)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		completedAt := time.Now().UTC()
+		run.State = assistantStateCompleted
+		run.RequiresConfirmation = false
+		run.PendingActionJSON = ""
+		run.MessageID = message.ID
+		run.CompletedAt = &completedAt
+		if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, err
+		}
+		settings, err := s.currentAssistantSettings(ctx, session.HomeID, userID)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+			return assistantRunResponse{}, err
+		}
+		return assistantRunResponse{
+			ID:               run.ID,
+			State:            run.State,
+			AssistantMessage: &message,
+		}, nil
 	default:
 		return assistantRunResponse{}, fmt.Errorf("unsupported pending action kind %q", pending.Kind)
 	}
@@ -2508,6 +2599,34 @@ func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *as
 			Title:        title,
 			Summary:      summary,
 			Confirmation: action.Confirmation,
+			Details:      details,
+			Destructive:  false,
+		}
+	case "media_download":
+		if pending.MediaDownload == nil {
+			return nil
+		}
+		action := pending.MediaDownload
+		details := []assistantPendingActionDetail{
+			{Label: "Title", Value: action.Title},
+			{Label: "Items", Value: fmt.Sprintf("%d", action.ItemCount)},
+			{Label: "Destination", Value: defaultString(action.DestinationPath, "Media root")},
+			{Label: "1080p", Value: fmt.Sprintf("%d", action.PreferredQualityCount)},
+		}
+		if action.FallbackQualityCount > 0 {
+			details = append(details, assistantPendingActionDetail{Label: "720p fallbacks", Value: fmt.Sprintf("%d", action.FallbackQualityCount)})
+		}
+		if action.MissingLinkCount > 0 {
+			details = append(details, assistantPendingActionDetail{Label: "Missing links", Value: fmt.Sprintf("%d", action.MissingLinkCount)})
+		}
+		if action.ExistingCount > 0 {
+			details = append(details, assistantPendingActionDetail{Label: "Already present", Value: fmt.Sprintf("%d", action.ExistingCount)})
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        "Download media",
+			Summary:      "Hank will start an agent-side background download after you approve it.",
+			Confirmation: defaultString(action.Confirmation, fmt.Sprintf("Confirm downloading `%s`.", action.Title)),
 			Details:      details,
 			Destructive:  false,
 		}

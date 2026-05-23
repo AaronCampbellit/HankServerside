@@ -42,7 +42,7 @@
       href: "/dashboard/assistant-settings",
       label: "AI Settings",
       detail: "OpenAI account linking and Hank Assistant setup.",
-      keywords: ["ai", "assistant", "openai", "chatgpt", "oauth", "link openai", "relink", "subscription", "settings"],
+      keywords: ["ai", "assistant", "openai", "chatgpt", "oauth", "link openai", "relink", "subscription", "settings", "tools", "workflows", "media downloads"],
     },
     {
       href: "/dashboard/profile-notes",

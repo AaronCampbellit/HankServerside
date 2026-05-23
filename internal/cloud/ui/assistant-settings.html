@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote AI Settings</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260521-inline-note-controls">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260523-hankai-tool-tabs">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -73,53 +73,120 @@
             <h2>HankAI Harness</h2>
             <span id="assistant-settings-pill" class="pill">Loading</span>
           </div>
+          <div class="settings-subtabs" role="tablist" aria-label="HankAI settings sections">
+            <button class="settings-subtab active" type="button" role="tab" aria-selected="true" aria-controls="assistant-settings-sources" data-settings-tab="sources">Sources</button>
+            <button class="settings-subtab" type="button" role="tab" aria-selected="false" aria-controls="assistant-settings-tools" data-settings-tab="tools">Tools &amp; Workflows</button>
+            <button class="settings-subtab" type="button" role="tab" aria-selected="false" aria-controls="assistant-settings-prompt" data-settings-tab="prompt">Prompt</button>
+          </div>
           <form id="assistant-settings-form" class="settings-form">
-            <div class="settings-block">
-              <div class="settings-block-head">
-                <h3>Hank Sources</h3>
-                <span class="mini-pill">Used on the next chat</span>
-              </div>
-              <div class="toggle-list">
-                <label class="toggle-field">
-                  <input id="harness-profile-notes-enabled" type="checkbox">
-                  <span>Personal notes</span>
-                </label>
-                <label class="toggle-field">
-                  <input id="harness-home-notes-enabled" type="checkbox">
-                  <span>Shared notes</span>
-                </label>
-                <label class="toggle-field">
-                  <input id="harness-files-enabled" type="checkbox">
-                  <span>Files</span>
-                </label>
-                <label class="toggle-field">
-                  <input id="harness-calendar-enabled" type="checkbox">
-                  <span>Calendar</span>
-                </label>
-                <label class="toggle-field">
-                  <input id="harness-homeassistant-enabled" type="checkbox">
-                  <span>Home Assistant</span>
-                </label>
-                <label class="toggle-field">
-                  <input id="harness-project-docs-enabled" type="checkbox">
-                  <span>Project docs</span>
-                </label>
-                <label class="toggle-field">
-                  <input id="harness-conversations-enabled" type="checkbox">
-                  <span>Past conversations</span>
-                </label>
+            <div id="assistant-settings-sources" class="settings-tab-panel" role="tabpanel" data-settings-panel="sources">
+              <div class="settings-block">
+                <div class="settings-block-head">
+                  <h3>Hank Sources</h3>
+                  <span class="mini-pill">Used on the next chat</span>
+                </div>
+                <div class="toggle-list">
+                  <label class="toggle-field">
+                    <input id="harness-profile-notes-enabled" type="checkbox">
+                    <span>Personal notes</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="harness-home-notes-enabled" type="checkbox">
+                    <span>Shared notes</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="harness-files-enabled" type="checkbox">
+                    <span>Files</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="harness-calendar-enabled" type="checkbox">
+                    <span>Calendar</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="harness-homeassistant-enabled" type="checkbox">
+                    <span>Home Assistant</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="harness-project-docs-enabled" type="checkbox">
+                    <span>Project docs</span>
+                  </label>
+                  <label class="toggle-field">
+                    <input id="harness-conversations-enabled" type="checkbox">
+                    <span>Past conversations</span>
+                  </label>
+                </div>
               </div>
             </div>
 
-            <div class="settings-block">
+            <div id="assistant-settings-tools" class="settings-tab-panel" role="tabpanel" data-settings-panel="tools" hidden>
               <div class="settings-block-head">
-                <h3>Prompt</h3>
-                <span class="mini-pill">System message</span>
+                <h3>Tools &amp; Workflows</h3>
+                <span class="mini-pill">Agent-backed</span>
               </div>
-              <label class="setting-field" for="harness-system-prompt">
-                <span>System prompt</span>
-                <textarea id="harness-system-prompt" rows="7" spellcheck="true"></textarea>
-              </label>
+              <div id="assistant-tools-output" class="tool-settings-grid"></div>
+              <div class="settings-block">
+                <div class="settings-block-head">
+                  <h3>Media Download Workflow</h3>
+                  <span id="media-workflow-pill" class="mini-pill">Checking</span>
+                </div>
+                <div class="toggle-list single-toggle-list">
+                  <label class="toggle-field">
+                    <input id="media-workflow-enabled" type="checkbox">
+                    <span>Enable Gramaton source</span>
+                  </label>
+                </div>
+                <div class="settings-grid media-settings-grid">
+                  <label class="setting-field" for="media-gramaton-base-url">
+                    <span>Gramaton URL</span>
+                    <input id="media-gramaton-base-url" type="url" autocomplete="off" placeholder="https://gramaton.io">
+                  </label>
+                  <label class="setting-field" for="media-gramaton-username">
+                    <span>Username</span>
+                    <input id="media-gramaton-username" type="email" autocomplete="username">
+                  </label>
+                  <label class="setting-field" for="media-gramaton-password">
+                    <span>Password</span>
+                    <input id="media-gramaton-password" type="password" autocomplete="new-password" placeholder="Leave unchanged">
+                  </label>
+                  <label class="setting-field" for="media-destination-path">
+                    <span>Destination inside Media share</span>
+                    <input id="media-destination-path" type="text" autocomplete="off" placeholder="Media root">
+                  </label>
+                  <label class="setting-field" for="media-preferred-quality">
+                    <span>Preferred quality</span>
+                    <input id="media-preferred-quality" type="text" value="1080p, fallback 720p" disabled>
+                  </label>
+                  <label class="setting-field" for="media-confirmation-required">
+                    <span>Confirmation</span>
+                    <input id="media-confirmation-required" type="text" value="Required before downloads" disabled>
+                  </label>
+                </div>
+                <div class="actions wrap">
+                  <button id="save-media-settings-button" type="button">Save Media Workflow</button>
+                  <button id="refresh-media-settings-button" type="button" class="secondary">Refresh Jobs</button>
+                </div>
+                <div id="media-workflow-meta" class="meta"></div>
+              </div>
+              <div class="settings-block">
+                <div class="settings-block-head">
+                  <h3>Running Media Jobs</h3>
+                  <span class="mini-pill">Agent status</span>
+                </div>
+                <div id="media-jobs-output" class="card-list empty-state">Checking media jobs.</div>
+              </div>
+            </div>
+
+            <div id="assistant-settings-prompt" class="settings-tab-panel" role="tabpanel" data-settings-panel="prompt" hidden>
+              <div class="settings-block">
+                <div class="settings-block-head">
+                  <h3>Prompt</h3>
+                  <span class="mini-pill">System message</span>
+                </div>
+                <label class="setting-field" for="harness-system-prompt">
+                  <span>System prompt</span>
+                  <textarea id="harness-system-prompt" rows="7" spellcheck="true"></textarea>
+                </label>
+              </div>
             </div>
 
             <div class="settings-actions">

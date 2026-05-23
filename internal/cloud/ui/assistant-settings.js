@@ -3,6 +3,7 @@ const state = {
   status: null,
   assistant: null,
   settings: null,
+  media: null,
   statusTimer: null,
 };
 
@@ -18,7 +19,20 @@ const els = {
   refreshButton: document.getElementById("refresh-button"),
   assistantSettingsPill: document.getElementById("assistant-settings-pill"),
   assistantSettingsForm: document.getElementById("assistant-settings-form"),
+  settingsTabButtons: Array.from(document.querySelectorAll("[data-settings-tab]")),
+  settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
   assistantHarnessOutput: document.getElementById("assistant-harness-output"),
+  assistantToolsOutput: document.getElementById("assistant-tools-output"),
+  mediaWorkflowPill: document.getElementById("media-workflow-pill"),
+  mediaWorkflowEnabled: document.getElementById("media-workflow-enabled"),
+  mediaGramatonBaseURL: document.getElementById("media-gramaton-base-url"),
+  mediaGramatonUsername: document.getElementById("media-gramaton-username"),
+  mediaGramatonPassword: document.getElementById("media-gramaton-password"),
+  mediaDestinationPath: document.getElementById("media-destination-path"),
+  mediaWorkflowMeta: document.getElementById("media-workflow-meta"),
+  saveMediaSettingsButton: document.getElementById("save-media-settings-button"),
+  refreshMediaSettingsButton: document.getElementById("refresh-media-settings-button"),
+  mediaJobsOutput: document.getElementById("media-jobs-output"),
   harnessProfileNotesEnabled: document.getElementById("harness-profile-notes-enabled"),
   harnessHomeNotesEnabled: document.getElementById("harness-home-notes-enabled"),
   harnessFilesEnabled: document.getElementById("harness-files-enabled"),
@@ -47,7 +61,7 @@ async function api(path, options = {}) {
 }
 
 function escapeHTML(value) {
-  return String(value || "")
+  return String(value == null ? "" : value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -57,6 +71,14 @@ function escapeHTML(value) {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function showToast(message, isError = false) {
@@ -169,6 +191,7 @@ function renderAssistantSettings() {
   const settings = payload.settings || {};
   const defaults = payload.defaults || {};
   const sources = payload.sources || [];
+  const tools = payload.tools || [];
   const enabledSources = sources.filter((source) => source.enabled);
 
   els.assistantSettingsPill.textContent = enabledSources.length ? `${enabledSources.length} sources` : "No sources";
@@ -182,6 +205,8 @@ function renderAssistantSettings() {
   els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
   els.harnessConversationsEnabled.checked = settings.conversations_enabled !== false;
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
+  renderToolSettings(tools);
+  renderMediaWorkflowSettings();
   const index = state.assistant?.index || {};
 
   els.assistantHarnessOutput.className = "card-list";
@@ -211,6 +236,132 @@ function renderAssistantSettings() {
   `;
 }
 
+function renderToolSettings(tools) {
+  const fallbackTools = [
+    {
+      label: "Files",
+      enabled: els.harnessFilesEnabled.checked,
+      status: els.harnessFilesEnabled.checked ? "Ready" : "Off",
+      description: "Search file names and route approved file work through the home agent.",
+    },
+    {
+      label: "Media Downloads",
+      enabled: false,
+      status: els.harnessFilesEnabled.checked ? "Agent setup needed" : "Files off",
+      description: "Search authorized media sources, prepare a confirmed download plan, and save approved files to the configured Media destination.",
+      requirements: ["Files enabled", "Media source enabled on the home agent", "Agent file backend pointed at the Media share"],
+    },
+  ];
+  const cards = (tools.length ? tools : fallbackTools).map((tool) => {
+    const statusClass = tool.enabled ? "status-chip" : "status-chip offline";
+    const requirements = Array.isArray(tool.requirements) && tool.requirements.length
+      ? `<div class="meta">${tool.requirements.map(escapeHTML).join(" &middot; ")}</div>`
+      : "";
+    return `
+      <article class="tool-setting-card">
+        <div class="tool-setting-head">
+          <div class="card-title">${escapeHTML(tool.label)}</div>
+          <span class="${statusClass}">${escapeHTML(tool.status || (tool.enabled ? "Ready" : "Off"))}</span>
+        </div>
+        <div class="meta">${escapeHTML(tool.description || "")}</div>
+        ${requirements}
+      </article>
+    `;
+  }).join("");
+  els.assistantToolsOutput.innerHTML = cards || `
+    <article class="tool-setting-card">
+      <div class="tool-setting-head">
+        <div class="card-title">No tools configured</div>
+        <span class="status-chip offline">Off</span>
+      </div>
+      <div class="meta">Enable Hank sources before using agent-backed workflows.</div>
+    </article>
+  `;
+}
+
+function renderMediaWorkflowSettings() {
+  const payload = state.media || {};
+  const settings = payload.settings || {};
+  const online = payload.online === true;
+  const canEdit = payload.can_edit === true;
+  const hasPassword = settings.has_password === true;
+  const enabled = settings.enabled === true;
+  const disabled = !online || !canEdit;
+
+  els.mediaWorkflowPill.textContent = online ? (enabled ? "Enabled" : "Configured Off") : "Agent Offline";
+  els.mediaWorkflowPill.className = online && enabled ? "status-chip" : "status-chip offline";
+  els.mediaWorkflowEnabled.checked = enabled;
+  els.mediaGramatonBaseURL.value = settings.base_url || "https://gramaton.io";
+  els.mediaGramatonUsername.value = settings.username || "";
+  els.mediaDestinationPath.value = settings.destination_path || "";
+  els.mediaGramatonPassword.placeholder = hasPassword ? "Leave unchanged" : "Required to enable";
+  els.mediaWorkflowMeta.textContent = payload.error
+    ? payload.error
+    : `Destination resolves under ${settings.destination_path ? `Media root/${settings.destination_path}` : "Media root"}. 1080p is preferred and 720p is used only as fallback.`;
+
+  [
+    els.mediaWorkflowEnabled,
+    els.mediaGramatonBaseURL,
+    els.mediaGramatonUsername,
+    els.mediaGramatonPassword,
+    els.mediaDestinationPath,
+    els.saveMediaSettingsButton,
+  ].forEach((element) => {
+    element.disabled = disabled;
+  });
+  els.refreshMediaSettingsButton.disabled = !online;
+  renderMediaJobs(payload.jobs || []);
+}
+
+function renderMediaJobs(jobs) {
+  if (!state.media?.online) {
+    els.mediaJobsOutput.className = "card-list empty-state";
+    els.mediaJobsOutput.textContent = state.media?.error || "The home agent is offline.";
+    return;
+  }
+  if (!jobs.length) {
+    els.mediaJobsOutput.className = "card-list empty-state";
+    els.mediaJobsOutput.textContent = "No media jobs reported.";
+    return;
+  }
+  els.mediaJobsOutput.className = "card-list";
+  els.mediaJobsOutput.innerHTML = jobs.map((job) => {
+    const status = String(job.status || "unknown");
+    const active = status === "queued" || status === "running";
+    const statusClass = active || status === "completed" ? "status-chip" : "status-chip offline";
+    const current = job.current_file ? `<div class="meta">Current: ${escapeHTML(job.current_file)} (${formatBytes(job.bytes_written)})</div>` : "";
+    return `
+      <article class="card media-job-card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">${escapeHTML(job.title || job.job_id || "Media job")}</div>
+            <div class="media-job-meta">
+              <span>${escapeHTML(job.completed_count || 0)}/${escapeHTML(job.total_count || 0)} complete</span>
+              <span>${escapeHTML(job.skipped_count || 0)} skipped</span>
+              <span>${escapeHTML(job.failed_count || 0)} failed</span>
+            </div>
+          </div>
+          <span class="${statusClass}">${escapeHTML(status)}</span>
+        </div>
+        ${current}
+        ${job.error_message ? `<div class="meta">${escapeHTML(job.error_message)}</div>` : ""}
+        ${active ? `<div class="actions wrap"><button type="button" class="secondary" data-cancel-media-job="${escapeHTML(job.job_id)}">Cancel Job</button></div>` : ""}
+      </article>
+    `;
+  }).join("");
+}
+
+function setSettingsTab(nextTab) {
+  els.settingsTabButtons.forEach((button) => {
+    const active = button.dataset.settingsTab === nextTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  els.settingsPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== nextTab;
+  });
+}
+
 function assistantSettingsFormPayload() {
   return {
     profile_notes_enabled: els.harnessProfileNotesEnabled.checked,
@@ -225,14 +376,22 @@ function assistantSettingsFormPayload() {
 }
 
 async function loadStatus() {
-  const [status, assistant, settings] = await Promise.all([
+  const [status, assistant, settings, media] = await Promise.all([
     api("/v1/oauth/openai/status"),
     api("/v1/home/assistant/status"),
     api("/v1/home/assistant/settings"),
+    api("/v1/home/assistant/media-settings").catch((error) => ({
+      online: false,
+      can_edit: false,
+      settings: { base_url: "https://gramaton.io", preferred_quality: "1080p", require_confirmation: true },
+      jobs: [],
+      error: error.message,
+    })),
   ]);
   state.status = status;
   state.assistant = assistant;
   state.settings = settings;
+  state.media = media;
   renderStatus();
   renderAssistantSettings();
   clearTimeout(state.statusTimer);
@@ -253,6 +412,43 @@ async function saveAssistantSettings(event) {
     });
     await loadStatus();
     showToast("HankAI settings saved.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function saveMediaSettings() {
+  try {
+    const password = els.mediaGramatonPassword.value;
+    const payload = await api("/v1/home/assistant/media-settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        settings: {
+          enabled: els.mediaWorkflowEnabled.checked,
+          base_url: els.mediaGramatonBaseURL.value,
+          username: els.mediaGramatonUsername.value,
+          destination_path: els.mediaDestinationPath.value,
+          preferred_quality: "1080p",
+          require_confirmation: true,
+        },
+        password,
+        persist: true,
+      }),
+    });
+    els.mediaGramatonPassword.value = "";
+    state.media = { ...state.media, ...payload, jobs: state.media?.jobs || [] };
+    await loadStatus();
+    showToast("Media workflow settings saved.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function cancelMediaJob(jobID) {
+  try {
+    await api(`/v1/home/assistant/media-jobs/${encodeURIComponent(jobID)}/cancel`, { method: "POST" });
+    await loadStatus();
+    showToast("Media job cancelled.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -300,6 +496,16 @@ els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
 els.refreshButton.addEventListener("click", () => loadStatus().then(() => showToast("AI settings refreshed.")).catch((error) => showToast(error.message, true)));
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
+els.saveMediaSettingsButton.addEventListener("click", saveMediaSettings);
+els.refreshMediaSettingsButton.addEventListener("click", () => loadStatus().then(() => showToast("Media jobs refreshed.")).catch((error) => showToast(error.message, true)));
+els.mediaJobsOutput.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-cancel-media-job]");
+  if (!button) return;
+  cancelMediaJob(button.dataset.cancelMediaJob);
+});
+els.settingsTabButtons.forEach((button) => {
+  button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
+});
 els.resetAssistantPromptButton.addEventListener("click", () => {
   const defaultPrompt = state.settings?.defaults?.system_prompt || "";
   if (defaultPrompt) {

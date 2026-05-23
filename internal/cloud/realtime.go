@@ -19,6 +19,7 @@ const (
 	topicHomeMembers         = "home.members"
 	topicHomePermissions     = "home.permissions"
 	topicStorage             = "storage.health"
+	topicMediaDownloads      = "media.downloads"
 )
 
 func fileDirectoryTopic(path string) string {
@@ -254,6 +255,12 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 		s.broadcastRawAppEvent(ctx, topic, event.Event, event.Body)
 	case "sync.status_changed":
 		s.broadcastRawAppEvent(ctx, topicHomeStatus, event.Event, event.Body)
+	case "media.download_progress", "media.download_completed":
+		topic := event.Topic
+		if !strings.HasPrefix(topic, "media.downloads") {
+			topic = topicMediaDownloads
+		}
+		s.broadcastRawAppEvent(ctx, topic, event.Event, event.Body)
 	default:
 		s.logger.Debug("ignored agent event", "home_id", homeID, "event", event.Event)
 	}

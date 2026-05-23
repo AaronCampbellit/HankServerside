@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
 
@@ -26,10 +27,20 @@ type assistantSettingsSource struct {
 	Description string `json:"description"`
 }
 
+type assistantSettingsTool struct {
+	Key          string   `json:"key"`
+	Label        string   `json:"label"`
+	Enabled      bool     `json:"enabled"`
+	Status       string   `json:"status"`
+	Description  string   `json:"description"`
+	Requirements []string `json:"requirements,omitempty"`
+}
+
 type assistantSettingsResponse struct {
 	Settings domain.AssistantSettings  `json:"settings"`
 	Defaults map[string]any            `json:"defaults"`
 	Sources  []assistantSettingsSource `json:"sources"`
+	Tools    []assistantSettingsTool   `json:"tools"`
 }
 
 type assistantSettingsUpdateRequest struct {
@@ -51,7 +62,7 @@ func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, assistantSettingsPayload(settings))
+		writeJSON(w, http.StatusOK, s.assistantSettingsPayload(home.ID, settings))
 	case http.MethodPut:
 		current, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
 		if err != nil {
@@ -78,7 +89,7 @@ func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, assistantSettingsPayload(updated))
+		writeJSON(w, http.StatusOK, s.assistantSettingsPayload(home.ID, updated))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -178,8 +189,9 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 	return settings
 }
 
-func assistantSettingsPayload(settings domain.AssistantSettings) assistantSettingsResponse {
+func (s *Server) assistantSettingsPayload(homeID string, settings domain.AssistantSettings) assistantSettingsResponse {
 	settings = normalizeAssistantSettings(settings)
+	capabilities := s.agentCapabilities(homeID)
 	return assistantSettingsResponse{
 		Settings: settings,
 		Defaults: map[string]any{
@@ -187,7 +199,18 @@ func assistantSettingsPayload(settings domain.AssistantSettings) assistantSettin
 			"max_context_items": maxAssistantContextItems,
 		},
 		Sources: assistantSettingsSources(settings),
+		Tools:   assistantSettingsTools(settings, capabilities),
 	}
+}
+
+func (s *Server) agentCapabilities(homeID string) []string {
+	if s == nil || s.router == nil {
+		return nil
+	}
+	if agent, ok := s.router.GetAgent(homeID); ok {
+		return append([]string(nil), agent.capabilities...)
+	}
+	return nil
 }
 
 func assistantSettingsSources(settings domain.AssistantSettings) []assistantSettingsSource {
@@ -236,6 +259,92 @@ func assistantSettingsSources(settings domain.AssistantSettings) []assistantSett
 			Description: "Home Assistant entity names and states.",
 		},
 	}
+}
+
+func assistantSettingsTools(settings domain.AssistantSettings, capabilities []string) []assistantSettingsTool {
+	settings = normalizeAssistantSettings(settings)
+	mediaConfigurable := hasCapabilities(capabilities,
+		protocol.CommandMediaSettingsStatus,
+		protocol.CommandMediaSettingsApply,
+	)
+	mediaReady := settings.FilesEnabled &&
+		hasCapabilities(capabilities,
+			protocol.CommandMediaSearch,
+			protocol.CommandMediaPlanDownload,
+			protocol.CommandMediaDownloadStart,
+			protocol.CommandMediaDownloadStatus,
+		)
+	mediaStatus := "Agent setup needed"
+	if !settings.FilesEnabled {
+		mediaStatus = "Files off"
+	} else if mediaReady {
+		mediaStatus = "Ready"
+	} else if mediaConfigurable {
+		mediaStatus = "Needs Gramaton credentials"
+	}
+	notesReady := settings.ProfileNotesEnabled || settings.HomeNotesEnabled
+	return []assistantSettingsTool{
+		{
+			Key:         "notes",
+			Label:       "Notes",
+			Enabled:     notesReady,
+			Status:      enabledStatus(notesReady),
+			Description: "Create, search, and update enabled note spaces after confirmation when required.",
+		},
+		{
+			Key:         "files",
+			Label:       "Files",
+			Enabled:     settings.FilesEnabled,
+			Status:      enabledStatus(settings.FilesEnabled),
+			Description: "Search file names and route approved file work through the home agent.",
+		},
+		{
+			Key:         "media_download",
+			Label:       "Media Downloads",
+			Enabled:     mediaReady,
+			Status:      mediaStatus,
+			Description: "Search authorized media sources, prepare a confirmed download plan, and save approved files to the configured Media destination.",
+			Requirements: []string{
+				"Files enabled",
+				"Media source enabled on the home agent",
+				"Agent file backend pointed at the Media share",
+			},
+		},
+		{
+			Key:         "calendar",
+			Label:       "Calendar",
+			Enabled:     settings.CalendarEnabled,
+			Status:      enabledStatus(settings.CalendarEnabled),
+			Description: "Prepare calendar actions for the Hank app confirmation flow.",
+		},
+		{
+			Key:         "homeassistant",
+			Label:       "Home Assistant",
+			Enabled:     settings.HomeAssistantEnabled,
+			Status:      enabledStatus(settings.HomeAssistantEnabled),
+			Description: "Read Home Assistant state through the home agent.",
+		},
+	}
+}
+
+func enabledStatus(enabled bool) string {
+	if enabled {
+		return "Ready"
+	}
+	return "Off"
+}
+
+func hasCapabilities(capabilities []string, required ...string) bool {
+	seen := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		seen[capability] = struct{}{}
+	}
+	for _, capability := range required {
+		if _, ok := seen[capability]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func assistantSettingsAllowSource(settings domain.AssistantSettings, sourceType string) bool {
