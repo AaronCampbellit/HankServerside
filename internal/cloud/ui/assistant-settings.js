@@ -286,18 +286,22 @@ function renderMediaWorkflowSettings() {
   const canEdit = payload.can_edit === true;
   const hasPassword = settings.has_password === true;
   const enabled = settings.enabled === true;
-  const disabled = !online || !canEdit;
+  const fieldsDisabled = !canEdit;
 
-  els.mediaWorkflowPill.textContent = online ? (enabled ? "Enabled" : "Configured Off") : "Agent Offline";
+  els.mediaWorkflowPill.textContent = !canEdit ? "Admin Only" : online ? (enabled ? "Enabled" : "Configured Off") : "Agent Offline";
   els.mediaWorkflowPill.className = online && enabled ? "status-chip" : "status-chip offline";
   els.mediaWorkflowEnabled.checked = enabled;
   els.mediaGramatonBaseURL.value = settings.base_url || "https://gramaton.io";
   els.mediaGramatonUsername.value = settings.username || "";
   els.mediaDestinationPath.value = settings.destination_path || "";
   els.mediaGramatonPassword.placeholder = hasPassword ? "Leave unchanged" : "Required to enable";
-  els.mediaWorkflowMeta.textContent = payload.error
-    ? payload.error
-    : `Destination resolves under ${settings.destination_path ? `Media root/${settings.destination_path}` : "Media root"}. 1080p is preferred and 720p is used only as fallback.`;
+  if (!canEdit) {
+    els.mediaWorkflowMeta.textContent = "Only Home admins can change media workflow settings.";
+  } else if (!online) {
+    els.mediaWorkflowMeta.textContent = `${payload.error || "The home agent is offline."} You can prepare these fields, but saving requires the updated home agent to be online.`;
+  } else {
+    els.mediaWorkflowMeta.textContent = `Destination resolves under ${settings.destination_path ? `Media root/${settings.destination_path}` : "Media root"}. 1080p is preferred and 720p is used only as fallback.`;
+  }
 
   [
     els.mediaWorkflowEnabled,
@@ -307,7 +311,7 @@ function renderMediaWorkflowSettings() {
     els.mediaDestinationPath,
     els.saveMediaSettingsButton,
   ].forEach((element) => {
-    element.disabled = disabled;
+    element.disabled = fieldsDisabled;
   });
   els.refreshMediaSettingsButton.disabled = !online;
   renderMediaJobs(payload.jobs || []);
@@ -419,6 +423,10 @@ async function saveAssistantSettings(event) {
 
 async function saveMediaSettings() {
   try {
+    if (!state.media?.online) {
+      showToast("Start or redeploy the updated home agent before saving media workflow settings.", true);
+      return;
+    }
     const password = els.mediaGramatonPassword.value;
     const payload = await api("/v1/home/assistant/media-settings", {
       method: "PUT",
