@@ -513,6 +513,7 @@
 
   function start() {
     if (installEmbeddedMode()) {
+      applyAdminVisibility();
       return;
     }
     installDashboardShell();
