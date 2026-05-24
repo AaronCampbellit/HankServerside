@@ -31,6 +31,7 @@ These documents stay in the repo root because common tooling expects them there.
 - [phase-5-operations.md](phase-5-operations.md)
 - [phase-5-tasklist.md](phase-5-tasklist.md)
 - [phase-6-hank-assistant.md](phase-6-hank-assistant.md)
+- [hankai-intents-rollout.md](hankai-intents-rollout.md)
 
 ## App Contract Notes
 
