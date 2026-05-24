@@ -284,6 +284,7 @@
     dashboardFrame = document.createElement("iframe");
     dashboardFrame.className = "dashboard-content-frame";
     dashboardFrame.title = "Dashboard content";
+    dashboardFrame.allow = "clipboard-read; clipboard-write";
     dashboardFrame.src = currentFrameSource();
     dashboardFrame.addEventListener("load", () => {
       document.body.classList.remove("dashboard-navigating");

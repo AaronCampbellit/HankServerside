@@ -612,12 +612,41 @@ async function toggleLogs() {
 async function copyLogs() {
   await loadLogs();
   const text = traceLogText();
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      showToast("Workflow logs copied.");
+      return;
+    }
+  } catch (_) {
+  }
+  if (copyTextFallback(text)) {
     showToast("Workflow logs copied.");
     return;
   }
-  showToast("Clipboard is unavailable in this browser.", true);
+  showToast("Clipboard is blocked. The logs are selected; press Cmd+C to copy.", true);
+}
+
+function copyTextFallback(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch (_) {
+    copied = false;
+  }
+  if (copied) {
+    document.body.removeChild(textarea);
+  }
+  return copied;
 }
 
 async function clearLogs() {
