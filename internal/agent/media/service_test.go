@@ -126,6 +126,76 @@ func TestSearchUsesDistinctiveTitleVariants(t *testing.T) {
 	}
 }
 
+func TestLiveMediaSearchFromEnv(t *testing.T) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE")), "true") {
+		t.Skip("set HANK_REMOTE_MEDIA_LIVE=true with media source env vars to run live diagnostics")
+	}
+
+	query := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_QUERY"))
+	if query == "" {
+		query = "project hail mary"
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL")), "/")
+	if baseURL == "" {
+		baseURL = "https://gramaton.io"
+	}
+	username := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME"))
+	password := os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD")
+	if username == "" || password == "" {
+		t.Fatal("set HANK_REMOTE_MEDIA_GRAMATON_USERNAME and HANK_REMOTE_MEDIA_GRAMATON_PASSWORD to run live diagnostics")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  baseURL,
+		Username: username,
+		Password: password,
+	}, agentfiles.New(t.TempDir()), nil)
+	if err := service.ensureAuthenticated(ctx); err != nil {
+		t.Fatalf("authenticate media source: %v", err)
+	}
+
+	variants := mediaSearchQueries(query)
+	t.Logf("live media search query=%q variants=%q", query, variants)
+	var rawResults []protocol.MediaSearchResult
+	for _, mediaType := range []string{protocol.MediaTypeMovie, protocol.MediaTypeSeries} {
+		for _, variant := range variants {
+			found, err := service.searchType(ctx, mediaType, variant)
+			if err != nil {
+				t.Logf("provider search type=%s query=%q error=%v", mediaType, variant, err)
+				continue
+			}
+			t.Logf("provider search type=%s query=%q parsed=%d", mediaType, variant, len(found))
+			for _, result := range found {
+				score := mediaResultScore(result, query)
+				t.Logf("  score=%d title=%q year=%d type=%s path=%q", score, result.Title, result.Year, result.Type, result.PagePath)
+			}
+			rawResults = append(rawResults, found...)
+		}
+	}
+
+	unique := uniqueSearchResults(rawResults)
+	t.Logf("raw_unique=%d", len(unique))
+	for _, result := range unique {
+		t.Logf("  unique score=%d title=%q year=%d type=%s path=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath)
+	}
+
+	response, err := service.Search(ctx, query, 10)
+	if err != nil {
+		t.Fatalf("live media search: %v", err)
+	}
+	t.Logf("filtered=%d", len(response.Results))
+	for _, result := range response.Results {
+		t.Logf("  filtered score=%d title=%q year=%d type=%s path=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath)
+	}
+	if len(response.Results) == 0 {
+		t.Fatalf("live search returned no filtered results for %q; inspect provider search and parsed result logs above", query)
+	}
+}
+
 func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	t.Parallel()
 
