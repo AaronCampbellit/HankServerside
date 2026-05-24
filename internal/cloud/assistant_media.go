@@ -192,16 +192,66 @@ func stripLeadingMediaArticle(query string) string {
 func (s *Server) answerMediaSearch(ctx context.Context, home domain.Home, query string) (assistantMessageContent, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "warn",
+			Scope:   "media",
+			Event:   "media.search.empty_query",
+			Summary: "Media workflow matched, but no usable title was parsed.",
+		})
 		return assistantMessageContent{Text: "Tell me the movie or show name to search for download availability."}, nil
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "media",
+		Event:   "media.search.start",
+		Summary: "Starting media search through the home agent.",
+		Details: traceDetails(map[string]any{
+			"query": query,
+			"limit": 10,
+		}),
+	})
 	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandMediaSearch, protocol.MediaSearchRequest{Query: query, Limit: 10})
 	if err != nil || envelope.Error != nil {
+		errorMessage := ""
+		if err != nil {
+			errorMessage = err.Error()
+		} else if envelope.Error != nil {
+			errorMessage = envelope.Error.Message
+		}
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "media",
+			Event:   "media.search.failed",
+			Summary: "Media search could not reach or complete through the home agent.",
+			Details: traceDetails(map[string]any{
+				"query": query,
+				"error": errorMessage,
+			}),
+		})
 		return assistantMessageContent{Text: "I couldn't reach the media source through the home agent right now."}, nil
 	}
 	payload, err := protocol.DecodePayload[protocol.MediaSearchResponse](envelope)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "media",
+			Event:   "media.search.decode_failed",
+			Summary: "Media search response could not be decoded.",
+			Details: traceDetails(map[string]any{
+				"query": query,
+				"error": err.Error(),
+			}),
+		})
 		return assistantMessageContent{}, err
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "media",
+		Event:   "media.search.results",
+		Summary: "Media search returned results.",
+		Details: traceDetails(map[string]any{
+			"query":        query,
+			"result_count": len(payload.Results),
+		}),
+	})
 	if len(payload.Results) == 0 {
 		return assistantMessageContent{Text: fmt.Sprintf("I couldn't find `%s` available for download.", query)}, nil
 	}
@@ -222,6 +272,16 @@ func (s *Server) answerMediaSearch(ctx context.Context, home domain.Home, query 
 }
 
 func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, card assistantResultCard) (assistantMessageContent, error) {
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "media",
+		Event:   "media.selection.start",
+		Summary: "Preparing the selected media option.",
+		Details: traceDetails(map[string]any{
+			"title": card.Title,
+			"path":  card.Path,
+			"type":  card.MediaType,
+		}),
+	})
 	selection := protocol.MediaSearchResult{
 		ID:         card.MediaOptionID,
 		Title:      card.Title,
@@ -233,8 +293,34 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 	}
 	plan, err := s.planMediaDownload(ctx, home.ID, selection)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "media",
+			Event:   "media.plan.failed",
+			Summary: "Could not prepare the media download plan.",
+			Details: traceDetails(map[string]any{
+				"title": card.Title,
+				"path":  card.Path,
+				"error": err.Error(),
+			}),
+		})
 		return assistantMessageContent{Text: fmt.Sprintf("I found `%s`, but I couldn't prepare the download plan through the home agent right now.", card.Title)}, nil
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "media",
+		Event:   "media.plan.prepared",
+		Summary: "Prepared the media download plan.",
+		Details: traceDetails(map[string]any{
+			"title":                   firstNonBlank(plan.Selection.Title, card.Title),
+			"type":                    plan.Selection.Type,
+			"items":                   plan.ItemCount,
+			"preferred_quality_count": plan.PreferredQualityCount,
+			"fallback_quality_count":  plan.FallbackQualityCount,
+			"missing_link_count":      plan.MissingLinkCount,
+			"existing_count":          plan.ExistingCount,
+			"destination":             plan.DestinationPath,
+		}),
+	})
 	if plan.ItemCount == 0 || plan.MissingLinkCount >= plan.ItemCount {
 		return assistantMessageContent{Text: fmt.Sprintf("I found `%s`, but no downloadable movie or episode entries were available.", card.Title)}, nil
 	}
@@ -285,7 +371,22 @@ func (s *Server) startMediaDownload(ctx context.Context, homeID string, selectio
 	if envelope.Error != nil {
 		return protocol.MediaDownloadStartResponse{}, errors.New(envelope.Error.Message)
 	}
-	return protocol.DecodePayload[protocol.MediaDownloadStartResponse](envelope)
+	response, err := protocol.DecodePayload[protocol.MediaDownloadStartResponse](envelope)
+	if err != nil {
+		return protocol.MediaDownloadStartResponse{}, err
+	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "media",
+		Event:   "media.download.started",
+		Summary: "Home agent started the media download job.",
+		Details: traceDetails(map[string]any{
+			"job_id": response.Job.JobID,
+			"title":  response.Job.Title,
+			"status": response.Job.Status,
+			"items":  response.Job.TotalCount,
+		}),
+	})
+	return response, nil
 }
 
 func (s *Server) resolvePreviousMediaSelection(ctx context.Context, sessionID string, prompt string) (assistantResultCard, bool) {

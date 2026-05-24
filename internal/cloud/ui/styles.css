@@ -657,6 +657,94 @@ h3 {
   font-size: 0.76rem;
 }
 
+.hank-log-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hank-log-panel[hidden] {
+  display: none;
+}
+
+.hank-log-panel h3 {
+  margin: 0 0 4px;
+  font-size: 0.94rem;
+}
+
+.hank-log-list {
+  max-height: 340px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.hank-log-entry {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(14, 11, 8, 0.35);
+}
+
+.hank-log-entry.error {
+  border-color: rgba(255, 117, 117, 0.36);
+}
+
+.hank-log-entry.warn {
+  border-color: rgba(255, 197, 104, 0.34);
+}
+
+.hank-log-entry p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.hank-log-entry-head,
+.hank-log-ids {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.hank-log-entry-head strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.hank-log-details {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.34fr) minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.hank-log-details div {
+  display: contents;
+}
+
+.hank-log-details dt {
+  color: var(--muted);
+}
+
+.hank-log-details dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .setting-field {
   display: grid;
   gap: 5px;

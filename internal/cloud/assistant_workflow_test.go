@@ -861,7 +861,13 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	auth := authContext{User: user}
 	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
 
-	answer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "find 2025 taxes")
+	traceCtx := withAssistantTraceContext(ctx, assistantTraceContext{
+		HomeID:    home.ID,
+		UserID:    user.ID,
+		SessionID: "asess_trace",
+		RunID:     "arun_trace",
+	})
+	answer, err := server.generateAssistantResponse(traceCtx, home, membership, auth, settings, "find 2025 taxes")
 	if err != nil {
 		t.Fatalf("generateAssistantResponse: %v", err)
 	}
@@ -871,6 +877,13 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	diagnostics := assistantDiagnosticsFromContent(answer)
 	if diagnostics == nil || diagnostics.ToolKind != string(assistantIntentFilesSearch) || diagnostics.IntentKind != string(assistantIntentFilesSearch) || diagnostics.Query != "2025 taxes" {
 		t.Fatalf("file search diagnostics = %#v", diagnostics)
+	}
+	events, total := server.assistantTraceSnapshot(home.ID, "asess_trace", "arun_trace", 20)
+	if total == 0 {
+		t.Fatal("assistant trace did not record the file-search workflow")
+	}
+	if !assistantTraceHasEvent(events, "assistant.tool.resolved") || !assistantTraceHasEvent(events, "assistant.tool.execute_done") {
+		t.Fatalf("assistant trace events = %#v, want tool resolution and completion", events)
 	}
 
 	allAnswer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "show me all 2025 taxes")
@@ -994,6 +1007,15 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 			t.Fatalf("kitchen light query cards missing %q: %#v", want, kitchenLightRun.AssistantMessage.Cards)
 		}
 	}
+}
+
+func assistantTraceHasEvent(events []assistantTraceEvent, eventName string) bool {
+	for _, event := range events {
+		if event.Event == eventName {
+			return true
+		}
+	}
+	return false
 }
 
 func assistantCardsContainTitle(cards []assistantResultCard, title string) bool {

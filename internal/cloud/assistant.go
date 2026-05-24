@@ -214,6 +214,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 	case len(parts) == 2 && parts[1] == "settings":
 		s.handleAssistantSettings(w, r, home, auth)
 		return true
+	case len(parts) == 2 && parts[1] == "logs":
+		s.handleAssistantLogs(w, r, home, membership)
+		return true
 	case len(parts) == 2 && parts[1] == "media-settings":
 		s.handleAssistantMediaSettings(w, r, home, membership)
 		return true
@@ -483,6 +486,13 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 		http.NotFound(w, r)
 		return
 	}
+	ctx := withAssistantTraceContext(r.Context(), assistantTraceContext{
+		HomeID:    home.ID,
+		UserID:    auth.User.ID,
+		SessionID: session.ID,
+		RunID:     run.ID,
+		MessageID: run.MessageID,
+	})
 
 	var request struct {
 		ToolName string                 `json:"tool_name"`
@@ -498,16 +508,26 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if request.ToolName == "" && len(request.Results) > 0 {
+		request.ToolName = request.Results[0].ToolName
+		request.Result = request.Results[0].Result
+		request.Error = request.Results[0].Error
+	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.client_tool.result_received",
+		Summary: "Received client tool result for a waiting run.",
+		Details: traceDetails(map[string]any{
+			"tool":       request.ToolName,
+			"has_error":  request.Error != "",
+			"result_set": len(request.Result) > 0 || len(request.Results) > 0,
+		}),
+	})
 
 	var pending assistantClientToolRequest
 	if err := json.Unmarshal([]byte(run.PendingActionJSON), &pending); err != nil {
 		http.Error(w, "run is not waiting for a client tool", http.StatusBadRequest)
 		return
-	}
-	if request.ToolName == "" && len(request.Results) > 0 {
-		request.ToolName = request.Results[0].ToolName
-		request.Result = request.Results[0].Result
-		request.Error = request.Results[0].Error
 	}
 	if request.ToolName != pending.ToolName {
 		http.Error(w, "client tool does not match pending run", http.StatusBadRequest)
@@ -516,16 +536,26 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 
 	var content assistantMessageContent
 	if strings.TrimSpace(request.Error) != "" {
-		content, err = s.finalizeAssistantClientToolErrorRun(r.Context(), session, request.ToolName, request.Result, request.Error)
+		content, err = s.finalizeAssistantClientToolErrorRun(ctx, session, request.ToolName, request.Result, request.Error)
 	} else {
-		content, err = s.finalizeAssistantClientToolRun(r.Context(), session, run, request.ToolName, request.Result)
+		content, err = s.finalizeAssistantClientToolRun(ctx, session, run, request.ToolName, request.Result)
 	}
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.client_tool.finalize_failed",
+			Summary: "Client tool result could not be finalized.",
+			Details: traceDetails(map[string]any{
+				"tool":  request.ToolName,
+				"error": err.Error(),
+			}),
+		})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	message, err := s.persistAssistantMessage(r.Context(), session, assistantRoleAssistant, content)
+	message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, content)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -536,19 +566,28 @@ func (s *Server) handleAssistantClientToolResults(w http.ResponseWriter, r *http
 	run.RequiresClientTools = false
 	run.PendingActionJSON = ""
 	run.CompletedAt = &completedAt
-	if err := s.store.UpdateAssistantRun(r.Context(), run); err != nil {
+	if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	settings, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
+	settings, err := s.currentAssistantSettings(ctx, home.ID, auth.User.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.touchAssistantSessionAndMemory(r.Context(), session, settings, completedAt); err != nil {
+	if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:     "assistant",
+		Event:     "assistant.client_tool.completed",
+		Summary:   "Client tool result completed the run.",
+		MessageID: message.ID,
+		Details: traceDetails(map[string]any{
+			"tool": request.ToolName,
+		}),
+	})
 
 	writeJSON(w, http.StatusOK, assistantRunResponse{
 		ID:               run.ID,
@@ -584,6 +623,21 @@ func (s *Server) handleAssistantConfirm(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
+	ctx := withAssistantTraceContext(r.Context(), assistantTraceContext{
+		HomeID:    home.ID,
+		UserID:    auth.User.ID,
+		SessionID: session.ID,
+		RunID:     run.ID,
+		MessageID: run.MessageID,
+	})
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.confirmation.received",
+		Summary: "Received a confirmation response.",
+		Details: traceDetails(map[string]any{
+			"approved": request.Approved,
+		}),
+	})
 
 	if !request.Approved {
 		completedAt := time.Now().UTC()
@@ -595,6 +649,11 @@ func (s *Server) handleAssistantConfirm(w http.ResponseWriter, r *http.Request, 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Scope:   "assistant",
+			Event:   "assistant.confirmation.cancelled",
+			Summary: "User cancelled the pending action.",
+		})
 		writeJSON(w, http.StatusOK, assistantRunResponse{
 			ID:                   run.ID,
 			State:                run.State,
@@ -610,11 +669,38 @@ func (s *Server) handleAssistantConfirm(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	response, err := s.executeConfirmedAssistantAction(r.Context(), session, run, pending, auth.User.ID)
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.confirmation.approved",
+		Summary: "User approved the pending action.",
+		Details: traceDetails(map[string]any{
+			"pending_action": pending.Kind,
+		}),
+	})
+	response, err := s.executeConfirmedAssistantAction(ctx, session, run, pending, auth.User.ID)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.confirmed_action.failed",
+			Summary: "Approved action failed.",
+			Details: traceDetails(map[string]any{
+				"pending_action": pending.Kind,
+				"error":          err.Error(),
+			}),
+		})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.confirmed_action.completed",
+		Summary: "Approved action completed.",
+		Details: traceDetails(map[string]any{
+			"pending_action": pending.Kind,
+			"state":          response.State,
+		}),
+	})
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -701,10 +787,49 @@ func (s *Server) processAssistantMessage(ctx context.Context, home domain.Home, 
 }
 
 func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, session domain.AssistantSession, content string, attachments []assistantMessageAttachment, deviceID string, timezone string) (assistantRunResponse, error) {
+	ctx = withAssistantTraceContext(ctx, assistantTraceContext{
+		HomeID:    home.ID,
+		UserID:    auth.User.ID,
+		SessionID: session.ID,
+	})
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.message.received",
+		Summary: "HankAI received a chat message.",
+		Details: traceDetails(map[string]any{
+			"prompt":           content,
+			"attachment_count": len(attachments),
+			"device_id":        deviceID,
+			"timezone":         timezone,
+			"membership_role":  membership.Role,
+		}),
+	})
 	settings, err := s.currentAssistantSettings(ctx, home.ID, auth.User.ID)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.settings.failed",
+			Summary: "Could not load HankAI settings.",
+			Details: traceDetails(map[string]any{"error": err.Error()}),
+		})
 		return assistantRunResponse{}, err
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.settings.loaded",
+		Summary: "Loaded HankAI settings for this run.",
+		Details: traceDetails(map[string]any{
+			"profile_notes": settings.ProfileNotesEnabled,
+			"home_notes":    settings.HomeNotesEnabled,
+			"files":         settings.FilesEnabled,
+			"calendar":      settings.CalendarEnabled,
+			"homeassistant": settings.HomeAssistantEnabled,
+			"project_docs":  settings.ProjectDocsEnabled,
+			"conversations": settings.ConversationsEnabled,
+			"max_context":   settings.MaxContextItems,
+		}),
+	})
 	if strings.TrimSpace(session.Title) == "" || session.Title == "New Conversation" {
 		session.Title = assistantSessionTitle(content)
 	}
@@ -721,9 +846,32 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 	userContent := assistantMessageContent{Text: content, Attachments: cleanAttachments}
 	userMessage, err := s.persistAssistantMessage(ctx, session, assistantRoleUser, userContent)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.user_message.failed",
+			Summary: "Could not persist the user message.",
+			Details: traceDetails(map[string]any{"error": err.Error()}),
+		})
 		return assistantRunResponse{}, err
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:     "assistant",
+		Event:     "assistant.user_message.saved",
+		Summary:   "Saved the user message.",
+		MessageID: userMessage.ID,
+		Details: traceDetails(map[string]any{
+			"attachment_count": len(cleanAttachments),
+		}),
+	})
 	if err := s.persistAssistantAttachments(ctx, session, auth.User.ID, cleanAttachments); err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.attachments.failed",
+			Summary: "Could not persist assistant attachment records.",
+			Details: traceDetails(map[string]any{"error": err.Error()}),
+		})
 		return assistantRunResponse{}, err
 	}
 
@@ -737,14 +885,63 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 		PendingActionJSON:    "",
 		CreatedAt:            time.Now().UTC(),
 	}
+	trace := assistantTraceContextFrom(ctx)
+	trace.RunID = run.ID
+	trace.MessageID = userMessage.ID
+	ctx = withAssistantTraceContext(ctx, trace)
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.run.created",
+		Summary: "Created an assistant run.",
+		Details: traceDetails(map[string]any{
+			"run_state": run.State,
+		}),
+	})
 
 	if len(cleanAttachments) > 0 {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Scope:   "assistant",
+			Event:   "assistant.attachments.planning",
+			Summary: "Checking whether uploaded files need a commit workflow.",
+			Details: traceDetails(map[string]any{
+				"attachment_count": len(cleanAttachments),
+				"default_target":   defaultAttachmentDestination,
+			}),
+		})
 		if runResponse, handled, err := s.planAttachmentCommit(ctx, home, membership, auth, session, settings, run, cleanAttachments, content, defaultAttachmentDestination); handled || err != nil {
+			if err != nil {
+				s.recordAssistantTrace(ctx, assistantTraceEvent{
+					Level:   "error",
+					Scope:   "assistant",
+					Event:   "assistant.attachments.plan_failed",
+					Summary: "Attachment workflow planning failed.",
+					Details: traceDetails(map[string]any{"error": err.Error()}),
+				})
+			} else {
+				s.recordAssistantTrace(ctx, assistantTraceEvent{
+					Scope:   "assistant",
+					Event:   "assistant.attachments.plan_handled",
+					Summary: "Attachment workflow handled this run.",
+					Details: traceDetails(map[string]any{
+						"state": runResponse.State,
+					}),
+				})
+			}
 			return runResponse, err
 		}
 	}
 
 	if pending, ok := s.planCalendarTool(content, timezone, deviceID); ok {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Scope:   "assistant",
+			Event:   "assistant.calendar.plan_matched",
+			Summary: "Calendar creation parser matched the prompt.",
+			Details: traceDetails(map[string]any{
+				"title":                 pending.title,
+				"date_text":             pending.dateText,
+				"requires_confirmation": pending.requiresConfirmation,
+			}),
+		})
 		if !settings.CalendarEnabled {
 			message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantMessageContent{
 				Text: "Calendar access is turned off in HankAI settings.",
@@ -797,6 +994,14 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 			if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, run.CreatedAt); err != nil {
 				return assistantRunResponse{}, err
 			}
+			s.recordAssistantTrace(ctx, assistantTraceEvent{
+				Scope:   "assistant",
+				Event:   "assistant.confirmation.waiting",
+				Summary: "Run is waiting for user confirmation.",
+				Details: traceDetails(map[string]any{
+					"pending_action": "calendar_create",
+				}),
+			})
 			return assistantRunResponse{
 				ID:                   run.ID,
 				State:                run.State,
@@ -819,6 +1024,14 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 		if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, run.CreatedAt); err != nil {
 			return assistantRunResponse{}, err
 		}
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Scope:   "assistant",
+			Event:   "assistant.client_tool.waiting",
+			Summary: "Run is waiting for a client-side tool.",
+			Details: traceDetails(map[string]any{
+				"tool": pending.request.ToolName,
+			}),
+		})
 		return assistantRunResponse{
 			ID:                  run.ID,
 			State:               run.State,
@@ -829,6 +1042,13 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 
 	assistantContent, err := s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, &session, content)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.generate.failed",
+			Summary: "Assistant workflow execution failed.",
+			Details: traceDetails(map[string]any{"error": err.Error()}),
+		})
 		return assistantRunResponse{}, err
 	}
 	message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, assistantContent)
@@ -851,6 +1071,15 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 		if err := s.store.TouchAssistantSession(ctx, session.ID, session.Title, run.CreatedAt); err != nil {
 			return assistantRunResponse{}, err
 		}
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Scope:     "assistant",
+			Event:     "assistant.confirmation.waiting",
+			Summary:   "Run is waiting for user confirmation.",
+			MessageID: message.ID,
+			Details: traceDetails(map[string]any{
+				"pending_action": pendingAction.Kind,
+			}),
+		})
 		return assistantRunResponse{
 			ID:                   run.ID,
 			State:                run.State,
@@ -870,6 +1099,15 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 	if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
 		return assistantRunResponse{}, err
 	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:     "assistant",
+		Event:     "assistant.run.completed",
+		Summary:   "Assistant run completed.",
+		MessageID: message.ID,
+		Details: traceDetails(map[string]any{
+			"card_count": len(message.Cards),
+		}),
+	})
 
 	return assistantRunResponse{
 		ID:               run.ID,
@@ -1366,6 +1604,17 @@ func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home
 func (s *Server) generateAssistantResponseForSession(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, session *domain.AssistantSession, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
 	tool, intent := resolveAssistantTool(prompt)
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.tool.resolved",
+		Summary: "Matched the prompt to a HankAI tool.",
+		Details: traceDetails(map[string]any{
+			"tool":        tool.Kind,
+			"intent":      intent.Kind,
+			"query":       intent.Query,
+			"description": tool.Description,
+		}),
+	})
 	if session != nil {
 		if selected, ok := s.resolvePreviousMediaSelection(ctx, session.ID, prompt); ok {
 			intent = assistantIntent{Kind: assistantIntentMediaSelection, MediaSelection: &selected}
@@ -1375,6 +1624,16 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 					break
 				}
 			}
+			s.recordAssistantTrace(ctx, assistantTraceEvent{
+				Scope:   "assistant",
+				Event:   "assistant.media.selection_resolved",
+				Summary: "Resolved the reply against previous media result cards.",
+				Details: traceDetails(map[string]any{
+					"title": selected.Title,
+					"path":  selected.Path,
+					"type":  selected.MediaType,
+				}),
+			})
 		}
 	}
 	runtime := assistantToolRuntime{
@@ -1385,17 +1644,84 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 		Prompt:     prompt,
 		Session:    session,
 	}
+	indexStartedAt := time.Now()
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.index.refresh_start",
+		Summary: "Refreshing enabled HankAI context before tool execution.",
+		Details: traceDetails(map[string]any{
+			"tool":   tool.Kind,
+			"intent": intent.Kind,
+		}),
+	})
 	s.refreshAssistantIndex(ctx, runtime, tool, intent)
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.index.refresh_done",
+		Summary: "Context refresh finished.",
+		Details: traceDetails(map[string]any{
+			"elapsed_ms": time.Since(indexStartedAt).Milliseconds(),
+		}),
+	})
 	if tool.Execute == nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.tool.missing_executor",
+			Summary: "Matched tool has no executor.",
+			Details: traceDetails(map[string]any{
+				"tool": tool.Kind,
+			}),
+		})
 		return assistantMessageContent{
 			Text: "This HankAI tool is registered but does not have an executor yet.",
 		}, nil
 	}
+	toolStartedAt := time.Now()
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.tool.execute_start",
+		Summary: "Executing the matched HankAI tool.",
+		Details: traceDetails(map[string]any{
+			"tool":   tool.Kind,
+			"intent": intent.Kind,
+			"query":  intent.Query,
+		}),
+	})
 	content, err := tool.Execute(ctx, s, runtime, intent)
 	if err != nil {
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   "error",
+			Scope:   "assistant",
+			Event:   "assistant.tool.execute_failed",
+			Summary: "HankAI tool execution failed.",
+			Details: traceDetails(map[string]any{
+				"tool":       tool.Kind,
+				"intent":     intent.Kind,
+				"query":      intent.Query,
+				"error":      err.Error(),
+				"elapsed_ms": time.Since(toolStartedAt).Milliseconds(),
+			}),
+		})
 		return assistantMessageContent{}, err
 	}
 	attachAssistantDiagnostics(&content, tool, intent)
+	pendingKind := ""
+	if pending := assistantPendingActionFromContent(content); pending != nil {
+		pendingKind = pending.Kind
+	}
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.tool.execute_done",
+		Summary: "HankAI tool execution finished.",
+		Details: traceDetails(map[string]any{
+			"tool":           tool.Kind,
+			"intent":         intent.Kind,
+			"card_count":     len(content.Cards),
+			"pending_action": pendingKind,
+			"elapsed_ms":     time.Since(toolStartedAt).Milliseconds(),
+		}),
+	})
 	return content, nil
 }
 

@@ -60,9 +60,24 @@
           <div class="panel-head">
             <h2 id="conversation-title">HankAI</h2>
             <div class="actions wrap compact">
+              <button id="log-button" type="button" class="ghost" data-admin-only="true" hidden>Logs</button>
               <button id="delete-session-button" type="button" class="ghost">Delete</button>
               <span id="run-state" class="pill">Ready</span>
             </div>
+          </div>
+          <div id="log-panel" class="hank-log-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <h3>Workflow Logs</h3>
+                <p id="log-meta" class="meta">Recent HankAI trace events.</p>
+              </div>
+              <div class="actions wrap compact">
+                <button id="refresh-logs-button" type="button" class="secondary">Refresh</button>
+                <button id="copy-logs-button" type="button" class="secondary">Copy</button>
+                <button id="clear-logs-button" type="button" class="ghost">Clear</button>
+              </div>
+            </div>
+            <div id="log-list" class="hank-log-list empty-state">Open logs to load recent workflow events.</div>
           </div>
           <div id="message-list" class="hank-message-list empty-state">Choose or create a conversation.</div>
           <div id="confirmation-card" class="card hank-confirmation" hidden>

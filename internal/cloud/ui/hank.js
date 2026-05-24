@@ -10,6 +10,8 @@ const state = {
   appSocketPromise: null,
   pendingRequests: new Map(),
   requestCounter: 0,
+  logsVisible: false,
+  traceEvents: [],
 };
 
 const els = {
@@ -22,6 +24,13 @@ const els = {
   deleteSessionButton: document.getElementById("delete-session-button"),
   conversationTitle: document.getElementById("conversation-title"),
   runState: document.getElementById("run-state"),
+  logButton: document.getElementById("log-button"),
+  logPanel: document.getElementById("log-panel"),
+  logMeta: document.getElementById("log-meta"),
+  logList: document.getElementById("log-list"),
+  refreshLogsButton: document.getElementById("refresh-logs-button"),
+  copyLogsButton: document.getElementById("copy-logs-button"),
+  clearLogsButton: document.getElementById("clear-logs-button"),
   messageList: document.getElementById("message-list"),
   confirmationCard: document.getElementById("confirmation-card"),
   confirmationMessage: document.getElementById("confirmation-message"),
@@ -458,6 +467,76 @@ function renderCardAction(card) {
   return `<a class="button-link hank-result-action" href="${escapeHTML(href)}">${escapeHTML(card.action_title || "Open")}</a>`;
 }
 
+function formatTraceTime(value) {
+  return value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+}
+
+function renderTraceDetails(details = {}) {
+  const rows = Object.entries(details || {}).filter(([_, value]) => String(value || "").trim());
+  if (!rows.length) return "";
+  return `<dl class="hank-log-details">${rows.map(([key, value]) => `
+    <div>
+      <dt>${escapeHTML(key.replaceAll("_", " "))}</dt>
+      <dd>${escapeHTML(value)}</dd>
+    </div>
+  `).join("")}</dl>`;
+}
+
+function renderLogs(payload = {}) {
+  const events = payload.events || [];
+  state.traceEvents = events;
+  const total = Number(payload.total || events.length);
+  const sessionSuffix = state.selectedSessionID ? " for this conversation" : "";
+  els.logMeta.textContent = `${events.length} of ${total} recent event(s)${sessionSuffix}.`;
+  if (!events.length) {
+    els.logList.className = "hank-log-list empty-state";
+    els.logList.textContent = "No workflow events recorded for this view yet.";
+    return;
+  }
+  els.logList.className = "hank-log-list";
+  els.logList.innerHTML = events.slice().reverse().map((event) => {
+    const level = String(event.level || "info").toLowerCase();
+    return `
+      <article class="hank-log-entry ${escapeHTML(level)}">
+        <div class="hank-log-entry-head">
+          <span>${escapeHTML(formatTraceTime(event.created_at))}</span>
+          <strong>${escapeHTML(event.event || "event")}</strong>
+          <span class="pill">${escapeHTML(event.scope || "assistant")}</span>
+        </div>
+        <p>${escapeHTML(event.summary || "")}</p>
+        <div class="hank-log-ids">
+          ${event.run_id ? `<span>run ${escapeHTML(event.run_id)}</span>` : ""}
+          ${event.request_id ? `<span>request ${escapeHTML(event.request_id)}</span>` : ""}
+          ${event.message_id ? `<span>message ${escapeHTML(event.message_id)}</span>` : ""}
+        </div>
+        ${renderTraceDetails(event.details || {})}
+      </article>
+    `;
+  }).join("");
+}
+
+function traceLogText() {
+  const lines = [
+    "HankAI workflow logs",
+    `Generated: ${new Date().toISOString()}`,
+    state.selectedSessionID ? `Session: ${state.selectedSessionID}` : "Session: all recent",
+    "",
+  ];
+  for (const event of state.traceEvents) {
+    lines.push(`[${event.created_at || ""}] ${event.level || "info"} ${event.scope || "assistant"} ${event.event || "event"}`);
+    if (event.summary) lines.push(`  ${event.summary}`);
+    if (event.home_id) lines.push(`  home_id=${event.home_id}`);
+    if (event.session_id) lines.push(`  session_id=${event.session_id}`);
+    if (event.run_id) lines.push(`  run_id=${event.run_id}`);
+    if (event.message_id) lines.push(`  message_id=${event.message_id}`);
+    if (event.request_id) lines.push(`  request_id=${event.request_id}`);
+    for (const [key, value] of Object.entries(event.details || {})) {
+      lines.push(`  ${key}=${value}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 function cardActionHref(card) {
   const kind = String(card.kind || "").toLowerCase();
   if (kind === "note" && card.note_id) {
@@ -501,6 +580,53 @@ async function loadMessages(sessionID) {
   renderSessions();
   const payload = await api(`/v1/home/assistant/sessions/${encodeURIComponent(sessionID)}/messages`);
   renderMessages(payload.messages || []);
+  if (state.logsVisible) {
+    await loadLogs();
+  }
+}
+
+async function loadLogs() {
+  if (!els.logPanel || els.logPanel.hidden) return;
+  const params = new URLSearchParams({ limit: "300" });
+  if (state.selectedSessionID) {
+    params.set("session_id", state.selectedSessionID);
+  }
+  try {
+    renderLogs(await api(`/v1/home/assistant/logs?${params.toString()}`));
+  } catch (error) {
+    els.logMeta.textContent = "Workflow logs are admin-only.";
+    els.logList.className = "hank-log-list empty-state";
+    els.logList.textContent = error.message;
+  }
+}
+
+async function toggleLogs() {
+  state.logsVisible = !state.logsVisible;
+  els.logPanel.hidden = !state.logsVisible;
+  els.logButton.textContent = state.logsVisible ? "Hide Logs" : "Logs";
+  if (state.logsVisible) {
+    await loadLogs();
+  }
+}
+
+async function copyLogs() {
+  await loadLogs();
+  const text = traceLogText();
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    showToast("Workflow logs copied.");
+    return;
+  }
+  showToast("Clipboard is unavailable in this browser.", true);
+}
+
+async function clearLogs() {
+  if (!window.confirm("Clear recent HankAI workflow logs for this home?")) {
+    return;
+  }
+  await api("/v1/home/assistant/logs", { method: "DELETE" });
+  await loadLogs();
+  showToast("Workflow logs cleared.");
 }
 
 async function createSession() {
@@ -567,6 +693,9 @@ async function sendMessage(event) {
     renderAttachmentTray();
     await continueRun(run);
     await loadSessions();
+    if (state.logsVisible) {
+      await loadLogs();
+    }
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -765,6 +894,9 @@ async function confirmPending(approved) {
     els.confirmationCard.hidden = true;
     await continueRun(run);
     await loadSessions();
+    if (state.logsVisible) {
+      await loadLogs();
+    }
   } catch (error) {
     showToast(error.message, true);
   }
@@ -793,6 +925,10 @@ async function hydrate() {
 els.logoutButton.addEventListener("click", logout);
 els.newSessionButton.addEventListener("click", () => createSession().catch((error) => showToast(error.message, true)));
 els.deleteSessionButton.addEventListener("click", () => deleteSession().catch((error) => showToast(error.message, true)));
+els.logButton?.addEventListener("click", () => toggleLogs().catch((error) => showToast(error.message, true)));
+els.refreshLogsButton?.addEventListener("click", () => loadLogs().then(() => showToast("Workflow logs refreshed.")).catch((error) => showToast(error.message, true)));
+els.copyLogsButton?.addEventListener("click", () => copyLogs().catch((error) => showToast(error.message, true)));
+els.clearLogsButton?.addEventListener("click", () => clearLogs().catch((error) => showToast(error.message, true)));
 els.sessionList.addEventListener("click", (event) => {
   const deleteButton = event.target.closest("[data-delete-session-id]");
   if (deleteButton) {

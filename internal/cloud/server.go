@@ -57,6 +57,7 @@ type Server struct {
 	assistantAI        AssistantAIConfig
 	chatGPTDeviceAuths *chatGPTDeviceAuthRegistry
 	noteAttachmentRoot string
+	assistantTrace     *assistantTraceLog
 }
 
 type authContext struct {
@@ -97,6 +98,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		requestTimeout:     requestTimeout,
 		chatGPTDeviceAuths: newChatGPTDeviceAuthRegistry(),
 		noteAttachmentRoot: filepath.Join("/tmp", "hank-note-attachments"),
+		assistantTrace:     newAssistantTraceLog(maxAssistantTraceLimit),
 	}
 
 	mux := http.NewServeMux()

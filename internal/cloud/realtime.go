@@ -3,6 +3,7 @@ package cloud
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -260,6 +261,21 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 		if !strings.HasPrefix(topic, "media.downloads") {
 			topic = topicMediaDownloads
 		}
+		level := "info"
+		if strings.Contains(string(event.Body), `"failed_count":`) {
+			details := traceEventDetailsFromJSON(event.Body)
+			if failed, _ := strconv.Atoi(details["failed_count"]); failed > 0 {
+				level = "error"
+			}
+		}
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Level:   level,
+			Scope:   "media",
+			Event:   event.Event,
+			Summary: "Home agent emitted a media download event.",
+			HomeID:  homeID,
+			Details: traceEventDetailsFromJSON(event.Body),
+		})
 		s.broadcastRawAppEvent(ctx, topic, event.Event, event.Body)
 	default:
 		s.logger.Debug("ignored agent event", "home_id", homeID, "event", event.Event)
