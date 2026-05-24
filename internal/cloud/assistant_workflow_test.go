@@ -868,6 +868,10 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	if len(answer.Cards) != 1 || answer.Cards[0].Kind != "file" || answer.Cards[0].Path != "Documents/Taxes/2025 Taxes" {
 		t.Fatalf("file search cards = %#v", answer.Cards)
 	}
+	diagnostics := assistantDiagnosticsFromContent(answer)
+	if diagnostics == nil || diagnostics.ToolKind != string(assistantIntentFilesSearch) || diagnostics.IntentKind != string(assistantIntentFilesSearch) || diagnostics.Query != "2025 taxes" {
+		t.Fatalf("file search diagnostics = %#v", diagnostics)
+	}
 
 	allAnswer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "show me all 2025 taxes")
 	if err != nil {

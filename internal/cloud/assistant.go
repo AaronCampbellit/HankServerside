@@ -155,6 +155,14 @@ type assistantIntent struct {
 	MediaSelection *assistantResultCard
 }
 
+type assistantDiagnostics struct {
+	ToolKind            string `json:"tool_kind,omitempty"`
+	IntentKind          string `json:"intent_kind,omitempty"`
+	Query               string `json:"query,omitempty"`
+	MediaSelectionTitle string `json:"media_selection_title,omitempty"`
+	MediaSelectionPath  string `json:"media_selection_path,omitempty"`
+}
+
 type assistantRunResponse struct {
 	ID                   string                         `json:"id"`
 	State                string                         `json:"state"`
@@ -163,6 +171,7 @@ type assistantRunResponse struct {
 	AssistantMessage     *assistantAPIMessage           `json:"assistant_message,omitempty"`
 	ClientToolRequest    *assistantClientToolRequest    `json:"client_tool_request,omitempty"`
 	PendingActionSummary *assistantPendingActionSummary `json:"pending_action_summary,omitempty"`
+	Diagnostics          *assistantDiagnostics          `json:"diagnostics,omitempty"`
 }
 
 type assistantAPISession struct {
@@ -174,11 +183,12 @@ type assistantAPISession struct {
 }
 
 type assistantAPIMessage struct {
-	ID        string                `json:"id"`
-	Role      string                `json:"role"`
-	Text      string                `json:"text"`
-	CreatedAt time.Time             `json:"created_at"`
-	Cards     []assistantResultCard `json:"cards,omitempty"`
+	ID          string                `json:"id"`
+	Role        string                `json:"role"`
+	Text        string                `json:"text"`
+	CreatedAt   time.Time             `json:"created_at"`
+	Cards       []assistantResultCard `json:"cards,omitempty"`
+	Diagnostics *assistantDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type assistantSessionListResponse struct {
@@ -847,6 +857,7 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 			RequiresConfirmation: true,
 			AssistantMessage:     &message,
 			PendingActionSummary: assistantPendingActionSummaryFromAction(*pendingAction),
+			Diagnostics:          message.Diagnostics,
 		}, nil
 	}
 
@@ -864,6 +875,7 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 		ID:               run.ID,
 		State:            run.State,
 		AssistantMessage: &message,
+		Diagnostics:      message.Diagnostics,
 	}, nil
 }
 
@@ -1379,7 +1391,12 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 			Text: "This HankAI tool is registered but does not have an executor yet.",
 		}, nil
 	}
-	return tool.Execute(ctx, s, runtime, intent)
+	content, err := tool.Execute(ctx, s, runtime, intent)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	attachAssistantDiagnostics(&content, tool, intent)
+	return content, nil
 }
 
 func (s *Server) answerNoteListPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings) (assistantMessageContent, error) {
@@ -2491,8 +2508,54 @@ func assistantMessageToAPI(message domain.AssistantMessage) assistantAPIMessage 
 	if err := json.Unmarshal([]byte(message.ContentJSON), &content); err == nil {
 		api.Text = content.Text
 		api.Cards = content.Cards
+		api.Diagnostics = assistantDiagnosticsFromContent(content)
 	}
 	return api
+}
+
+func attachAssistantDiagnostics(content *assistantMessageContent, tool assistantTool, intent assistantIntent) {
+	if content == nil {
+		return
+	}
+	if content.Meta == nil {
+		content.Meta = make(map[string]interface{})
+	}
+	content.Meta["diagnostics"] = assistantDiagnosticsForIntent(tool, intent)
+}
+
+func assistantDiagnosticsForIntent(tool assistantTool, intent assistantIntent) assistantDiagnostics {
+	diagnostics := assistantDiagnostics{
+		ToolKind:   string(tool.Kind),
+		IntentKind: string(intent.Kind),
+		Query:      strings.TrimSpace(intent.Query),
+	}
+	if intent.MediaSelection != nil {
+		diagnostics.MediaSelectionTitle = intent.MediaSelection.Title
+		diagnostics.MediaSelectionPath = intent.MediaSelection.Path
+	}
+	return diagnostics
+}
+
+func assistantDiagnosticsFromContent(content assistantMessageContent) *assistantDiagnostics {
+	if content.Meta == nil {
+		return nil
+	}
+	raw, ok := content.Meta["diagnostics"]
+	if !ok || raw == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var diagnostics assistantDiagnostics
+	if err := json.Unmarshal(encoded, &diagnostics); err != nil {
+		return nil
+	}
+	if diagnostics.ToolKind == "" && diagnostics.IntentKind == "" && diagnostics.Query == "" {
+		return nil
+	}
+	return &diagnostics
 }
 
 func assistantPendingActionFromContent(content assistantMessageContent) *assistantPendingAction {
@@ -2776,6 +2839,7 @@ func (s *Server) assistantRunResponseForSession(ctx context.Context, session dom
 				if messages[i].Role == assistantRoleAssistant {
 					message := assistantMessageToAPI(messages[i])
 					response.AssistantMessage = &message
+					response.Diagnostics = message.Diagnostics
 					break
 				}
 			}
