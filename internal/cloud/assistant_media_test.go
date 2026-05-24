@@ -19,11 +19,17 @@ func TestMediaAvailabilityPromptMatching(t *testing.T) {
 		want   string
 		ok     bool
 	}{
-		{prompt: "is Spongebob Squarepants available for download", want: "spongebob squarepants", ok: true},
-		{prompt: "is Batman Returns availabe for download", want: "batman returns", ok: true},
+		{prompt: "is Spongebob Squarepants available for download", want: "Spongebob Squarepants", ok: true},
+		{prompt: "is Batman Returns availabe for download", want: "Batman Returns", ok: true},
 		{prompt: "can I download The Matrix", want: "The Matrix", ok: true},
 		{prompt: "find The Office for download", want: "The Office", ok: true},
+		{prompt: `find the normal movie for download`, want: "normal movie", ok: true},
+		{prompt: `find "normal" movie`, want: "normal", ok: true},
+		{prompt: `search for "normal" movie for download`, want: "normal", ok: true},
+		{prompt: `search "normal" movie for download`, want: "normal", ok: true},
+		{prompt: "find normal movie", want: "normal movie", ok: true},
 		{prompt: "find 2025 taxes", ok: false},
+		{prompt: "find 2025 taxes for download", ok: false},
 	}
 
 	for _, test := range tests {

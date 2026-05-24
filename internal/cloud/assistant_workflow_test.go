@@ -34,6 +34,8 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "home assistant on", prompt: "what entities are on", want: assistantIntentHomeAssistantQuery},
 		{name: "home assistant garage", prompt: "garage entities", want: assistantIntentHomeAssistantQuery},
 		{name: "home assistant conversational query", prompt: "can you find all the garage light entities", want: assistantIntentHomeAssistantQuery},
+		{name: "media quoted movie search", prompt: `find "normal" movie`, want: assistantIntentMediaSearch},
+		{name: "media quoted download search", prompt: `search for "normal" movie for download`, want: assistantIntentMediaSearch},
 		{name: "file search", prompt: "find 2025 taxes", want: assistantIntentFilesSearch},
 		{name: "project docs", prompt: "what does AGENTS.md say", want: assistantIntentProjectDocs},
 	}

@@ -96,6 +96,18 @@ var assistantToolRegistry = []assistantTool{
 		Execute: executeAssistantNotesTool,
 	},
 	{
+		Kind:        assistantIntentMediaSearch,
+		Description: "Search authorized media downloads through the home agent.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			query, ok := mediaAvailabilityQuery(prompt)
+			if !ok {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentMediaSearch, Query: query}, true
+		},
+		Execute: executeAssistantMediaSearchTool,
+	},
+	{
 		Kind:        assistantIntentFilesSearch,
 		Description: "Search indexed SMB files and folders through Hank Remote.",
 		Match: func(prompt string) (assistantIntent, bool) {
@@ -112,18 +124,6 @@ var assistantToolRegistry = []assistantTool{
 			}
 		},
 		Execute: executeAssistantFilesSearchTool,
-	},
-	{
-		Kind:        assistantIntentMediaSearch,
-		Description: "Search authorized media downloads through the home agent.",
-		Match: func(prompt string) (assistantIntent, bool) {
-			query, ok := mediaAvailabilityQuery(prompt)
-			if !ok {
-				return assistantIntent{}, false
-			}
-			return assistantIntent{Kind: assistantIntentMediaSearch, Query: query}, true
-		},
-		Execute: executeAssistantMediaSearchTool,
 	},
 	{
 		Kind:        assistantIntentGeneral,

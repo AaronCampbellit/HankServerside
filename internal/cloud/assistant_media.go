@@ -13,32 +13,180 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
-var mediaOptionPattern = regexp.MustCompile(`(?i)^\s*(?:option\s*)?(\d+)\s*$`)
+var (
+	mediaOptionPattern      = regexp.MustCompile(`(?i)^\s*(?:option\s*)?(\d+)\s*$`)
+	mediaQuotedTitlePattern = regexp.MustCompile(`"([^"]+)"`)
+)
 
 func mediaAvailabilityQuery(prompt string) (string, bool) {
 	trimmed := strings.TrimSpace(prompt)
 	lowered := strings.ToLower(trimmed)
-	if !strings.Contains(lowered, "download") {
+	hasDownloadIntent := mediaPromptHasDownloadIntent(lowered)
+	hasTypedSearchIntent := hasSearchVerb(lowered) && mediaPromptHasTypeHint(trimmed)
+	if !hasDownloadIntent && !hasTypedSearchIntent {
 		return "", false
 	}
-	if strings.Contains(lowered, "available for download") || strings.Contains(lowered, "availabe for download") {
-		query := trimmed
-		for _, marker := range []string{" available for download", " availabe for download", " Available for download", " Availabe for download"} {
-			query = strings.Replace(query, marker, "", 1)
-		}
-		query = strings.TrimSpace(strings.TrimPrefix(strings.ToLower(query), "is "))
-		query = strings.TrimSpace(strings.TrimPrefix(query, "the "))
+
+	if match := mediaQuotedTitlePattern.FindStringSubmatch(trimmed); len(match) == 2 {
+		query := cleanQuotedMediaQuery(match[1])
 		return query, query != ""
 	}
-	for _, prefix := range []string{"can i download ", "find ", "search "} {
-		if strings.HasPrefix(lowered, prefix) {
-			query := strings.TrimSpace(trimmed[len(prefix):])
-			query = strings.TrimSpace(strings.TrimSuffix(query, "for download"))
-			query = strings.TrimSpace(strings.TrimSuffix(query, "download"))
-			return query, query != ""
+
+	query := stripMediaPromptPrefix(trimmed)
+	query = stripMediaPromptSuffix(query)
+	query = cleanMediaPromptQuery(query)
+	return query, query != ""
+}
+
+func mediaPromptHasDownloadIntent(lowered string) bool {
+	if !strings.Contains(lowered, "download") {
+		return false
+	}
+	if mediaPromptLooksLikeFileRequest(lowered) && !mediaPromptHasTypeHint(lowered) {
+		return false
+	}
+	return strings.Contains(lowered, "available") ||
+		strings.Contains(lowered, "availabe") ||
+		strings.Contains(lowered, "for download") ||
+		strings.Contains(lowered, "to download") ||
+		strings.HasPrefix(lowered, "can i download ") ||
+		strings.HasPrefix(lowered, "can you download ") ||
+		strings.HasPrefix(lowered, "download ") ||
+		hasSearchVerb(lowered)
+}
+
+func mediaPromptLooksLikeFileRequest(lowered string) bool {
+	return strings.Contains(lowered, "file") ||
+		strings.Contains(lowered, "folder") ||
+		strings.Contains(lowered, "directory") ||
+		strings.Contains(lowered, "smb") ||
+		strings.Contains(lowered, "share") ||
+		strings.Contains(lowered, "document") ||
+		strings.Contains(lowered, "pdf") ||
+		strings.Contains(lowered, " tax") ||
+		strings.Contains(lowered, "tax ") ||
+		strings.Contains(lowered, "taxes")
+}
+
+func mediaPromptHasTypeHint(prompt string) bool {
+	for _, token := range strings.Fields(normalizedMediaSelection(prompt)) {
+		if isMediaTypeHint(token) {
+			return true
 		}
 	}
-	return "", false
+	return false
+}
+
+func isMediaTypeHint(token string) bool {
+	switch token {
+	case "movie", "movies", "film", "films", "series", "show", "shows", "tv", "season", "seasons", "episode", "episodes":
+		return true
+	default:
+		return false
+	}
+}
+
+func stripMediaPromptPrefix(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	lowered := strings.ToLower(trimmed)
+	prefixes := []string{
+		"can you download ",
+		"can i download ",
+		"please search for ",
+		"please search ",
+		"please find ",
+		"search for ",
+		"look for ",
+		"find all ",
+		"search ",
+		"find ",
+		"is ",
+		"are ",
+		"download ",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lowered, prefix) {
+			return strings.TrimSpace(trimmed[len(prefix):])
+		}
+	}
+	return stripAssistantSearchPrefix(trimmed)
+}
+
+func stripMediaPromptSuffix(query string) string {
+	suffixes := []string{
+		" available for download",
+		" availabe for download",
+		" available to download",
+		" availabe to download",
+		" for download",
+		" to download",
+		" available",
+		" availabe",
+		" download",
+	}
+	for {
+		trimmed := strings.TrimSpace(query)
+		lowered := strings.ToLower(trimmed)
+		changed := false
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(lowered, suffix) {
+				query = strings.TrimSpace(trimmed[:len(trimmed)-len(suffix)])
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			return trimmed
+		}
+	}
+}
+
+func cleanQuotedMediaQuery(query string) string {
+	return strings.TrimSpace(query)
+}
+
+func cleanMediaPromptQuery(query string) string {
+	query = strings.TrimSpace(query)
+	query = strings.Trim(query, " \t\r\n\"'`")
+	for {
+		lowered := strings.ToLower(query)
+		if strings.HasPrefix(lowered, "for ") {
+			query = strings.TrimSpace(query[len("for "):])
+			continue
+		}
+		if strings.HasPrefix(lowered, "called ") {
+			query = strings.TrimSpace(query[len("called "):])
+			continue
+		}
+		if strings.HasPrefix(lowered, "named ") {
+			query = strings.TrimSpace(query[len("named "):])
+			continue
+		}
+		break
+	}
+	if mediaQueryEndsWithTypeHint(query) {
+		query = stripLeadingMediaArticle(query)
+	}
+	return query
+}
+
+func mediaQueryEndsWithTypeHint(query string) bool {
+	tokens := strings.Fields(normalizedMediaSelection(query))
+	if len(tokens) == 0 {
+		return false
+	}
+	return isMediaTypeHint(tokens[len(tokens)-1])
+}
+
+func stripLeadingMediaArticle(query string) string {
+	trimmed := strings.TrimSpace(query)
+	lowered := strings.ToLower(trimmed)
+	for _, prefix := range []string{"the ", "a ", "an "} {
+		if strings.HasPrefix(lowered, prefix) {
+			return strings.TrimSpace(trimmed[len(prefix):])
+		}
+	}
+	return trimmed
 }
 
 func (s *Server) answerMediaSearch(ctx context.Context, home domain.Home, query string) (assistantMessageContent, error) {
