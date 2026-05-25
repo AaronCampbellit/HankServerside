@@ -60,6 +60,56 @@ func TestAssistantMediaSettingsEndpointAppliesThroughAgent(t *testing.T) {
 	}
 }
 
+func TestAssistantMediaSettingsEndpointReturnsDestinationOptions(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSettingsStatus, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaSettingsStatusRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaSettingsStatusResponse{
+				Settings: protocol.MediaSettings{
+					BaseURL:             "https://gramaton.io",
+					DestinationPath:     "Movies",
+					PreferredQuality:    "1080p",
+					RequireConfirmation: true,
+				},
+				DestinationOptions: []protocol.MediaDestinationOption{
+					{Value: "", Label: "Media root"},
+					{Value: "Movies", Label: "Media root/Movies"},
+					{Value: "Shows", Label: "Media root/Shows"},
+				},
+			}, nil
+		})
+	}()
+
+	var response assistantMediaSettingsResponse
+	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/assistant/media-settings", nil, &response)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if !response.Online || response.Settings.DestinationPath != "Movies" {
+		t.Fatalf("settings response = %#v", response)
+	}
+	values := map[string]string{}
+	for _, option := range response.DestinationOptions {
+		values[option.Value] = option.Label
+	}
+	if values["Movies"] != "Media root/Movies" || values["Shows"] != "Media root/Shows" {
+		t.Fatalf("destination options = %#v", response.DestinationOptions)
+	}
+}
+
 func TestAssistantMediaJobCancelEndpointRoutesToAgent(t *testing.T) {
 	t.Parallel()
 
@@ -98,6 +148,51 @@ func TestAssistantMediaJobCancelEndpointRoutesToAgent(t *testing.T) {
 	}
 	if !response.Online || response.Job.Status != protocol.MediaJobStatusCancelled {
 		t.Fatalf("cancel response = %#v", response)
+	}
+}
+
+func TestAssistantMediaJobStatusEndpointRoutesToAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	requestCh := make(chan protocol.MediaDownloadStatusRequest, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaDownloadStatus, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaDownloadStatusRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			requestCh <- request
+			return protocol.MediaDownloadStatusResponse{Job: protocol.MediaDownloadJobStatus{
+				JobID:        request.JobID,
+				Status:       protocol.MediaJobStatusRunning,
+				Title:        "Fixture Movie",
+				TotalCount:   1,
+				CurrentFile:  "Fixture Movie.mp4",
+				BytesWritten: 42,
+				BytesTotal:   100,
+			}}, nil
+		})
+	}()
+
+	var response assistantMediaJobStatusResponse
+	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/assistant/media-jobs/job_fixture", nil, &response)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	request := <-requestCh
+	if request.JobID != "job_fixture" {
+		t.Fatalf("status request = %#v", request)
+	}
+	if !response.Online || response.Job.Status != protocol.MediaJobStatusRunning || response.Job.BytesWritten != 42 {
+		t.Fatalf("status response = %#v", response)
 	}
 }
 

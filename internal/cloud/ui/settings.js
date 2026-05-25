@@ -70,8 +70,13 @@ function frameURL(frame, tab) {
   const url = new URL(raw, window.location.origin);
   const current = new URLSearchParams(window.location.search);
   const token = current.get("token");
+  const mediaJob = current.get("media_job");
   if (tab === "join-home" && token) {
     url.searchParams.set("token", token);
+  }
+  if (tab === "ai" && mediaJob) {
+    url.searchParams.set("media_job", mediaJob);
+    url.searchParams.set("settings_tab", "tools");
   }
   return url.toString();
 }

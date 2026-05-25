@@ -221,6 +221,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 	case len(parts) == 2 && parts[1] == "media-settings":
 		s.handleAssistantMediaSettings(w, r, home, membership)
 		return true
+	case len(parts) == 3 && parts[1] == "media-jobs":
+		s.handleAssistantMediaJobStatus(w, r, home, membership, parts[2])
+		return true
 	case len(parts) == 4 && parts[1] == "media-jobs" && parts[3] == "cancel":
 		s.handleAssistantMediaJobCancel(w, r, home, membership, parts[2])
 		return true
@@ -2683,7 +2686,7 @@ func (s *Server) executeConfirmedAssistantAction(
 					Kind:        "media",
 					Title:       pending.MediaDownload.Title,
 					Summary:     fmt.Sprintf("Job %s is %s. %d item(s) queued for the Media share root.", job.JobID, job.Status, job.TotalCount),
-					ActionTitle: "Downloading",
+					ActionTitle: "View Job",
 					Path:        pending.MediaDownload.Selection.PagePath,
 					MediaType:   pending.MediaDownload.MediaType,
 					JobID:       job.JobID,

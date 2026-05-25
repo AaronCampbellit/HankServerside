@@ -12,6 +12,10 @@ const state = {
   requestCounter: 0,
   logsVisible: false,
   traceEvents: [],
+  mediaJobs: new Map(),
+  visibleMediaJobIDs: new Set(),
+  mediaJobPollTimer: null,
+  mediaRealtimeSubscribed: false,
 };
 
 const els = {
@@ -34,6 +38,7 @@ const els = {
   messageList: document.getElementById("message-list"),
   confirmationCard: document.getElementById("confirmation-card"),
   confirmationMessage: document.getElementById("confirmation-message"),
+  confirmationPreview: document.getElementById("confirmation-preview"),
   confirmButton: document.getElementById("confirm-button"),
   cancelButton: document.getElementById("cancel-button"),
   attachmentTray: document.getElementById("attachment-tray"),
@@ -205,10 +210,37 @@ function closeAppSocket() {
   }
   state.appSocket = null;
   state.appSocketPromise = null;
+  state.mediaRealtimeSubscribed = false;
   for (const { reject } of state.pendingRequests.values()) {
     reject(new Error("File server connection closed."));
   }
   state.pendingRequests.clear();
+}
+
+function decodedAppEventBody(body) {
+  if (!body) return null;
+  if (typeof body === "string") {
+    try {
+      return JSON.parse(body);
+    } catch (_) {
+      return null;
+    }
+  }
+  return body;
+}
+
+function handleAppEvent(envelope) {
+  const payload = envelope.payload || {};
+  if (payload.topic !== "media.downloads") {
+    return;
+  }
+  const job = decodedAppEventBody(payload.body);
+  if (!job?.job_id) {
+    return;
+  }
+  mergeMediaJobStatus(job);
+  updateMediaJobElements(job.job_id);
+  scheduleMediaJobPoll();
 }
 
 function handleSocketMessage(event) {
@@ -216,6 +248,10 @@ function handleSocketMessage(event) {
   try {
     envelope = JSON.parse(event.data);
   } catch (_) {
+    return;
+  }
+  if (envelope.type === "app.event") {
+    handleAppEvent(envelope);
     return;
   }
   const pending = state.pendingRequests.get(envelope.request_id);
@@ -434,8 +470,10 @@ function renderMessages(messages = []) {
   if (!messages.length) {
     els.messageList.className = "hank-message-list empty-state";
     els.messageList.textContent = "Ask Hank about your synced Hank data.";
+    watchMediaJobs([]);
     return;
   }
+  const mediaJobIDs = mediaJobIDsFromMessages(messages);
   els.messageList.className = "hank-message-list";
   els.messageList.innerHTML = messages.map((message) => `
     <article class="hank-message ${escapeHTML(message.role)}">
@@ -445,6 +483,22 @@ function renderMessages(messages = []) {
     </article>
   `).join("");
   els.messageList.scrollTop = els.messageList.scrollHeight;
+  watchMediaJobs(mediaJobIDs);
+}
+
+function mediaJobIDsFromMessages(messages = []) {
+  const ids = [];
+  const seen = new Set();
+  for (const message of messages) {
+    for (const card of message.cards || []) {
+      const jobID = String(card.job_id || "").trim();
+      if (jobID && !seen.has(jobID)) {
+        seen.add(jobID);
+        ids.push(jobID);
+      }
+    }
+  }
+  return ids;
 }
 
 function renderCards(cards) {
@@ -460,12 +514,96 @@ function renderCard(card) {
       <div class="hank-result-card-body">
       <div class="card-title">${escapeHTML(card.title)}</div>
       <div class="meta">${escapeHTML(card.summary || "")}</div>
+      ${renderMediaJobStatus(card)}
       <div class="hank-result-card-footer">
         <div class="pill">${escapeHTML(card.kind || "result")}</div>
         ${renderCardAction(card)}
       </div>
       </div>
     </article>
+  `;
+}
+
+function renderConfirmationPreview(cards = []) {
+  const previews = cards.filter((card) => card && (String(card.kind || "").toLowerCase() === "media" || cardImageURL(card)));
+  if (!previews.length) return "";
+  return previews.map((card) => {
+    const imageURL = cardImageURL(card);
+    return `
+      <article class="hank-confirmation-media">
+        ${imageURL ? `<img class="hank-confirmation-media-image" src="${escapeHTML(imageURL)}" alt="">` : ""}
+        <div class="hank-confirmation-media-body">
+          <div class="card-title">${escapeHTML(card.title || "Selected media")}</div>
+          <div class="meta">${escapeHTML(card.summary || "")}</div>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function showConfirmation(run) {
+  state.pendingRun = run;
+  els.confirmationMessage.textContent = run.assistant_message?.text || "Hank needs confirmation before continuing.";
+  const preview = renderConfirmationPreview(run.assistant_message?.cards || []);
+  els.confirmationPreview.innerHTML = preview;
+  els.confirmationPreview.hidden = !preview;
+  els.confirmationCard.hidden = false;
+  els.runState.textContent = "Confirm";
+}
+
+function hideConfirmation() {
+  state.pendingRun = null;
+  els.confirmationCard.hidden = true;
+  els.confirmationPreview.hidden = true;
+  els.confirmationPreview.innerHTML = "";
+}
+
+function renderMediaJobStatus(card) {
+  const kind = String(card.kind || "").toLowerCase();
+  const jobID = String(card.job_id || "").trim();
+  if (kind !== "media" || !jobID) return "";
+  return `<div class="hank-media-job-status" data-media-job-id="${escapeHTML(jobID)}">${mediaJobStatusHTML(state.mediaJobs.get(jobID), jobID)}</div>`;
+}
+
+function mediaJobStatusHTML(job, jobID) {
+  if (!job) {
+    return `
+      <div class="hank-media-job-head">
+        <span class="status-chip">Checking</span>
+        <span class="meta">Looking up job ${escapeHTML(jobID)}.</span>
+      </div>
+    `;
+  }
+  const status = String(job.status || "unknown").toLowerCase();
+  const active = isMediaJobActive(job);
+  const statusClass = active || status === "completed" ? "status-chip" : "status-chip offline";
+  const written = Number(job.bytes_written || 0);
+  const total = Number(job.bytes_total || 0);
+  const percent = total > 0 ? Math.min(100, Math.max(0, (written / total) * 100)) : 0;
+  const progressText = total > 0 ? `${formatBytes(written)} / ${formatBytes(total)} (${Math.round(percent)}%)` : formatBytes(written);
+  const now = Date.now();
+  const lastSeen = job._last_seen_at ? relativeTime(now - job._last_seen_at) : "not checked yet";
+  const lastProgress = job._last_progress_at ? relativeTime(now - job._last_progress_at) : "waiting for progress";
+  const stalled = active && job._last_progress_at && now - job._last_progress_at > 60000;
+  const detailRows = [
+    `${Number(job.completed_count || 0)}/${Number(job.total_count || 0)} complete`,
+    job.current_file ? `Current: ${job.current_file}` : "",
+    written || total ? `Progress: ${progressText}` : "",
+    job.download_mode ? `Mode: ${job.download_mode}` : "",
+    job.verification_status ? `Verify: ${job.verification_status}` : "",
+    job.fallback_used ? "Fallback: single stream" : "",
+    active ? `Last movement: ${lastProgress}` : "",
+    `Last checked: ${lastSeen}`,
+  ].filter(Boolean);
+  return `
+    <div class="hank-media-job-head">
+      <span class="${statusClass}">${escapeHTML(status)}</span>
+      <span class="meta">${stalled ? "No recent progress" : active ? "Live job status" : "Final job status"}</span>
+    </div>
+    ${total > 0 ? `<div class="hank-media-job-bar" aria-label="${escapeHTML(progressText)}"><span style="width: ${percent.toFixed(1)}%"></span></div>` : ""}
+    <div class="hank-media-job-meta">${detailRows.map((row) => `<span>${escapeHTML(row)}</span>`).join("")}</div>
+    ${job.error_message ? `<div class="meta">${escapeHTML(job.error_message)}</div>` : ""}
+    ${job._status_error ? `<div class="meta">${escapeHTML(job._status_error)}</div>` : ""}
   `;
 }
 
@@ -484,6 +622,114 @@ function renderCardAction(card) {
   const href = cardActionHref(card);
   if (!href) return "";
   return `<a class="button-link hank-result-action" href="${escapeHTML(href)}">${escapeHTML(card.action_title || "Open")}</a>`;
+}
+
+function isMediaJobActive(job) {
+  const status = String(job?.status || "").toLowerCase();
+  return status === "queued" || status === "running";
+}
+
+function relativeTime(milliseconds) {
+  const seconds = Math.max(0, Math.round((Number(milliseconds) || 0) / 1000));
+  if (seconds < 2) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function mergeMediaJobStatus(job) {
+  const jobID = String(job?.job_id || "").trim();
+  if (!jobID) return;
+  const now = Date.now();
+  const previous = state.mediaJobs.get(jobID) || {};
+  const moved = !previous._last_progress_at ||
+    Number(previous.bytes_written || 0) !== Number(job.bytes_written || 0) ||
+    Number(previous.completed_count || 0) !== Number(job.completed_count || 0) ||
+    Number(previous.failed_count || 0) !== Number(job.failed_count || 0) ||
+    String(previous.current_file || "") !== String(job.current_file || "") ||
+    String(previous.status || "") !== String(job.status || "");
+  state.mediaJobs.set(jobID, {
+    ...previous,
+    ...job,
+    _last_seen_at: now,
+    _last_progress_at: moved ? now : previous._last_progress_at,
+    _status_error: "",
+  });
+}
+
+function markMediaJobStatusError(jobID, message) {
+  const trimmed = String(jobID || "").trim();
+  if (!trimmed) return;
+  const previous = state.mediaJobs.get(trimmed) || { job_id: trimmed, status: "unknown" };
+  state.mediaJobs.set(trimmed, {
+    ...previous,
+    _last_seen_at: Date.now(),
+    _status_error: message || "Could not refresh media job status.",
+  });
+  updateMediaJobElements(trimmed);
+}
+
+function updateMediaJobElements(jobID) {
+  document.querySelectorAll("[data-media-job-id]").forEach((element) => {
+    if (element.dataset.mediaJobId !== jobID) return;
+    element.innerHTML = mediaJobStatusHTML(state.mediaJobs.get(jobID), jobID);
+  });
+}
+
+async function subscribeMediaDownloadEvents() {
+  if (state.mediaRealtimeSubscribed) {
+    return;
+  }
+  await sendCommand("app.subscribe", { topics: ["media.downloads"] });
+  state.mediaRealtimeSubscribed = true;
+}
+
+function watchMediaJobs(jobIDs) {
+  state.visibleMediaJobIDs = new Set((jobIDs || []).map((jobID) => String(jobID || "").trim()).filter(Boolean));
+  if (!state.visibleMediaJobIDs.size) {
+    clearTimeout(state.mediaJobPollTimer);
+    state.mediaJobPollTimer = null;
+    return;
+  }
+  subscribeMediaDownloadEvents().catch(() => {
+    state.mediaRealtimeSubscribed = false;
+  });
+  refreshVisibleMediaJobs().catch((error) => showToast(error.message, true));
+}
+
+async function refreshVisibleMediaJobs() {
+  const jobIDs = Array.from(state.visibleMediaJobIDs);
+  await Promise.all(jobIDs.map((jobID) => refreshMediaJobStatus(jobID)));
+  scheduleMediaJobPoll();
+}
+
+async function refreshMediaJobStatus(jobID) {
+  try {
+    const payload = await api(`/v1/home/assistant/media-jobs/${encodeURIComponent(jobID)}`);
+    if (payload.job) {
+      mergeMediaJobStatus(payload.job);
+      updateMediaJobElements(jobID);
+    }
+  } catch (error) {
+    markMediaJobStatusError(jobID, error.message);
+  }
+}
+
+function scheduleMediaJobPoll(delay = 3000) {
+  clearTimeout(state.mediaJobPollTimer);
+  const activeJobs = Array.from(state.visibleMediaJobIDs).filter((jobID) => {
+    const job = state.mediaJobs.get(jobID);
+    return !job || isMediaJobActive(job);
+  });
+  if (!activeJobs.length) {
+    state.mediaJobPollTimer = null;
+    return;
+  }
+  state.mediaJobPollTimer = window.setTimeout(() => {
+    refreshVisibleMediaJobs().catch((error) => showToast(error.message, true));
+  }, delay);
 }
 
 function formatTraceTime(value) {
@@ -558,6 +804,10 @@ function traceLogText() {
 
 function cardActionHref(card) {
   const kind = String(card.kind || "").toLowerCase();
+  if (kind === "media" && card.job_id) {
+    const params = new URLSearchParams({ media_job: card.job_id });
+    return `/dashboard/settings?${params.toString()}#ai`;
+  }
   if (kind === "note" && card.note_id) {
     const params = new URLSearchParams({ note_id: card.note_id });
     if (card.search_text) params.set("search", card.search_text);
@@ -905,10 +1155,7 @@ async function continueRun(initialRun) {
   let run = initialRun.run || initialRun;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (run.requires_confirmation) {
-      state.pendingRun = run;
-      els.confirmationMessage.textContent = run.assistant_message?.text || "Hank needs confirmation before continuing.";
-      els.confirmationCard.hidden = false;
-      els.runState.textContent = "Confirm";
+      showConfirmation(run);
       return;
     }
     if (run.requires_client_tools) {
@@ -938,8 +1185,7 @@ async function confirmPending(approved) {
       method: "POST",
       body: JSON.stringify({ approved }),
     });
-    state.pendingRun = null;
-    els.confirmationCard.hidden = true;
+    hideConfirmation();
     await continueRun(run);
     await loadSessions();
     if (state.logsVisible) {

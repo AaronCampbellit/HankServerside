@@ -1208,6 +1208,42 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 	}
 }
 
+func TestSettingsIncludesMediaDestinationOptions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	root := t.TempDir()
+	for _, dir := range []string{
+		"Movies",
+		"Shows",
+		filepath.Join("Shows", "Comedy"),
+	} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatalf("create fixture dir: %v", err)
+		}
+	}
+	service := New(Config{
+		DestinationPath: "Custom/Archive",
+	}, agentfiles.New(root), nil)
+
+	response := service.Settings(ctx)
+	values := map[string]string{}
+	for _, option := range response.DestinationOptions {
+		values[option.Value] = option.Label
+	}
+	for value, label := range map[string]string{
+		"":               "Media root",
+		"Movies":         "Media root/Movies",
+		"Shows":          "Media root/Shows",
+		"Shows/Comedy":   "Media root/Shows/Comedy",
+		"Custom/Archive": "Media root/Custom/Archive",
+	} {
+		if values[value] != label {
+			t.Fatalf("destination option %q = %q, want %q in %#v", value, values[value], label, response.DestinationOptions)
+		}
+	}
+}
+
 func TestMediaDownloadJobCanBeCancelled(t *testing.T) {
 	t.Parallel()
 

@@ -28,8 +28,10 @@ import (
 )
 
 const (
-	preferredQuality      = "1080p"
-	downloadSniffByteSize = 4096
+	preferredQuality                   = "1080p"
+	downloadSniffByteSize              = 4096
+	maxMediaDestinationOptionDepth     = 3
+	maxMediaDestinationOptionItemCount = 200
 )
 
 var (
@@ -148,10 +150,11 @@ func (s *Service) Enabled() bool {
 		s.files.Enabled()
 }
 
-func (s *Service) Settings(_ context.Context) protocol.MediaSettingsStatusResponse {
+func (s *Service) Settings(ctx context.Context) protocol.MediaSettingsStatusResponse {
 	return protocol.MediaSettingsStatusResponse{
-		Settings: s.settingsSnapshot(),
-		Jobs:     s.jobSnapshots(),
+		Settings:           s.settingsSnapshot(),
+		DestinationOptions: s.destinationOptions(ctx),
+		Jobs:               s.jobSnapshots(),
 	}
 }
 
@@ -222,6 +225,77 @@ func (s *Service) settingsSnapshot() protocol.MediaSettings {
 		PreferredQuality:    preferredQuality,
 		RequireConfirmation: true,
 	}
+}
+
+func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestinationOption {
+	cfg := s.configSnapshot()
+	options := []protocol.MediaDestinationOption{{Value: "", Label: "Media root"}}
+	seen := map[string]struct{}{"": {}}
+
+	if s.files != nil && s.files.Enabled() {
+		type queueItem struct {
+			path  string
+			depth int
+		}
+		queue := []queueItem{{path: "", depth: 0}}
+		for len(queue) > 0 && len(options) < maxMediaDestinationOptionItemCount {
+			current := queue[0]
+			queue = queue[1:]
+			if current.depth >= maxMediaDestinationOptionDepth {
+				continue
+			}
+			items, err := s.files.List(ctx, current.path)
+			if err != nil {
+				continue
+			}
+			for _, item := range items {
+				if ctx.Err() != nil || len(options) >= maxMediaDestinationOptionItemCount {
+					break
+				}
+				if !item.IsDirectory {
+					continue
+				}
+				value := cleanSharePath(item.Path)
+				if value == "" {
+					continue
+				}
+				if _, ok := seen[value]; ok {
+					continue
+				}
+				seen[value] = struct{}{}
+				options = append(options, protocol.MediaDestinationOption{
+					Value: value,
+					Label: mediaDestinationOptionLabel(value),
+				})
+				queue = append(queue, queueItem{path: value, depth: current.depth + 1})
+			}
+		}
+	}
+
+	current := cleanSharePath(cfg.DestinationPath)
+	if _, ok := seen[current]; current != "" && !ok {
+		options = append(options, protocol.MediaDestinationOption{
+			Value: current,
+			Label: mediaDestinationOptionLabel(current),
+		})
+	}
+	sort.Slice(options[1:], func(i, j int) bool {
+		left := options[i+1]
+		right := options[j+1]
+		if left.Label == right.Label {
+			return left.Value < right.Value
+		}
+		return left.Label < right.Label
+	})
+	return options
+}
+
+func mediaDestinationOptionLabel(value string) string {
+	value = cleanSharePath(value)
+	if value == "" {
+		return "Media root"
+	}
+	return "Media root/" + value
 }
 
 func (s *Service) jobSnapshots() []protocol.MediaDownloadJobStatus {

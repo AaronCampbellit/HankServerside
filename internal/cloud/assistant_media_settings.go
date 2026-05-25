@@ -9,14 +9,20 @@ import (
 )
 
 type assistantMediaSettingsResponse struct {
-	Online   bool                              `json:"online"`
-	CanEdit  bool                              `json:"can_edit"`
-	Settings protocol.MediaSettings            `json:"settings"`
-	Jobs     []protocol.MediaDownloadJobStatus `json:"jobs"`
-	Error    string                            `json:"error,omitempty"`
+	Online             bool                              `json:"online"`
+	CanEdit            bool                              `json:"can_edit"`
+	Settings           protocol.MediaSettings            `json:"settings"`
+	DestinationOptions []protocol.MediaDestinationOption `json:"destination_options,omitempty"`
+	Jobs               []protocol.MediaDownloadJobStatus `json:"jobs"`
+	Error              string                            `json:"error,omitempty"`
 }
 
 type assistantMediaJobCancelResponse struct {
+	Online bool                            `json:"online"`
+	Job    protocol.MediaDownloadJobStatus `json:"job"`
+}
+
+type assistantMediaJobStatusResponse struct {
 	Online bool                            `json:"online"`
 	Job    protocol.MediaDownloadJobStatus `json:"job"`
 }
@@ -29,6 +35,7 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 			response.Online = false
 			response.CanEdit = membership.Role == domain.HomeRoleAdmin
 			response.Settings = defaultAssistantMediaSettings()
+			response.DestinationOptions = defaultAssistantMediaDestinationOptions(response.Settings.DestinationPath)
 			response.Error = err.Error()
 		}
 		writeJSON(w, http.StatusOK, response)
@@ -58,9 +65,10 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 			return
 		}
 		writeJSON(w, http.StatusOK, assistantMediaSettingsResponse{
-			Online:   true,
-			CanEdit:  true,
-			Settings: payload.Settings,
+			Online:             true,
+			CanEdit:            true,
+			Settings:           payload.Settings,
+			DestinationOptions: defaultAssistantMediaDestinationOptions(payload.Settings.DestinationPath),
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -80,11 +88,34 @@ func (s *Server) fetchAssistantMediaSettings(r *http.Request, home domain.Home, 
 		return assistantMediaSettingsResponse{}, err
 	}
 	return assistantMediaSettingsResponse{
-		Online:   true,
-		CanEdit:  membership.Role == domain.HomeRoleAdmin,
-		Settings: payload.Settings,
-		Jobs:     payload.Jobs,
+		Online:             true,
+		CanEdit:            membership.Role == domain.HomeRoleAdmin,
+		Settings:           payload.Settings,
+		DestinationOptions: payload.DestinationOptions,
+		Jobs:               payload.Jobs,
 	}, nil
+}
+
+func (s *Server) handleAssistantMediaJobStatus(w http.ResponseWriter, r *http.Request, home domain.Home, _ domain.HomeMembership, jobID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandMediaDownloadStatus, protocol.MediaDownloadStatusRequest{JobID: jobID})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if envelope.Error != nil {
+		http.Error(w, envelope.Error.Message, http.StatusBadGateway)
+		return
+	}
+	payload, err := protocol.DecodePayload[protocol.MediaDownloadStatusResponse](envelope)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, assistantMediaJobStatusResponse{Online: true, Job: payload.Job})
 }
 
 func (s *Server) handleAssistantMediaJobCancel(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, jobID string) {
@@ -119,4 +150,15 @@ func defaultAssistantMediaSettings() protocol.MediaSettings {
 		PreferredQuality:    "1080p",
 		RequireConfirmation: true,
 	}
+}
+
+func defaultAssistantMediaDestinationOptions(current string) []protocol.MediaDestinationOption {
+	options := []protocol.MediaDestinationOption{{Value: "", Label: "Media root"}}
+	if current != "" {
+		options = append(options, protocol.MediaDestinationOption{
+			Value: current,
+			Label: "Media root/" + current,
+		})
+	}
+	return options
 }

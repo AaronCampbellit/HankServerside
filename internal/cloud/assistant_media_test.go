@@ -3,11 +3,14 @@ package cloud
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -64,6 +67,82 @@ func TestAssistantMediaCardCarriesPosterImage(t *testing.T) {
 	}, 1)
 	if card.ImageURL != "https://image.example/project-hail-mary.jpg" {
 		t.Fatalf("card image = %q", card.ImageURL)
+	}
+}
+
+func TestAssistantMediaConfirmationCarriesPosterCard(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	const posterURL = "https://image.example/fixture-movie.jpg"
+	errCh := make(chan error, 1)
+	go func() {
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSearch, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaSearchRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			if request.Query != "Fixture Movie" {
+				return nil, fmt.Errorf("media search query = %q, want Fixture Movie", request.Query)
+			}
+			return protocol.MediaSearchResponse{
+				Query: request.Query,
+				Results: []protocol.MediaSearchResult{{
+					ID:        "movies/fixture-movie",
+					Title:     "Fixture Movie",
+					Year:      2026,
+					Type:      protocol.MediaTypeMovie,
+					Summary:   "Movie | Fixture",
+					PosterURL: posterURL,
+					PagePath:  "/movies/fixture-movie",
+				}},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			if request.Selection.PosterURL != posterURL {
+				return nil, fmt.Errorf("planned selection poster = %q, want %q", request.Selection.PosterURL, posterURL)
+			}
+			return protocol.MediaPlanDownloadResponse{
+				Plan: protocol.MediaDownloadPlan{
+					Selection:             request.Selection,
+					Items:                 []protocol.MediaDownloadItem{{Title: "Fixture Movie", MediaType: protocol.MediaTypeMovie, Quality: "1080p", Filename: "Fixture Movie.mp4", DownloadOK: true}},
+					ItemCount:             1,
+					PreferredQualityCount: 1,
+					DestinationPath:       "Media root/Movies",
+				},
+			}, nil
+		})
+	}()
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "find Fixture Movie for download",
+	}, &run)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if !run.RequiresConfirmation || run.AssistantMessage == nil {
+		t.Fatalf("run did not wait for media confirmation: %#v", run)
+	}
+	if len(run.AssistantMessage.Cards) != 1 || run.AssistantMessage.Cards[0].ImageURL != posterURL {
+		t.Fatalf("confirmation cards = %#v, want poster %q", run.AssistantMessage.Cards, posterURL)
+	}
+	if run.PendingActionSummary == nil || run.PendingActionSummary.Kind != "media_download" {
+		t.Fatalf("pending action summary = %#v", run.PendingActionSummary)
 	}
 }
 

@@ -5,6 +5,8 @@ const state = {
   settings: null,
   media: null,
   statusTimer: null,
+  highlightedMediaJobID: new URLSearchParams(window.location.search).get("media_job") || "",
+  highlightedMediaJobScrolled: false,
 };
 
 const els = {
@@ -79,6 +81,61 @@ function formatBytes(value) {
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function normalizeMediaDestinationPath(value) {
+  return String(value || "")
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/\/{2,}/g, "/");
+}
+
+function mediaDestinationLabel(value, fallback = "") {
+  const cleaned = normalizeMediaDestinationPath(value);
+  if (fallback) return fallback;
+  return cleaned ? `Media root/${cleaned}` : "Media root";
+}
+
+function renderMediaDestinationOptions(payload, settings) {
+  const current = normalizeMediaDestinationPath(settings.destination_path || "");
+  const options = [
+    { value: "", label: "Media root" },
+    ...((payload.destination_options || []).map((option) => ({
+      value: normalizeMediaDestinationPath(option.value),
+      label: mediaDestinationLabel(option.value, option.label),
+    }))),
+  ];
+  const seen = new Set();
+  const unique = [];
+  for (const option of options) {
+    if (seen.has(option.value)) continue;
+    seen.add(option.value);
+    unique.push(option);
+  }
+  if (current && !seen.has(current)) {
+    unique.push({ value: current, label: `Current: ${mediaDestinationLabel(current)}` });
+  }
+  els.mediaDestinationPath.innerHTML = unique.map((option) => (
+    `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
+  )).join("");
+  els.mediaDestinationPath.value = current;
+}
+
+function isActiveMediaJob(job) {
+  const status = String(job?.status || "").toLowerCase();
+  return status === "queued" || status === "running";
+}
+
+function mediaJobProgress(job) {
+  const written = Number(job.bytes_written || 0);
+  const total = Number(job.bytes_total || 0);
+  if (total <= 0) {
+    return written ? formatBytes(written) : "";
+  }
+  const percent = Math.min(100, Math.max(0, (written / total) * 100));
+  return `${formatBytes(written)} / ${formatBytes(total)} (${Math.round(percent)}%)`;
 }
 
 function showToast(message, isError = false) {
@@ -293,14 +350,14 @@ function renderMediaWorkflowSettings() {
   els.mediaWorkflowEnabled.checked = enabled;
   els.mediaGramatonBaseURL.value = settings.base_url || "https://gramaton.io";
   els.mediaGramatonUsername.value = settings.username || "";
-  els.mediaDestinationPath.value = settings.destination_path || "";
+  renderMediaDestinationOptions(payload, settings);
   els.mediaGramatonPassword.placeholder = hasPassword ? "Leave unchanged" : "Required to enable";
   if (!canEdit) {
     els.mediaWorkflowMeta.textContent = "Only Home admins can change media workflow settings.";
   } else if (!online) {
     els.mediaWorkflowMeta.textContent = `${payload.error || "The home agent is offline."} You can prepare these fields, but saving requires the updated home agent to be online.`;
   } else {
-    els.mediaWorkflowMeta.textContent = `Destination resolves under ${settings.destination_path ? `Media root/${settings.destination_path}` : "Media root"}. 1080p is preferred and 720p is used only as fallback.`;
+    els.mediaWorkflowMeta.textContent = `Destination resolves under ${mediaDestinationLabel(settings.destination_path)}. 1080p is preferred and 720p is used only as fallback.`;
   }
 
   [
@@ -333,9 +390,11 @@ function renderMediaJobs(jobs) {
     const status = String(job.status || "unknown");
     const active = status === "queued" || status === "running";
     const statusClass = active || status === "completed" ? "status-chip" : "status-chip offline";
-    const current = job.current_file ? `<div class="meta">Current: ${escapeHTML(job.current_file)} (${formatBytes(job.bytes_written)})</div>` : "";
+    const selected = state.highlightedMediaJobID && state.highlightedMediaJobID === job.job_id;
+    const current = job.current_file ? `<div class="meta">Current: ${escapeHTML(job.current_file)}${job.bytes_written ? ` (${escapeHTML(formatBytes(job.bytes_written))})` : ""}</div>` : "";
+    const progress = mediaJobProgress(job);
     return `
-      <article class="card media-job-card">
+      <article class="card media-job-card${selected ? " selected" : ""}" data-media-job-id="${escapeHTML(job.job_id || "")}">
         <div class="card-head">
           <div>
             <div class="card-title">${escapeHTML(job.title || job.job_id || "Media job")}</div>
@@ -348,11 +407,27 @@ function renderMediaJobs(jobs) {
           <span class="${statusClass}">${escapeHTML(status)}</span>
         </div>
         ${current}
+        ${progress ? `<div class="meta">Progress: ${escapeHTML(progress)}</div>` : ""}
+        ${job.download_mode ? `<div class="meta">Mode: ${escapeHTML(job.download_mode)}${job.verification_status ? ` · Verify: ${escapeHTML(job.verification_status)}` : ""}${job.fallback_used ? " · Fallback used" : ""}</div>` : ""}
         ${job.error_message ? `<div class="meta">${escapeHTML(job.error_message)}</div>` : ""}
         ${active ? `<div class="actions wrap"><button type="button" class="secondary" data-cancel-media-job="${escapeHTML(job.job_id)}">Cancel Job</button></div>` : ""}
       </article>
     `;
   }).join("");
+  scrollHighlightedMediaJob();
+}
+
+function scrollHighlightedMediaJob() {
+  if (!state.highlightedMediaJobID || state.highlightedMediaJobScrolled) {
+    return;
+  }
+  const selected = Array.from(els.mediaJobsOutput.querySelectorAll("[data-media-job-id]"))
+    .find((element) => element.dataset.mediaJobId === state.highlightedMediaJobID);
+  if (!selected) {
+    return;
+  }
+  state.highlightedMediaJobScrolled = true;
+  selected.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function setSettingsTab(nextTab) {
@@ -388,6 +463,7 @@ async function loadStatus() {
       online: false,
       can_edit: false,
       settings: { base_url: "https://gramaton.io", preferred_quality: "1080p", require_confirmation: true },
+      destination_options: [{ value: "", label: "Media root" }],
       jobs: [],
       error: error.message,
     })),
@@ -399,11 +475,16 @@ async function loadStatus() {
   renderStatus();
   renderAssistantSettings();
   clearTimeout(state.statusTimer);
+  const hasActiveMediaJobs = (media.jobs || []).some(isActiveMediaJob);
   if (status.pending?.state === "pending") {
     const waitSeconds = Math.max(Number(status.pending.poll_after_seconds || 3), 2);
     state.statusTimer = window.setTimeout(() => {
       loadStatus().catch((error) => showToast(error.message, true));
     }, waitSeconds * 1000);
+  } else if (hasActiveMediaJobs) {
+    state.statusTimer = window.setTimeout(() => {
+      loadStatus().catch((error) => showToast(error.message, true));
+    }, 3000);
   }
 }
 
@@ -435,7 +516,7 @@ async function saveMediaSettings() {
           enabled: els.mediaWorkflowEnabled.checked,
           base_url: els.mediaGramatonBaseURL.value,
           username: els.mediaGramatonUsername.value,
-          destination_path: els.mediaDestinationPath.value,
+          destination_path: normalizeMediaDestinationPath(els.mediaDestinationPath.value),
           preferred_quality: "1080p",
           require_confirmation: true,
         },
@@ -494,6 +575,10 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("settings_tab") || state.highlightedMediaJobID) {
+      setSettingsTab(params.get("settings_tab") || "tools");
+    }
     await loadStatus();
   } catch (_) {
     window.location.replace("/");

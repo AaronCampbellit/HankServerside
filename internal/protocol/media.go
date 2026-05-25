@@ -40,11 +40,17 @@ type MediaSettings struct {
 	RequireConfirmation bool   `json:"require_confirmation"`
 }
 
+type MediaDestinationOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
 type MediaSettingsStatusRequest struct{}
 
 type MediaSettingsStatusResponse struct {
-	Settings MediaSettings            `json:"settings"`
-	Jobs     []MediaDownloadJobStatus `json:"jobs"`
+	Settings           MediaSettings            `json:"settings"`
+	DestinationOptions []MediaDestinationOption `json:"destination_options,omitempty"`
+	Jobs               []MediaDownloadJobStatus `json:"jobs"`
 }
 
 type MediaSettingsApplyRequest struct {
