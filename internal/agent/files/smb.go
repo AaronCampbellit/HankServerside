@@ -230,6 +230,28 @@ func (s *Service) openWriterSMB(ctx context.Context, filePath string, offset int
 	return &smbWriteHandle{file: file, cleanup: cleanup}, size, nil
 }
 
+func (s *Service) openRandomWriterSMB(ctx context.Context, filePath string) (RandomWriteHandle, error) {
+	share, cleanup, err := s.dialSMBShare(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	resolved := resolveSharePath(filePath)
+	if dir := path.Dir(resolved); dir != "." {
+		if err := share.MkdirAll(dir, 0o755); err != nil {
+			_ = cleanup()
+			return nil, err
+		}
+	}
+
+	file, err := share.OpenFile(resolved, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+	if err != nil {
+		_ = cleanup()
+		return nil, err
+	}
+	return &smbRandomWriteHandle{file: file, cleanup: cleanup}, nil
+}
+
 func (s *Service) dialSMBShare(ctx context.Context) (*smb2.Share, func() error, error) {
 	s.mu.RLock()
 	cfg := s.smb
@@ -300,6 +322,23 @@ func (h *smbWriteHandle) Write(p []byte) (int, error) {
 }
 
 func (h *smbWriteHandle) Close() error {
+	return closeSMBHandle(h.file, h.cleanup)
+}
+
+type smbRandomWriteHandle struct {
+	file    *smb2.File
+	cleanup func() error
+}
+
+func (h *smbRandomWriteHandle) WriteAt(p []byte, off int64) (int, error) {
+	return h.file.WriteAt(p, off)
+}
+
+func (h *smbRandomWriteHandle) Truncate(size int64) error {
+	return h.file.Truncate(size)
+}
+
+func (h *smbRandomWriteHandle) Close() error {
 	return closeSMBHandle(h.file, h.cleanup)
 }
 

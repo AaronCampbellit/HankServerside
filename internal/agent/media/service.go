@@ -951,6 +951,41 @@ func (s *Service) markJobCancelled(job *downloadJob) {
 }
 
 func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download plannedDownload) error {
+	finalPath := s.destinationFilePath(download.item.Filename)
+	partPath := finalPath + ".part"
+
+	err := s.downloadOneRanged(ctx, job, download, partPath)
+	if err == nil {
+		if err := s.files.Rename(ctx, partPath, finalPath); err != nil {
+			_ = s.files.Delete(context.Background(), partPath, false)
+			return err
+		}
+		return nil
+	}
+	if ctx.Err() != nil {
+		return err
+	}
+
+	fallbackUsed := !errors.Is(err, errRangeDownloadUnavailable)
+	if fallbackUsed {
+		s.logger.Debug("ranged media download failed; falling back to single stream", "file", download.item.Filename, "error", err)
+		job.update(func(status *protocol.MediaDownloadJobStatus) {
+			status.FallbackUsed = true
+			status.Verification = "fallback"
+		})
+	}
+	_ = s.files.Delete(context.Background(), partPath, false)
+	return s.downloadOneSingle(ctx, job, download, finalPath, partPath, fallbackUsed)
+}
+
+func (s *Service) downloadOneSingle(ctx context.Context, job *downloadJob, download plannedDownload, finalPath string, partPath string, fallbackUsed bool) error {
+	job.update(func(status *protocol.MediaDownloadJobStatus) {
+		status.DownloadMode = protocol.MediaDownloadModeSingle
+		status.Verification = "single_stream"
+		status.BytesTotal = 0
+		status.FallbackUsed = fallbackUsed
+	})
+
 	req, err := s.newDownloadRequest(ctx, download)
 	if err != nil {
 		return err
@@ -969,8 +1004,6 @@ func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download pl
 		return err
 	}
 
-	finalPath := s.destinationFilePath(download.item.Filename)
-	partPath := finalPath + ".part"
 	writer, _, err := s.files.OpenWriter(ctx, partPath, 0)
 	if err != nil {
 		return err

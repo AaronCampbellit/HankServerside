@@ -20,6 +20,9 @@ const (
 	MediaJobStatusCompleted = "completed"
 	MediaJobStatusFailed    = "failed"
 	MediaJobStatusCancelled = "cancelled"
+
+	MediaDownloadModeSingle = "single"
+	MediaDownloadModeRange  = "range"
 )
 
 type MediaSearchRequest struct {
@@ -146,6 +149,10 @@ type MediaDownloadJobStatus struct {
 	CurrentIndex   int       `json:"current_index,omitempty"`
 	CurrentFile    string    `json:"current_file,omitempty"`
 	BytesWritten   int64     `json:"bytes_written,omitempty"`
+	BytesTotal     int64     `json:"bytes_total,omitempty"`
+	DownloadMode   string    `json:"download_mode,omitempty"`
+	Verification   string    `json:"verification_status,omitempty"`
+	FallbackUsed   bool      `json:"fallback_used,omitempty"`
 	ErrorMessage   string    `json:"error_message,omitempty"`
 	StartedAt      time.Time `json:"started_at,omitempty"`
 	CompletedAt    time.Time `json:"completed_at,omitempty"`

@@ -111,6 +111,51 @@ func TestOpenWriterOffsetZeroTruncatesWithoutStatRequirement(t *testing.T) {
 	}
 }
 
+func TestOpenRandomWriterWritesAtOffsetsAndTruncates(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	writer, err := service.OpenRandomWriter(context.Background(), "downloads/movie.mp4.part")
+	if err != nil {
+		t.Fatalf("OpenRandomWriter create: %v", err)
+	}
+	if _, err := writer.WriteAt([]byte("world"), 6); err != nil {
+		t.Fatalf("WriteAt suffix: %v", err)
+	}
+	if _, err := writer.WriteAt([]byte("hello "), 0); err != nil {
+		t.Fatalf("WriteAt prefix: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close random writer: %v", err)
+	}
+
+	content, err := service.Download(context.Background(), "downloads/movie.mp4.part")
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if got := string(mustDecodeBase64(t, content)); got != "hello world" {
+		t.Fatalf("content = %q, want assembled content", got)
+	}
+
+	writer, err = service.OpenRandomWriter(context.Background(), "downloads/movie.mp4.part")
+	if err != nil {
+		t.Fatalf("OpenRandomWriter truncate: %v", err)
+	}
+	if _, err := writer.WriteAt([]byte("new"), 0); err != nil {
+		t.Fatalf("WriteAt new: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close truncated random writer: %v", err)
+	}
+	content, err = service.Download(context.Background(), "downloads/movie.mp4.part")
+	if err != nil {
+		t.Fatalf("Download truncated: %v", err)
+	}
+	if got := string(mustDecodeBase64(t, content)); got != "new" {
+		t.Fatalf("content after truncate = %q, want new", got)
+	}
+}
+
 func mustDecodeBase64(t *testing.T, content string) []byte {
 	t.Helper()
 	decoded, err := base64.StdEncoding.DecodeString(content)

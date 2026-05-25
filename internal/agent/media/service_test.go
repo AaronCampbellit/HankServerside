@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -545,6 +546,55 @@ func TestLiveMediaDownloadProbeFromEnv(t *testing.T) {
 	if err := validateDownloadResponse(resp, sniff); err != nil {
 		t.Fatalf("download probe rejected response: %v", err)
 	}
+	if resp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("download probe status = %d, want 206 partial content", resp.StatusCode)
+	}
+	start, end, total, err := parseContentRange(resp.Header.Get("Content-Range"))
+	if err != nil {
+		t.Fatalf("download probe content range: %v", err)
+	}
+	if start != 0 || end+1 != int64(len(sniff)) || total <= int64(len(sniff)) {
+		t.Fatalf("download probe range = %d-%d/%d with %d bytes", start, end, total, len(sniff))
+	}
+	if err := validateMediaSignature(sniff, resp.Header.Get("Content-Type")); err != nil {
+		t.Fatalf("download probe media signature: %v", err)
+	}
+
+	secondStart := int64(1048576)
+	if total <= secondStart+31 {
+		secondStart = total / 2
+	}
+	secondEnd := secondStart + 31
+	if secondEnd >= total {
+		secondEnd = total - 1
+	}
+	secondReq, err := service.newDownloadRequest(ctx, download)
+	if err != nil {
+		t.Fatalf("new second range request: %v", err)
+	}
+	secondReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", secondStart, secondEnd))
+	secondResp, err := service.client.Do(secondReq)
+	if err != nil {
+		t.Fatalf("second range request: %v", err)
+	}
+	defer secondResp.Body.Close()
+	secondSniff, err := io.ReadAll(io.LimitReader(secondResp.Body, 64))
+	if err != nil {
+		t.Fatalf("read second range body: %v", err)
+	}
+	if secondResp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("second range status = %d, want 206 partial content", secondResp.StatusCode)
+	}
+	if err := validateDownloadResponse(secondResp, secondSniff); err != nil {
+		t.Fatalf("second range rejected response: %v", err)
+	}
+	secondRangeStart, secondRangeEnd, secondTotal, err := parseContentRange(secondResp.Header.Get("Content-Range"))
+	if err != nil {
+		t.Fatalf("second range content range: %v", err)
+	}
+	if secondRangeStart != secondStart || secondRangeEnd != secondEnd || secondTotal != total {
+		t.Fatalf("second range = %d-%d/%d, want %d-%d/%d", secondRangeStart, secondRangeEnd, secondTotal, secondStart, secondEnd, total)
+	}
 }
 
 func logLiveDownloadAnchors(t *testing.T, ctx context.Context, service *Service, pagePath string) {
@@ -824,6 +874,181 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	}
 }
 
+func TestMediaDownloadUsesVerifiedRangedChunks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	data := fixtureMP4Bytes(int(rangeDownloadChunkSize*2 + 257))
+	var baseURL string
+	var mu sync.Mutex
+	rangeRequests := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies/ranged", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<h1>Fixture Ranged</h1><a href="%s/download/ranged.mp4?file=Fixture_Ranged_1080p.mp4">Download 1080p</a>`, baseURL)
+	})
+	mux.HandleFunc("/download/ranged.mp4", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			mu.Lock()
+			rangeRequests++
+			mu.Unlock()
+		}
+		writeRangeMedia(t, w, r, data, "")
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	root := t.TempDir()
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(root), nil)
+
+	start, err := service.StartDownload(ctx, protocol.MediaDownloadStartRequest{Selection: protocol.MediaSearchResult{
+		ID:       "movies/ranged",
+		Title:    "Fixture Ranged",
+		Type:     protocol.MediaTypeMovie,
+		PagePath: "/movies/ranged",
+	}})
+	if err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	status := waitForJob(t, ctx, service, start.Job.JobID)
+	if status.Status != protocol.MediaJobStatusCompleted || status.DownloadMode != protocol.MediaDownloadModeRange || status.Verification != "verified" || status.FallbackUsed {
+		t.Fatalf("job status = %#v, want verified ranged completion without fallback", status)
+	}
+	if status.BytesTotal != int64(len(data)) || status.BytesWritten != int64(len(data)) {
+		t.Fatalf("job bytes = written %d total %d, want %d", status.BytesWritten, status.BytesTotal, len(data))
+	}
+	written, err := os.ReadFile(filepath.Join(root, "Fixture_Ranged_1080p.mp4"))
+	if err != nil {
+		t.Fatalf("read ranged output: %v", err)
+	}
+	if !bytes.Equal(written, data) {
+		t.Fatal("ranged output bytes do not match source media")
+	}
+	if _, err := os.Stat(filepath.Join(root, "Fixture_Ranged_1080p.mp4.part")); !os.IsNotExist(err) {
+		t.Fatalf("part file still exists or unexpected error: %v", err)
+	}
+	mu.Lock()
+	gotRangeRequests := rangeRequests
+	mu.Unlock()
+	if gotRangeRequests < 2 {
+		t.Fatalf("range requests = %d, want probe plus chunk requests", gotRangeRequests)
+	}
+}
+
+func TestMediaDownloadFallsBackWhenRangeUnsupported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	data := fixtureMP4Bytes(96)
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies/no-range", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<h1>Fixture No Range</h1><a href="%s/download/no-range.mp4?file=Fixture_No_Range_1080p.mp4">Download 1080p</a>`, baseURL)
+	})
+	mux.HandleFunc("/download/no-range.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	root := t.TempDir()
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(root), nil)
+
+	start, err := service.StartDownload(ctx, protocol.MediaDownloadStartRequest{Selection: protocol.MediaSearchResult{
+		ID:       "movies/no-range",
+		Title:    "Fixture No Range",
+		Type:     protocol.MediaTypeMovie,
+		PagePath: "/movies/no-range",
+	}})
+	if err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	status := waitForJob(t, ctx, service, start.Job.JobID)
+	if status.Status != protocol.MediaJobStatusCompleted || status.DownloadMode != protocol.MediaDownloadModeSingle || status.FallbackUsed {
+		t.Fatalf("job status = %#v, want single-stream completion without range-failure fallback", status)
+	}
+	written, err := os.ReadFile(filepath.Join(root, "Fixture_No_Range_1080p.mp4"))
+	if err != nil {
+		t.Fatalf("read fallback output: %v", err)
+	}
+	if !bytes.Equal(written, data) {
+		t.Fatal("single-stream fallback output bytes do not match source media")
+	}
+}
+
+func TestMediaDownloadFallsBackWhenRangedChunkIsInvalid(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	data := fixtureMP4Bytes(int(rangeDownloadChunkSize + 160))
+	corruptRange := fmt.Sprintf("bytes=0-%d", rangeDownloadChunkSize-1)
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies/bad-range", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<h1>Fixture Bad Range</h1><a href="%s/download/bad-range.mp4?file=Fixture_Bad_Range_1080p.mp4">Download 1080p</a>`, baseURL)
+	})
+	mux.HandleFunc("/download/bad-range.mp4", func(w http.ResponseWriter, r *http.Request) {
+		writeRangeMedia(t, w, r, data, corruptRange)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	root := t.TempDir()
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(root), nil)
+
+	start, err := service.StartDownload(ctx, protocol.MediaDownloadStartRequest{Selection: protocol.MediaSearchResult{
+		ID:       "movies/bad-range",
+		Title:    "Fixture Bad Range",
+		Type:     protocol.MediaTypeMovie,
+		PagePath: "/movies/bad-range",
+	}})
+	if err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	status := waitForJob(t, ctx, service, start.Job.JobID)
+	if status.Status != protocol.MediaJobStatusCompleted || status.DownloadMode != protocol.MediaDownloadModeSingle || !status.FallbackUsed {
+		t.Fatalf("job status = %#v, want single-stream completion after ranged fallback", status)
+	}
+	written, err := os.ReadFile(filepath.Join(root, "Fixture_Bad_Range_1080p.mp4"))
+	if err != nil {
+		t.Fatalf("read fallback output: %v", err)
+	}
+	if !bytes.Equal(written, data) {
+		t.Fatal("fallback output bytes do not match source media")
+	}
+	if _, err := os.Stat(filepath.Join(root, "Fixture_Bad_Range_1080p.mp4.part")); !os.IsNotExist(err) {
+		t.Fatalf("part file still exists or unexpected error: %v", err)
+	}
+}
+
 func TestMediaDownloadRejectsHTMLResponse(t *testing.T) {
 	t.Parallel()
 
@@ -1046,6 +1271,69 @@ func TestMediaDownloadJobCanBeCancelled(t *testing.T) {
 		t.Fatalf("job status = %#v, want cancelled", status)
 	}
 	waitForPathAbsent(t, ctx, filepath.Join(root, "Fixture_Movie_1080p.mp4.part"))
+}
+
+func fixtureMP4Bytes(size int) []byte {
+	if size < 32 {
+		size = 32
+	}
+	data := make([]byte, size)
+	copy(data, []byte{0x00, 0x00, 0x00, 0x20, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0x00, 0x00, 0x02, 0x00})
+	for i := 16; i < len(data); i++ {
+		data[i] = byte((i * 31) % 251)
+	}
+	return data
+}
+
+func writeRangeMedia(t *testing.T, w http.ResponseWriter, r *http.Request, data []byte, corruptRange string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("ETag", `"fixture-media"`)
+	w.Header().Set("Last-Modified", "Mon, 25 May 2026 12:00:00 GMT")
+	rangeHeader := r.Header.Get("Range")
+	if rangeHeader == "" {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+
+	start, end, ok := parseTestRange(rangeHeader, int64(len(data)))
+	if !ok {
+		http.Error(w, "bad range", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	contentRange := fmt.Sprintf("bytes %d-%d/%d", start, end, len(data))
+	if rangeHeader == corruptRange {
+		contentRange = fmt.Sprintf("bytes %d-%d/%d", start+1, end, len(data))
+	}
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Range", contentRange)
+	w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+	w.WriteHeader(http.StatusPartialContent)
+	_, _ = w.Write(data[start : end+1])
+}
+
+func parseTestRange(value string, size int64) (int64, int64, bool) {
+	value = strings.TrimSpace(strings.TrimPrefix(value, "bytes="))
+	startText, endText, ok := strings.Cut(value, "-")
+	if !ok {
+		return 0, 0, false
+	}
+	start, err := strconv.ParseInt(startText, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	end, err := strconv.ParseInt(endText, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	if start < 0 || end < start || start >= size {
+		return 0, 0, false
+	}
+	if end >= size {
+		end = size - 1
+	}
+	return start, end, true
 }
 
 func containsStringFold(values []string, want string) bool {

@@ -29,6 +29,12 @@ type WriteHandle interface {
 	io.Closer
 }
 
+type RandomWriteHandle interface {
+	io.WriterAt
+	io.Closer
+	Truncate(size int64) error
+}
+
 type SMBConfig struct {
 	Host     string
 	Share    string
@@ -246,6 +252,13 @@ func (s *Service) OpenWriter(ctx context.Context, path string, offset int64) (Wr
 	return s.openWriterLocal(ctx, path, offset)
 }
 
+func (s *Service) OpenRandomWriter(ctx context.Context, path string) (RandomWriteHandle, error) {
+	if s.usingSMB() {
+		return s.openRandomWriterSMB(ctx, path)
+	}
+	return s.openRandomWriterLocal(ctx, path)
+}
+
 func (s *Service) listLocal(ctx context.Context, path string) ([]protocol.FileItem, error) {
 	resolved, err := s.resolveLocal(path)
 	if err != nil {
@@ -435,6 +448,19 @@ func (s *Service) openWriterLocal(_ context.Context, path string, offset int64) 
 	}
 
 	return file, size, nil
+}
+
+func (s *Service) openRandomWriterLocal(_ context.Context, path string) (RandomWriteHandle, error) {
+	resolved, err := s.resolveLocal(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return nil, err
+	}
+
+	return os.OpenFile(resolved, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
 }
 
 func (s *Service) resolveLocal(path string) (string, error) {
