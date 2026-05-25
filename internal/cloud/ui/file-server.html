@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote File Server</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260525-site-reorg">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525-file-explorer-reference">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <link rel="manifest" href="/assets/site.webmanifest">
   </head>
-  <body>
+  <body class="file-server-page">
     <div class="shell dashboard-shell">
       <header class="hero">
         <div>
@@ -58,35 +58,96 @@
 
         <section class="panel wide-panel file-explorer-panel">
           <div class="panel-head">
-            <h2>File Explorer</h2>
+            <div>
+              <h2>File Explorer</h2>
+              <p class="meta">Browse, search, move, rename, upload, and preview home files.</p>
+            </div>
             <span id="path-status" class="pill">/</span>
           </div>
-          <div class="file-path-row">
-            <label>
-              <span>Folder Path</span>
+
+          <div class="file-command-bar" role="toolbar" aria-label="File tools">
+            <button type="button" id="files-upload-button">Add File</button>
+            <button type="button" id="files-new-folder-button" class="secondary">Add Folder</button>
+            <span class="file-command-divider" aria-hidden="true"></span>
+            <button type="button" id="files-move-selected-button" class="secondary" disabled>Move</button>
+            <button type="button" id="files-download-selected-button" class="secondary" disabled>Download</button>
+            <button type="button" id="files-rename-selected-button" class="secondary" disabled>Rename</button>
+            <button type="button" id="files-delete-selected-button" class="ghost" disabled>Delete</button>
+            <span class="file-command-divider" aria-hidden="true"></span>
+            <button type="button" id="files-refresh-current-button" class="ghost">Refresh</button>
+            <input id="files-upload" class="visually-hidden" type="file" multiple>
+          </div>
+
+          <div class="file-location-row">
+            <div class="drive-path-tools">
+              <button type="button" id="files-home-button" class="secondary">Main</button>
+              <button type="button" id="files-up-button" class="secondary">Up</button>
+            </div>
+            <label class="file-path-label">
+              <span>Path</span>
               <input id="files-path" type="text" value="/" autocomplete="off">
             </label>
-            <div class="actions wrap path-actions">
-              <button type="button" id="files-refresh-button">Open</button>
-              <button type="button" id="files-up-button" class="secondary">Up One Level</button>
-            </div>
+            <button type="button" id="files-refresh-button" class="secondary">Open</button>
+            <label class="file-search-label">
+              <span>Search Files</span>
+              <input id="files-search" type="search" placeholder="Search" autocomplete="off">
+            </label>
+            <button type="button" id="files-search-button" class="secondary">Search</button>
+            <button type="button" id="files-search-clear-button" class="ghost">Clear</button>
           </div>
           <div id="file-breadcrumbs" class="file-breadcrumbs" aria-label="Folder Path"></div>
-          <div class="file-action-row">
-            <label>
-              <span>New Folder</span>
-              <input id="files-new-directory" type="text" placeholder="new-folder" autocomplete="off">
-            </label>
-            <label>
-              <span>Upload File</span>
-              <input id="files-upload" type="file" multiple>
-            </label>
-            <div class="actions wrap">
-              <button type="button" id="files-create-directory-button">Create Folder</button>
-              <button type="button" id="files-upload-button">Upload File</button>
-            </div>
+
+          <div id="file-selection-bar" class="file-selection-bar" hidden>
+            <strong id="file-selection-count">0 selected</strong>
+            <button type="button" id="files-clear-selection-button" class="ghost">Clear Selection</button>
           </div>
-          <div id="files-output" class="file-list empty-state">Choose a home to browse files.</div>
+
+          <div class="file-manager-layout">
+            <aside class="file-tree-pane" aria-label="Folder tree">
+              <div class="file-tree-head">
+                <span>Folder name</span>
+              </div>
+              <div id="file-tree" class="file-tree empty-state">Loading folders.</div>
+            </aside>
+
+            <div class="file-browser-pane">
+              <div class="file-view-toolbar">
+                <label class="file-select-all">
+                  <input id="files-select-all" type="checkbox">
+                  <span>Select all visible</span>
+                </label>
+                <label>
+                  <span>Sort</span>
+                  <select id="files-sort">
+                    <option value="name-asc">Name A-Z</option>
+                    <option value="name-desc">Name Z-A</option>
+                    <option value="modified-desc">Newest</option>
+                    <option value="modified-asc">Oldest</option>
+                    <option value="size-desc">Largest</option>
+                    <option value="size-asc">Smallest</option>
+                    <option value="type-asc">Type A-Z</option>
+                    <option value="type-desc">Type Z-A</option>
+                  </select>
+                </label>
+                <div class="segmented-control" role="group" aria-label="File view">
+                  <button type="button" id="files-list-view-button" class="active" aria-pressed="true">List</button>
+                  <button type="button" id="files-grid-view-button" aria-pressed="false">Grid</button>
+                </div>
+              </div>
+              <div id="files-output" class="file-list empty-state">Choose a home to browse files.</div>
+            </div>
+
+            <aside id="file-preview-panel" class="file-preview-panel" aria-label="File preview">
+              <div class="panel-head">
+                <div>
+                  <h3 id="file-preview-title">Details</h3>
+                  <p id="file-preview-meta" class="meta">Select a file or folder.</p>
+                </div>
+              </div>
+              <div id="file-preview-body" class="file-preview-body empty-state">No file selected.</div>
+              <div id="file-preview-actions" class="actions wrap compact"></div>
+            </aside>
+          </div>
         </section>
 
         <section class="panel wide-panel">
@@ -104,9 +165,81 @@
       </main>
 
       <div id="toast" class="toast" hidden></div>
+
+      <dialog id="new-folder-dialog" class="file-dialog">
+        <form id="new-folder-form" method="dialog">
+          <h3>New Folder</h3>
+          <p id="new-folder-location" class="meta"></p>
+          <label>
+            <span>Folder Name</span>
+            <input id="new-folder-name" type="text" autocomplete="off" required>
+          </label>
+          <div class="actions wrap">
+            <button type="submit">Create</button>
+            <button type="button" id="new-folder-cancel-button" class="secondary">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="rename-dialog" class="file-dialog">
+        <form id="rename-form" method="dialog">
+          <h3>Rename</h3>
+          <p id="rename-path" class="meta"></p>
+          <label>
+            <span>New Name</span>
+            <input id="rename-name" type="text" autocomplete="off" required>
+          </label>
+          <div class="actions wrap">
+            <button type="submit">Rename</button>
+            <button type="button" id="rename-cancel-button" class="secondary">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="move-dialog" class="file-dialog file-move-dialog">
+        <form id="move-form" method="dialog">
+          <h3>Move</h3>
+          <p id="move-target-label" class="meta"></p>
+          <div class="file-location-row compact">
+            <label>
+              <span>Destination</span>
+              <input id="move-path" type="text" value="/" autocomplete="off">
+            </label>
+            <button type="button" id="move-open-button" class="secondary">Open</button>
+          </div>
+          <div id="move-breadcrumbs" class="file-breadcrumbs" aria-label="Move Destination"></div>
+          <div id="move-folders" class="file-list compact empty-state">Loading folders.</div>
+          <div class="actions wrap">
+            <button type="submit" id="move-confirm-button">Move Here</button>
+            <button type="button" id="move-cancel-button" class="secondary">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="delete-dialog" class="file-dialog">
+        <form id="delete-form" method="dialog">
+          <h3>Delete</h3>
+          <div id="delete-body" class="dialog-copy"></div>
+          <div class="actions wrap">
+            <button type="submit" class="danger">Delete</button>
+            <button type="button" id="delete-cancel-button" class="secondary">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="confirm-dialog" class="file-dialog">
+        <form id="confirm-form" method="dialog">
+          <h3 id="confirm-title">Confirm</h3>
+          <div id="confirm-body" class="dialog-copy"></div>
+          <div class="actions wrap">
+            <button type="submit" id="confirm-continue-button">Continue</button>
+            <button type="button" id="confirm-cancel-button" class="secondary">Cancel</button>
+          </div>
+        </form>
+      </dialog>
     </div>
 
-    <script src="/assets/file-server.js?v=20260525-site-reorg" defer></script>
-    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/file-server.js?v=20260525-file-explorer-reference" defer></script>
+    <script src="/assets/admin-nav.js?v=20260525-file-explorer-reference" defer></script>
   </body>
 </html>
