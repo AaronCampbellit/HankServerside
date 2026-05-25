@@ -186,10 +186,17 @@ func (s *Service) openWriterSMB(ctx context.Context, filePath string, offset int
 		}
 	}
 
-	file, err := share.OpenFile(resolved, os.O_CREATE|os.O_WRONLY, 0o644)
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset == 0 {
+		flags |= os.O_TRUNC
+	}
+	file, err := share.OpenFile(resolved, flags, 0o644)
 	if err != nil {
 		_ = cleanup()
 		return nil, 0, err
+	}
+	if offset == 0 {
+		return &smbWriteHandle{file: file, cleanup: cleanup}, 0, nil
 	}
 
 	info, err := file.Stat()

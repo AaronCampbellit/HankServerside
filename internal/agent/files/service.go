@@ -399,9 +399,16 @@ func (s *Service) openWriterLocal(_ context.Context, path string, offset int64) 
 		return nil, 0, err
 	}
 
-	file, err := os.OpenFile(resolved, os.O_CREATE|os.O_WRONLY, 0o644)
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset == 0 {
+		flags |= os.O_TRUNC
+	}
+	file, err := os.OpenFile(resolved, flags, 0o644)
 	if err != nil {
 		return nil, 0, err
+	}
+	if offset == 0 {
+		return file, 0, nil
 	}
 
 	info, err := file.Stat()

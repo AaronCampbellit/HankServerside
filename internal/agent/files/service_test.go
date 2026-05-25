@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"encoding/base64"
+	"io"
 	"testing"
 )
 
@@ -66,6 +67,55 @@ func TestSearchFindsNestedFiles(t *testing.T) {
 	if !found {
 		t.Fatalf("Search results = %#v, want docs/taxes/2025-summary.pdf", results)
 	}
+}
+
+func TestOpenWriterOffsetZeroTruncatesWithoutStatRequirement(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	writer, size, err := service.OpenWriter(context.Background(), "downloads/movie.mp4.part", 0)
+	if err != nil {
+		t.Fatalf("OpenWriter create: %v", err)
+	}
+	if size != 0 {
+		t.Fatalf("create size = %d, want 0", size)
+	}
+	if _, err := io.WriteString(writer, "old-content"); err != nil {
+		t.Fatalf("write old content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close old content: %v", err)
+	}
+
+	writer, size, err = service.OpenWriter(context.Background(), "downloads/movie.mp4.part", 0)
+	if err != nil {
+		t.Fatalf("OpenWriter truncate: %v", err)
+	}
+	if size != 0 {
+		t.Fatalf("truncate size = %d, want 0", size)
+	}
+	if _, err := io.WriteString(writer, "new"); err != nil {
+		t.Fatalf("write new content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close new content: %v", err)
+	}
+	content, err := service.Download(context.Background(), "downloads/movie.mp4.part")
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if got := string(mustDecodeBase64(t, content)); got != "new" {
+		t.Fatalf("content = %q, want truncated new content", got)
+	}
+}
+
+func mustDecodeBase64(t *testing.T, content string) []byte {
+	t.Helper()
+	decoded, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		t.Fatalf("decode base64: %v", err)
+	}
+	return decoded
 }
 
 func TestSMBConfigEnablesService(t *testing.T) {
