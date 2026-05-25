@@ -72,12 +72,14 @@ var (
 )
 
 type Config struct {
-	Enabled         bool
-	BaseURL         string
-	Username        string
-	Password        string
-	DestinationPath string
-	EnvPath         string
+	Enabled              bool
+	BaseURL              string
+	Username             string
+	Password             string
+	DestinationPath      string
+	MovieDestinationPath string
+	TVDestinationPath    string
+	EnvPath              string
 }
 
 type EventSink func(ctx context.Context, event string, topic string, payload any) error
@@ -96,6 +98,7 @@ type Service struct {
 
 type plannedDownload struct {
 	item        protocol.MediaDownloadItem
+	mediaTitle  string
 	downloadURL string
 }
 
@@ -120,12 +123,14 @@ func New(cfg Config, files *agentfiles.Service, logger *slog.Logger) *Service {
 	jar, _ := cookiejar.New(nil)
 	return &Service{
 		cfg: Config{
-			Enabled:         cfg.Enabled,
-			BaseURL:         strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
-			Username:        strings.TrimSpace(cfg.Username),
-			Password:        cfg.Password,
-			DestinationPath: cleanSharePath(cfg.DestinationPath),
-			EnvPath:         strings.TrimSpace(cfg.EnvPath),
+			Enabled:              cfg.Enabled,
+			BaseURL:              strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
+			Username:             strings.TrimSpace(cfg.Username),
+			Password:             cfg.Password,
+			DestinationPath:      cleanSharePath(cfg.DestinationPath),
+			MovieDestinationPath: cleanSharePath(firstNonBlank(cfg.MovieDestinationPath, cfg.DestinationPath)),
+			TVDestinationPath:    cleanSharePath(firstNonBlank(cfg.TVDestinationPath, cfg.DestinationPath)),
+			EnvPath:              strings.TrimSpace(cfg.EnvPath),
 		},
 		files:  files,
 		client: &http.Client{Jar: jar},
@@ -166,6 +171,8 @@ func (s *Service) ApplySettings(_ context.Context, request protocol.MediaSetting
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(firstNonBlank(settings.BaseURL, cfg.BaseURL)), "/")
 	cfg.Username = strings.TrimSpace(settings.Username)
 	cfg.DestinationPath = cleanSharePath(settings.DestinationPath)
+	cfg.MovieDestinationPath = cleanSharePath(firstNonBlank(settings.MovieDestinationPath, settings.DestinationPath))
+	cfg.TVDestinationPath = cleanSharePath(firstNonBlank(settings.TVDestinationPath, settings.DestinationPath))
 	if request.Password != "" {
 		cfg.Password = request.Password
 	}
@@ -217,19 +224,21 @@ func (s *Service) configSnapshot() Config {
 func (s *Service) settingsSnapshot() protocol.MediaSettings {
 	cfg := s.configSnapshot()
 	return protocol.MediaSettings{
-		Enabled:             cfg.Enabled,
-		BaseURL:             cfg.BaseURL,
-		Username:            cfg.Username,
-		HasPassword:         cfg.Password != "",
-		DestinationPath:     cfg.DestinationPath,
-		PreferredQuality:    preferredQuality,
-		RequireConfirmation: true,
+		Enabled:              cfg.Enabled,
+		BaseURL:              cfg.BaseURL,
+		Username:             cfg.Username,
+		HasPassword:          cfg.Password != "",
+		DestinationPath:      cfg.DestinationPath,
+		MovieDestinationPath: cfg.MovieDestinationPath,
+		TVDestinationPath:    cfg.TVDestinationPath,
+		PreferredQuality:     preferredQuality,
+		RequireConfirmation:  true,
 	}
 }
 
 func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestinationOption {
 	cfg := s.configSnapshot()
-	options := []protocol.MediaDestinationOption{{Value: "", Label: "Media root"}}
+	options := []protocol.MediaDestinationOption{{Value: "", Label: "SMB share root"}}
 	seen := map[string]struct{}{"": {}}
 
 	if s.files != nil && s.files.Enabled() {
@@ -272,12 +281,18 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 		}
 	}
 
-	current := cleanSharePath(cfg.DestinationPath)
-	if _, ok := seen[current]; current != "" && !ok {
-		options = append(options, protocol.MediaDestinationOption{
-			Value: current,
-			Label: mediaDestinationOptionLabel(current),
-		})
+	for _, current := range []string{
+		cleanSharePath(cfg.DestinationPath),
+		cleanSharePath(cfg.MovieDestinationPath),
+		cleanSharePath(cfg.TVDestinationPath),
+	} {
+		if _, ok := seen[current]; current != "" && !ok {
+			seen[current] = struct{}{}
+			options = append(options, protocol.MediaDestinationOption{
+				Value: current,
+				Label: mediaDestinationOptionLabel(current),
+			})
+		}
 	}
 	sort.Slice(options[1:], func(i, j int) bool {
 		left := options[i+1]
@@ -293,9 +308,9 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 func mediaDestinationOptionLabel(value string) string {
 	value = cleanSharePath(value)
 	if value == "" {
-		return "Media root"
+		return "SMB share root"
 	}
-	return "Media root/" + value
+	return "SMB share/" + value
 }
 
 func (s *Service) jobSnapshots() []protocol.MediaDownloadJobStatus {
@@ -744,8 +759,8 @@ func (s *Service) buildMoviePlan(ctx context.Context, selection protocol.MediaSe
 	if downloadURL == "" {
 		item.ErrorReason = missingDownloadReason(page)
 	}
-	item.Existing = s.fileExists(ctx, item.Filename)
-	downloads := []plannedDownload{{item: item, downloadURL: downloadURL}}
+	item.Existing = s.fileExists(ctx, item.MediaType, title, item.Filename)
+	downloads := []plannedDownload{{item: item, mediaTitle: title, downloadURL: downloadURL}}
 	return s.planFromDownloads(selection, downloads), downloads, nil
 }
 
@@ -840,8 +855,8 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 			item.Filename = episodeFilename(title, episode.season, episode.episode, "")
 			item.ErrorReason = missingDownloadReason(episodePage)
 		}
-		item.Existing = s.fileExists(ctx, item.Filename)
-		downloads = append(downloads, plannedDownload{item: item, downloadURL: link.href})
+		item.Existing = s.fileExists(ctx, item.MediaType, title, item.Filename)
+		downloads = append(downloads, plannedDownload{item: item, mediaTitle: title, downloadURL: link.href})
 	}
 	return s.planFromDownloads(selection, downloads), downloads, nil
 }
@@ -920,8 +935,8 @@ func (s *Service) resolveMediaAssetURL(rawURL string) string {
 	return resolved
 }
 
-func (s *Service) fileExists(ctx context.Context, name string) bool {
-	name = s.destinationFilePath(name)
+func (s *Service) fileExists(ctx context.Context, mediaType string, title string, name string) bool {
+	name = s.destinationFilePath(mediaType, title, name)
 	if name == "" {
 		return false
 	}
@@ -929,10 +944,19 @@ func (s *Service) fileExists(ctx context.Context, name string) bool {
 	return err == nil && !item.IsDirectory && item.Size > 0
 }
 
-func (s *Service) destinationFilePath(name string) string {
+func (s *Service) destinationFilePath(mediaType string, title string, name string) string {
 	name = cleanSharePath(name)
 	cfg := s.configSnapshot()
 	destination := cleanSharePath(cfg.DestinationPath)
+	switch mediaType {
+	case protocol.MediaTypeMovie:
+		destination = cleanSharePath(firstNonBlank(cfg.MovieDestinationPath, cfg.DestinationPath))
+	case protocol.MediaTypeSeries:
+		destination = cleanSharePath(firstNonBlank(cfg.TVDestinationPath, cfg.DestinationPath))
+		if showFolder := safeFilename(title); showFolder != "" {
+			destination = cleanSharePath(path.Join(destination, showFolder))
+		}
+	}
 	if destination == "" {
 		return name
 	}
@@ -1025,7 +1049,7 @@ func (s *Service) markJobCancelled(job *downloadJob) {
 }
 
 func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download plannedDownload) error {
-	finalPath := s.destinationFilePath(download.item.Filename)
+	finalPath := s.destinationFilePath(download.item.MediaType, download.mediaTitle, download.item.Filename)
 	partPath := finalPath + ".part"
 
 	err := s.downloadOneRanged(ctx, job, download, partPath)
@@ -1482,10 +1506,15 @@ func (s *Service) planFromDownloads(selection protocol.MediaSearchResult, downlo
 
 func (s *Service) destinationLabel() string {
 	cfg := s.configSnapshot()
-	if cfg.DestinationPath == "" {
-		return "Media root"
+	moviePath := cleanSharePath(firstNonBlank(cfg.MovieDestinationPath, cfg.DestinationPath))
+	tvPath := cleanSharePath(firstNonBlank(cfg.TVDestinationPath, cfg.DestinationPath))
+	if moviePath == "" && tvPath == "" {
+		return "SMB share root"
 	}
-	return "Media root/" + cfg.DestinationPath
+	if moviePath == tvPath {
+		return "SMB share/" + moviePath
+	}
+	return "Movies: " + mediaDestinationOptionLabel(moviePath) + "; TV: " + mediaDestinationOptionLabel(tvPath)
 }
 
 func (s *Service) persistSettings(cfg Config) error {
@@ -1502,6 +1531,8 @@ func (s *Service) persistSettings(cfg Config) error {
 	env["HANK_REMOTE_MEDIA_GRAMATON_USERNAME"] = strings.TrimSpace(cfg.Username)
 	env["HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"] = cfg.Password
 	env["HANK_REMOTE_MEDIA_DESTINATION_PATH"] = cleanSharePath(cfg.DestinationPath)
+	env["HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH"] = cleanSharePath(cfg.MovieDestinationPath)
+	env["HANK_REMOTE_MEDIA_TV_DESTINATION_PATH"] = cleanSharePath(cfg.TVDestinationPath)
 	return writeEnvFile(cfg.EnvPath, env)
 }
 

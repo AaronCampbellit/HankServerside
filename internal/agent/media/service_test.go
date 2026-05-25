@@ -818,7 +818,10 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	baseURL = server.URL
 
 	root := t.TempDir()
-	existingPath := filepath.Join(root, "Fixture_Show_S01E02_720p.mp4")
+	existingPath := filepath.Join(root, "Fixture_Show", "Fixture_Show_S01E02_720p.mp4")
+	if err := os.MkdirAll(filepath.Dir(existingPath), 0o755); err != nil {
+		t.Fatalf("create existing dir: %v", err)
+	}
 	if err := os.WriteFile(existingPath, []byte("already"), 0o644); err != nil {
 		t.Fatalf("write existing: %v", err)
 	}
@@ -859,14 +862,14 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	if status.Status != protocol.MediaJobStatusCompleted || status.CompletedCount != 2 || status.SkippedCount != 1 || status.FailedCount != 0 {
 		t.Fatalf("job status = %#v", status)
 	}
-	data, err := os.ReadFile(filepath.Join(root, "Fixture_Show_S01E01_1080p.mp4"))
+	data, err := os.ReadFile(filepath.Join(root, "Fixture_Show", "Fixture_Show_S01E01_1080p.mp4"))
 	if err != nil {
 		t.Fatalf("read downloaded file: %v", err)
 	}
 	if !strings.Contains(string(data), "s1e1_1080p") {
 		t.Fatalf("downloaded data = %q", string(data))
 	}
-	if _, err := os.Stat(filepath.Join(root, "Fixture_Show_S01E01_1080p.mp4.part")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "Fixture_Show", "Fixture_Show_S01E01_1080p.mp4.part")); !os.IsNotExist(err) {
 		t.Fatalf("part file still exists or unexpected error: %v", err)
 	}
 	if len(events) == 0 {
@@ -1175,10 +1178,12 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 
 	response, err := service.ApplySettings(ctx, protocol.MediaSettingsApplyRequest{
 		Settings: protocol.MediaSettings{
-			Enabled:         true,
-			BaseURL:         "https://gramaton.io/",
-			Username:        "media@example.com",
-			DestinationPath: "Shows/Fixture",
+			Enabled:              true,
+			BaseURL:              "https://gramaton.io/",
+			Username:             "media@example.com",
+			DestinationPath:      "Media",
+			MovieDestinationPath: "Movies",
+			TVDestinationPath:    "Shows/Fixture",
 		},
 		Password: "test-password",
 		Persist:  true,
@@ -1186,7 +1191,7 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplySettings: %v", err)
 	}
-	if !response.Settings.Enabled || !response.Settings.HasPassword || response.Settings.DestinationPath != "Shows/Fixture" {
+	if !response.Settings.Enabled || !response.Settings.HasPassword || response.Settings.MovieDestinationPath != "Movies" || response.Settings.TVDestinationPath != "Shows/Fixture" {
 		t.Fatalf("settings response = %#v", response.Settings)
 	}
 	data, err := os.ReadFile(envPath)
@@ -1200,7 +1205,9 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 		"HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=https://gramaton.io",
 		"HANK_REMOTE_MEDIA_GRAMATON_USERNAME=media@example.com",
 		"HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=test-password",
-		"HANK_REMOTE_MEDIA_DESTINATION_PATH=Shows/Fixture",
+		"HANK_REMOTE_MEDIA_DESTINATION_PATH=Media",
+		"HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH=Movies",
+		"HANK_REMOTE_MEDIA_TV_DESTINATION_PATH=Shows/Fixture",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("env file missing %q:\n%s", want, env)
@@ -1223,7 +1230,9 @@ func TestSettingsIncludesMediaDestinationOptions(t *testing.T) {
 		}
 	}
 	service := New(Config{
-		DestinationPath: "Custom/Archive",
+		DestinationPath:      "Custom/Archive",
+		MovieDestinationPath: "Movies",
+		TVDestinationPath:    "Shows",
 	}, agentfiles.New(root), nil)
 
 	response := service.Settings(ctx)
@@ -1232,15 +1241,34 @@ func TestSettingsIncludesMediaDestinationOptions(t *testing.T) {
 		values[option.Value] = option.Label
 	}
 	for value, label := range map[string]string{
-		"":               "Media root",
-		"Movies":         "Media root/Movies",
-		"Shows":          "Media root/Shows",
-		"Shows/Comedy":   "Media root/Shows/Comedy",
-		"Custom/Archive": "Media root/Custom/Archive",
+		"":               "SMB share root",
+		"Movies":         "SMB share/Movies",
+		"Shows":          "SMB share/Shows",
+		"Shows/Comedy":   "SMB share/Shows/Comedy",
+		"Custom/Archive": "SMB share/Custom/Archive",
 	} {
 		if values[value] != label {
 			t.Fatalf("destination option %q = %q, want %q in %#v", value, values[value], label, response.DestinationOptions)
 		}
+	}
+}
+
+func TestMediaDestinationFilePathSortsMoviesAndTVShows(t *testing.T) {
+	t.Parallel()
+
+	service := New(Config{
+		MovieDestinationPath: "Movies",
+		TVDestinationPath:    "TV Shows",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	moviePath := service.destinationFilePath(protocol.MediaTypeMovie, "Fixture Movie", "Fixture.Movie.1080p.mp4")
+	if moviePath != "Movies/Fixture.Movie.1080p.mp4" {
+		t.Fatalf("movie destination = %q, want movie folder without title subfolder", moviePath)
+	}
+
+	tvPath := service.destinationFilePath(protocol.MediaTypeSeries, "Fixture Show!", "Fixture.Show.S01E02.1080p.mp4")
+	if tvPath != "TV Shows/Fixture_Show/Fixture.Show.S01E02.1080p.mp4" {
+		t.Fatalf("tv destination = %q, want tv folder with show-title subfolder", tvPath)
 	}
 }
 

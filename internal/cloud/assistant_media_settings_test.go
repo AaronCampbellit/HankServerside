@@ -41,10 +41,12 @@ func TestAssistantMediaSettingsEndpointAppliesThroughAgent(t *testing.T) {
 	var response assistantMediaSettingsResponse
 	requestJSON(t, testServer, sessionToken, http.MethodPut, "/v1/home/assistant/media-settings", map[string]any{
 		"settings": map[string]any{
-			"enabled":          true,
-			"base_url":         "https://gramaton.io",
-			"username":         "media@example.com",
-			"destination_path": "Shows",
+			"enabled":                true,
+			"base_url":               "https://gramaton.io",
+			"username":               "media@example.com",
+			"destination_path":       "Media",
+			"movie_destination_path": "Movies",
+			"tv_destination_path":    "Shows",
 		},
 		"password": "test-password",
 	}, &response)
@@ -52,7 +54,7 @@ func TestAssistantMediaSettingsEndpointAppliesThroughAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := <-requestCh
-	if !request.Persist || request.Password != "test-password" || request.Settings.Username != "media@example.com" || request.Settings.DestinationPath != "Shows" {
+	if !request.Persist || request.Password != "test-password" || request.Settings.Username != "media@example.com" || request.Settings.MovieDestinationPath != "Movies" || request.Settings.TVDestinationPath != "Shows" {
 		t.Fatalf("settings apply request = %#v", request)
 	}
 	if !response.Online || !response.Settings.Enabled || !response.Settings.HasPassword {
@@ -79,15 +81,17 @@ func TestAssistantMediaSettingsEndpointReturnsDestinationOptions(t *testing.T) {
 			}
 			return protocol.MediaSettingsStatusResponse{
 				Settings: protocol.MediaSettings{
-					BaseURL:             "https://gramaton.io",
-					DestinationPath:     "Movies",
-					PreferredQuality:    "1080p",
-					RequireConfirmation: true,
+					BaseURL:              "https://gramaton.io",
+					DestinationPath:      "Media",
+					MovieDestinationPath: "Movies",
+					TVDestinationPath:    "Shows",
+					PreferredQuality:     "1080p",
+					RequireConfirmation:  true,
 				},
 				DestinationOptions: []protocol.MediaDestinationOption{
-					{Value: "", Label: "Media root"},
-					{Value: "Movies", Label: "Media root/Movies"},
-					{Value: "Shows", Label: "Media root/Shows"},
+					{Value: "", Label: "SMB share root"},
+					{Value: "Movies", Label: "SMB share/Movies"},
+					{Value: "Shows", Label: "SMB share/Shows"},
 				},
 			}, nil
 		})
@@ -98,14 +102,14 @@ func TestAssistantMediaSettingsEndpointReturnsDestinationOptions(t *testing.T) {
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}
-	if !response.Online || response.Settings.DestinationPath != "Movies" {
+	if !response.Online || response.Settings.MovieDestinationPath != "Movies" || response.Settings.TVDestinationPath != "Shows" {
 		t.Fatalf("settings response = %#v", response)
 	}
 	values := map[string]string{}
 	for _, option := range response.DestinationOptions {
 		values[option.Value] = option.Label
 	}
-	if values["Movies"] != "Media root/Movies" || values["Shows"] != "Media root/Shows" {
+	if values["Movies"] != "SMB share/Movies" || values["Shows"] != "SMB share/Shows" {
 		t.Fatalf("destination options = %#v", response.DestinationOptions)
 	}
 }

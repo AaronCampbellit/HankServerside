@@ -31,6 +31,8 @@ const els = {
   mediaGramatonUsername: document.getElementById("media-gramaton-username"),
   mediaGramatonPassword: document.getElementById("media-gramaton-password"),
   mediaDestinationPath: document.getElementById("media-destination-path"),
+  mediaMovieDestinationPath: document.getElementById("media-movie-destination-path"),
+  mediaTVDestinationPath: document.getElementById("media-tv-destination-path"),
   mediaWorkflowMeta: document.getElementById("media-workflow-meta"),
   saveMediaSettingsButton: document.getElementById("save-media-settings-button"),
   refreshMediaSettingsButton: document.getElementById("refresh-media-settings-button"),
@@ -95,13 +97,13 @@ function normalizeMediaDestinationPath(value) {
 function mediaDestinationLabel(value, fallback = "") {
   const cleaned = normalizeMediaDestinationPath(value);
   if (fallback) return fallback;
-  return cleaned ? `Media root/${cleaned}` : "Media root";
+  return cleaned ? `SMB share/${cleaned}` : "SMB share root";
 }
 
-function renderMediaDestinationOptions(payload, settings) {
-  const current = normalizeMediaDestinationPath(settings.destination_path || "");
+function renderMediaDestinationSelect(select, payload, currentValue) {
+  const current = normalizeMediaDestinationPath(currentValue || "");
   const options = [
-    { value: "", label: "Media root" },
+    { value: "", label: "SMB share root" },
     ...((payload.destination_options || []).map((option) => ({
       value: normalizeMediaDestinationPath(option.value),
       label: mediaDestinationLabel(option.value, option.label),
@@ -117,10 +119,16 @@ function renderMediaDestinationOptions(payload, settings) {
   if (current && !seen.has(current)) {
     unique.push({ value: current, label: `Current: ${mediaDestinationLabel(current)}` });
   }
-  els.mediaDestinationPath.innerHTML = unique.map((option) => (
+  select.innerHTML = unique.map((option) => (
     `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
   )).join("");
-  els.mediaDestinationPath.value = current;
+  select.value = current;
+}
+
+function renderMediaDestinationOptions(payload, settings) {
+  renderMediaDestinationSelect(els.mediaDestinationPath, payload, settings.destination_path || "");
+  renderMediaDestinationSelect(els.mediaMovieDestinationPath, payload, settings.movie_destination_path || settings.destination_path || "");
+  renderMediaDestinationSelect(els.mediaTVDestinationPath, payload, settings.tv_destination_path || settings.destination_path || "");
 }
 
 function isActiveMediaJob(job) {
@@ -357,7 +365,7 @@ function renderMediaWorkflowSettings() {
   } else if (!online) {
     els.mediaWorkflowMeta.textContent = `${payload.error || "The home agent is offline."} You can prepare these fields, but saving requires the updated home agent to be online.`;
   } else {
-    els.mediaWorkflowMeta.textContent = `Destination resolves under ${mediaDestinationLabel(settings.destination_path)}. 1080p is preferred and 720p is used only as fallback.`;
+    els.mediaWorkflowMeta.textContent = `Movies save to ${mediaDestinationLabel(settings.movie_destination_path || settings.destination_path)}. TV shows save to ${mediaDestinationLabel(settings.tv_destination_path || settings.destination_path)} under a show-title folder.`;
   }
 
   [
@@ -366,6 +374,8 @@ function renderMediaWorkflowSettings() {
     els.mediaGramatonUsername,
     els.mediaGramatonPassword,
     els.mediaDestinationPath,
+    els.mediaMovieDestinationPath,
+    els.mediaTVDestinationPath,
     els.saveMediaSettingsButton,
   ].forEach((element) => {
     element.disabled = fieldsDisabled;
@@ -463,7 +473,7 @@ async function loadStatus() {
       online: false,
       can_edit: false,
       settings: { base_url: "https://gramaton.io", preferred_quality: "1080p", require_confirmation: true },
-      destination_options: [{ value: "", label: "Media root" }],
+      destination_options: [{ value: "", label: "SMB share root" }],
       jobs: [],
       error: error.message,
     })),
@@ -517,6 +527,8 @@ async function saveMediaSettings() {
           base_url: els.mediaGramatonBaseURL.value,
           username: els.mediaGramatonUsername.value,
           destination_path: normalizeMediaDestinationPath(els.mediaDestinationPath.value),
+          movie_destination_path: normalizeMediaDestinationPath(els.mediaMovieDestinationPath.value),
+          tv_destination_path: normalizeMediaDestinationPath(els.mediaTVDestinationPath.value),
           preferred_quality: "1080p",
           require_confirmation: true,
         },

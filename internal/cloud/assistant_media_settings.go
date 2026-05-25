@@ -35,7 +35,7 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 			response.Online = false
 			response.CanEdit = membership.Role == domain.HomeRoleAdmin
 			response.Settings = defaultAssistantMediaSettings()
-			response.DestinationOptions = defaultAssistantMediaDestinationOptions(response.Settings.DestinationPath)
+			response.DestinationOptions = defaultAssistantMediaDestinationOptions(response.Settings)
 			response.Error = err.Error()
 		}
 		writeJSON(w, http.StatusOK, response)
@@ -68,7 +68,7 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 			Online:             true,
 			CanEdit:            true,
 			Settings:           payload.Settings,
-			DestinationOptions: defaultAssistantMediaDestinationOptions(payload.Settings.DestinationPath),
+			DestinationOptions: defaultAssistantMediaDestinationOptions(payload.Settings),
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -152,12 +152,20 @@ func defaultAssistantMediaSettings() protocol.MediaSettings {
 	}
 }
 
-func defaultAssistantMediaDestinationOptions(current string) []protocol.MediaDestinationOption {
-	options := []protocol.MediaDestinationOption{{Value: "", Label: "Media root"}}
-	if current != "" {
+func defaultAssistantMediaDestinationOptions(settings protocol.MediaSettings) []protocol.MediaDestinationOption {
+	options := []protocol.MediaDestinationOption{{Value: "", Label: "SMB share root"}}
+	seen := map[string]struct{}{"": {}}
+	for _, current := range []string{settings.DestinationPath, settings.MovieDestinationPath, settings.TVDestinationPath} {
+		if current == "" {
+			continue
+		}
+		if _, ok := seen[current]; ok {
+			continue
+		}
+		seen[current] = struct{}{}
 		options = append(options, protocol.MediaDestinationOption{
 			Value: current,
-			Label: "Media root/" + current,
+			Label: "SMB share/" + current,
 		})
 	}
 	return options

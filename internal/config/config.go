@@ -92,11 +92,13 @@ type SMB struct {
 }
 
 type Media struct {
-	GramatonEnabled bool
-	GramatonBaseURL string
-	Username        string
-	Password        string
-	DestinationPath string
+	GramatonEnabled      bool
+	GramatonBaseURL      string
+	Username             string
+	Password             string
+	DestinationPath      string
+	MovieDestinationPath string
+	TVDestinationPath    string
 }
 
 func LoadCloud() (Cloud, error) {
@@ -191,11 +193,13 @@ func LoadAgent() (Agent, error) {
 		FilesRoot:  strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
 		NotesRoot:  strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
 		Media: Media{
-			GramatonEnabled: boolEnvOrDefault("HANK_REMOTE_MEDIA_GRAMATON_ENABLED", false),
-			GramatonBaseURL: strings.TrimRight(envOrDefault("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL", "https://gramaton.io"), "/"),
-			Username:        strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME")),
-			Password:        os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"),
-			DestinationPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_DESTINATION_PATH")),
+			GramatonEnabled:      boolEnvOrDefault("HANK_REMOTE_MEDIA_GRAMATON_ENABLED", false),
+			GramatonBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL", "https://gramaton.io"), "/"),
+			Username:             strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME")),
+			Password:             os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"),
+			DestinationPath:      strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_DESTINATION_PATH")),
+			MovieDestinationPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH")),
+			TVDestinationPath:    strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_TV_DESTINATION_PATH")),
 		},
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),

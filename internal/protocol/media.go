@@ -31,13 +31,15 @@ type MediaSearchRequest struct {
 }
 
 type MediaSettings struct {
-	Enabled             bool   `json:"enabled"`
-	BaseURL             string `json:"base_url"`
-	Username            string `json:"username,omitempty"`
-	HasPassword         bool   `json:"has_password"`
-	DestinationPath     string `json:"destination_path,omitempty"`
-	PreferredQuality    string `json:"preferred_quality"`
-	RequireConfirmation bool   `json:"require_confirmation"`
+	Enabled              bool   `json:"enabled"`
+	BaseURL              string `json:"base_url"`
+	Username             string `json:"username,omitempty"`
+	HasPassword          bool   `json:"has_password"`
+	DestinationPath      string `json:"destination_path,omitempty"`
+	MovieDestinationPath string `json:"movie_destination_path,omitempty"`
+	TVDestinationPath    string `json:"tv_destination_path,omitempty"`
+	PreferredQuality     string `json:"preferred_quality"`
+	RequireConfirmation  bool   `json:"require_confirmation"`
 }
 
 type MediaDestinationOption struct {

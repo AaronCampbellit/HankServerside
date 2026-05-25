@@ -36,12 +36,14 @@ func main() {
 		},
 	})
 	media := agentmedia.New(agentmedia.Config{
-		Enabled:         cfg.Media.GramatonEnabled,
-		BaseURL:         cfg.Media.GramatonBaseURL,
-		Username:        cfg.Media.Username,
-		Password:        cfg.Media.Password,
-		DestinationPath: cfg.Media.DestinationPath,
-		EnvPath:         cfg.ConfigPath,
+		Enabled:              cfg.Media.GramatonEnabled,
+		BaseURL:              cfg.Media.GramatonBaseURL,
+		Username:             cfg.Media.Username,
+		Password:             cfg.Media.Password,
+		DestinationPath:      cfg.Media.DestinationPath,
+		MovieDestinationPath: cfg.Media.MovieDestinationPath,
+		TVDestinationPath:    cfg.Media.TVDestinationPath,
+		EnvPath:              cfg.ConfigPath,
 	}, files, logger)
 	notes := agentnotes.New(cfg.NotesRoot)
 
