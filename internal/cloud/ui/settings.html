@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Settings</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525-site-reorg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <link rel="manifest" href="/assets/site.webmanifest">
+  </head>
+  <body>
+    <div class="shell dashboard-shell settings-page">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Settings</h1>
+          <p class="lede">Manage account access, connector setup, connections, HankAI, backups, and invitations.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
+
+      <main class="settings-layout">
+        <section class="panel settings-index-panel" aria-label="Settings sections">
+          <div class="settings-page-tabs" role="tablist" aria-label="Settings sections">
+            <button type="button" class="settings-page-tab active" role="tab" aria-selected="true" data-settings-page-tab="home">Home</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="people">People</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="connections">Connections</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="ai">AI</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="backups" data-admin-only="true" hidden>Backups</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="join-home">Join Home</button>
+          </div>
+        </section>
+
+        <section class="settings-frame-panel" data-settings-page-panel="home">
+          <iframe class="settings-pane-frame" title="Home settings" data-src="/dashboard?pane=1&amp;embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="people" hidden>
+          <iframe class="settings-pane-frame" title="People settings" data-src="/dashboard/home-users?pane=1&amp;embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="connections" hidden>
+          <iframe class="settings-pane-frame" title="Connection settings" data-src="/dashboard/settings/connections-pane?embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="ai" hidden>
+          <iframe class="settings-pane-frame" title="AI settings" data-src="/dashboard/assistant-settings?pane=1&amp;embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="backups" data-admin-only="true" hidden>
+          <iframe class="settings-pane-frame" title="Backup settings" data-src="/dashboard/storage?pane=1&amp;embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="join-home" hidden>
+          <iframe class="settings-pane-frame" title="Join home" data-src="/dashboard/accept-invitation?pane=1&amp;embedded=1"></iframe>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/settings.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
+  </body>
+</html>

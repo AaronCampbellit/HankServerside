@@ -103,7 +103,7 @@ function renderHomes() {
     option.textContent = "No home yet";
     els.homeSelect.appendChild(option);
     els.homeRole.textContent = "No home";
-    els.homeMeta.textContent = "Create the home from Overview first.";
+    els.homeMeta.textContent = "Create the home from Home first.";
     return;
   }
 

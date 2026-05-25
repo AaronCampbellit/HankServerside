@@ -359,10 +359,13 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/sync-status",
 		"/dashboard/storage",
 		"/dashboard/hank",
+		"/dashboard/home-assistant",
 		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
 		"/dashboard/file-server",
 		"/dashboard/file-transfers",
+		"/dashboard/settings",
+		"/dashboard/settings/connections-pane",
 		"/dashboard/accept-invitation",
 	}
 
@@ -415,13 +418,11 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 
 	normalPages := []string{
 		"/dashboard",
-		"/dashboard/home-users",
-		"/dashboard/service-profiles",
-		"/dashboard/sync-status",
 		"/dashboard/hank",
-		"/dashboard/assistant-settings",
+		"/dashboard/home-assistant",
 		"/dashboard/profile-notes",
 		"/dashboard/file-server",
+		"/dashboard/settings/connections-pane",
 	}
 
 	for _, routePath := range normalPages {
@@ -455,13 +456,41 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 	}
 	legacyFileTransfers.Body.Close()
 
+	redirects := map[string]string{
+		"/dashboard/home-users":         "/dashboard/settings#people",
+		"/dashboard/service-profiles":   "/dashboard/settings#connections",
+		"/dashboard/sync-status":        "/dashboard#health",
+		"/dashboard/assistant-settings": "/dashboard/settings#ai",
+		"/dashboard/accept-invitation":  "/dashboard/settings#join-home",
+	}
+	for routePath, wantLocation := range redirects {
+		response := requestDashboardPage(t, testServer, routePath, "member-token")
+		if response.StatusCode != http.StatusSeeOther {
+			data, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("member legacy %s status = %d, want %d body=%s", routePath, response.StatusCode, http.StatusSeeOther, string(data))
+		}
+		if location := response.Header.Get("Location"); location != wantLocation {
+			t.Fatalf("legacy %s redirect location = %q, want %q", routePath, location, wantLocation)
+		}
+		response.Body.Close()
+	}
+
 	acceptResponse := requestDashboardPage(t, testServer, "/dashboard/accept-invitation", "outsider-token")
-	if acceptResponse.StatusCode != http.StatusOK {
+	if acceptResponse.StatusCode != http.StatusSeeOther {
 		data, _ := io.ReadAll(acceptResponse.Body)
 		acceptResponse.Body.Close()
-		t.Fatalf("outsider accept-invitation status = %d, want %d body=%s", acceptResponse.StatusCode, http.StatusOK, string(data))
+		t.Fatalf("outsider accept-invitation status = %d, want %d body=%s", acceptResponse.StatusCode, http.StatusSeeOther, string(data))
 	}
 	acceptResponse.Body.Close()
+
+	settingsResponse := requestDashboardPage(t, testServer, "/dashboard/settings", "outsider-token")
+	if settingsResponse.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(settingsResponse.Body)
+		settingsResponse.Body.Close()
+		t.Fatalf("outsider settings status = %d, want %d body=%s", settingsResponse.StatusCode, http.StatusOK, string(data))
+	}
+	settingsResponse.Body.Close()
 
 	storageResponse := requestDashboardPage(t, testServer, "/dashboard/storage", "member-token")
 	if storageResponse.StatusCode != http.StatusForbidden {
@@ -477,15 +506,12 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 
 	pages := []string{
 		"dashboard.html",
-		"home-users.html",
-		"service-profiles.html",
-		"sync-status.html",
-		"storage.html",
 		"hank.html",
-		"assistant-settings.html",
+		"home-assistant.html",
+		"settings.html",
+		"settings-connections.html",
 		"profile-notes.html",
 		"file-server.html",
-		"accept-invitation.html",
 	}
 	for _, page := range pages {
 		data, err := fs.ReadFile(uiAssets, "ui/"+page)
@@ -493,13 +519,11 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 			t.Fatalf("%s read: %v", page, err)
 		}
 		body := string(data)
-		storageLinks := strings.Count(body, `href="/dashboard/storage"`)
-		if storageLinks == 0 {
-			t.Fatalf("%s has no storage dashboard link", page)
+		if strings.Contains(body, `>Overview<`) || strings.Contains(body, `>Status<`) {
+			t.Fatalf("%s still exposes old overview/status navigation", page)
 		}
-		adminOnlyLinks := strings.Count(body, `href="/dashboard/storage" data-admin-only="true" hidden`)
-		if adminOnlyLinks != storageLinks {
-			t.Fatalf("%s storage admin-only links = %d, want %d", page, adminOnlyLinks, storageLinks)
+		if strings.Contains(body, `href="/dashboard/settings#backups"`) && !strings.Contains(body, `href="/dashboard/settings#backups" data-admin-only="true" hidden`) {
+			t.Fatalf("%s backup settings links must be admin-only", page)
 		}
 		adminScriptStart := strings.Index(body, `src="/assets/admin-nav.js`)
 		if adminScriptStart == -1 {
@@ -513,6 +537,17 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 
 	if _, err := fs.ReadFile(uiAssets, "ui/admin-nav.js"); err != nil {
 		t.Fatalf("admin-nav.js read: %v", err)
+	}
+	nav, err := fs.ReadFile(uiAssets, "ui/admin-nav.js")
+	if err != nil {
+		t.Fatalf("admin-nav.js read: %v", err)
+	}
+	navBody := string(nav)
+	if strings.Contains(navBody, `label: "Overview"`) || strings.Contains(navBody, `label: "Status"`) {
+		t.Fatal("admin nav still registers old overview/status entries")
+	}
+	if !strings.Contains(navBody, `href: "/dashboard/settings#backups"`) || !strings.Contains(navBody, `adminOnly: true`) {
+		t.Fatal("admin nav must expose backup settings as an admin-only search result")
 	}
 	request := httptest.NewRequest(http.MethodGet, "/assets/admin-nav.js", nil)
 	response := httptest.NewRecorder()

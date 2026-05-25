@@ -419,6 +419,15 @@ h3 {
   gap: 6px;
 }
 
+.sidebar-nav-group {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  padding: 10px 10px 2px;
+  text-transform: uppercase;
+}
+
 .sidebar-context {
   padding: 8px 9px 2px;
   border-top: 1px solid var(--line);
@@ -542,7 +551,9 @@ h3 {
 }
 
 .settings-subtab.active,
-.settings-subtab:hover {
+.settings-subtab:hover,
+.settings-page-tab.active,
+.settings-page-tab:hover {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.08);
   color: var(--ink);
@@ -555,6 +566,39 @@ h3 {
 
 .settings-tab-panel[hidden] {
   display: none;
+}
+
+.settings-layout {
+  display: grid;
+  gap: 14px;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.settings-index-panel {
+  padding: 12px;
+}
+
+.settings-page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-page-tab {
+  flex: 0 1 auto;
+}
+
+.settings-frame-panel {
+  min-width: 0;
+}
+
+.settings-pane-frame {
+  width: 100%;
+  min-height: 620px;
+  border: 0;
+  display: block;
+  background: transparent;
 }
 
 .settings-block {
@@ -1000,6 +1044,11 @@ button.ghost {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 7px;
   margin-bottom: 10px;
+}
+
+.compact-ops,
+.tool-link-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .ops-card {
@@ -1847,6 +1896,25 @@ button:disabled {
   gap: 7px;
 }
 
+.hank-result-card.has-image {
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: start;
+}
+
+.hank-result-card-image {
+  width: 72px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.hank-result-card-body {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
 .hank-result-card-footer {
   display: flex;
   align-items: center;
@@ -1973,6 +2041,10 @@ button:disabled {
 
   .sidebar-nav-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sidebar-nav-group {
+    grid-column: 1 / -1;
   }
 
   .dashboard-shell .tab-link,

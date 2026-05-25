@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
 )
 
 func TestMediaAvailabilityPromptMatching(t *testing.T) {
@@ -47,6 +48,22 @@ func TestMediaAvailabilityPromptMatching(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAssistantMediaCardCarriesPosterImage(t *testing.T) {
+	t.Parallel()
+
+	card := assistantMediaCard(protocol.MediaSearchResult{
+		ID:        "movies/20429-project-hail-mary",
+		Title:     "Project Hail Mary",
+		Year:      2026,
+		Type:      protocol.MediaTypeMovie,
+		PosterURL: "https://image.example/project-hail-mary.jpg",
+		PagePath:  "/movies/20429-project-hail-mary",
+	}, 1)
+	if card.ImageURL != "https://image.example/project-hail-mary.jpg" {
+		t.Fatalf("card image = %q", card.ImageURL)
 	}
 }
 

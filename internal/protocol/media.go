@@ -62,6 +62,7 @@ type MediaSearchResult struct {
 	Summary    string   `json:"summary,omitempty"`
 	Rating     string   `json:"rating,omitempty"`
 	Genres     []string `json:"genres,omitempty"`
+	PosterURL  string   `json:"poster_url,omitempty"`
 	PagePath   string   `json:"page_path"`
 	SearchText string   `json:"search_text,omitempty"`
 }

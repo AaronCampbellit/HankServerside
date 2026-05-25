@@ -369,11 +369,17 @@ function renderSourceSummary() {
         <div class="kv-row"><div class="kv-label">Password</div><div>${config.passwordSet ? "Saved" : "Not saved"}</div></div>
         <div class="kv-row"><div class="kv-label">Last Error</div><div>${escapeHTML(profile.last_error || "None")}</div></div>
       </div>
+      <div class="item-actions">
+        <a class="ops-card manage-link" href="/dashboard/settings#connections">Edit Settings</a>
+      </div>
     </article>
   `;
 }
 
 function renderSettings() {
+  if (!els.smbForm) {
+    return;
+  }
   const config = fileConfig();
   els.smbHost.value = config.host;
   els.smbShare.value = config.share;
@@ -846,7 +852,7 @@ els.filesPath.addEventListener("keydown", (event) => {
 els.filesUpButton.addEventListener("click", () => browseFiles(parentPath(state.currentFilesPath)));
 els.filesCreateDirectoryButton.addEventListener("click", createDirectory);
 els.filesUploadButton.addEventListener("click", uploadFile);
-els.smbForm.addEventListener("submit", saveSMBSettings);
+els.smbForm?.addEventListener("submit", saveSMBSettings);
 installExplorerDropTarget();
 
 hydrate();

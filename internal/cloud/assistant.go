@@ -53,6 +53,7 @@ type assistantResultCard struct {
 	Path          string     `json:"path,omitempty"`
 	IsDirectory   bool       `json:"is_directory,omitempty"`
 	SearchText    string     `json:"search_text,omitempty"`
+	ImageURL      string     `json:"image_url,omitempty"`
 	MediaOptionID string     `json:"media_option_id,omitempty"`
 	MediaType     string     `json:"media_type,omitempty"`
 	Year          int        `json:"year,omitempty"`

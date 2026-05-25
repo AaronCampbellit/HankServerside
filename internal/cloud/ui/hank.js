@@ -449,16 +449,35 @@ function renderMessages(messages = []) {
 
 function renderCards(cards) {
   if (!cards.length) return "";
-  return `<div class="card-list hank-result-cards">${cards.map((card) => `
-    <article class="card hank-result-card">
+  return `<div class="card-list hank-result-cards">${cards.map(renderCard).join("")}</div>`;
+}
+
+function renderCard(card) {
+  const imageURL = cardImageURL(card);
+  return `
+    <article class="card hank-result-card${imageURL ? " has-image" : ""}">
+      ${imageURL ? `<img class="hank-result-card-image" src="${escapeHTML(imageURL)}" alt="">` : ""}
+      <div class="hank-result-card-body">
       <div class="card-title">${escapeHTML(card.title)}</div>
       <div class="meta">${escapeHTML(card.summary || "")}</div>
       <div class="hank-result-card-footer">
         <div class="pill">${escapeHTML(card.kind || "result")}</div>
         ${renderCardAction(card)}
       </div>
+      </div>
     </article>
-  `).join("")}</div>`;
+  `;
+}
+
+function cardImageURL(card) {
+  const value = String(card.image_url || "").trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value, window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch (_) {
+    return "";
+  }
 }
 
 function renderCardAction(card) {

@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	"github.com/dropfile/hankremote/internal/protocol"
+	"golang.org/x/net/html"
 )
 
 func TestParseSearchResultsAndDetailPages(t *testing.T) {
@@ -24,11 +26,13 @@ func TestParseSearchResultsAndDetailPages(t *testing.T) {
 	results := parseSearchResults(strings.NewReader(`
 		<div class="item">
 			<a class="movie-card-link" href="/movies/2787-batman-returns"></a>
+			<img src="/images/batman-returns.jpg">
 			<h2>Batman Returns</h2>
 			<p>Action, Fantasy PG-13 7.1 1992 watch</p>
 		</div>
 		<div class="item">
 			<a class="movie-card-link" href="/series/1073-spongebob-squarepants?recent=true&season=1&episode=1"></a>
+			<img data-src="https://images.example/spongebob.jpg">
 			<h2>SpongeBob SquarePants</h2>
 			<p>Animation, Comedy TV-Y7 8.2 1999 watch</p>
 		</div>
@@ -39,12 +43,19 @@ func TestParseSearchResultsAndDetailPages(t *testing.T) {
 	if results[0].Type != protocol.MediaTypeMovie || results[0].PagePath != "/movies/2787-batman-returns" || results[0].Year != 1992 {
 		t.Fatalf("movie result = %#v", results[0])
 	}
+	if results[0].PosterURL != "/images/batman-returns.jpg" {
+		t.Fatalf("movie poster = %q", results[0].PosterURL)
+	}
 	if results[1].Type != protocol.MediaTypeSeries || results[1].PagePath != "/series/1073-spongebob-squarepants" || results[1].Year != 1999 {
 		t.Fatalf("series result = %#v", results[1])
+	}
+	if results[1].PosterURL != "https://images.example/spongebob.jpg" {
+		t.Fatalf("series poster = %q", results[1].PosterURL)
 	}
 
 	page := parseDetailPage(strings.NewReader(`
 		<h1>Fixture Show</h1>
+		<script>var posterImage = "https://images.example/fixture-show.jpg";</script>
 		<a href="https://dl.example/fixture_720p.mp4?file=Fixture_720p.mp4">Download 720p</a>
 		<a href="https://dl.example/fixture_1080p.mp4?file=Fixture_1080p.mp4">Download 1080p</a>
 		<div class="tv-details-episodes">
@@ -60,11 +71,45 @@ func TestParseSearchResultsAndDetailPages(t *testing.T) {
 	if page.title != "Fixture Show" {
 		t.Fatalf("title = %q", page.title)
 	}
+	if page.posterURL != "https://images.example/fixture-show.jpg" {
+		t.Fatalf("detail poster = %q", page.posterURL)
+	}
 	if got := chooseDownloadLink(page.downloads); got.quality != "1080p" {
 		t.Fatalf("chosen link = %#v, want 1080p", got)
 	}
 	if len(page.episodes) != 3 || page.episodes[2].season != 2 || page.episodes[2].episode != 1 {
 		t.Fatalf("episodes = %#v", page.episodes)
+	}
+}
+
+func TestParseDetailPageIgnoresPlaceholderDownloadLinks(t *testing.T) {
+	t.Parallel()
+
+	page := parseDetailPage(strings.NewReader(`
+		<h1>Fixture Movie</h1>
+		<a id="dlbtn" href="#">Download 1080p</a>
+		<a href="/">Download 1080p</a>
+		<a href="javascript:void(0)">Download 720p</a>
+		<a href="/assets/poster_1080p.jpg">Download 1080p</a>
+	`))
+	if len(page.downloads) != 0 {
+		t.Fatalf("downloads = %#v, want placeholder links ignored", page.downloads)
+	}
+	if !page.placeholderButton {
+		t.Fatal("placeholderButton = false, want placeholder button detected")
+	}
+}
+
+func TestParseDetailPageReportsBlockedDownload(t *testing.T) {
+	t.Parallel()
+
+	page := parseDetailPage(strings.NewReader(`
+		<h1>Fixture Movie</h1>
+		<div class="premium-expired"></div>
+		<a id="dlbtn" href="#">Download</a>
+	`))
+	if reason := missingDownloadReason(page); !strings.Contains(reason, "premium") {
+		t.Fatalf("missing reason = %q, want premium/expired access reason", reason)
 	}
 }
 
@@ -140,7 +185,7 @@ func TestSearchAcceptsDirectMediaURL(t *testing.T) {
 		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
 	})
 	mux.HandleFunc("/movies/20429-project-hail-mary", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<h1>Project Hail Mary</h1><a href="https://dl.example/project_hail_mary_1080p.mp4?file=Project_Hail_Mary_1080p.mp4">Download 1080p</a>`)
+		fmt.Fprint(w, `<h1>Project Hail Mary</h1><script>var posterImage = "/posters/project-hail-mary.jpg";</script><a href="https://dl.example/project_hail_mary_1080p.mp4?file=Project_Hail_Mary_1080p.mp4">Download 1080p</a>`)
 	})
 	mux.HandleFunc("/index/loadmovies", func(w http.ResponseWriter, r *http.Request) {
 		searchEndpointCalled = true
@@ -174,6 +219,9 @@ func TestSearchAcceptsDirectMediaURL(t *testing.T) {
 	if result.Title != "Project Hail Mary" || result.Type != protocol.MediaTypeMovie || result.PagePath != "/movies/20429-project-hail-mary" {
 		t.Fatalf("direct result = %#v", result)
 	}
+	if result.PosterURL != server.URL+"/posters/project-hail-mary.jpg" {
+		t.Fatalf("direct poster = %q", result.PosterURL)
+	}
 }
 
 func TestSearchUsesKnownMediaPathHintWhenProviderSearchIsEmpty(t *testing.T) {
@@ -193,7 +241,7 @@ func TestSearchUsesKnownMediaPathHintWhenProviderSearchIsEmpty(t *testing.T) {
 		fmt.Fprint(w, `<script>var token_key = "token";</script>`)
 	})
 	mux.HandleFunc("/movies/20429-project-hail-mary", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<h1>Project Hail Mary</h1><a href="https://dl.example/project_hail_mary_1080p.mp4?file=Project_Hail_Mary_2026_1080p.mp4">Download 1080p</a>`)
+		fmt.Fprint(w, `<h1>Project Hail Mary</h1><script>var posterImage = "/posters/project-hail-mary.jpg";</script><a href="https://dl.example/project_hail_mary_1080p.mp4?file=Project_Hail_Mary_2026_1080p.mp4">Download 1080p</a>`)
 	})
 	mux.HandleFunc("/index/loadmovies", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<div></div>`)
@@ -218,6 +266,9 @@ func TestSearchUsesKnownMediaPathHintWhenProviderSearchIsEmpty(t *testing.T) {
 	result := response.Results[0]
 	if result.Title != "Project Hail Mary" || result.PagePath != "/movies/20429-project-hail-mary" {
 		t.Fatalf("path-hint result = %#v", result)
+	}
+	if result.PosterURL != server.URL+"/posters/project-hail-mary.jpg" {
+		t.Fatalf("path-hint poster = %q", result.PosterURL)
 	}
 }
 
@@ -419,8 +470,113 @@ func TestLiveMediaCatalogFromEnv(t *testing.T) {
 			if index >= limit {
 				break
 			}
-			t.Logf("  catalog[%d] title=%q year=%d type=%s path=%q summary=%q", index+1, result.Title, result.Year, result.Type, result.PagePath, result.Summary)
+			t.Logf("  catalog[%d] title=%q year=%d type=%s path=%q poster=%q summary=%q", index+1, result.Title, result.Year, result.Type, result.PagePath, result.PosterURL, result.Summary)
 		}
+	}
+}
+
+func TestLiveMediaDownloadProbeFromEnv(t *testing.T) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_DOWNLOAD_PROBE")), "true") {
+		t.Skip("set HANK_REMOTE_MEDIA_LIVE_DOWNLOAD_PROBE=true with media source env vars to probe a live download")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	service := liveMediaServiceFromEnv(t)
+	if err := service.ensureAuthenticated(ctx); err != nil {
+		t.Fatalf("authenticate media source: %v", err)
+	}
+
+	query := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_QUERY"))
+	if query == "" {
+		query = "project hail mary"
+	}
+	search, err := service.Search(ctx, query, 1)
+	if err != nil {
+		t.Fatalf("search %q: %v", query, err)
+	}
+	if len(search.Results) == 0 {
+		t.Fatalf("search %q returned no results", query)
+	}
+	plan, downloads, err := service.buildPlan(ctx, search.Results[0])
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	logLiveDownloadAnchors(t, ctx, service, search.Results[0].PagePath)
+	if len(downloads) == 0 || downloads[0].downloadURL == "" {
+		t.Fatalf("plan has no downloadable item: %#v", plan)
+	}
+
+	download := downloads[0]
+	t.Logf("selected title=%q type=%s quality=%s filename=%q page=%q download_url=%q",
+		plan.Selection.Title,
+		download.item.MediaType,
+		download.item.Quality,
+		download.item.Filename,
+		download.item.PagePath,
+		redactedURLForLog(download.downloadURL),
+	)
+
+	req, err := service.newDownloadRequest(ctx, download)
+	if err != nil {
+		t.Fatalf("new download request: %v", err)
+	}
+	req.Header.Set("Range", "bytes=0-4095")
+	resp, err := service.client.Do(req)
+	if err != nil {
+		t.Fatalf("probe request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	sniff, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if readErr != nil {
+		t.Fatalf("read probe body: %v", readErr)
+	}
+	t.Logf("probe status=%d final_url=%q content_type=%q content_length=%d content_range=%q accept_ranges=%q sniff=%q",
+		resp.StatusCode,
+		redactedURLForLog(resp.Request.URL.String()),
+		resp.Header.Get("Content-Type"),
+		resp.ContentLength,
+		resp.Header.Get("Content-Range"),
+		resp.Header.Get("Accept-Ranges"),
+		truncateForLog(cleanText(string(sniff)), 240),
+	)
+	if err := validateDownloadResponse(resp, sniff); err != nil {
+		t.Fatalf("download probe rejected response: %v", err)
+	}
+}
+
+func logLiveDownloadAnchors(t *testing.T, ctx context.Context, service *Service, pagePath string) {
+	t.Helper()
+
+	body, status, err := service.fetchText(ctx, http.MethodGet, pagePath, nil)
+	if err != nil {
+		t.Logf("detail page fetch error: %v", err)
+		return
+	}
+	root, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Logf("detail page parse error: %v", err)
+		return
+	}
+	t.Logf("detail page status=%d body_len=%d", status, len(body))
+	t.Logf("detail page premium_or_expired_overlay=%v", pageHasDownloadAccessOverlay(root))
+	for _, node := range findAll(root, func(node *html.Node) bool {
+		return node.Type == html.ElementNode && node.Data == "a" && attr(node, "href") != ""
+	}) {
+		href := attr(node, "href")
+		text := cleanText(nodeText(node))
+		quality := linkQuality(text, href)
+		loweredText := strings.ToLower(text)
+		loweredHref := strings.ToLower(href)
+		if quality == "" &&
+			!strings.Contains(loweredText, "download") &&
+			!strings.Contains(loweredHref, "download") &&
+			!strings.Contains(loweredHref, "/dl") {
+			continue
+		}
+		t.Logf("detail anchor href=%q quality=%q text=%q", redactedURLForLog(href), quality, truncateForLog(text, 240))
 	}
 }
 
@@ -443,7 +599,7 @@ func runLiveMediaSearch(t *testing.T, ctx context.Context, service *Service, que
 			t.Logf("provider search type=%s query=%q parsed=%d", mediaType, variant, len(found))
 			for _, result := range found {
 				score := mediaResultScore(result, query)
-				t.Logf("  score=%d title=%q year=%d type=%s path=%q", score, result.Title, result.Year, result.Type, result.PagePath)
+				t.Logf("  score=%d title=%q year=%d type=%s path=%q poster=%q", score, result.Title, result.Year, result.Type, result.PagePath, result.PosterURL)
 			}
 			rawResults = append(rawResults, found...)
 		}
@@ -452,7 +608,7 @@ func runLiveMediaSearch(t *testing.T, ctx context.Context, service *Service, que
 	unique := uniqueSearchResults(rawResults)
 	t.Logf("raw_unique=%d", len(unique))
 	for _, result := range unique {
-		t.Logf("  unique score=%d title=%q year=%d type=%s path=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath)
+		t.Logf("  unique score=%d title=%q year=%d type=%s path=%q poster=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath, result.PosterURL)
 	}
 
 	response, err := service.Search(ctx, query, 10)
@@ -461,7 +617,7 @@ func runLiveMediaSearch(t *testing.T, ctx context.Context, service *Service, que
 	}
 	t.Logf("filtered=%d", len(response.Results))
 	for _, result := range response.Results {
-		t.Logf("  filtered score=%d title=%q year=%d type=%s path=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath)
+		t.Logf("  filtered score=%d title=%q year=%d type=%s path=%q poster=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath, result.PosterURL)
 	}
 	if requireResults && len(response.Results) == 0 {
 		t.Fatalf("live search returned no filtered results for %q; inspect provider search and parsed result logs above", query)
@@ -530,6 +686,34 @@ func looksLikeLoginPage(body string) bool {
 	return strings.Contains(lowered, "userlogin") ||
 		strings.Contains(lowered, "forgotpassword") ||
 		(strings.Contains(lowered, "password") && strings.Contains(lowered, "login"))
+}
+
+func redactedURLForLog(rawURL string) string {
+	if strings.HasPrefix(strings.TrimSpace(rawURL), "#") {
+		return "#"
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "(invalid)"
+	}
+	if parsed.Scheme == "" && parsed.Host == "" {
+		if parsed.Path == "" && parsed.Fragment != "" {
+			return "#"
+		}
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func truncateForLog(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 func logLiveSearchFetch(t *testing.T, ctx context.Context, service *Service, mediaType string, query string) {
@@ -637,6 +821,117 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	}
 	if len(events) == 0 {
 		t.Fatal("expected progress/completed events")
+	}
+}
+
+func TestMediaDownloadRejectsHTMLResponse(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies/html-error", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<h1>Fixture Movie</h1><a href="%s/download/html_1080p.mp4?file=Fixture_Movie_1080p.mp4">Download 1080p</a>`, baseURL)
+	})
+	mux.HandleFunc("/download/html_1080p.mp4", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html><html><body><form><input name="password"></form>login</body></html>`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	root := t.TempDir()
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(root), nil)
+
+	start, err := service.StartDownload(ctx, protocol.MediaDownloadStartRequest{Selection: protocol.MediaSearchResult{
+		ID:       "movies/html-error",
+		Title:    "Fixture Movie",
+		Type:     protocol.MediaTypeMovie,
+		PagePath: "/movies/html-error",
+	}})
+	if err != nil {
+		t.Fatalf("StartDownload: %v", err)
+	}
+	status := waitForJob(t, ctx, service, start.Job.JobID)
+	if status.Status != protocol.MediaJobStatusFailed || status.FailedCount != 1 || status.CompletedCount != 0 {
+		t.Fatalf("job status = %#v, want failed HTML download", status)
+	}
+	if !strings.Contains(status.ErrorMessage, "HTML") && !strings.Contains(status.ErrorMessage, "web page") {
+		t.Fatalf("error message = %q, want HTML/web page failure", status.ErrorMessage)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Fixture_Movie_1080p.mp4")); !os.IsNotExist(err) {
+		t.Fatalf("final file exists or unexpected error: %v", err)
+	}
+}
+
+func TestMoviePlanUsesDynamic1080pLink(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var sawDynamicRequest bool
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies/20429-project-hail-mary", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `
+			<h1>Project Hail Mary</h1>
+			<script>var token_key = "dynamic-token";</script>
+			<a id="dlbtn" href="#">Download 720p</a>
+			<a id="dlbtn-hd" href="#">Download 1080p</a>
+		`)
+	})
+	mux.HandleFunc("/movies/getMovieLink", func(w http.ResponseWriter, r *http.Request) {
+		sawDynamicRequest = true
+		if r.URL.Query().Get("id") != "20429" || r.URL.Query().Get("token") != "dynamic-token" {
+			t.Fatalf("dynamic query = %s, want id and token", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"dl":"%s/download/web_720p.mp4?file=Project_Hail_Mary_720p.mp4","dl_hd":"%s/download/web_1080p.mp4?file=Project_Hail_Mary_1080p.mp4"}`, baseURL, baseURL)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	response, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{Selection: protocol.MediaSearchResult{
+		ID:       "movies/20429-project-hail-mary",
+		Title:    "Project Hail Mary",
+		Type:     protocol.MediaTypeMovie,
+		PagePath: "/movies/20429-project-hail-mary",
+	}})
+	if err != nil {
+		t.Fatalf("PlanDownload: %v", err)
+	}
+	if !sawDynamicRequest {
+		t.Fatal("dynamic movie link endpoint was not called")
+	}
+	if len(response.Plan.Items) != 1 {
+		t.Fatalf("items = %#v, want one", response.Plan.Items)
+	}
+	item := response.Plan.Items[0]
+	if !item.DownloadOK || item.Quality != "1080p" || item.Filename != "Project_Hail_Mary_1080p.mp4" {
+		t.Fatalf("dynamic item = %#v, want 1080p dynamic link item", item)
 	}
 }
 

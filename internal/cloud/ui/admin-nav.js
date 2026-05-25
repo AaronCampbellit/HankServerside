@@ -3,70 +3,95 @@
   const dashboardPages = [
     {
       href: "/dashboard",
-      label: "Overview",
-      detail: "Home name, connector setup, server checks, Home Assistant, files, and notes.",
-      keywords: ["home", "home name", "connector", "agent", "setup file", "token", "health", "home assistant", "files", "notes"],
-    },
-    {
-      href: "/dashboard/home-users",
-      label: "People",
-      detail: "Invite people, review members, and manage access.",
-      keywords: ["people", "users", "members", "invite", "invitation", "role", "admin", "access"],
-    },
-    {
-      href: "/dashboard/service-profiles",
-      label: "Connections",
-      detail: "Save Home Assistant settings for the home connector.",
-      keywords: ["connections", "home assistant", "ha token", "settings"],
-    },
-    {
-      href: "/dashboard/sync-status",
-      label: "Status",
-      detail: "Check notes, saved connections, and sync health.",
-      keywords: ["status", "sync", "health", "saved connections", "notes", "profile backup"],
-    },
-    {
-      href: "/dashboard/storage",
-      label: "Backups",
-      detail: "Backups, restore tests, checksum checks, and backup schedules.",
-      keywords: ["storage", "backup", "backups", "restore", "checksum", "schedule", "encrypted", "retention"],
-      adminOnly: true,
+      label: "Home",
+      detail: "Home name, connector setup, server checks, and quick links.",
+      keywords: ["home", "home name", "connector", "agent", "setup file", "token", "health", "server"],
+      group: "Home",
     },
     {
       href: "/dashboard/hank",
       label: "Hank",
       detail: "Ask HankAI about notes, calendars, Home Assistant, and files.",
       keywords: ["hank", "hankai", "ai", "assistant", "chat", "notes", "calendar", "home assistant", "files", "smb"],
+      group: "Tools",
     },
     {
-      href: "/dashboard/assistant-settings",
-      label: "AI Settings",
-      detail: "OpenAI account linking and Hank Assistant setup.",
-      keywords: ["ai", "assistant", "openai", "chatgpt", "oauth", "link openai", "relink", "subscription", "settings", "tools", "workflows", "media downloads"],
-    },
-    {
-      href: "/dashboard/profile-notes",
-      label: "My Notes",
-      detail: "Write, search, and autosave profile notes.",
-      keywords: ["notes", "my notes", "documents", "editor", "autosave", "formatting", "search notes"],
+      href: "/dashboard/home-assistant",
+      label: "Home Assistant",
+      detail: "Run Home Assistant health, state, and service commands.",
+      keywords: ["home assistant", "ha", "states", "service", "lights", "sensors", "tools"],
+      group: "Tools",
     },
     {
       href: "/dashboard/file-server",
       label: "File Server",
       detail: "Browse, upload, download, and manage home files.",
-      keywords: ["file server", "files", "file share", "smb", "nas", "transfers", "upload", "download", "file moves", "credentials"],
+      keywords: ["file server", "files", "file share", "smb", "nas", "transfers", "upload", "download", "file moves"],
+      group: "Tools",
     },
     {
-      href: "/dashboard/accept-invitation",
+      href: "/dashboard/profile-notes",
+      label: "Notes",
+      detail: "Write, search, and autosave profile notes.",
+      keywords: ["notes", "my notes", "documents", "editor", "autosave", "formatting", "search notes"],
+      group: "Tools",
+    },
+    {
+      href: "/dashboard/settings",
+      label: "Settings",
+      detail: "Home, people, connections, AI, backups, and invitations.",
+      keywords: ["settings", "home settings", "people", "connections", "ai", "backups", "join home", "invite"],
+      group: "Settings",
+    },
+    {
+      href: "/dashboard/settings#home",
+      label: "Home Settings",
+      detail: "Rename the home, review the connector, and create setup files.",
+      keywords: ["home name", "connector", "agent", "setup file", "token", "settings"],
+      searchOnly: true,
+    },
+    {
+      href: "/dashboard/settings#people",
+      label: "People Settings",
+      detail: "Invite people, review members, and manage access.",
+      keywords: ["people", "users", "members", "invite", "invitation", "role", "admin", "access"],
+      searchOnly: true,
+    },
+    {
+      href: "/dashboard/settings#connections",
+      label: "Connection Settings",
+      detail: "Save Home Assistant and file server settings for the connector.",
+      keywords: ["connections", "home assistant", "ha token", "settings", "file server", "smb", "nas", "credentials", "share"],
+      searchOnly: true,
+    },
+    {
+      href: "/dashboard/settings#ai",
+      label: "AI Settings",
+      detail: "OpenAI account linking and HankAI setup.",
+      keywords: ["ai", "assistant", "openai", "chatgpt", "oauth", "link openai", "relink", "subscription", "settings", "tools", "workflows", "media downloads"],
+      searchOnly: true,
+    },
+    {
+      href: "/dashboard/settings#backups",
+      label: "Backup Settings",
+      detail: "Backups, restore tests, checksum checks, and backup schedules.",
+      keywords: ["storage", "backup", "backups", "restore", "checksum", "schedule", "encrypted", "retention"],
+      adminOnly: true,
+      searchOnly: true,
+    },
+    {
+      href: "/dashboard/settings#join-home",
       label: "Join Home",
       detail: "Use an invite code to join a home.",
       keywords: ["join", "invite code", "accept invitation", "home invite"],
+      searchOnly: true,
     },
     {
       href: "/docs/deployment",
       label: "Setup Guide",
       detail: "One-server setup, .env.cloud, .env.agent, Docker, and first checks.",
       keywords: ["setup", "deployment", "guide", "docker", "env cloud", "env agent", "port", "18080", "first checks"],
+      group: "Support",
     },
   ];
   const preloaded = new Set();
@@ -74,7 +99,7 @@
   let dashboardFrame = null;
 
   function isEmbeddedDashboard() {
-    return window.self !== window.top && new URLSearchParams(window.location.search).get("embedded") === "1";
+    return new URLSearchParams(window.location.search).get("embedded") === "1";
   }
 
   function embeddedURL(href) {
@@ -113,6 +138,10 @@
     return dashboardPages.filter((page) => !page.adminOnly || canViewAdmin);
   }
 
+  function visibleNavPages() {
+    return visiblePages().filter((page) => !page.searchOnly);
+  }
+
   function normalizedPath(href) {
     try {
       return new URL(href, window.location.origin).pathname;
@@ -136,7 +165,7 @@
     const title = hero.querySelector("h1");
     const lede = hero.querySelector(".lede");
     if (title) {
-      title.textContent = page.label === "Overview" ? "Remote Dashboard" : page.label;
+      title.textContent = page.label;
     }
     if (lede) {
       lede.textContent = page.detail;
@@ -223,7 +252,7 @@
       <img class="sidebar-brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
       <div>
         <div class="sidebar-title">Hank Remote</div>
-        <div class="sidebar-subtitle">Server Settings</div>
+        <div class="sidebar-subtitle">Tools and Settings</div>
       </div>
     `;
     nav.appendChild(header);
@@ -241,22 +270,30 @@
 
     const list = document.createElement("div");
     list.className = "sidebar-nav-list";
-    visiblePages().forEach((page) => {
-      const link = document.createElement("a");
-      link.className = `tab-link${isActivePage(page) ? " active" : ""}`;
-      link.href = page.href;
-      link.textContent = page.label;
-      if (isActivePage(page)) {
-        link.setAttribute("aria-current", "page");
-      }
-      if (page.adminOnly) {
-        link.dataset.adminOnly = "true";
-      }
-      list.appendChild(link);
+    ["Home", "Tools", "Settings", "Support"].forEach((group) => {
+      const pages = visibleNavPages().filter((page) => (page.group || "Tools") === group);
+      if (!pages.length) return;
+      const groupLabel = document.createElement("div");
+      groupLabel.className = "sidebar-nav-group";
+      groupLabel.textContent = group;
+      list.appendChild(groupLabel);
+      pages.forEach((page) => {
+        const link = document.createElement("a");
+        link.className = `tab-link${isActivePage(page) ? " active" : ""}`;
+        link.href = page.href;
+        link.textContent = page.label;
+        if (isActivePage(page)) {
+          link.setAttribute("aria-current", "page");
+        }
+        if (page.adminOnly) {
+          link.dataset.adminOnly = "true";
+        }
+        list.appendChild(link);
+      });
     });
     nav.appendChild(list);
 
-    const activePage = dashboardPages.find(isActivePage);
+    const activePage = dashboardPages.find((page) => !page.searchOnly && isActivePage(page));
     const footer = document.createElement("div");
     footer.className = "sidebar-context";
     footer.textContent = activePage?.detail || "Manage Hank Remote from one place.";
@@ -447,7 +484,7 @@
 
   function preloadDashboardPages() {
     const run = () => {
-      visiblePages().forEach((page) => preloadPage(page.href));
+      visibleNavPages().forEach((page) => preloadPage(page.href));
     };
 
     if ("requestIdleCallback" in window) {

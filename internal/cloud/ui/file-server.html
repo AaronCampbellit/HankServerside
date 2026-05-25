@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote File Server</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260521-inline-note-controls">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525-site-reorg">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -33,18 +33,7 @@
         </div>
       </header>
 
-      <nav class="tab-strip" aria-label="Dashboard Sections">
-        <a class="tab-link" href="/dashboard">Overview</a>
-        <a class="tab-link" href="/dashboard/home-users">People</a>
-        <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
-        <a class="tab-link" href="/dashboard/sync-status">Status</a>
-        <a class="tab-link" href="/dashboard/storage" data-admin-only="true" hidden>Backups</a>
-        <a class="tab-link" href="/dashboard/hank">Hank</a>
-        <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
-        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
-        <a class="tab-link active" href="/dashboard/file-server">File Server</a>
-        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
-      </nav>
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
       <main class="grid file-server-grid">
         <section class="panel file-source-panel">
@@ -102,47 +91,22 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>File Server Settings</h2>
-            <span id="settings-role" class="pill">Loading</span>
+            <h2>Connection Settings</h2>
+            <span class="pill">Settings</span>
           </div>
-          <form id="smb-form" class="settings-form">
-            <div class="settings-grid">
-              <label class="setting-field">
-                <span>Server Address</span>
-                <input id="smb-host" type="text" placeholder="192.168.1.20" autocomplete="off">
-              </label>
-              <label class="setting-field">
-                <span>Share Name</span>
-                <input id="smb-share" type="text" placeholder="media" autocomplete="off">
-              </label>
-              <label class="setting-field">
-                <span>Domain</span>
-                <input id="smb-domain" type="text" placeholder="WORKGROUP" autocomplete="off">
-              </label>
-              <label class="setting-field">
-                <span>Username</span>
-                <input id="smb-username" type="text" placeholder="aaron" autocomplete="off">
-              </label>
-              <label class="setting-field">
-                <span>Password</span>
-                <input id="smb-password" type="password" autocomplete="new-password">
-              </label>
-              <label class="toggle-field">
-                <input id="smb-persist" type="checkbox" checked>
-                <span>Save on home connector</span>
-              </label>
-            </div>
+          <div class="tool-shell">
+            <p class="hint">File server credentials and connection details now live with the other home connection settings.</p>
             <div class="actions wrap">
-              <button type="submit">Save File Server</button>
+              <a class="button-link" href="/dashboard/settings#connections">Open Connection Settings</a>
             </div>
-          </form>
+          </div>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/file-server.js?v=20260504-card-links" defer></script>
-    <script src="/assets/admin-nav.js?v=20260504-frame-full-width" defer></script>
+    <script src="/assets/file-server.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
   </body>
 </html>

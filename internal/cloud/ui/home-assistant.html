@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hank Remote Home Assistant</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525-site-reorg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <link rel="manifest" href="/assets/site.webmanifest">
+  </head>
+  <body>
+    <div class="shell dashboard-shell">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Home Assistant</h1>
+          <p class="lede">Check devices and send Home Assistant commands through the home connector.</p>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
+
+      <main class="grid">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Connector</h2>
+            <span id="homeassistant-agent-pill" class="pill">Checking</span>
+          </div>
+          <div id="homeassistant-agent-output" class="card-list empty-state">Checking connector.</div>
+          <div class="actions wrap">
+            <a class="button-link secondary" href="/dashboard/settings#connections">Connection Settings</a>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Commands</h2>
+            <span class="pill">Tools</span>
+          </div>
+          <div class="tool-shell">
+            <div class="tool-actions">
+              <button type="button" id="ha-health-button" class="secondary">Check Health</button>
+              <button type="button" id="ha-states-button">Fetch States</button>
+            </div>
+            <div class="three-up">
+              <label>
+                <span>Device ID</span>
+                <input id="ha-entity-id" type="text" placeholder="light.kitchen">
+              </label>
+              <label>
+                <span>Type</span>
+                <input id="ha-service-domain" type="text" placeholder="light">
+              </label>
+              <label>
+                <span>Service</span>
+                <input id="ha-service-name" type="text" placeholder="turn_on">
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="button" id="ha-entity-button">Get Device</button>
+              <button type="button" id="ha-service-button">Send Command</button>
+            </div>
+            <label>
+              <span>Command Details</span>
+              <textarea id="ha-service-body" rows="5" placeholder='{"entity_id":"light.kitchen"}'></textarea>
+            </label>
+            <div id="ha-output" class="card-list empty-state">Run a Home Assistant command to see results.</div>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/home-assistant.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
+  </body>
+</html>

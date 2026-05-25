@@ -3,12 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote Connections</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260521-inline-note-controls">
+    <title>Hank Remote Connection Settings</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525-site-reorg">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
-    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="manifest" href="/assets/site.webmanifest">
   </head>
   <body>
     <div class="shell dashboard-shell">
@@ -19,7 +16,7 @@
             <p class="eyebrow">Hank Remote</p>
           </div>
           <h1>Connections</h1>
-          <p class="lede">Connect Hank Remote to Home Assistant and your file share.</p>
+          <p class="lede">Save Home Assistant and file server settings for the home connector.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -70,11 +67,13 @@
               <span>Home Assistant Token</span>
               <textarea id="ha-secrets" rows="6" placeholder='{"token":"replace-with-home-assistant-token"}'></textarea>
             </label>
-            <label>
-              <span><input id="ha-persist" type="checkbox" checked> Save this on the home connector</span>
+            <label class="toggle-field">
+              <input id="ha-persist" type="checkbox" checked>
+              <span>Save on home connector</span>
             </label>
             <div class="actions wrap">
               <button type="submit">Save Home Assistant</button>
+              <a class="button-link secondary" href="/dashboard/home-assistant">Open Home Assistant</a>
             </div>
           </form>
         </section>
@@ -82,18 +81,47 @@
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>File Server</h2>
-            <span class="pill">NAS or SMB</span>
+            <span id="settings-role" class="pill">Loading</span>
           </div>
-          <div class="tool-shell">
-            <a class="manage-link" href="/dashboard/settings#connections">Open File Server Settings</a>
-          </div>
+          <form id="smb-form" class="settings-form">
+            <div class="settings-grid">
+              <label class="setting-field">
+                <span>Server Address</span>
+                <input id="smb-host" type="text" placeholder="192.168.1.20" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Share Name</span>
+                <input id="smb-share" type="text" placeholder="media" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Domain</span>
+                <input id="smb-domain" type="text" placeholder="WORKGROUP" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Username</span>
+                <input id="smb-username" type="text" placeholder="aaron" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Password</span>
+                <input id="smb-password" type="password" autocomplete="new-password">
+              </label>
+              <label class="toggle-field">
+                <input id="smb-persist" type="checkbox" checked>
+                <span>Save on home connector</span>
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="submit">Save File Server</button>
+              <a class="button-link secondary" href="/dashboard/file-server">Open File Server</a>
+            </div>
+          </form>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/service-profiles.js" defer></script>
+    <script src="/assets/settings-connections.js?v=20260525-site-reorg" defer></script>
     <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
   </body>
 </html>

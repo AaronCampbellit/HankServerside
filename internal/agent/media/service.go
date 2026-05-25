@@ -1,9 +1,11 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,18 +27,23 @@ import (
 	"golang.org/x/net/html"
 )
 
-const preferredQuality = "1080p"
+const (
+	preferredQuality      = "1080p"
+	downloadSniffByteSize = 4096
+)
 
 var (
-	errDisabled       = errors.New("media source is not configured")
-	yearPattern       = regexp.MustCompile(`\b(19|20)\d{2}\b`)
-	tokenPattern      = regexp.MustCompile(`token_key\s*=\s*["']([^"']+)["']`)
-	seasonIDPattern   = regexp.MustCompile(`(?i)^season(\d+)$`)
-	qualityPattern    = regexp.MustCompile(`(?i)(720|1080)p`)
-	unsafeNameRunes   = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
-	spacingPattern    = regexp.MustCompile(`\s+`)
-	mediaPathPattern  = regexp.MustCompile(`^/(movies|series)/([^/?#]+)`)
-	searchRouteByType = map[string]string{
+	errDisabled        = errors.New("media source is not configured")
+	yearPattern        = regexp.MustCompile(`\b(19|20)\d{2}\b`)
+	tokenPattern       = regexp.MustCompile(`token_key\s*=\s*["']([^"']+)["']`)
+	posterImagePattern = regexp.MustCompile(`(?i)\bposterImage\s*=\s*["']([^"']+)["']`)
+	seasonIDPattern    = regexp.MustCompile(`(?i)^season(\d+)$`)
+	qualityPattern     = regexp.MustCompile(`(?i)(720|1080)p`)
+	unsafeNameRunes    = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
+	spacingPattern     = regexp.MustCompile(`\s+`)
+	mediaPathPattern   = regexp.MustCompile(`^/(movies|series)/([^/?#]+)`)
+	mediaPageIDPattern = regexp.MustCompile(`^/(movies|series)/(\d+)`)
+	searchRouteByType  = map[string]string{
 		protocol.MediaTypeMovie:  "/movies",
 		protocol.MediaTypeSeries: "/series",
 	}
@@ -88,6 +95,11 @@ type Service struct {
 type plannedDownload struct {
 	item        protocol.MediaDownloadItem
 	downloadURL string
+}
+
+type movieLinkPayload struct {
+	Download   string `json:"dl"`
+	DownloadHD string `json:"dl_hd"`
 }
 
 type downloadJob struct {
@@ -411,6 +423,7 @@ func (s *Service) searchDirectMediaPath(ctx context.Context, query string) (prot
 		Title:      title,
 		Year:       parseYear(title),
 		Type:       mediaTypeFromPath(pagePath),
+		PosterURL:  s.resolveMediaAssetURL(page.posterURL),
 		PagePath:   pagePath,
 		SearchText: cleanText(title + " " + pagePath),
 	}
@@ -562,7 +575,9 @@ func (s *Service) searchType(ctx context.Context, mediaType string, query string
 	if status >= 400 {
 		return nil, fmt.Errorf("media search returned status %d", status)
 	}
-	return parseSearchResults(strings.NewReader(body), mediaType), nil
+	results := parseSearchResults(strings.NewReader(body), mediaType)
+	s.resolveMediaResultAssets(results)
+	return results, nil
 }
 
 func (s *Service) fetchSearchText(ctx context.Context, route string, endpoint string, form url.Values) (string, int, error) {
@@ -632,7 +647,13 @@ func (s *Service) buildMoviePlan(ctx context.Context, selection protocol.MediaSe
 	}
 	title := firstNonBlank(selection.Title, pageTitle(page), mediaTitleFromPath(selection.PagePath))
 	selection.Title = title
+	if selection.PosterURL == "" {
+		selection.PosterURL = s.resolveMediaAssetURL(page.posterURL)
+	}
 	link := chooseDownloadLink(page.downloads)
+	if link.href == "" {
+		link = s.dynamicMovieDownloadLink(ctx, selection.PagePath, page.token)
+	}
 	downloadURL := ""
 	if link.href != "" {
 		downloadURL, _ = s.resolveURL(link.href)
@@ -647,11 +668,49 @@ func (s *Service) buildMoviePlan(ctx context.Context, selection protocol.MediaSe
 		DownloadOK: downloadURL != "",
 	}
 	if downloadURL == "" {
-		item.ErrorReason = "No visible 1080p or 720p download link was found."
+		item.ErrorReason = missingDownloadReason(page)
 	}
 	item.Existing = s.fileExists(ctx, item.Filename)
 	downloads := []plannedDownload{{item: item, downloadURL: downloadURL}}
 	return s.planFromDownloads(selection, downloads), downloads, nil
+}
+
+func (s *Service) dynamicMovieDownloadLink(ctx context.Context, pagePath string, token string) downloadLink {
+	id := mediaPageID(pagePath)
+	if id == "" {
+		return downloadLink{}
+	}
+	if token == "" {
+		token, _ = s.pageToken(ctx, pagePath)
+	}
+	if token == "" {
+		return downloadLink{}
+	}
+	values := url.Values{}
+	values.Set("id", id)
+	values.Set("token", token)
+	values.Set("oPid", "")
+	body, status, err := s.fetchText(ctx, http.MethodGet, "/movies/getMovieLink?"+values.Encode(), nil)
+	if err != nil || status >= 400 {
+		if err != nil {
+			s.logger.Debug("dynamic movie download link failed", "page", pagePath, "error", err)
+		} else {
+			s.logger.Debug("dynamic movie download link returned status", "page", pagePath, "status", status)
+		}
+		return downloadLink{}
+	}
+	var payload movieLinkPayload
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		s.logger.Debug("dynamic movie download link JSON decode failed", "page", pagePath, "error", err)
+		return downloadLink{}
+	}
+	if href := strings.TrimSpace(payload.DownloadHD); href != "" {
+		return downloadLink{href: href, quality: "1080p"}
+	}
+	if href := strings.TrimSpace(payload.Download); href != "" {
+		return downloadLink{href: href, quality: "720p"}
+	}
+	return downloadLink{}
 }
 
 func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, []plannedDownload, error) {
@@ -661,6 +720,9 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 	}
 	title := firstNonBlank(selection.Title, pageTitle(page), mediaTitleFromPath(selection.PagePath))
 	selection.Title = title
+	if selection.PosterURL == "" {
+		selection.PosterURL = s.resolveMediaAssetURL(page.posterURL)
+	}
 	episodes := page.episodes
 	if len(episodes) == 0 {
 		return protocol.MediaDownloadPlan{}, nil, fmt.Errorf("no episodes were found on the series page")
@@ -702,7 +764,7 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 			item.ErrorReason = err.Error()
 		} else if link.href == "" {
 			item.Filename = episodeFilename(title, episode.season, episode.episode, "")
-			item.ErrorReason = "No visible 1080p or 720p download link was found."
+			item.ErrorReason = missingDownloadReason(episodePage)
 		}
 		item.Existing = s.fileExists(ctx, item.Filename)
 		downloads = append(downloads, plannedDownload{item: item, downloadURL: link.href})
@@ -764,6 +826,24 @@ func (s *Service) resolveURL(rawPath string) (string, error) {
 		return "", err
 	}
 	return base.ResolveReference(relative).String(), nil
+}
+
+func (s *Service) resolveMediaResultAssets(results []protocol.MediaSearchResult) {
+	for index := range results {
+		results[index].PosterURL = s.resolveMediaAssetURL(results[index].PosterURL)
+	}
+}
+
+func (s *Service) resolveMediaAssetURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	resolved, err := s.resolveURL(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return resolved
 }
 
 func (s *Service) fileExists(ctx context.Context, name string) bool {
@@ -871,18 +951,22 @@ func (s *Service) markJobCancelled(job *downloadJob) {
 }
 
 func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download plannedDownload) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, download.downloadURL, nil)
+	req, err := s.newDownloadRequest(ctx, download)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "HankRemoteMedia/1.0")
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("download returned status %d", resp.StatusCode)
+
+	sniff, err := io.ReadAll(io.LimitReader(resp.Body, downloadSniffByteSize))
+	if err != nil {
+		return err
+	}
+	if err := validateDownloadResponse(resp, sniff); err != nil {
+		return err
 	}
 
 	finalPath := s.destinationFilePath(download.item.Filename)
@@ -893,7 +977,7 @@ func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download pl
 	}
 	var written int64
 	_, copyErr := io.Copy(writer, progressReader{
-		reader: resp.Body,
+		reader: io.MultiReader(bytes.NewReader(sniff), resp.Body),
 		onProgress: func(n int64) {
 			written += n
 			job.update(func(status *protocol.MediaDownloadJobStatus) {
@@ -913,6 +997,46 @@ func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download pl
 	if err := s.files.Rename(ctx, partPath, finalPath); err != nil {
 		_ = s.files.Delete(context.Background(), partPath, false)
 		return err
+	}
+	return nil
+}
+
+func (s *Service) newDownloadRequest(ctx context.Context, download plannedDownload) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, download.downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 HankRemoteMedia/1.0")
+	req.Header.Set("Accept", "video/*, application/octet-stream;q=0.9, */*;q=0.8")
+	if referer, err := s.resolveURL(download.item.PagePath); err == nil {
+		req.Header.Set("Referer", referer)
+	}
+	return req, nil
+}
+
+func validateDownloadResponse(resp *http.Response, sniff []byte) error {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("download returned status %d", resp.StatusCode)
+	}
+	if len(sniff) == 0 {
+		return fmt.Errorf("download returned an empty response")
+	}
+
+	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	body := strings.ToLower(strings.TrimSpace(string(sniff)))
+	if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xhtml") {
+		return fmt.Errorf("download returned an HTML page instead of media")
+	}
+	if strings.HasPrefix(body, "<!doctype html") ||
+		strings.HasPrefix(body, "<html") ||
+		strings.Contains(body, "</html>") ||
+		strings.Contains(body, "<form") ||
+		(strings.Contains(body, "login") && strings.Contains(body, "password")) {
+		return fmt.Errorf("download returned a web page instead of media")
+	}
+	if strings.Contains(contentType, "application/json") &&
+		(strings.Contains(body, "error") || strings.Contains(body, "message")) {
+		return fmt.Errorf("download returned an error response instead of media")
 	}
 	return nil
 }
@@ -956,9 +1080,13 @@ func (r progressReader) Read(p []byte) (int, error) {
 }
 
 type parsedPage struct {
-	title     string
-	downloads []downloadLink
-	episodes  []seriesEpisode
+	title             string
+	token             string
+	posterURL         string
+	downloads         []downloadLink
+	episodes          []seriesEpisode
+	downloadBlocked   bool
+	placeholderButton bool
 }
 
 type downloadLink struct {
@@ -1001,6 +1129,7 @@ func parseSearchResults(reader io.Reader, fallbackType string) []protocol.MediaS
 			Type:       mediaType,
 			Summary:    searchSummary(title, text),
 			Rating:     parseRating(text),
+			PosterURL:  mediaImageURL(node),
 			PagePath:   canonicalMediaPath(href),
 			SearchText: text,
 		}
@@ -1014,26 +1143,166 @@ func parseDetailPage(reader io.Reader) parsedPage {
 	if err != nil {
 		return parsedPage{}
 	}
-	page := parsedPage{title: pageTitleFromNode(root)}
+	page := parsedPage{
+		title:             pageTitleFromNode(root),
+		token:             pageTokenFromHTML(root),
+		posterURL:         pagePosterURL(root),
+		downloadBlocked:   pageHasDownloadAccessOverlay(root),
+		placeholderButton: pageHasPlaceholderDownloadButton(root),
+	}
 	for _, node := range findAll(root, func(node *html.Node) bool {
 		return node.Type == html.ElementNode && node.Data == "a" && attr(node, "href") != ""
 	}) {
-		href := attr(node, "href")
+		href := strings.TrimSpace(attr(node, "href"))
+		if !downloadHrefLooksUsable(href) {
+			continue
+		}
 		text := cleanText(nodeText(node))
 		quality := linkQuality(text, href)
 		if quality == "" {
 			continue
 		}
-		if !strings.Contains(strings.ToLower(text), "download") && !strings.Contains(strings.ToLower(href), "/dl") {
-			continue
-		}
-		if strings.HasPrefix(strings.ToLower(href), "javascript:") {
+		if !strings.Contains(strings.ToLower(text), "download") && !downloadHrefLooksLikeMedia(href) {
 			continue
 		}
 		page.downloads = append(page.downloads, downloadLink{href: href, quality: quality})
 	}
 	page.episodes = parseEpisodes(root)
 	return page
+}
+
+func pagePosterURL(root *html.Node) string {
+	if match := posterImagePattern.FindStringSubmatch(nodeText(root)); len(match) == 2 {
+		return strings.TrimSpace(match[1])
+	}
+	return mediaImageURL(root)
+}
+
+func mediaImageURL(root *html.Node) string {
+	for _, node := range findAll(root, func(node *html.Node) bool {
+		return node.Type == html.ElementNode && (node.Data == "img" || node.Data == "source")
+	}) {
+		for _, name := range []string{"data-src", "data-original", "data-lazy-src", "data-lazy", "src", "poster"} {
+			if candidate := imageCandidate(attr(node, name)); candidate != "" {
+				return candidate
+			}
+		}
+		if candidate := imageCandidateFromSrcset(attr(node, "srcset")); candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func imageCandidateFromSrcset(srcset string) string {
+	for _, part := range strings.Split(srcset, ",") {
+		fields := strings.Fields(strings.TrimSpace(part))
+		if len(fields) == 0 {
+			continue
+		}
+		if candidate := imageCandidate(fields[0]); candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func imageCandidate(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" ||
+		strings.HasPrefix(strings.ToLower(rawURL), "data:") ||
+		strings.HasPrefix(strings.ToLower(rawURL), "javascript:") {
+		return ""
+	}
+	return rawURL
+}
+
+func missingDownloadReason(page parsedPage) string {
+	if page.downloadBlocked {
+		return "The media source did not expose a file download link; the page shows a premium or expired-access overlay."
+	}
+	if page.placeholderButton {
+		return "The media source showed a download button, but it was only a placeholder and did not include a file URL."
+	}
+	return "No visible 1080p or 720p download link was found."
+}
+
+func pageTokenFromHTML(root *html.Node) string {
+	match := tokenPattern.FindStringSubmatch(nodeText(root))
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
+}
+
+func pageHasDownloadAccessOverlay(root *html.Node) bool {
+	for _, node := range findAll(root, func(node *html.Node) bool {
+		return node.Type == html.ElementNode &&
+			(hasClass(node, "premium-expired") || hasClass(node, "premium-required"))
+	}) {
+		if node != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func pageHasPlaceholderDownloadButton(root *html.Node) bool {
+	for _, node := range findAll(root, func(node *html.Node) bool {
+		if node.Type != html.ElementNode || node.Data != "a" {
+			return false
+		}
+		href := strings.TrimSpace(attr(node, "href"))
+		if href != "" && href != "#" {
+			return false
+		}
+		text := strings.ToLower(cleanText(nodeText(node)))
+		return strings.Contains(text, "download")
+	}) {
+		if node != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func downloadHrefLooksUsable(href string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(href))
+	if lowered == "" ||
+		lowered == "#" ||
+		strings.HasPrefix(lowered, "#") ||
+		strings.HasPrefix(lowered, "javascript:") {
+		return false
+	}
+	parsed, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	downloadPath := strings.TrimSpace(parsed.Path)
+	if downloadPath == "" || downloadPath == "/" {
+		return false
+	}
+	return downloadHrefLooksLikeMedia(href)
+}
+
+func downloadHrefLooksLikeMedia(href string) bool {
+	parsed, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(parsed.Query().Get("file")) != "" {
+		return true
+	}
+	loweredPath := strings.ToLower(parsed.Path)
+	if strings.Contains(loweredPath, "/dl") || strings.Contains(loweredPath, "download") {
+		return true
+	}
+	for _, suffix := range []string{".mp4", ".mkv", ".mov", ".avi", ".m4v"} {
+		if strings.HasSuffix(loweredPath, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseEpisodes(root *html.Node) []seriesEpisode {
@@ -1303,6 +1572,15 @@ func canonicalMediaPath(raw string) string {
 
 func mediaID(raw string) string {
 	return strings.Trim(canonicalMediaPath(raw), "/")
+}
+
+func mediaPageID(raw string) string {
+	raw = canonicalMediaPath(raw)
+	match := mediaPageIDPattern.FindStringSubmatch(raw)
+	if len(match) != 3 {
+		return ""
+	}
+	return match[2]
 }
 
 func parseYear(text string) int {

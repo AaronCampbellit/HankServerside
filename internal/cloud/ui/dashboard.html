@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hank Remote Dashboard</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260521-inline-note-controls">
+    <title>Hank Remote Home</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525-site-reorg">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -18,8 +18,8 @@
             <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
             <p class="eyebrow">Hank Remote</p>
           </div>
-          <h1>Remote Dashboard</h1>
-          <p class="lede">Set up remote access for the Hank app and check whether the home connector is online.</p>
+          <h1>Home</h1>
+          <p class="lede">Check the home connector, create setup files, and jump into the right tool or setting.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -33,18 +33,7 @@
         </div>
       </header>
 
-      <nav class="tab-strip" aria-label="Dashboard Sections">
-        <a class="tab-link active" href="/dashboard">Overview</a>
-        <a class="tab-link" href="/dashboard/home-users">People</a>
-        <a class="tab-link" href="/dashboard/service-profiles">Connections</a>
-        <a class="tab-link" href="/dashboard/sync-status">Status</a>
-        <a class="tab-link" href="/dashboard/storage" data-admin-only="true" hidden>Backups</a>
-        <a class="tab-link" href="/dashboard/hank">Hank</a>
-        <a class="tab-link" href="/dashboard/assistant-settings">AI Settings</a>
-        <a class="tab-link" href="/dashboard/profile-notes">My Notes</a>
-        <a class="tab-link" href="/dashboard/file-server">File Server</a>
-        <a class="tab-link" href="/dashboard/accept-invitation">Join Home</a>
-      </nav>
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
       <main class="grid">
         <section class="panel">
@@ -69,8 +58,8 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Connect the Home Server</h2>
-            <span class="pill">Setup</span>
+            <h2>Setup File</h2>
+            <span class="pill">Connector</span>
           </div>
           <form id="token-form" class="stack compact">
             <label>
@@ -83,7 +72,7 @@
             </label>
             <label>
               <span>Connector Name</span>
-              <input id="token-name" type="text" placeholder="Auto-generated as &lt;Home Name&gt; Agent">
+              <input id="token-name" type="text" placeholder="Auto-generated as Home Agent">
             </label>
             <label>
               <span>Expires After</span>
@@ -95,97 +84,45 @@
           <div id="token-list" class="card-list empty-state">No setup files created yet.</div>
         </section>
 
-        <section class="panel">
+        <section id="health" class="panel">
           <div class="panel-head">
-            <h2>Server Checks</h2>
-            <span class="pill">Quick Links</span>
+            <h2>Health</h2>
+            <span id="sync-health-pill" class="pill">Checking</span>
           </div>
-          <div class="ops-grid">
-            <a class="ops-card" href="/healthz" target="_blank" rel="noreferrer">Server Running</a>
-            <a class="ops-card" href="/readyz" target="_blank" rel="noreferrer">Database Ready</a>
-            <a class="ops-card" href="/metrics" target="_blank" rel="noreferrer">Details</a>
-            <a class="ops-card" href="/docs/deployment" target="_blank" rel="noreferrer">Setup Guide</a>
-            <a class="ops-card" href="/dashboard/storage" data-admin-only="true" hidden>Backups</a>
-          </div>
-          <p class="hint">Use these when checking whether the server itself is running correctly.</p>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>How Remote Access Works</h2>
-            <span class="pill">Simple View</span>
-          </div>
-          <p class="hint">The Hank app talks to this server. The home connector talks from your server back to Hank Remote.</p>
-          <div class="card-list">
-            <article class="card">
-              <h3>Public Server</h3>
-              <p>This is the address the Hank app uses when you are away from home.</p>
-            </article>
-            <article class="card">
-              <h3>Home Connector</h3>
-              <p>This keeps the home side connected and reaches Home Assistant, files, and notes.</p>
-            </article>
-            <article class="card">
-              <h3>Setup File</h3>
-              <p>Create the setup file here, put it in <code>.env.agent</code>, then start the connector.</p>
-            </article>
+          <div id="sync-summary" class="kv-grid"></div>
+          <div class="ops-grid compact-ops">
+            <a class="ops-card" href="/healthz" target="_blank" rel="noreferrer">Server</a>
+            <a class="ops-card" href="/readyz" target="_blank" rel="noreferrer">Database</a>
+            <a class="ops-card" href="/metrics" target="_blank" rel="noreferrer">Metrics</a>
+            <a class="ops-card" href="/docs/deployment" target="_blank" rel="noreferrer">Guide</a>
           </div>
         </section>
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Home Assistant</h2>
-            <span class="pill">Controls</span>
+            <h2>Tools</h2>
+            <span class="pill">Workspaces</span>
           </div>
-          <p class="hint">Check Home Assistant and send a basic service command through Hank Remote.</p>
-          <div class="tool-shell">
-            <div class="tool-actions">
-              <button type="button" id="ha-health-button" class="secondary">Check Health</button>
-              <button type="button" id="ha-states-button">Fetch States</button>
-            </div>
-            <div class="three-up">
-              <label>
-                <span>Device ID</span>
-                <input id="ha-entity-id" type="text" placeholder="light.kitchen">
-              </label>
-              <label>
-                <span>Type</span>
-                <input id="ha-service-domain" type="text" placeholder="light">
-              </label>
-              <label>
-                <span>Service</span>
-                <input id="ha-service-name" type="text" placeholder="turn_on">
-              </label>
-            </div>
-            <div class="actions wrap">
-              <button type="button" id="ha-entity-button">Get Device</button>
-              <button type="button" id="ha-service-button">Send Command</button>
-            </div>
-            <label>
-              <span>Command Details</span>
-              <textarea id="ha-service-body" rows="5" placeholder='{"entity_id":"light.kitchen"}'></textarea>
-            </label>
-            <div id="ha-output" class="card-list empty-state">Choose a home to run Home Assistant commands.</div>
+          <div class="ops-grid tool-link-grid">
+            <a class="ops-card" href="/dashboard/hank">Hank</a>
+            <a class="ops-card" href="/dashboard/home-assistant">Home Assistant</a>
+            <a class="ops-card" href="/dashboard/file-server">File Server</a>
+            <a class="ops-card" href="/dashboard/profile-notes">Notes</a>
           </div>
         </section>
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>File Server</h2>
-            <span class="pill">Files</span>
+            <h2>Settings</h2>
+            <span class="pill">Configure</span>
           </div>
-          <div class="tool-shell">
-            <a class="manage-link" href="/dashboard/file-server">Open File Server</a>
-          </div>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Notes</h2>
-            <span class="pill">Workspace</span>
-          </div>
-          <div class="tool-shell">
-            <a class="manage-link" href="/dashboard/profile-notes">Open Notes</a>
+          <div class="ops-grid tool-link-grid">
+            <a class="ops-card" href="/dashboard/settings#home">Home</a>
+            <a class="ops-card" href="/dashboard/settings#people">People</a>
+            <a class="ops-card" href="/dashboard/settings#connections">Connections</a>
+            <a class="ops-card" href="/dashboard/settings#ai">AI</a>
+            <a class="ops-card" href="/dashboard/settings#backups" data-admin-only="true" hidden>Backups</a>
+            <a class="ops-card" href="/dashboard/settings#join-home">Join Home</a>
           </div>
         </section>
       </main>
@@ -193,7 +130,7 @@
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/dashboard.js" defer></script>
-    <script src="/assets/admin-nav.js?v=20260504-frame-full-width" defer></script>
+    <script src="/assets/dashboard.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
   </body>
 </html>

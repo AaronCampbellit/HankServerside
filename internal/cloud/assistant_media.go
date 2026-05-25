@@ -288,6 +288,7 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 		Year:       card.Year,
 		Type:       card.MediaType,
 		Summary:    card.Summary,
+		PosterURL:  card.ImageURL,
 		PagePath:   card.Path,
 		SearchText: card.SearchText,
 	}
@@ -456,6 +457,7 @@ func assistantMediaCard(result protocol.MediaSearchResult, option int) assistant
 		ActionTitle:   fmt.Sprintf("Reply %d to choose", option),
 		Path:          result.PagePath,
 		SearchText:    result.SearchText,
+		ImageURL:      result.PosterURL,
 		MediaOptionID: result.ID,
 		MediaType:     result.Type,
 		Year:          result.Year,
