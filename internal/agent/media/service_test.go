@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -175,6 +176,163 @@ func TestSearchAcceptsDirectMediaURL(t *testing.T) {
 	}
 }
 
+func TestSearchUsesKnownMediaPathHintWhenProviderSearchIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<script>var token_key = "token";</script>`)
+	})
+	mux.HandleFunc("/series", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<script>var token_key = "token";</script>`)
+	})
+	mux.HandleFunc("/movies/20429-project-hail-mary", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<h1>Project Hail Mary</h1><a href="https://dl.example/project_hail_mary_1080p.mp4?file=Project_Hail_Mary_2026_1080p.mp4">Download 1080p</a>`)
+	})
+	mux.HandleFunc("/index/loadmovies", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<div></div>`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	response, err := service.Search(ctx, "project hail mary", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(response.Results) != 1 {
+		t.Fatalf("results = %#v, want one path-hint result", response.Results)
+	}
+	result := response.Results[0]
+	if result.Title != "Project Hail Mary" || result.PagePath != "/movies/20429-project-hail-mary" {
+		t.Fatalf("path-hint result = %#v", result)
+	}
+}
+
+func TestSearchStopsAfterExactProviderMatch(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var seenQueries []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<script>var token_key = "token";</script>`)
+	})
+	mux.HandleFunc("/series", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("series route should not be needed when provider search returns mixed media types")
+	})
+	mux.HandleFunc("/index/loadmovies", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		query := r.FormValue("q")
+		seenQueries = append(seenQueries, query)
+		fmt.Fprint(w, `
+			<div class="item">
+				<a class="movie-card-link" href="/movies/20429-project-hail-mary"></a>
+				<h2>Project Hail Mary</h2>
+				<p>Drama, Sci-Fi PG-13 7.2 2026 watch</p>
+			</div>
+		`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	response, err := service.Search(ctx, "project hail mary", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(response.Results) != 1 || response.Results[0].Title != "Project Hail Mary" {
+		t.Fatalf("results = %#v, want exact Project Hail Mary match", response.Results)
+	}
+	if len(seenQueries) != 1 || seenQueries[0] != "project hail mary" {
+		t.Fatalf("seen queries = %#v, want only exact query", seenQueries)
+	}
+}
+
+func TestSearchUsesCorrectedQueryVariant(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var seenQueries []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<script>var token_key = "token";</script>`)
+	})
+	mux.HandleFunc("/index/loadmovies", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		query := r.FormValue("q")
+		seenQueries = append(seenQueries, query)
+		if strings.EqualFold(query, "marshals") {
+			fmt.Fprint(w, `
+				<div class="item">
+					<a class="movie-card-link" href="/series/20242-marshals"></a>
+					<h2>Marshals</h2>
+					<p>Crime, Drama TV-MA 7.1 2026 watch</p>
+				</div>
+				<div class="item">
+					<a class="movie-card-link" href="/movies/1655-us-marshals"></a>
+					<h2>U.S. Marshals</h2>
+					<p>Action, Crime PG-13 6.6 1998 watch</p>
+				</div>
+			`)
+			return
+		}
+		fmt.Fprint(w, `<div></div>`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	response, err := service.Search(ctx, "marshalls", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(response.Results) != 1 || response.Results[0].Title != "Marshals" {
+		t.Fatalf("results = %#v, want corrected Marshals match", response.Results)
+	}
+	if len(seenQueries) != 2 || seenQueries[0] != "marshalls" || seenQueries[1] != "marshals" {
+		t.Fatalf("seen queries = %#v, want original then corrected query", seenQueries)
+	}
+}
+
 func TestPreferExactMediaMatches(t *testing.T) {
 	t.Parallel()
 
@@ -186,6 +344,28 @@ func TestPreferExactMediaMatches(t *testing.T) {
 	if len(filtered) != 1 || filtered[0].Title != "Project Hail Mary" {
 		t.Fatalf("filtered = %#v, want only exact match", filtered)
 	}
+
+	results = []protocol.MediaSearchResult{
+		{Title: "Normal", Type: protocol.MediaTypeMovie, PagePath: "/movies/20444-normal", SearchText: "Normal"},
+		{Title: "Normal People", Type: protocol.MediaTypeSeries, PagePath: "/series/19709-normal-people", SearchText: "Normal People"},
+		{Title: "Paranormal Activity", Type: protocol.MediaTypeMovie, PagePath: "/movies/2965-paranormal-activity", SearchText: "Paranormal Activity"},
+	}
+	filtered = preferExactMediaMatches(results, "normal movie")
+	if len(filtered) != 1 || filtered[0].Title != "Normal" {
+		t.Fatalf("normal filtered = %#v, want only exact Normal match", filtered)
+	}
+	if score := mediaResultScore(results[2], "normal"); score != 0 {
+		t.Fatalf("Paranormal score = %d, want 0 for normal word-boundary query", score)
+	}
+
+	results = []protocol.MediaSearchResult{
+		{Title: "Reminders of Him", Type: protocol.MediaTypeMovie, PagePath: "/movies/20363-reminders-of-him", SearchText: "Reminders of Him"},
+		{Title: "HIM", Type: protocol.MediaTypeMovie, PagePath: "/movies/19922-him", SearchText: "HIM"},
+	}
+	filtered = preferExactMediaMatches(results, "reminder of him")
+	if len(filtered) != 1 || filtered[0].Title != "Reminders of Him" {
+		t.Fatalf("reminder filtered = %#v, want plural-tolerant exact match", filtered)
+	}
 }
 
 func TestLiveMediaSearchFromEnv(t *testing.T) {
@@ -193,32 +373,59 @@ func TestLiveMediaSearchFromEnv(t *testing.T) {
 		t.Skip("set HANK_REMOTE_MEDIA_LIVE=true with media source env vars to run live diagnostics")
 	}
 
-	query := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_QUERY"))
-	if query == "" {
-		query = "project hail mary"
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	service := liveMediaServiceFromEnv(t)
+	if err := service.ensureAuthenticated(ctx); err != nil {
+		t.Fatalf("authenticate media source: %v", err)
 	}
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL")), "/")
-	if baseURL == "" {
-		baseURL = "https://gramaton.io"
+
+	requireResults := !strings.EqualFold(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_REQUIRE_RESULTS")), "false")
+	for _, query := range liveMediaQueries() {
+		runLiveMediaSearch(t, ctx, service, query, requireResults)
 	}
-	username := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME"))
-	password := os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD")
-	if username == "" || password == "" {
-		t.Fatal("set HANK_REMOTE_MEDIA_GRAMATON_USERNAME and HANK_REMOTE_MEDIA_GRAMATON_PASSWORD to run live diagnostics")
+}
+
+func TestLiveMediaCatalogFromEnv(t *testing.T) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE")), "true") {
+		t.Skip("set HANK_REMOTE_MEDIA_LIVE=true with media source env vars to run live diagnostics")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	service := New(Config{
-		Enabled:  true,
-		BaseURL:  baseURL,
-		Username: username,
-		Password: password,
-	}, agentfiles.New(t.TempDir()), nil)
+	service := liveMediaServiceFromEnv(t)
 	if err := service.ensureAuthenticated(ctx); err != nil {
 		t.Fatalf("authenticate media source: %v", err)
 	}
+
+	limit := liveMediaSampleLimit()
+	for _, sample := range []struct {
+		route     string
+		mediaType string
+	}{
+		{route: "/movies", mediaType: protocol.MediaTypeMovie},
+		{route: "/series", mediaType: protocol.MediaTypeSeries},
+	} {
+		body, status, err := service.fetchText(ctx, http.MethodGet, sample.route, nil)
+		if err != nil {
+			t.Logf("catalog route=%s error=%v", sample.route, err)
+			continue
+		}
+		results := parseSearchResults(strings.NewReader(body), sample.mediaType)
+		t.Logf("catalog route=%s status=%d body_len=%d parsed=%d login_marker=%v", sample.route, status, len(body), len(results), looksLikeLoginPage(body))
+		for index, result := range results {
+			if index >= limit {
+				break
+			}
+			t.Logf("  catalog[%d] title=%q year=%d type=%s path=%q summary=%q", index+1, result.Title, result.Year, result.Type, result.PagePath, result.Summary)
+		}
+	}
+}
+
+func runLiveMediaSearch(t *testing.T, ctx context.Context, service *Service, query string, requireResults bool) {
+	t.Helper()
 
 	variants := mediaSearchQueries(query)
 	t.Logf("live media search query=%q variants=%q", query, variants)
@@ -256,9 +463,73 @@ func TestLiveMediaSearchFromEnv(t *testing.T) {
 	for _, result := range response.Results {
 		t.Logf("  filtered score=%d title=%q year=%d type=%s path=%q", mediaResultScore(result, query), result.Title, result.Year, result.Type, result.PagePath)
 	}
-	if len(response.Results) == 0 {
+	if requireResults && len(response.Results) == 0 {
 		t.Fatalf("live search returned no filtered results for %q; inspect provider search and parsed result logs above", query)
 	}
+}
+
+func liveMediaServiceFromEnv(t *testing.T) *Service {
+	t.Helper()
+
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL")), "/")
+	if baseURL == "" {
+		baseURL = "https://gramaton.io"
+	}
+	username := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME"))
+	password := os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD")
+	if username == "" || password == "" {
+		t.Fatal("set HANK_REMOTE_MEDIA_GRAMATON_USERNAME and HANK_REMOTE_MEDIA_GRAMATON_PASSWORD to run live diagnostics")
+	}
+	return New(Config{
+		Enabled:  true,
+		BaseURL:  baseURL,
+		Username: username,
+		Password: password,
+	}, agentfiles.New(t.TempDir()), nil)
+}
+
+func liveMediaQueries() []string {
+	values := splitLiveValues(os.Getenv("HANK_REMOTE_MEDIA_LIVE_QUERIES"))
+	if len(values) > 0 {
+		return values
+	}
+	query := strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_QUERY"))
+	if query == "" {
+		query = "project hail mary"
+	}
+	return []string{query}
+}
+
+func splitLiveValues(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '\n' || r == ';'
+	})
+	values := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			values = append(values, field)
+		}
+	}
+	return values
+}
+
+func liveMediaSampleLimit() int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE_SAMPLE_LIMIT")))
+	if err != nil || value <= 0 {
+		return 12
+	}
+	if value > 50 {
+		return 50
+	}
+	return value
+}
+
+func looksLikeLoginPage(body string) bool {
+	lowered := strings.ToLower(body)
+	return strings.Contains(lowered, "userlogin") ||
+		strings.Contains(lowered, "forgotpassword") ||
+		(strings.Contains(lowered, "password") && strings.Contains(lowered, "login"))
 }
 
 func logLiveSearchFetch(t *testing.T, ctx context.Context, service *Service, mediaType string, query string) {

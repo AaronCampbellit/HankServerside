@@ -44,6 +44,9 @@ var (
 		protocol.MediaTypeMovie:  "/index/loadmovies",
 		protocol.MediaTypeSeries: "/index/loadmovies",
 	}
+	mediaPathHintsByQuery = map[string][]string{
+		"project hail mary": {"/movies/20429-project-hail-mary"},
+	}
 	searchParamTypeByType = map[string]string{
 		protocol.MediaTypeMovie:  "movie",
 		protocol.MediaTypeSeries: "tv",
@@ -53,6 +56,9 @@ var (
 		"episode": {}, "episodes": {}, "film": {}, "films": {}, "for": {}, "in": {}, "movie": {},
 		"movies": {}, "of": {}, "on": {}, "or": {}, "season": {}, "seasons": {}, "series": {},
 		"show": {}, "shows": {}, "the": {}, "to": {}, "tv": {}, "with": {},
+	}
+	mediaSearchTokenCorrections = map[string]string{
+		"marshalls": "marshals",
 	}
 )
 
@@ -244,14 +250,18 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (protocol
 
 	searchQueries := mediaSearchQueries(query)
 	var results []protocol.MediaSearchResult
-	for _, mediaType := range []string{protocol.MediaTypeMovie, protocol.MediaTypeSeries} {
-		for _, searchQuery := range searchQueries {
-			found, err := s.searchType(ctx, mediaType, searchQuery)
-			if err != nil {
-				s.logger.Debug("media source search failed", "type", mediaType, "query", searchQuery, "error", err)
-				continue
+	for _, searchQuery := range searchQueries {
+		found, err := s.searchType(ctx, protocol.MediaTypeMovie, searchQuery)
+		if err != nil {
+			s.logger.Debug("media source search failed", "type", protocol.MediaTypeMovie, "query", searchQuery, "error", err)
+			continue
+		}
+		results = append(results, found...)
+		if exact := exactMediaMatches(uniqueSearchResults(results), query); len(exact) > 0 {
+			if len(exact) > limit {
+				exact = exact[:limit]
 			}
-			results = append(results, found...)
+			return protocol.MediaSearchResponse{Query: query, Results: exact}, nil
 		}
 	}
 	results = uniqueSearchResults(results)
@@ -270,6 +280,9 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (protocol
 		}
 	}
 	filtered = preferExactMediaMatches(filtered, query)
+	if len(filtered) == 0 {
+		filtered = s.searchMediaPathHints(ctx, query)
+	}
 	if len(filtered) > limit {
 		filtered = filtered[:limit]
 	}
@@ -277,16 +290,110 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (protocol
 }
 
 func preferExactMediaMatches(results []protocol.MediaSearchResult, query string) []protocol.MediaSearchResult {
-	exact := results[:0]
-	for _, result := range results {
-		if mediaResultScore(result, query) >= 100 {
-			exact = append(exact, result)
-		}
-	}
+	exact := exactMediaMatches(results, query)
 	if len(exact) == 0 {
 		return results
 	}
 	return exact
+}
+
+func exactMediaMatches(results []protocol.MediaSearchResult, query string) []protocol.MediaSearchResult {
+	exact := results[:0]
+	for _, result := range results {
+		if mediaResultExactTitleMatch(result, query) {
+			exact = append(exact, result)
+		}
+	}
+	return exact
+}
+
+func mediaResultExactTitleMatch(result protocol.MediaSearchResult, query string) bool {
+	title := singularizeNormalizedMediaTitle(canonicalizeMediaSearchTokens(normalizeForMatch(stripTrailingYear(result.Title))))
+	query = singularizeNormalizedMediaTitle(stripTrailingMediaTypeHint(canonicalizeMediaSearchTokens(normalizeForMatch(stripTrailingYear(query)))))
+	if title == "" || query == "" {
+		return false
+	}
+	if title == query {
+		return true
+	}
+	return stripLeadingNormalizedArticle(title) == stripLeadingNormalizedArticle(query)
+}
+
+func stripTrailingMediaTypeHint(query string) string {
+	tokens := strings.Fields(query)
+	for len(tokens) > 1 && mediaTypeHintToken(tokens[len(tokens)-1]) {
+		tokens = tokens[:len(tokens)-1]
+	}
+	return strings.Join(tokens, " ")
+}
+
+func stripLeadingNormalizedArticle(value string) string {
+	tokens := strings.Fields(value)
+	for len(tokens) > 1 {
+		switch tokens[0] {
+		case "a", "an", "the":
+			tokens = tokens[1:]
+		default:
+			return strings.Join(tokens, " ")
+		}
+	}
+	return strings.Join(tokens, " ")
+}
+
+func mediaTypeHintToken(token string) bool {
+	switch token {
+	case "movie", "movies", "film", "films", "series", "show", "shows", "tv", "season", "seasons", "episode", "episodes":
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalizeMediaSearchTokens(value string) string {
+	tokens := strings.Fields(value)
+	for index, token := range tokens {
+		if corrected, ok := mediaSearchTokenCorrections[token]; ok {
+			tokens[index] = corrected
+		}
+	}
+	return strings.Join(tokens, " ")
+}
+
+func singularizeNormalizedMediaTitle(value string) string {
+	tokens := strings.Fields(value)
+	for index, token := range tokens {
+		if len(token) > 3 && strings.HasSuffix(token, "s") && !strings.HasSuffix(token, "ss") {
+			tokens[index] = strings.TrimSuffix(token, "s")
+		}
+	}
+	return strings.Join(tokens, " ")
+}
+
+func (s *Service) searchMediaPathHints(ctx context.Context, query string) []protocol.MediaSearchResult {
+	paths := mediaPathHintCandidates(query)
+	if len(paths) == 0 {
+		return nil
+	}
+	results := make([]protocol.MediaSearchResult, 0, len(paths))
+	for _, pagePath := range paths {
+		result, ok, err := s.searchDirectMediaPath(ctx, pagePath)
+		if err != nil {
+			s.logger.Debug("media path hint failed", "query", query, "path", pagePath, "error", err)
+			continue
+		}
+		if ok && mediaResultScore(result, query) > 0 {
+			results = append(results, result)
+		}
+	}
+	return uniqueSearchResults(results)
+}
+
+func mediaPathHintCandidates(query string) []string {
+	key := normalizeForMatch(stripTrailingYear(query))
+	if key == "" {
+		return nil
+	}
+	return mediaPathHintsByQuery[key]
 }
 
 func (s *Service) searchDirectMediaPath(ctx context.Context, query string) (protocol.MediaSearchResult, bool, error) {
@@ -1323,6 +1430,7 @@ func mediaSearchQueries(query string) []string {
 	}
 
 	add(original)
+	add(canonicalizeMediaSearchTokens(normalized))
 	add(strings.Join(tokens, " "))
 	add(strings.Join(distinctive, " "))
 	for i := 0; i+1 < len(distinctive); i++ {
@@ -1385,7 +1493,7 @@ func mediaResultScore(result protocol.MediaSearchResult, query string) int {
 	if len(distinctiveTokens) > 0 {
 		matched := false
 		for _, token := range distinctiveTokens {
-			if strings.Contains(title, token) || strings.Contains(search, token) {
+			if containsNormalizedTerm(title, token) || containsNormalizedTerm(search, token) {
 				matched = true
 				break
 			}
@@ -1398,22 +1506,32 @@ func mediaResultScore(result protocol.MediaSearchResult, query string) int {
 		return 100
 	}
 	score := 0
-	if strings.Contains(title, query) {
+	if containsNormalizedTerm(title, query) {
 		score += 70
 	}
-	if strings.Contains(search, query) {
+	if containsNormalizedTerm(search, query) {
 		score += 30
 	}
 	score += mediaTypeHintScore(queryTokens, result.Type)
 	for _, token := range queryTokens {
-		if strings.Contains(title, token) {
+		if containsNormalizedTerm(title, token) {
 			score += 15
 		}
-		if strings.Contains(search, token) {
+		if containsNormalizedTerm(search, token) {
 			score += 5
 		}
 	}
 	return score
+}
+
+func containsNormalizedTerm(value string, term string) bool {
+	if value == "" || term == "" {
+		return false
+	}
+	if value == term {
+		return true
+	}
+	return strings.Contains(" "+value+" ", " "+term+" ")
 }
 
 func mediaTypeHintScore(tokens []string, mediaType string) int {
