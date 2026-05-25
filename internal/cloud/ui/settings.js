@@ -21,6 +21,8 @@ const tabAliases = {
   invitations: "join-home",
   invite: "join-home",
 };
+const minFrameHeight = 620;
+const framePadding = 14;
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -77,20 +79,38 @@ function frameURL(frame, tab) {
 function resizeFrame(frame) {
   try {
     const doc = frame.contentDocument;
-    if (!doc) return;
-    const height = Math.max(
-      620,
-      doc.documentElement?.scrollHeight || 0,
-      doc.body?.scrollHeight || 0,
-    );
-    frame.style.height = `${height + 12}px`;
+    const win = frame.contentWindow;
+    if (!doc || !win) return;
+    const contentRoot = doc.querySelector(".shell") || doc.querySelector("main") || doc.body;
+    if (!contentRoot) return;
+    const rect = contentRoot.getBoundingClientRect();
+    const bodyStyle = win.getComputedStyle(doc.body);
+    const marginTop = Number.parseFloat(bodyStyle.marginTop) || 0;
+    const marginBottom = Number.parseFloat(bodyStyle.marginBottom) || 0;
+    const measuredHeight = Math.ceil(rect.height + marginTop + marginBottom + framePadding);
+    const nextHeight = Math.max(minFrameHeight, measuredHeight);
+    const currentHeight = Number.parseFloat(frame.style.height) || 0;
+    if (Math.abs(currentHeight - nextHeight) > 2) {
+      frame.style.height = `${nextHeight}px`;
+    }
   } catch (_) {
   }
 }
 
+function scheduleFrameResize(frame) {
+  if (frame.dataset.resizePending === "true") {
+    return;
+  }
+  frame.dataset.resizePending = "true";
+  window.requestAnimationFrame(() => {
+    frame.dataset.resizePending = "false";
+    resizeFrame(frame);
+  });
+}
+
 function installFrameResizer(frame) {
   if (frame.dataset.resizerInstalled === "true") {
-    resizeFrame(frame);
+    scheduleFrameResize(frame);
     return;
   }
   frame.dataset.resizerInstalled = "true";
@@ -98,10 +118,13 @@ function installFrameResizer(frame) {
     resizeFrame(frame);
     try {
       const doc = frame.contentDocument;
-      const resize = () => resizeFrame(frame);
-      if (frame.contentWindow?.ResizeObserver && doc?.body) {
+      const resize = () => scheduleFrameResize(frame);
+      frame._settingsPaneResizeObserver?.disconnect();
+      const contentRoot = doc?.querySelector(".shell") || doc?.querySelector("main") || doc?.body;
+      if (frame.contentWindow?.ResizeObserver && contentRoot) {
         const observer = new frame.contentWindow.ResizeObserver(resize);
-        observer.observe(doc.body);
+        observer.observe(contentRoot);
+        frame._settingsPaneResizeObserver = observer;
       }
       frame.contentWindow?.addEventListener("resize", resize);
       window.setTimeout(resize, 150);
