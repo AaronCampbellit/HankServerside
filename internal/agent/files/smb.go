@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/hirochachacha/go-smb2"
@@ -286,7 +287,7 @@ func (h *smbReadHandle) Read(p []byte) (int, error) {
 }
 
 func (h *smbReadHandle) Close() error {
-	return errors.Join(h.file.Close(), h.cleanup())
+	return closeSMBHandle(h.file, h.cleanup)
 }
 
 type smbWriteHandle struct {
@@ -299,5 +300,29 @@ func (h *smbWriteHandle) Write(p []byte) (int, error) {
 }
 
 func (h *smbWriteHandle) Close() error {
-	return errors.Join(h.file.Close(), h.cleanup())
+	return closeSMBHandle(h.file, h.cleanup)
+}
+
+func closeSMBHandle(file *smb2.File, cleanup func() error) error {
+	return finishSMBCleanup(file.Close(), cleanup())
+}
+
+func finishSMBCleanup(fileErr error, cleanupErr error) error {
+	if fileErr != nil {
+		return fileErr
+	}
+	if isBenignSMBCleanupError(cleanupErr) {
+		return nil
+	}
+	return cleanupErr
+}
+
+func isBenignSMBCleanupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	return strings.Contains(err.Error(), "use of closed network connection")
 }

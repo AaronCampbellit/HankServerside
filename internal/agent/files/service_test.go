@@ -3,6 +3,8 @@ package files
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"io"
 	"testing"
 )
@@ -162,6 +164,30 @@ func TestSMBAddressDialsNormalizedHostOnPort445(t *testing.T) {
 	}
 	if got := smbAddress("smb://truenas.local:1445/share"); got != "truenas.local:1445" {
 		t.Fatalf("smbAddress() = %q, want %q", got, "truenas.local:1445")
+	}
+}
+
+func TestSMBFinishCleanupIgnoresClosedNetworkCleanupError(t *testing.T) {
+	t.Parallel()
+
+	err := finishSMBCleanup(nil, fmt.Errorf("close tcp 192.168.48.3:34698->192.168.86.137:445: use of closed network connection"))
+	if err != nil {
+		t.Fatalf("finishSMBCleanup() = %v, want nil for benign SMB cleanup close", err)
+	}
+}
+
+func TestSMBFinishCleanupPreservesRealCloseErrors(t *testing.T) {
+	t.Parallel()
+
+	fileErr := errors.New("file close failed")
+	cleanupErr := fmt.Errorf("close tcp 192.168.48.3:34698->192.168.86.137:445: use of closed network connection")
+	if err := finishSMBCleanup(fileErr, cleanupErr); !errors.Is(err, fileErr) {
+		t.Fatalf("finishSMBCleanup() = %v, want file close error", err)
+	}
+
+	cleanupErr = errors.New("session logoff failed")
+	if err := finishSMBCleanup(nil, cleanupErr); !errors.Is(err, cleanupErr) {
+		t.Fatalf("finishSMBCleanup() = %v, want cleanup error", err)
 	}
 }
 
