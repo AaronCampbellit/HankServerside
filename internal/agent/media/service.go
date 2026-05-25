@@ -40,6 +40,10 @@ var (
 		protocol.MediaTypeMovie:  "/movies",
 		protocol.MediaTypeSeries: "/series",
 	}
+	searchEndpointByType = map[string]string{
+		protocol.MediaTypeMovie:  "/index/loadmovies",
+		protocol.MediaTypeSeries: "/index/loadmovies",
+	}
 	searchParamTypeByType = map[string]string{
 		protocol.MediaTypeMovie:  "movie",
 		protocol.MediaTypeSeries: "tv",
@@ -231,6 +235,12 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (protocol
 	if err := s.ensureAuthenticated(ctx); err != nil {
 		return protocol.MediaSearchResponse{}, err
 	}
+	if result, ok, err := s.searchDirectMediaPath(ctx, query); ok || err != nil {
+		if err != nil {
+			return protocol.MediaSearchResponse{}, err
+		}
+		return protocol.MediaSearchResponse{Query: query, Results: []protocol.MediaSearchResult{result}}, nil
+	}
 
 	searchQueries := mediaSearchQueries(query)
 	var results []protocol.MediaSearchResult
@@ -259,10 +269,45 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (protocol
 			filtered = append(filtered, result)
 		}
 	}
+	filtered = preferExactMediaMatches(filtered, query)
 	if len(filtered) > limit {
 		filtered = filtered[:limit]
 	}
 	return protocol.MediaSearchResponse{Query: query, Results: filtered}, nil
+}
+
+func preferExactMediaMatches(results []protocol.MediaSearchResult, query string) []protocol.MediaSearchResult {
+	exact := results[:0]
+	for _, result := range results {
+		if mediaResultScore(result, query) >= 100 {
+			exact = append(exact, result)
+		}
+	}
+	if len(exact) == 0 {
+		return results
+	}
+	return exact
+}
+
+func (s *Service) searchDirectMediaPath(ctx context.Context, query string) (protocol.MediaSearchResult, bool, error) {
+	pagePath := canonicalMediaPath(query)
+	if pagePath == "" {
+		return protocol.MediaSearchResult{}, false, nil
+	}
+	page, err := s.fetchPage(ctx, pagePath)
+	if err != nil {
+		return protocol.MediaSearchResult{}, true, err
+	}
+	title := firstNonBlank(pageTitle(page), mediaTitleFromPath(pagePath))
+	result := protocol.MediaSearchResult{
+		ID:         mediaID(pagePath),
+		Title:      title,
+		Year:       parseYear(title),
+		Type:       mediaTypeFromPath(pagePath),
+		PagePath:   pagePath,
+		SearchText: cleanText(title + " " + pagePath),
+	}
+	return result, true, nil
 }
 
 func (s *Service) PlanDownload(ctx context.Context, request protocol.MediaPlanDownloadRequest) (protocol.MediaPlanDownloadResponse, error) {
@@ -385,8 +430,9 @@ func (s *Service) login(ctx context.Context) error {
 
 func (s *Service) searchType(ctx context.Context, mediaType string, query string) ([]protocol.MediaSearchResult, error) {
 	route := searchRouteByType[mediaType]
+	endpoint := searchEndpointByType[mediaType]
 	paramType := searchParamTypeByType[mediaType]
-	if route == "" || paramType == "" {
+	if route == "" || endpoint == "" || paramType == "" {
 		return nil, nil
 	}
 	token, _ := s.pageToken(ctx, route)
@@ -399,9 +445,10 @@ func (s *Service) searchType(ctx context.Context, mediaType string, query string
 	values.Set("quality", "All")
 	values.Set("type", paramType)
 	values.Set("q", query)
+	values.Set("search", query)
 	values.Set("token", token)
 
-	body, status, err := s.fetchText(ctx, http.MethodPost, "/index/loadmovies", values)
+	body, status, err := s.fetchSearchText(ctx, route, endpoint, values)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +456,33 @@ func (s *Service) searchType(ctx context.Context, mediaType string, query string
 		return nil, fmt.Errorf("media search returned status %d", status)
 	}
 	return parseSearchResults(strings.NewReader(body), mediaType), nil
+}
+
+func (s *Service) fetchSearchText(ctx context.Context, route string, endpoint string, form url.Values) (string, int, error) {
+	target, err := s.resolveURL(endpoint)
+	if err != nil {
+		return "", 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 HankRemoteMedia/1.0")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	if referer, err := s.resolveURL(route); err == nil {
+		req.Header.Set("Referer", referer)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 12<<20))
+	if err != nil {
+		return "", resp.StatusCode, err
+	}
+	return string(data), resp.StatusCode, nil
 }
 
 func (s *Service) pageToken(ctx context.Context, path string) (string, error) {

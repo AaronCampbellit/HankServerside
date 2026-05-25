@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,6 +127,67 @@ func TestSearchUsesDistinctiveTitleVariants(t *testing.T) {
 	}
 }
 
+func TestSearchAcceptsDirectMediaURL(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var searchEndpointCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/movies/20429-project-hail-mary", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<h1>Project Hail Mary</h1><a href="https://dl.example/project_hail_mary_1080p.mp4?file=Project_Hail_Mary_1080p.mp4">Download 1080p</a>`)
+	})
+	mux.HandleFunc("/index/loadmovies", func(w http.ResponseWriter, r *http.Request) {
+		searchEndpointCalled = true
+		fmt.Fprint(w, `<div></div>`)
+	})
+	mux.HandleFunc("/index/loadmoviesnew", func(w http.ResponseWriter, r *http.Request) {
+		searchEndpointCalled = true
+		fmt.Fprint(w, `<div></div>`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	response, err := service.Search(ctx, "https://gramaton.io/movies/20429-project-hail-mary", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if searchEndpointCalled {
+		t.Fatal("direct media URL should fetch the detail page without using the search endpoint")
+	}
+	if len(response.Results) != 1 {
+		t.Fatalf("results = %#v, want one direct URL result", response.Results)
+	}
+	result := response.Results[0]
+	if result.Title != "Project Hail Mary" || result.Type != protocol.MediaTypeMovie || result.PagePath != "/movies/20429-project-hail-mary" {
+		t.Fatalf("direct result = %#v", result)
+	}
+}
+
+func TestPreferExactMediaMatches(t *testing.T) {
+	t.Parallel()
+
+	results := []protocol.MediaSearchResult{
+		{Title: "Project Hail Mary", Type: protocol.MediaTypeMovie, PagePath: "/movies/20429-project-hail-mary", SearchText: "Project Hail Mary"},
+		{Title: "Mother Mary", Type: protocol.MediaTypeMovie, PagePath: "/movies/20443-mother-mary", SearchText: "Mother Mary"},
+	}
+	filtered := preferExactMediaMatches(results, "project hail mary")
+	if len(filtered) != 1 || filtered[0].Title != "Project Hail Mary" {
+		t.Fatalf("filtered = %#v, want only exact match", filtered)
+	}
+}
+
 func TestLiveMediaSearchFromEnv(t *testing.T) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_LIVE")), "true") {
 		t.Skip("set HANK_REMOTE_MEDIA_LIVE=true with media source env vars to run live diagnostics")
@@ -163,6 +225,9 @@ func TestLiveMediaSearchFromEnv(t *testing.T) {
 	var rawResults []protocol.MediaSearchResult
 	for _, mediaType := range []string{protocol.MediaTypeMovie, protocol.MediaTypeSeries} {
 		for _, variant := range variants {
+			if os.Getenv("HANK_REMOTE_MEDIA_LIVE_DEBUG") == "true" {
+				logLiveSearchFetch(t, ctx, service, mediaType, variant)
+			}
 			found, err := service.searchType(ctx, mediaType, variant)
 			if err != nil {
 				t.Logf("provider search type=%s query=%q error=%v", mediaType, variant, err)
@@ -194,6 +259,29 @@ func TestLiveMediaSearchFromEnv(t *testing.T) {
 	if len(response.Results) == 0 {
 		t.Fatalf("live search returned no filtered results for %q; inspect provider search and parsed result logs above", query)
 	}
+}
+
+func logLiveSearchFetch(t *testing.T, ctx context.Context, service *Service, mediaType string, query string) {
+	t.Helper()
+
+	route := searchRouteByType[mediaType]
+	endpoint := searchEndpointByType[mediaType]
+	paramType := searchParamTypeByType[mediaType]
+	token, tokenErr := service.pageToken(ctx, route)
+	values := url.Values{}
+	values.Set("loadmovies", "showData")
+	values.Set("page", "1")
+	values.Set("abc", "All")
+	values.Set("genres", "")
+	values.Set("sortby", "Recent")
+	values.Set("quality", "All")
+	values.Set("type", paramType)
+	values.Set("q", query)
+	values.Set("search", query)
+	values.Set("token", token)
+
+	body, status, err := service.fetchSearchText(ctx, route, endpoint, values)
+	t.Logf("provider raw type=%s endpoint=%s query=%q token_present=%v token_error=%v status=%d body_len=%d error=%v", mediaType, endpoint, query, token != "", tokenErr, status, len(body), err)
 }
 
 func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
