@@ -266,7 +266,13 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 			return true
 		}
-		if err := s.store.RevokeAgentTokenForHome(r.Context(), home.ID, parts[2]); err != nil {
+		var err error
+		if r.URL.Query().Get("purge") == "1" {
+			err = s.store.DeleteAgentTokenForHome(r.Context(), home.ID, parts[2])
+		} else {
+			err = s.store.RevokeAgentTokenForHome(r.Context(), home.ID, parts[2])
+		}
+		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				http.NotFound(w, r)
 				return true

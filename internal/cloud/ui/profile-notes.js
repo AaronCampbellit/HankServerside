@@ -35,12 +35,22 @@ const els = {
   noteTitle: document.getElementById("note-title"),
   noteContent: document.getElementById("note-content"),
   noteInline: document.getElementById("note-inline-layer"),
+  kanbanBoard: document.getElementById("kanban-board"),
   saveState: document.getElementById("save-state"),
   lastSaved: document.getElementById("last-saved"),
   deleteButton: document.getElementById("delete-button"),
   toast: document.getElementById("toast"),
   formatButtons: Array.from(document.querySelectorAll("[data-format]")),
 };
+
+function randomID(prefix = "id") {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function nowISOString() {
+  return new Date().toISOString();
+}
 
 function logLive(message, detail = {}) {
   console.info("[Hank Remote Notes]", message, detail);
@@ -271,13 +281,59 @@ function currentMarkdown() {
   return els.noteContent.value.replace(/\r\n/g, "\n");
 }
 
+function isKanbanMode() {
+  return state.currentPageType === "kanban";
+}
+
+function emptyKanbanBoard() {
+  const now = nowISOString();
+  return {
+    columns: [
+      { id: randomID("col"), title: "To Do", sort_order: 0, cards: [], created_at: now, updated_at: now },
+      { id: randomID("col"), title: "Doing", sort_order: 1, cards: [], created_at: now, updated_at: now },
+      { id: randomID("col"), title: "Done", sort_order: 2, cards: [], created_at: now, updated_at: now },
+    ],
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function normalizeBoard(board) {
+  const now = nowISOString();
+  const source = board && Array.isArray(board.columns) ? board : emptyKanbanBoard();
+  return {
+    columns: source.columns.map((column, columnIndex) => ({
+      id: column.id || randomID("col"),
+      title: String(column.title || "Column"),
+      sort_order: columnIndex,
+      cards: Array.isArray(column.cards) ? column.cards.map((card, cardIndex) => ({
+        id: card.id || randomID("card"),
+        text: String(card.text || ""),
+        sort_order: cardIndex,
+        created_at: card.created_at || now,
+        updated_at: card.updated_at || now,
+      })) : [],
+      created_at: column.created_at || now,
+      updated_at: column.updated_at || now,
+    })),
+    created_at: source.created_at || now,
+    updated_at: now,
+  };
+}
+
+function currentBoard() {
+  state.currentBoard = normalizeBoard(state.currentBoard);
+  return state.currentBoard;
+}
+
 function setEditorValue(value) {
   els.noteContent.value = value || "";
   renderEditorExtras();
 }
 
 function currentEditorHash() {
-  return `${state.selectedNoteID}\n${normalizedTitle()}\n${currentMarkdown()}`;
+  const boardHash = isKanbanMode() ? JSON.stringify(state.currentBoard || {}) : "";
+  return `${state.selectedNoteID}\n${normalizedTitle()}\n${state.currentPageType || "text"}\n${currentMarkdown()}\n${boardHash}`;
 }
 
 function activeHistoryKey() {
@@ -441,6 +497,9 @@ function clearEditor() {
   state.isSaving = false;
   state.suppressInput = true;
   els.noteTitle.value = "";
+  state.currentPageType = "text";
+  state.currentBoard = emptyKanbanBoard();
+  document.body.classList.remove("kanban-note");
   setEditorValue("");
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
@@ -525,7 +584,7 @@ function updateSelectedSummaryDraft() {
     return;
   }
   note.title = normalizedTitle();
-  note.preview = previewFromMarkdown(currentMarkdown());
+  note.preview = isKanbanMode() ? "Kanban board" : previewFromMarkdown(currentMarkdown());
   note.updated_at = new Date().toISOString();
   renderNotes();
 }
@@ -539,6 +598,9 @@ function fillEditor(note) {
   state.isSaving = false;
   state.suppressInput = true;
   els.noteTitle.value = note.title || "";
+  state.currentPageType = note.page_type === "kanban" ? "kanban" : "text";
+  state.currentBoard = normalizeBoard(note.board);
+  document.body.classList.toggle("kanban-note", isKanbanMode());
   setEditorValue(note.body_markdown || note.content || "");
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
@@ -611,7 +673,7 @@ function markDirty() {
   if (state.suppressInput) {
     return;
   }
-  const hasDraft = Boolean(state.selectedNoteID || els.noteTitle.value.trim() || els.noteContent.value.trim());
+  const hasDraft = Boolean(state.selectedNoteID || els.noteTitle.value.trim() || els.noteContent.value.trim() || isKanbanMode());
   if (!hasDraft) {
     return;
   }
@@ -638,7 +700,7 @@ async function saveNote(options = {}) {
   if (!force && (!state.isDirty || nextHash === state.lastSavedHash)) {
     return true;
   }
-  if (!state.selectedNoteID && !els.noteTitle.value.trim() && !els.noteContent.value.trim()) {
+  if (!state.selectedNoteID && !els.noteTitle.value.trim() && !els.noteContent.value.trim() && !isKanbanMode()) {
     return true;
   }
 
@@ -653,8 +715,13 @@ async function saveNote(options = {}) {
     body_markdown: currentMarkdown(),
     body_format: "markdown",
     expected_revision: state.currentRevision,
-    page_type: "text",
+    page_type: state.currentPageType || "text",
   };
+  if (payload.page_type === "kanban") {
+    payload.content = "";
+    payload.body_markdown = "";
+    payload.board = currentBoard();
+  }
 
   try {
     let response;
@@ -840,6 +907,7 @@ function transformSelectedLines(transform) {
 function stripLinePrefix(line) {
   return line
     .replace(/^\s*#{1,6}\s+/, "")
+    .replace(/^\s*[○●]\s+/, "")
     .replace(/^\s*[-*]\s+\[[ xX]\]\s+/, "")
     .replace(/^\s*[-*]\s+/, "")
     .replace(/^\s*\d+\.\s+/, "");
@@ -965,12 +1033,12 @@ function renderInlineText(text) {
 }
 
 function renderInlineLine(line, lineIndex) {
-  const checklist = String(line || "").match(/^(\s*)([-*]\s+\[)([ xX])(\]\s+)(.*)$/);
+  const checklist = String(line || "").match(/^(\s*)((?:[-*]\s+\[)([ xX])(?:\]\s+)|[○●]\s+)(.*)$/);
   if (!checklist) {
     return renderInlineText(line);
   }
-  const checked = checklist[3].toLowerCase() === "x";
-  const text = checklist[5] || "Checklist item";
+  const checked = checklist[2].startsWith("●") || (checklist[3] || "").toLowerCase() === "x";
+  const text = checklist[4] || "Checklist item";
   return `${escapeHTML(checklist[1])}<button type="button" class="note-check-toggle inline${checked ? " checked" : ""}" data-line-index="${lineIndex}" aria-pressed="${checked ? "true" : "false"}" title="${checked ? "Mark incomplete" : "Mark complete"}"><span class="note-check-circle" aria-hidden="true"></span></button><span class="note-check-text">${renderInlineText(text)}</span>`;
 }
 
@@ -988,6 +1056,7 @@ function syncEditorScroll() {
 
 function renderEditorExtras() {
   renderInlineEditor();
+  renderKanbanBoard();
   syncEditorScroll();
 }
 
@@ -1002,6 +1071,13 @@ function lineRangeForIndex(lines, lineIndex) {
 function toggleChecklistLine(lineIndex) {
   const lines = currentMarkdown().split("\n");
   const line = lines[lineIndex] || "";
+  const circleMatch = line.match(/^(\s*)([○●])(\s+)(.*)$/);
+  if (circleMatch) {
+    const replacement = `${circleMatch[1]}${circleMatch[2] === "●" ? "○" : "●"}${circleMatch[3]}${circleMatch[4]}`;
+    const range = lineRangeForIndex(lines, lineIndex);
+    replaceText(range.start, range.end, replacement, range.start, range.start + replacement.length);
+    return;
+  }
   const match = line.match(/^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/);
   if (!match) {
     return;
@@ -1026,6 +1102,90 @@ function applyLink() {
   }
   const text = selected && !isLikelyURL(selected) ? selected : url;
   replaceText(start, end, `[${text}](${url})`, start, start + `[${text}](${url})`.length);
+}
+
+function currentLinePrefix() {
+  const value = els.noteContent.value;
+  const cursor = els.noteContent.selectionStart;
+  const lineStart = value.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+  const line = value.slice(lineStart, cursor);
+  const match = line.match(/^(\s*(?:[○●]\s+|[-*]\s+\[[ xX]\]\s+|[-*]\s+|\d+\.\s+))/);
+  if (!match) return null;
+  const content = line.slice(match[1].length);
+  if (!content.trim()) return { prefix: match[1], empty: true, lineStart };
+  const number = match[1].match(/^(\s*)(\d+)\.\s+$/);
+  if (number) return { prefix: `${number[1]}${Number(number[2]) + 1}. `, empty: false, lineStart };
+  if (/^\s*●\s+$/.test(match[1])) return { prefix: match[1].replace("●", "○"), empty: false, lineStart };
+  if (/^\s*[-*]\s+\[[xX]\]\s+$/.test(match[1])) return { prefix: match[1].replace(/\[[xX]\]/, "[ ]"), empty: false, lineStart };
+  return { prefix: match[1], empty: false, lineStart };
+}
+
+function handleEditorReturn(event) {
+  if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey || isKanbanMode()) {
+    return;
+  }
+  const activePrefix = currentLinePrefix();
+  if (!activePrefix) return;
+  event.preventDefault();
+  const cursor = els.noteContent.selectionStart;
+  if (activePrefix.empty) {
+    replaceText(activePrefix.lineStart, cursor, "", activePrefix.lineStart, activePrefix.lineStart);
+    return;
+  }
+  insertAtCursor(`\n${activePrefix.prefix}`);
+}
+
+function kanbanMarkdown(title) {
+  const sections = currentBoard().columns.map((column) => {
+    const cards = column.cards.map((card) => `- ${card.text}`).join("\n");
+    return cards ? `## ${column.title}\n${cards}` : `## ${column.title}`;
+  }).join("\n\n");
+  return sections ? `# ${title}\n\n${sections}\n` : `# ${title}\n`;
+}
+
+function convertToKanban() {
+  state.currentPageType = "kanban";
+  if (!state.currentBoard?.columns?.length) {
+    state.currentBoard = emptyKanbanBoard();
+  }
+  document.body.classList.add("kanban-note");
+  renderEditorExtras();
+  markDirty();
+}
+
+function convertToText() {
+  state.currentPageType = "text";
+  document.body.classList.remove("kanban-note");
+  setEditorValue(kanbanMarkdown(normalizedTitle()));
+  markDirty();
+}
+
+function renderKanbanBoard() {
+  if (!els.kanbanBoard) return;
+  if (!isKanbanMode()) {
+    els.kanbanBoard.innerHTML = "";
+    return;
+  }
+  const board = currentBoard();
+  els.kanbanBoard.innerHTML = `
+    <div class="kanban-actions">
+      <button type="button" class="secondary" data-kanban-add-column>Add Column</button>
+      <button type="button" class="ghost" data-kanban-convert-text>Convert to Text</button>
+    </div>
+    <div class="kanban-columns">
+      ${board.columns.map((column) => `
+        <section class="kanban-column" data-column-id="${escapeHTML(column.id)}">
+          <input class="kanban-column-title" data-kanban-column-title="${escapeHTML(column.id)}" value="${escapeHTML(column.title)}" aria-label="Column title">
+          <div class="kanban-cards">
+            ${column.cards.map((card) => `
+              <textarea class="kanban-card" data-kanban-card="${escapeHTML(card.id)}" data-column-id="${escapeHTML(column.id)}" rows="3" aria-label="Kanban card">${escapeHTML(card.text)}</textarea>
+            `).join("")}
+          </div>
+          <button type="button" class="secondary" data-kanban-add-card="${escapeHTML(column.id)}">Add Card</button>
+        </section>
+      `).join("")}
+    </div>
+  `;
 }
 
 function applyFormat(format) {
@@ -1061,7 +1221,10 @@ function applyFormat(format) {
     applyLinePrefix((index) => `${index + 1}. `);
     break;
   case "checklist":
-    applyLinePrefix(() => "- [ ] ");
+    applyLinePrefix(() => "○ ");
+    break;
+  case "kanban":
+    convertToKanban();
     break;
   case "tag": {
     const rawTag = window.prompt("Tag");
@@ -1110,6 +1273,7 @@ els.noteContent.addEventListener("keydown", (event) => {
     event.preventDefault();
     saveNote({ force: true }).catch((error) => showToast(error.message, true));
   }
+  handleEditorReturn(event);
 });
 els.noteInline.addEventListener("click", (event) => {
   const checklistButton = event.target.closest("[data-line-index]");
@@ -1124,7 +1288,56 @@ els.formatButtons.forEach((button) => {
   button.addEventListener("mousedown", (event) => {
     event.preventDefault();
   });
-  button.addEventListener("click", () => applyFormat(button.dataset.format));
+  button.addEventListener("click", () => {
+    applyFormat(button.dataset.format);
+    if (!isKanbanMode()) {
+      els.noteContent.focus();
+    }
+  });
+});
+
+els.kanbanBoard?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-kanban-add-column]")) {
+    const board = currentBoard();
+    const now = nowISOString();
+    board.columns.push({ id: randomID("col"), title: "New Column", sort_order: board.columns.length, cards: [], created_at: now, updated_at: now });
+    state.currentBoard = normalizeBoard(board);
+    renderEditorExtras();
+    markDirty();
+    return;
+  }
+  if (event.target.closest("[data-kanban-convert-text]")) {
+    convertToText();
+    return;
+  }
+  const addCard = event.target.closest("[data-kanban-add-card]");
+  if (addCard) {
+    const board = currentBoard();
+    const column = board.columns.find((item) => item.id === addCard.dataset.kanbanAddCard);
+    if (!column) return;
+    const now = nowISOString();
+    column.cards.push({ id: randomID("card"), text: "", sort_order: column.cards.length, created_at: now, updated_at: now });
+    state.currentBoard = normalizeBoard(board);
+    renderEditorExtras();
+    markDirty();
+  }
+});
+
+els.kanbanBoard?.addEventListener("input", (event) => {
+  const board = currentBoard();
+  const titleInput = event.target.closest("[data-kanban-column-title]");
+  if (titleInput) {
+    const column = board.columns.find((item) => item.id === titleInput.dataset.kanbanColumnTitle);
+    if (column) column.title = titleInput.value || "Column";
+  }
+  const cardInput = event.target.closest("[data-kanban-card]");
+  if (cardInput) {
+    const column = board.columns.find((item) => item.id === cardInput.dataset.columnId);
+    const card = column?.cards.find((item) => item.id === cardInput.dataset.kanbanCard);
+    if (card) card.text = cardInput.value;
+  }
+  state.currentBoard = normalizeBoard(board);
+  markDirty();
 });
 
 hydrate();

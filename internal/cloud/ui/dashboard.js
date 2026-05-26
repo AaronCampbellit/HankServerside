@@ -237,6 +237,13 @@ function renderTokens(homeID) {
       button.textContent = "Disable setup file";
       button.addEventListener("click", () => revokeToken(homeID, token.id));
       wrapper.appendChild(button);
+    } else {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "danger-link";
+      button.textContent = "Remove setup file";
+      button.addEventListener("click", () => removeToken(homeID, token.id));
+      wrapper.appendChild(button);
     }
     els.tokenList.appendChild(wrapper);
   });
@@ -364,6 +371,16 @@ async function revokeToken(homeID, tokenID) {
     await api(`/v1/home/agent/tokens/${encodeURIComponent(tokenID)}`, { method: "DELETE" });
     await loadTokens(homeID);
     showToast("Setup file disabled.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function removeToken(homeID, tokenID) {
+  try {
+    await api(`/v1/home/agent/tokens/${encodeURIComponent(tokenID)}?purge=1`, { method: "DELETE" });
+    await loadTokens(homeID);
+    showToast("Setup file removed.");
   } catch (error) {
     showToast(error.message, true);
   }

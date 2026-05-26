@@ -847,6 +847,21 @@ func (s *Store) RevokeAgentTokenForHome(ctx context.Context, homeID string, toke
 	return nil
 }
 
+func (s *Store) DeleteAgentTokenForHome(ctx context.Context, homeID string, tokenID string) error {
+	result, err := s.exec(ctx, `DELETE FROM agent_tokens WHERE id = ? AND home_id = ?`, tokenID, homeID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListAgentTokensByHome(ctx context.Context, homeID string) ([]domain.AgentToken, error) {
 	rows, err := s.query(
 		ctx,
