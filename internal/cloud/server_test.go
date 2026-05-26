@@ -854,6 +854,50 @@ func TestListAgentTokensForHome(t *testing.T) {
 	}
 }
 
+func TestDeleteAgentTokenCanPurgeDisabledSetupFile(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_1", Email: "user@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_1", UserID: user.ID, Name: "Test Home", CreatedAt: now, UpdatedAt: now}
+	agent := domain.Agent{ID: "agent_1", HomeID: home.ID, Name: "Test Agent", Status: domain.AgentStatusOffline, CreatedAt: now, UpdatedAt: now}
+	sessionRawToken := "session-token"
+	session := domain.AppSession{ID: "sess_1", UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	token := domain.AgentToken{ID: "agtok_1", HomeID: home.ID, AgentID: agent.ID, TokenHash: hashToken("agent-token"), RevokedAt: &now, CreatedAt: now}
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.UpsertAgent(ctx, agent))
+	must(t, db.CreateSession(ctx, session))
+	must(t, db.CreateAgentToken(ctx, token))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var deletePayload struct {
+		OK bool `json:"ok"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodDelete, "/v1/home/agent/tokens/agtok_1?purge=1", nil, &deletePayload)
+	if !deletePayload.OK {
+		t.Fatalf("delete response ok = false")
+	}
+
+	var listPayload struct {
+		Tokens []domain.AgentToken `json:"tokens"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/home/agent/tokens", nil, &listPayload)
+	if len(listPayload.Tokens) != 0 {
+		t.Fatalf("token count after purge = %d, want 0", len(listPayload.Tokens))
+	}
+}
+
 func TestRequestTimeoutReturnsAppError(t *testing.T) {
 	t.Parallel()
 

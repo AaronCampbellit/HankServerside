@@ -259,7 +259,12 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	status := s.assistantStatus(r.Context(), auth.User.ID)
+	settings, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	status := s.assistantStatus(r.Context(), auth.User.ID, settings.ChatModel)
 	indexStats, err := s.store.AssistantIndexStats(r.Context(), home.ID, auth.User.ID)
 	if err != nil {
 		s.logger.Warn("assistant index stats unavailable", "home_id", home.ID, "user_id", auth.User.ID, "error", err)
@@ -277,6 +282,9 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		"chat_configured":      status.ChatConfigured,
 		"embedding_configured": status.EmbeddingConfigured,
 		"chat_model":           status.ChatModel,
+		"chat_model_default":   status.DefaultChatModel,
+		"chat_model_override":  status.ChatModelOverride,
+		"chat_model_options":   status.ChatModelOptions,
 		"embedding_model":      status.EmbeddingModel,
 		"vector_store":         status.VectorStore,
 		"index":                indexStats,
@@ -832,6 +840,7 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 			"project_docs":  settings.ProjectDocsEnabled,
 			"conversations": settings.ConversationsEnabled,
 			"max_context":   settings.MaxContextItems,
+			"chat_model":    defaultString(settings.ChatModel, "provider default"),
 		}),
 	})
 	if strings.TrimSpace(session.Title) == "" || session.Title == "New Conversation" {
@@ -2091,7 +2100,7 @@ func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, a
 			Role:    "user",
 			Content: assistantPromptWithContext(prompt, projectContexts),
 		},
-	}); err == nil && strings.TrimSpace(providerAnswer) != "" {
+	}, settings.ChatModel); err == nil && strings.TrimSpace(providerAnswer) != "" {
 		answer = strings.TrimSpace(providerAnswer)
 		_ = modelName
 	} else if errors.Is(err, errChatGPTRelinkRequired) {
@@ -2149,7 +2158,7 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, me
 			Role:    "user",
 			Content: assistantPromptWithContext(prompt, contexts),
 		},
-	}); err == nil && strings.TrimSpace(providerAnswer) != "" {
+	}, settings.ChatModel); err == nil && strings.TrimSpace(providerAnswer) != "" {
 		answer = strings.TrimSpace(providerAnswer)
 		_ = modelName
 	} else if errors.Is(err, errChatGPTRelinkRequired) {

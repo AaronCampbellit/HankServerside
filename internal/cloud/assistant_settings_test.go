@@ -50,6 +50,9 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if defaults.Settings.MaxContextItems != maxAssistantContextItems {
 		t.Fatalf("default max context = %d, want %d", defaults.Settings.MaxContextItems, maxAssistantContextItems)
 	}
+	if defaults.Settings.ChatModel != "" {
+		t.Fatalf("default chat model override = %q, want empty", defaults.Settings.ChatModel)
+	}
 	if !strings.Contains(defaults.Settings.SystemPrompt, "You are HankAI") || !strings.Contains(defaults.Settings.SystemPrompt, "privacy boundary") {
 		t.Fatalf("default prompt does not include harness guidance: %q", defaults.Settings.SystemPrompt)
 	}
@@ -69,6 +72,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 		"project_docs_enabled":  false,
 		"profile_notes_enabled": false,
 		"home_notes_enabled":    true,
+		"chat_model":            "gpt-codex-large",
 		"system_prompt":         "Use only the supplied Hank test context.",
 	}, &updated)
 	if updated.Settings.FilesEnabled || updated.Settings.CalendarEnabled || updated.Settings.ProjectDocsEnabled {
@@ -77,7 +81,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if updated.Settings.ProfileNotesEnabled || !updated.Settings.HomeNotesEnabled {
 		t.Fatalf("note toggles were not saved: %#v", updated.Settings)
 	}
-	if updated.Settings.SystemPrompt != "Use only the supplied Hank test context." || updated.Settings.MaxContextItems != maxAssistantContextItems {
+	if updated.Settings.SystemPrompt != "Use only the supplied Hank test context." || updated.Settings.MaxContextItems != maxAssistantContextItems || updated.Settings.ChatModel != "gpt-codex-large" {
 		t.Fatalf("prompt/context settings = %#v", updated.Settings)
 	}
 	if toolStatus(updated.Tools, "media_download") != "Files off" {
@@ -86,7 +90,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 
 	var persisted assistantSettingsResponse
 	requestJSON(t, testServer, "harness-settings-token", http.MethodGet, "/v1/home/assistant/settings", nil, &persisted)
-	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems {
+	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems || persisted.Settings.ChatModel != "gpt-codex-large" {
 		t.Fatalf("persisted settings = %#v", persisted.Settings)
 	}
 }

@@ -1459,6 +1459,72 @@ button.ghost {
   color: transparent;
 }
 
+body.kanban-note .note-inline-layer,
+body.kanban-note .document-editor {
+  display: none;
+}
+
+body.kanban-note .kanban-board {
+  display: flex;
+}
+
+.kanban-board {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  overflow: auto;
+  background: var(--surface-strong);
+}
+
+.kanban-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kanban-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.kanban-column {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.kanban-column-title,
+.kanban-card {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgba(8, 17, 28, 0.68);
+}
+
+.kanban-column-title {
+  font-weight: 700;
+}
+
+.kanban-cards {
+  display: grid;
+  gap: 8px;
+}
+
+.kanban-card {
+  min-height: 72px;
+  resize: vertical;
+}
+
 .tool-shell {
   display: grid;
   gap: 8px;
