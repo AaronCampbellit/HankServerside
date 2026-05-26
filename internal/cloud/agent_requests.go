@@ -144,7 +144,7 @@ func (s *Server) sendAgentCommand(ctx context.Context, homeID string, command st
 
 	timeout := s.requestTimeout
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = 120 * time.Second
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -182,6 +182,17 @@
             <div id="assistant-settings-prompt" class="settings-tab-panel" role="tabpanel" data-settings-panel="prompt" hidden>
               <div class="settings-block">
                 <div class="settings-block-head">
+                  <h3>Model</h3>
+                  <span class="mini-pill">Chat</span>
+                </div>
+                <label class="setting-field" for="harness-chat-model">
+                  <span>Chat model</span>
+                  <input id="harness-chat-model" type="text" list="harness-chat-model-options" autocomplete="off" placeholder="Provider default">
+                  <datalist id="harness-chat-model-options"></datalist>
+                </label>
+              </div>
+              <div class="settings-block">
+                <div class="settings-block-head">
                   <h3>Prompt</h3>
                   <span class="mini-pill">System message</span>
                 </div>

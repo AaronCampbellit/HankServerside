@@ -107,7 +107,7 @@ func LoadCloud() (Cloud, error) {
 		return Cloud{}, err
 	}
 
-	requestTimeout, err := durationSeconds("HANK_REMOTE_REQUEST_TIMEOUT_SECONDS", 30)
+	requestTimeout, err := durationSeconds("HANK_REMOTE_REQUEST_TIMEOUT_SECONDS", 120)
 	if err != nil {
 		return Cloud{}, err
 	}

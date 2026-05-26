@@ -413,6 +413,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			conversations_enabled BOOLEAN NOT NULL DEFAULT TRUE,
 			system_prompt TEXT NOT NULL DEFAULT '',
 			max_context_items INTEGER NOT NULL DEFAULT 8,
+			chat_model TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			updated_by TEXT NOT NULL,
@@ -547,6 +548,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		`ALTER TABLE openai_accounts ADD COLUMN IF NOT EXISTS chatgpt_plan_type TEXT NOT NULL DEFAULT '';`,
 		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS project_docs_enabled BOOLEAN NOT NULL DEFAULT TRUE;`,
 		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS conversations_enabled BOOLEAN NOT NULL DEFAULT TRUE;`,
+		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS chat_model TEXT NOT NULL DEFAULT '';`,
 		`UPDATE home_memberships SET role = 'admin' WHERE role = 'owner';`,
 	}
 

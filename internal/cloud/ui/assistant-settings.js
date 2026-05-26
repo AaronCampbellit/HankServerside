@@ -44,6 +44,8 @@ const els = {
   harnessHomeAssistantEnabled: document.getElementById("harness-homeassistant-enabled"),
   harnessProjectDocsEnabled: document.getElementById("harness-project-docs-enabled"),
   harnessConversationsEnabled: document.getElementById("harness-conversations-enabled"),
+  harnessChatModel: document.getElementById("harness-chat-model"),
+  harnessChatModelOptions: document.getElementById("harness-chat-model-options"),
   harnessSystemPrompt: document.getElementById("harness-system-prompt"),
   resetAssistantPromptButton: document.getElementById("reset-assistant-prompt-button"),
   toast: document.getElementById("toast"),
@@ -258,6 +260,7 @@ function renderAssistantSettings() {
   const sources = payload.sources || [];
   const tools = payload.tools || [];
   const enabledSources = sources.filter((source) => source.enabled);
+  const modelOptions = state.assistant?.chat_model_options || defaults.chat_model_options || [];
 
   els.assistantSettingsPill.textContent = enabledSources.length ? `${enabledSources.length} sources` : "No sources";
   els.assistantSettingsPill.className = enabledSources.length ? "status-chip" : "status-chip offline";
@@ -269,6 +272,11 @@ function renderAssistantSettings() {
   els.harnessHomeAssistantEnabled.checked = settings.homeassistant_enabled !== false;
   els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
   els.harnessConversationsEnabled.checked = settings.conversations_enabled !== false;
+  els.harnessChatModel.value = settings.chat_model || "";
+  els.harnessChatModel.placeholder = state.assistant?.chat_model_default ? `Default: ${state.assistant.chat_model_default}` : "Provider default";
+  els.harnessChatModelOptions.innerHTML = modelOptions.map((model) => (
+    `<option value="${escapeHTML(model)}"></option>`
+  )).join("");
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
   renderToolSettings(tools);
   renderMediaWorkflowSettings();
@@ -279,6 +287,7 @@ function renderAssistantSettings() {
     <article class="card">
       <div class="card-title">Current provider: ${escapeHTML(state.assistant?.provider || "local")}</div>
       <div class="meta">Chat model: ${escapeHTML(state.assistant?.chat_model || "local fallback")}</div>
+      <div class="meta">Model override: ${escapeHTML(settings.chat_model || "Provider default")}</div>
       <div class="meta">Embeddings: ${escapeHTML(state.assistant?.embedding_model || "local-hash")}</div>
       <div class="meta">Vector mode: ${escapeHTML(index.vector_mode || "json_fallback")}</div>
       <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || defaults.max_context_items || 20)} items</div>
@@ -460,6 +469,7 @@ function assistantSettingsFormPayload() {
     homeassistant_enabled: els.harnessHomeAssistantEnabled.checked,
     project_docs_enabled: els.harnessProjectDocsEnabled.checked,
     conversations_enabled: els.harnessConversationsEnabled.checked,
+    chat_model: els.harnessChatModel.value.trim(),
     system_prompt: els.harnessSystemPrompt.value,
   };
 }

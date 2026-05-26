@@ -32,8 +32,8 @@ func TestLoadCloudDefaults(t *testing.T) {
 	if cfg.SessionTTL != 7*24*time.Hour {
 		t.Fatalf("SessionTTL = %s, want %s", cfg.SessionTTL, 7*24*time.Hour)
 	}
-	if cfg.RequestTimeout != 30*time.Second {
-		t.Fatalf("RequestTimeout = %s, want %s", cfg.RequestTimeout, 30*time.Second)
+	if cfg.RequestTimeout != 120*time.Second {
+		t.Fatalf("RequestTimeout = %s, want %s", cfg.RequestTimeout, 120*time.Second)
 	}
 	if cfg.AssistantAI.ChatGPTOAuthEnabled {
 		t.Fatal("ChatGPTOAuthEnabled = true, want false by default")

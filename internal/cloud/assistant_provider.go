@@ -36,12 +36,15 @@ type AssistantAIConfig struct {
 }
 
 type assistantProviderStatus struct {
-	Provider            string `json:"provider"`
-	ChatConfigured      bool   `json:"chat_configured"`
-	EmbeddingConfigured bool   `json:"embedding_configured"`
-	ChatModel           string `json:"chat_model"`
-	EmbeddingModel      string `json:"embedding_model"`
-	VectorStore         string `json:"vector_store"`
+	Provider            string
+	ChatConfigured      bool
+	EmbeddingConfigured bool
+	ChatModel           string
+	DefaultChatModel    string
+	ChatModelOverride   string
+	ChatModelOptions    []string
+	EmbeddingModel      string
+	VectorStore         string
 }
 
 type assistantLLMMessage struct {
@@ -100,16 +103,55 @@ func (c *AssistantAIConfig) normalize() {
 	}
 }
 
-func (s *Server) assistantStatus(ctx context.Context, userID string) assistantProviderStatus {
+func (c AssistantAIConfig) defaultChatModelForProvider(provider string) string {
+	c.normalize()
+	switch provider {
+	case "ollama":
+		return c.OllamaChatModel
+	case "openai":
+		return c.OpenAIChatModel
+	case assistantProviderChatGPTCodex:
+		return c.ChatGPTChatModel
+	default:
+		return "local fallback"
+	}
+}
+
+func assistantChatModelOverride(values ...string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[0])
+}
+
+func assistantChatModelOptions(cfg AssistantAIConfig) []string {
+	cfg.normalize()
+	return uniqueStrings([]string{
+		cfg.ChatGPTChatModel,
+		cfg.OpenAIChatModel,
+		cfg.OllamaChatModel,
+	})
+}
+
+func (s *Server) assistantStatus(ctx context.Context, userID string, modelOverride ...string) assistantProviderStatus {
 	cfg := s.assistantAI
 	cfg.normalize()
 	provider, token := s.resolveAssistantProvider(ctx, userID)
+	override := assistantChatModelOverride(modelOverride...)
+	defaultChatModel := cfg.defaultChatModelForProvider(provider)
+	chatModel := defaultChatModel
+	if defaultChatModel != "local fallback" {
+		chatModel = defaultString(override, defaultChatModel)
+	}
 	status := assistantProviderStatus{
-		Provider:       provider,
-		VectorStore:    "postgres",
-		ChatModel:      "local fallback",
-		EmbeddingModel: "local-hash",
-		ChatConfigured: provider == "ollama" && cfg.OllamaBaseURL != "",
+		Provider:          provider,
+		VectorStore:       "postgres",
+		ChatModel:         chatModel,
+		DefaultChatModel:  defaultChatModel,
+		ChatModelOverride: override,
+		ChatModelOptions:  assistantChatModelOptions(cfg),
+		EmbeddingModel:    "local-hash",
+		ChatConfigured:    provider == "ollama" && cfg.OllamaBaseURL != "",
 	}
 	if cfg.OllamaBaseURL != "" {
 		status.EmbeddingConfigured = true
@@ -118,15 +160,10 @@ func (s *Server) assistantStatus(ctx context.Context, userID string) assistantPr
 		status.EmbeddingConfigured = true
 		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
 	}
-	if provider == "ollama" {
-		status.ChatModel = cfg.OllamaChatModel
-	}
 	if provider == "openai" {
-		status.ChatModel = cfg.OpenAIChatModel
 		status.ChatConfigured = token != ""
 	}
 	if provider == assistantProviderChatGPTCodex {
-		status.ChatModel = cfg.ChatGPTChatModel
 		status.ChatConfigured = token != ""
 	}
 	if !s.store.VectorAvailable() {
@@ -181,23 +218,24 @@ func (s *Server) hasLinkedChatGPTCodex(ctx context.Context, userID string) bool 
 	return account.AuthProvider == openAIAccountProviderChatGPTCodex && strings.TrimSpace(account.AccessToken) != ""
 }
 
-func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string, messages []assistantLLMMessage) (string, string, error) {
+func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string, messages []assistantLLMMessage, modelOverride ...string) (string, string, error) {
 	cfg := s.assistantAI
 	cfg.normalize()
 	provider, token := s.resolveAssistantProvider(ctx, userID)
+	chatModel := defaultString(assistantChatModelOverride(modelOverride...), cfg.defaultChatModelForProvider(provider))
 	switch provider {
 	case "ollama":
 		if cfg.OllamaBaseURL == "" {
 			return "", "", errors.New("Ollama is not configured")
 		}
-		text, err := postOllamaChat(ctx, cfg.OllamaBaseURL, cfg.OllamaChatModel, messages)
-		return text, "ollama:" + cfg.OllamaChatModel, err
+		text, err := postOllamaChat(ctx, cfg.OllamaBaseURL, chatModel, messages)
+		return text, "ollama:" + chatModel, err
 	case "openai":
 		if token == "" {
 			return "", "", errors.New("OpenAI is not configured")
 		}
-		text, err := postOpenAIChat(ctx, cfg.OpenAIBaseURL, token, cfg.OpenAIChatModel, messages)
-		return text, "openai:" + cfg.OpenAIChatModel, err
+		text, err := postOpenAIChat(ctx, cfg.OpenAIBaseURL, token, chatModel, messages)
+		return text, "openai:" + chatModel, err
 	case assistantProviderChatGPTCodex:
 		if !cfg.ChatGPTOAuthEnabled {
 			return "", "", errChatGPTRelinkRequired
@@ -206,20 +244,20 @@ func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string
 		if err != nil {
 			return "", "", err
 		}
-		text, err := postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, cfg.ChatGPTChatModel, messages)
+		text, err := postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, chatModel, messages)
 		var providerErr *providerHTTPError
 		if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			account, err = s.refreshChatGPTCodexAccount(ctx, account)
 			if err != nil {
 				return "", "", err
 			}
-			text, err = postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, cfg.ChatGPTChatModel, messages)
+			text, err = postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, chatModel, messages)
 			if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 				_ = s.store.DeleteOpenAIAccount(ctx, userID)
 				return "", "", errChatGPTRelinkRequired
 			}
 		}
-		return text, assistantProviderChatGPTCodex + ":" + cfg.ChatGPTChatModel, err
+		return text, assistantProviderChatGPTCodex + ":" + chatModel, err
 	default:
 		return "", "local", errors.New("assistant provider is not configured")
 	}

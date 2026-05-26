@@ -63,7 +63,7 @@ POSTGRES_PASSWORD=replace-with-real-db-password
 HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-real-db-password@postgres:5432/hankremote?sslmode=disable
 
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
-HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=30
+HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=120
 
 HANK_REMOTE_AI_PROVIDER=auto
 HANK_REMOTE_OLLAMA_BASE_URL=http://ollama:11434
@@ -114,6 +114,7 @@ Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot 
 After signing in to the dashboard, open `AI Settings` to manage the HankAI harness. Those settings are stored in the database and apply immediately to the next HankAI message:
 - which Hank sources can be sent to the active provider
 - whether HankAI can use your private past conversations as memory
+- the chat model override for the active chat provider, including ChatGPT/Codex subscription-backed chat
 - the system prompt HankAI uses
 - the server-owned maximum context window used for provider requests
 

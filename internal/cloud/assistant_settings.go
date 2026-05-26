@@ -18,6 +18,7 @@ const (
 
 	maxAssistantContextItems      = 20
 	maxAssistantSystemPromptBytes = 6000
+	maxAssistantChatModelBytes    = 120
 )
 
 type assistantSettingsSource struct {
@@ -52,6 +53,7 @@ type assistantSettingsUpdateRequest struct {
 	ProjectDocsEnabled   *bool   `json:"project_docs_enabled"`
 	ConversationsEnabled *bool   `json:"conversations_enabled"`
 	SystemPrompt         *string `json:"system_prompt"`
+	ChatModel            *string `json:"chat_model"`
 }
 
 func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
@@ -123,7 +125,7 @@ func (s *Server) currentAssistantSettings(ctx context.Context, homeID string, us
 }
 
 func assistantSettingsNeedPersistence(current domain.AssistantSettings, normalized domain.AssistantSettings) bool {
-	return current.SystemPrompt != normalized.SystemPrompt || current.MaxContextItems != normalized.MaxContextItems
+	return current.SystemPrompt != normalized.SystemPrompt || current.MaxContextItems != normalized.MaxContextItems || current.ChatModel != normalized.ChatModel
 }
 
 func defaultAssistantSettings(homeID string, userID string) domain.AssistantSettings {
@@ -171,9 +173,18 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	if request.SystemPrompt != nil {
 		settings.SystemPrompt = strings.TrimSpace(*request.SystemPrompt)
 	}
+	if request.ChatModel != nil {
+		settings.ChatModel = strings.TrimSpace(*request.ChatModel)
+	}
 	settings = normalizeAssistantSettings(settings)
 	if len(settings.SystemPrompt) > maxAssistantSystemPromptBytes {
 		return domain.AssistantSettings{}, errors.New("system_prompt is too long")
+	}
+	if len(settings.ChatModel) > maxAssistantChatModelBytes {
+		return domain.AssistantSettings{}, errors.New("chat_model is too long")
+	}
+	if strings.ContainsAny(settings.ChatModel, " \t\r\n") {
+		return domain.AssistantSettings{}, errors.New("chat_model cannot contain whitespace")
 	}
 	return settings, nil
 }
@@ -185,6 +196,7 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 	} else {
 		settings.SystemPrompt = trimmedPrompt
 	}
+	settings.ChatModel = strings.TrimSpace(settings.ChatModel)
 	settings.MaxContextItems = maxAssistantContextItems
 	return settings
 }
@@ -192,11 +204,15 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 func (s *Server) assistantSettingsPayload(homeID string, settings domain.AssistantSettings) assistantSettingsResponse {
 	settings = normalizeAssistantSettings(settings)
 	capabilities := s.agentCapabilities(homeID)
+	cfg := s.assistantAI
+	cfg.normalize()
 	return assistantSettingsResponse{
 		Settings: settings,
 		Defaults: map[string]any{
-			"system_prompt":     defaultAssistantSystemPrompt,
-			"max_context_items": maxAssistantContextItems,
+			"system_prompt":      defaultAssistantSystemPrompt,
+			"max_context_items":  maxAssistantContextItems,
+			"chat_model":         "",
+			"chat_model_options": assistantChatModelOptions(cfg),
 		},
 		Sources: assistantSettingsSources(settings),
 		Tools:   assistantSettingsTools(settings, capabilities),

@@ -73,7 +73,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		sessionTTL = 7 * 24 * time.Hour
 	}
 	if requestTimeout <= 0 {
-		requestTimeout = 30 * time.Second
+		requestTimeout = 120 * time.Second
 	}
 
 	realtimeCtx, realtimeCancel := context.WithCancel(context.Background())

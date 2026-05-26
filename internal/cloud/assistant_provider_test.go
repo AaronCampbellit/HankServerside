@@ -92,6 +92,9 @@ func TestAssistantStatusUsesLinkedChatGPTCodexWhenConfigured(t *testing.T) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}))
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.ChatModel = "gpt-codex-large"
+	must(t, db.UpsertAssistantSettings(ctx, settings))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	server.ConfigureAssistantAI(AssistantAIConfig{Provider: assistantProviderChatGPTCodex, ChatGPTOAuthEnabled: true, ChatGPTChatModel: "gpt-codex-test", OpenAIEmbeddingModel: "embed-test"})
@@ -107,8 +110,11 @@ func TestAssistantStatusUsesLinkedChatGPTCodexWhenConfigured(t *testing.T) {
 		encoded, _ := json.Marshal(status)
 		t.Fatalf("chat_configured = false, status=%s", encoded)
 	}
-	if status["chat_model"] != "gpt-codex-test" {
+	if status["chat_model"] != "gpt-codex-large" {
 		t.Fatalf("chat_model = %#v", status["chat_model"])
+	}
+	if status["chat_model_default"] != "gpt-codex-test" || status["chat_model_override"] != "gpt-codex-large" {
+		t.Fatalf("chat model defaults = %#v", status)
 	}
 	if status["embedding_configured"] != false {
 		t.Fatalf("embedding_configured = %#v, want false", status["embedding_configured"])
@@ -181,6 +187,54 @@ func TestChatGPTCodexProviderPostsResponsesWithBearerAndAccount(t *testing.T) {
 	}
 	if model != "chatgpt_codex:gpt-codex-test" {
 		t.Fatalf("model = %q", model)
+	}
+}
+
+func TestChatGPTCodexProviderUsesModelOverride(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_chatgpt_model_override", Email: "chatgpt-model@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
+		UserID:          user.ID,
+		ProviderUserID:  "workspace-123",
+		AuthProvider:    openAIAccountProviderChatGPTCodex,
+		ChatGPTPlanType: "plus",
+		AccessToken:     "linked-token",
+		TokenType:       "Bearer",
+		Scope:           "chatgpt_codex",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}))
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Model != "gpt-codex-large" {
+			t.Fatalf("model = %q", body.Model)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"output_text": "Override answer."})
+	}))
+	defer provider.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{Provider: assistantProviderChatGPTCodex, ChatGPTOAuthEnabled: true, ChatGPTBackendBaseURL: provider.URL, ChatGPTChatModel: "gpt-codex-test"})
+
+	answer, model, err := server.generateAssistantLLMResponse(ctx, user.ID, []assistantLLMMessage{{Role: "user", Content: "hello"}}, "gpt-codex-large")
+	if err != nil {
+		t.Fatalf("generateAssistantLLMResponse: %v", err)
+	}
+	if answer != "Override answer." || model != "chatgpt_codex:gpt-codex-large" {
+		t.Fatalf("answer/model = %q/%q", answer, model)
 	}
 }
 
