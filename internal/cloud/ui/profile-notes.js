@@ -27,7 +27,6 @@ const els = {
   logoutButton: document.getElementById("logout-button"),
   sessionState: document.getElementById("session-state"),
   sessionMeta: document.getElementById("session-meta"),
-  noteCount: document.getElementById("note-count"),
   noteSearch: document.getElementById("note-search"),
   refreshButton: document.getElementById("refresh-button"),
   newButton: document.getElementById("new-button"),
@@ -545,7 +544,6 @@ function sortNotesByRecency(notes) {
 }
 
 function renderNotes() {
-  els.noteCount.textContent = `${state.notes.length} note${state.notes.length === 1 ? "" : "s"}`;
   const notes = filteredNotes();
   if (!state.notes.length) {
     els.noteTabs.className = "note-tabs empty-state";

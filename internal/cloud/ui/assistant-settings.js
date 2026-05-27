@@ -18,10 +18,9 @@ const els = {
   openAIAccountOutput: document.getElementById("openai-account-output"),
   openAIConfigOutput: document.getElementById("openai-config-output"),
   linkOpenAIButton: document.getElementById("link-openai-button"),
-  refreshButton: document.getElementById("refresh-button"),
   assistantSettingsPill: document.getElementById("assistant-settings-pill"),
   assistantSettingsForm: document.getElementById("assistant-settings-form"),
-  settingsTabButtons: Array.from(document.querySelectorAll("[data-settings-tab]")),
+  settingsSectionButtons: Array.from(document.querySelectorAll("[data-settings-section]")),
   settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
   assistantHarnessOutput: document.getElementById("assistant-harness-output"),
   assistantToolsOutput: document.getElementById("assistant-tools-output"),
@@ -33,6 +32,7 @@ const els = {
   mediaDestinationPath: document.getElementById("media-destination-path"),
   mediaMovieDestinationPath: document.getElementById("media-movie-destination-path"),
   mediaTVDestinationPath: document.getElementById("media-tv-destination-path"),
+  mediaConfirmationRequired: document.getElementById("media-confirmation-required"),
   mediaWorkflowMeta: document.getElementById("media-workflow-meta"),
   saveMediaSettingsButton: document.getElementById("save-media-settings-button"),
   refreshMediaSettingsButton: document.getElementById("refresh-media-settings-button"),
@@ -102,35 +102,89 @@ function mediaDestinationLabel(value, fallback = "") {
   return cleaned ? `SMB share/${cleaned}` : "SMB share root";
 }
 
-function renderMediaDestinationSelect(select, payload, currentValue) {
-  const current = normalizeMediaDestinationPath(currentValue || "");
-  const options = [
-    { value: "", label: "SMB share root" },
-    ...((payload.destination_options || []).map((option) => ({
-      value: normalizeMediaDestinationPath(option.value),
-      label: mediaDestinationLabel(option.value, option.label),
-    }))),
-  ];
-  const seen = new Set();
-  const unique = [];
-  for (const option of options) {
-    if (seen.has(option.value)) continue;
-    seen.add(option.value);
-    unique.push(option);
+function mediaPathBaseName(value) {
+  const cleaned = normalizeMediaDestinationPath(value);
+  if (!cleaned) return "SMB share root";
+  const parts = cleaned.split("/");
+  return parts[parts.length - 1] || cleaned;
+}
+
+function mediaPathParent(value) {
+  const cleaned = normalizeMediaDestinationPath(value);
+  if (!cleaned || !cleaned.includes("/")) return "";
+  return cleaned.split("/").slice(0, -1).join("/");
+}
+
+function mediaPathIsSameOrChild(value, base) {
+  const cleaned = normalizeMediaDestinationPath(value);
+  const root = normalizeMediaDestinationPath(base);
+  return !root || cleaned === root || cleaned.startsWith(`${root}/`);
+}
+
+function mediaDestinationValues(payload) {
+  const values = new Set([""]);
+  (payload.destination_options || []).forEach((option) => {
+    values.add(normalizeMediaDestinationPath(option.value));
+  });
+  return values;
+}
+
+function mediaDestinationChildren(values, parent) {
+  const root = normalizeMediaDestinationPath(parent);
+  return Array.from(values)
+    .filter((value) => value && mediaPathParent(value) === root)
+    .sort((left, right) => mediaPathBaseName(left).localeCompare(mediaPathBaseName(right)));
+}
+
+function renderMediaDestinationSelect(select, payload, currentValue, baseValue = "") {
+  const values = mediaDestinationValues(payload);
+  const base = normalizeMediaDestinationPath(baseValue);
+  let current = normalizeMediaDestinationPath(currentValue || base);
+  if (!mediaPathIsSameOrChild(current, base)) {
+    current = base;
   }
-  if (current && !seen.has(current)) {
-    unique.push({ value: current, label: `Current: ${mediaDestinationLabel(current)}` });
+  values.add(base);
+  values.add(current);
+
+  const options = [];
+  const addOption = (value, label) => {
+    const cleaned = normalizeMediaDestinationPath(value);
+    if (options.some((option) => option.value === cleaned)) return;
+    options.push({ value: cleaned, label });
+  };
+
+  addOption(current, mediaDestinationLabel(current));
+  const parent = mediaPathParent(current);
+  if (current !== base && mediaPathIsSameOrChild(parent, base)) {
+    addOption(parent, `Up to ${mediaDestinationLabel(parent)}`);
   }
-  select.innerHTML = unique.map((option) => (
+  mediaDestinationChildren(values, current).forEach((child) => {
+    addOption(child, mediaPathBaseName(child));
+  });
+
+  select.innerHTML = options.map((option) => (
     `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
   )).join("");
   select.value = current;
 }
 
 function renderMediaDestinationOptions(payload, settings) {
-  renderMediaDestinationSelect(els.mediaDestinationPath, payload, settings.destination_path || "");
-  renderMediaDestinationSelect(els.mediaMovieDestinationPath, payload, settings.movie_destination_path || settings.destination_path || "");
-  renderMediaDestinationSelect(els.mediaTVDestinationPath, payload, settings.tv_destination_path || settings.destination_path || "");
+  const destination = normalizeMediaDestinationPath(settings.destination_path || "");
+  renderMediaDestinationSelect(els.mediaDestinationPath, payload, destination);
+  renderMediaDestinationSelect(els.mediaMovieDestinationPath, payload, settings.movie_destination_path || destination, destination);
+  renderMediaDestinationSelect(els.mediaTVDestinationPath, payload, settings.tv_destination_path || destination, destination);
+}
+
+function refreshScopedMediaDestinationOptions(overrides = {}) {
+  const media = state.media || {};
+  const settings = media.settings || {};
+  renderMediaDestinationOptions(media, {
+    ...settings,
+    destination_path: els.mediaDestinationPath.value,
+    movie_destination_path: els.mediaMovieDestinationPath.value,
+    tv_destination_path: els.mediaTVDestinationPath.value,
+    ...overrides,
+  });
 }
 
 function isActiveMediaJob(job) {
@@ -367,6 +421,7 @@ function renderMediaWorkflowSettings() {
   els.mediaWorkflowEnabled.checked = enabled;
   els.mediaGramatonBaseURL.value = settings.base_url || "https://gramaton.io";
   els.mediaGramatonUsername.value = settings.username || "";
+  els.mediaConfirmationRequired.value = settings.require_confirmation === false ? "false" : "true";
   renderMediaDestinationOptions(payload, settings);
   els.mediaGramatonPassword.placeholder = hasPassword ? "Leave unchanged" : "Required to enable";
   if (!canEdit) {
@@ -385,6 +440,7 @@ function renderMediaWorkflowSettings() {
     els.mediaDestinationPath,
     els.mediaMovieDestinationPath,
     els.mediaTVDestinationPath,
+    els.mediaConfirmationRequired,
     els.saveMediaSettingsButton,
   ].forEach((element) => {
     element.disabled = fieldsDisabled;
@@ -449,15 +505,15 @@ function scrollHighlightedMediaJob() {
   selected.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
-function setSettingsTab(nextTab) {
-  els.settingsTabButtons.forEach((button) => {
-    const active = button.dataset.settingsTab === nextTab;
+function setSettingsSection(nextSection, options = {}) {
+  els.settingsSectionButtons.forEach((button) => {
+    const active = button.dataset.settingsSection === nextSection;
     button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
   });
-  els.settingsPanels.forEach((panel) => {
-    panel.hidden = panel.dataset.settingsPanel !== nextTab;
-  });
+  const panel = els.settingsPanels.find((item) => item.dataset.settingsPanel === nextSection);
+  if (panel && options.scroll !== false) {
+    panel.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
 }
 
 function assistantSettingsFormPayload() {
@@ -540,7 +596,7 @@ async function saveMediaSettings() {
           movie_destination_path: normalizeMediaDestinationPath(els.mediaMovieDestinationPath.value),
           tv_destination_path: normalizeMediaDestinationPath(els.mediaTVDestinationPath.value),
           preferred_quality: "1080p",
-          require_confirmation: true,
+          require_confirmation: els.mediaConfirmationRequired.value !== "false",
         },
         password,
         persist: true,
@@ -599,7 +655,7 @@ async function hydrate() {
     renderSession();
     const params = new URLSearchParams(window.location.search);
     if (params.get("settings_tab") || state.highlightedMediaJobID) {
-      setSettingsTab(params.get("settings_tab") || "tools");
+      setSettingsSection(params.get("settings_tab") || "tools");
     }
     await loadStatus();
   } catch (_) {
@@ -609,17 +665,26 @@ async function hydrate() {
 
 els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
-els.refreshButton.addEventListener("click", () => loadStatus().then(() => showToast("AI settings refreshed.")).catch((error) => showToast(error.message, true)));
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
 els.saveMediaSettingsButton.addEventListener("click", saveMediaSettings);
 els.refreshMediaSettingsButton.addEventListener("click", () => loadStatus().then(() => showToast("Media jobs refreshed.")).catch((error) => showToast(error.message, true)));
+els.mediaDestinationPath.addEventListener("change", () => {
+  const destination = els.mediaDestinationPath.value;
+  refreshScopedMediaDestinationOptions({
+    destination_path: destination,
+    movie_destination_path: destination,
+    tv_destination_path: destination,
+  });
+});
+els.mediaMovieDestinationPath.addEventListener("change", refreshScopedMediaDestinationOptions);
+els.mediaTVDestinationPath.addEventListener("change", refreshScopedMediaDestinationOptions);
 els.mediaJobsOutput.addEventListener("click", (event) => {
   const button = event.target.closest("[data-cancel-media-job]");
   if (!button) return;
   cancelMediaJob(button.dataset.cancelMediaJob);
 });
-els.settingsTabButtons.forEach((button) => {
-  button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
+els.settingsSectionButtons.forEach((button) => {
+  button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
 });
 els.resetAssistantPromptButton.addEventListener("click", () => {
   const defaultPrompt = state.settings?.defaults?.system_prompt || "";

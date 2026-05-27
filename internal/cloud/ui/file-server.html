@@ -35,6 +35,8 @@
 
       <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
+      <p class="settings-blurb">File server connection details live in <a href="/dashboard/settings#connections">Settings &gt; Connections</a>.</p>
+
       <main class="grid file-server-grid">
         <section class="panel file-source-panel">
           <div class="panel-head">
@@ -79,15 +81,10 @@
           </div>
 
           <div class="file-location-row">
-            <div class="drive-path-tools">
-              <button type="button" id="files-home-button" class="secondary">Main</button>
-              <button type="button" id="files-up-button" class="secondary">Up</button>
-            </div>
             <label class="file-path-label">
               <span>Path</span>
               <input id="files-path" type="text" value="/" autocomplete="off">
             </label>
-            <button type="button" id="files-refresh-button" class="secondary">Open</button>
             <label class="file-search-label">
               <span>Search Files</span>
               <input id="files-search" type="search" placeholder="Search" autocomplete="off">
@@ -150,18 +147,6 @@
           </div>
         </section>
 
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Connection Settings</h2>
-            <span class="pill">Settings</span>
-          </div>
-          <div class="tool-shell">
-            <p class="hint">File server credentials and connection details now live with the other home connection settings.</p>
-            <div class="actions wrap">
-              <a class="button-link" href="/dashboard/settings#connections">Open Connection Settings</a>
-            </div>
-          </div>
-        </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>

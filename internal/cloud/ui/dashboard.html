@@ -56,75 +56,74 @@
           <div id="agent-list" class="card-list empty-state">Connector status appears here.</div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
+        <details class="panel collapsible-panel setup-file-panel">
+          <summary class="panel-head collapsible-panel-head">
             <h2>Setup File</h2>
-            <span class="pill">Connector</span>
+            <span class="chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <form id="token-form" class="stack compact">
+              <label>
+                <span>Home</span>
+                <select id="token-home" required></select>
+              </label>
+              <label>
+                <span>Connector ID</span>
+                <input id="token-agent-id" type="text" placeholder="Auto-generated from home name" required>
+              </label>
+              <label>
+                <span>Connector Name</span>
+                <input id="token-name" type="text" placeholder="Auto-generated as Home Agent">
+              </label>
+              <label>
+                <span>Expires After</span>
+                <input id="token-expiry" type="number" min="0" step="1" placeholder="0 means no expiry">
+              </label>
+              <button type="submit">Create Setup File</button>
+            </form>
+            <div id="token-created" class="token-output" hidden></div>
+            <div id="token-list" class="card-list empty-state">No setup files created yet.</div>
           </div>
-          <form id="token-form" class="stack compact">
-            <label>
-              <span>Home</span>
-              <select id="token-home" required></select>
-            </label>
-            <label>
-              <span>Connector ID</span>
-              <input id="token-agent-id" type="text" placeholder="Auto-generated from home name" required>
-            </label>
-            <label>
-              <span>Connector Name</span>
-              <input id="token-name" type="text" placeholder="Auto-generated as Home Agent">
-            </label>
-            <label>
-              <span>Expires After</span>
-              <input id="token-expiry" type="number" min="0" step="1" placeholder="0 means no expiry">
-            </label>
-            <button type="submit">Create Setup File</button>
-          </form>
-          <div id="token-created" class="token-output" hidden></div>
-          <div id="token-list" class="card-list empty-state">No setup files created yet.</div>
-        </section>
+        </details>
 
-        <section id="health" class="panel">
-          <div class="panel-head">
+        <details id="health" class="panel collapsible-panel">
+          <summary class="panel-head collapsible-panel-head">
             <h2>Health</h2>
-            <span id="sync-health-pill" class="pill">Checking</span>
+            <span class="collapsible-panel-actions">
+              <span id="sync-health-pill" class="pill">Checking</span>
+              <span class="chevron" aria-hidden="true"></span>
+            </span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <div id="sync-summary" class="kv-grid"></div>
+            <div class="ops-grid compact-ops">
+              <a class="ops-card" href="/healthz" target="_blank" rel="noreferrer">Server</a>
+              <a class="ops-card" href="/readyz" target="_blank" rel="noreferrer">Database</a>
+              <a class="ops-card" href="/metrics" target="_blank" rel="noreferrer">Metrics</a>
+              <a class="ops-card" href="/docs/deployment" target="_blank" rel="noreferrer">Guide</a>
+            </div>
           </div>
-          <div id="sync-summary" class="kv-grid"></div>
-          <div class="ops-grid compact-ops">
-            <a class="ops-card" href="/healthz" target="_blank" rel="noreferrer">Server</a>
-            <a class="ops-card" href="/readyz" target="_blank" rel="noreferrer">Database</a>
-            <a class="ops-card" href="/metrics" target="_blank" rel="noreferrer">Metrics</a>
-            <a class="ops-card" href="/docs/deployment" target="_blank" rel="noreferrer">Guide</a>
-          </div>
-        </section>
+        </details>
 
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Tools</h2>
-            <span class="pill">Workspaces</span>
-          </div>
-          <div class="ops-grid tool-link-grid">
-            <a class="ops-card" href="/dashboard/hank">Hank</a>
-            <a class="ops-card" href="/dashboard/home-assistant">Home Assistant</a>
-            <a class="ops-card" href="/dashboard/file-server">File Server</a>
-            <a class="ops-card" href="/dashboard/profile-notes">Notes</a>
-          </div>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
+        <details class="panel wide-panel collapsible-panel">
+          <summary class="panel-head collapsible-panel-head">
             <h2>Settings</h2>
-            <span class="pill">Configure</span>
+            <span class="collapsible-panel-actions">
+              <span class="pill">Configure</span>
+              <span class="chevron" aria-hidden="true"></span>
+            </span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <div class="ops-grid tool-link-grid">
+              <a class="ops-card" href="/dashboard/settings#home">Home</a>
+              <a class="ops-card" href="/dashboard/settings#people">People</a>
+              <a class="ops-card" href="/dashboard/settings#connections">Connections</a>
+              <a class="ops-card" href="/dashboard/settings#ai">AI</a>
+              <a class="ops-card" href="/dashboard/settings#backups" data-admin-only="true" hidden>Backups</a>
+              <a class="ops-card" href="/dashboard/settings#join-home">Join Home</a>
+            </div>
           </div>
-          <div class="ops-grid tool-link-grid">
-            <a class="ops-card" href="/dashboard/settings#home">Home</a>
-            <a class="ops-card" href="/dashboard/settings#people">People</a>
-            <a class="ops-card" href="/dashboard/settings#connections">Connections</a>
-            <a class="ops-card" href="/dashboard/settings#ai">AI</a>
-            <a class="ops-card" href="/dashboard/settings#backups" data-admin-only="true" hidden>Backups</a>
-            <a class="ops-card" href="/dashboard/settings#join-home">Join Home</a>
-          </div>
-        </section>
+        </details>
       </main>
 
       <div id="toast" class="toast" hidden></div>

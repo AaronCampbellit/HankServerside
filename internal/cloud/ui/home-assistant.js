@@ -179,10 +179,12 @@ function renderAgents() {
   els.agentPill.className = isOnline ? "status-chip" : "status-chip offline";
   if (!agent) {
     els.agentOutput.className = "card-list empty-state";
-    els.agentOutput.textContent = "Set up the home connector before running Home Assistant commands.";
+    els.agentOutput.textContent = "";
+    els.agentOutput.hidden = true;
     return;
   }
   els.agentOutput.className = "card-list";
+  els.agentOutput.hidden = false;
   els.agentOutput.innerHTML = `
     <article class="card">
       <div class="card-head">
@@ -200,6 +202,7 @@ function renderAgents() {
 
 function renderHAOutput(html, empty = false) {
   els.haOutput.className = empty ? "card-list empty-state" : "card-list";
+  els.haOutput.hidden = false;
   els.haOutput.innerHTML = html;
 }
 

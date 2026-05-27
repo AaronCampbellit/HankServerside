@@ -52,10 +52,7 @@ const els = {
   fileBreadcrumbs: document.getElementById("file-breadcrumbs"),
   fileTree: document.getElementById("file-tree"),
   filesUpload: document.getElementById("files-upload"),
-  filesRefreshButton: document.getElementById("files-refresh-button"),
   filesRefreshCurrentButton: document.getElementById("files-refresh-current-button"),
-  filesHomeButton: document.getElementById("files-home-button"),
-  filesUpButton: document.getElementById("files-up-button"),
   filesNewFolderButton: document.getElementById("files-new-folder-button"),
   filesUploadButton: document.getElementById("files-upload-button"),
   filesOutput: document.getElementById("files-output"),
@@ -1714,16 +1711,13 @@ els.filesSearch.addEventListener("keydown", (event) => {
     searchFiles();
   }
 });
-els.filesRefreshButton.addEventListener("click", () => browseFiles(els.filesPath.value));
 els.filesRefreshCurrentButton.addEventListener("click", () => refreshCurrentView());
-els.filesHomeButton.addEventListener("click", () => browseFiles("/"));
 els.filesPath.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     browseFiles(els.filesPath.value);
   }
 });
-els.filesUpButton.addEventListener("click", () => browseFiles(parentPath(state.currentFilesPath)));
 els.filesNewFolderButton.addEventListener("click", openNewFolderDialog);
 els.filesUploadButton.addEventListener("click", () => els.filesUpload.click());
 els.filesUpload.addEventListener("change", () => uploadFiles(els.filesUpload.files, state.currentFilesPath));

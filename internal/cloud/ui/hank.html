@@ -36,14 +36,19 @@
       <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
       <main class="hank-chat-layout">
-        <aside class="panel hank-sessions-panel">
-          <div class="panel-head">
+        <details class="panel hank-sessions-panel collapsible-panel">
+          <summary class="panel-head collapsible-panel-head">
             <h2>Conversations</h2>
-            <button id="new-session-button" type="button">New</button>
+            <span class="collapsible-panel-actions">
+              <button id="new-session-button" type="button">New</button>
+              <span class="chevron" aria-hidden="true"></span>
+            </span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <div id="assistant-status" class="kv-grid compact"></div>
+            <div id="session-list" class="card-list empty-state">Loading conversations.</div>
           </div>
-          <div id="assistant-status" class="kv-grid compact"></div>
-          <div id="session-list" class="card-list empty-state">Loading conversations.</div>
-        </aside>
+        </details>
 
         <section class="panel hank-chat-panel">
           <div class="panel-head">

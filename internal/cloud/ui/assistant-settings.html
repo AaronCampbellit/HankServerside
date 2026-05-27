@@ -44,7 +44,6 @@
           <div id="openai-account-output" class="kv-grid"></div>
           <div class="actions wrap">
             <button id="link-openai-button" type="button">Link ChatGPT/Codex</button>
-            <button id="refresh-button" type="button" class="secondary">Refresh</button>
             <a class="button-link secondary" href="/dashboard/hank">Open Hank</a>
           </div>
         </section>
@@ -62,13 +61,14 @@
             <h2>HankAI Harness</h2>
             <span id="assistant-settings-pill" class="pill">Loading</span>
           </div>
-          <div class="settings-subtabs" role="tablist" aria-label="HankAI settings sections">
-            <button class="settings-subtab active" type="button" role="tab" aria-selected="true" aria-controls="assistant-settings-sources" data-settings-tab="sources">Sources</button>
-            <button class="settings-subtab" type="button" role="tab" aria-selected="false" aria-controls="assistant-settings-tools" data-settings-tab="tools">Tools &amp; Workflows</button>
-            <button class="settings-subtab" type="button" role="tab" aria-selected="false" aria-controls="assistant-settings-prompt" data-settings-tab="prompt">Prompt</button>
+          <div class="settings-section-nav" aria-label="HankAI settings sections">
+            <button class="settings-section-button active" type="button" aria-controls="assistant-settings-sources" data-settings-section="sources">Sources</button>
+            <button class="settings-section-button" type="button" aria-controls="assistant-settings-tools" data-settings-section="tools">Tools &amp; Workflows</button>
+            <button class="settings-section-button" type="button" aria-controls="assistant-settings-information" data-settings-section="information">Information</button>
+            <button class="settings-section-button" type="button" aria-controls="assistant-settings-prompt" data-settings-section="prompt">Prompt</button>
           </div>
           <form id="assistant-settings-form" class="settings-form">
-            <div id="assistant-settings-sources" class="settings-tab-panel" role="tabpanel" data-settings-panel="sources">
+            <div id="assistant-settings-sources" class="settings-tab-panel" data-settings-panel="sources">
               <div class="settings-block">
                 <div class="settings-block-head">
                   <h3>Hank Sources</h3>
@@ -107,7 +107,7 @@
               </div>
             </div>
 
-            <div id="assistant-settings-tools" class="settings-tab-panel" role="tabpanel" data-settings-panel="tools" hidden>
+            <div id="assistant-settings-tools" class="settings-tab-panel" data-settings-panel="tools">
               <div class="settings-block-head">
                 <h3>Tools &amp; Workflows</h3>
                 <span class="mini-pill">Agent-backed</span>
@@ -155,17 +155,16 @@
                       <option value="">SMB share root</option>
                     </select>
                   </label>
-                  <label class="setting-field" for="media-preferred-quality">
-                    <span>Preferred quality</span>
-                    <input id="media-preferred-quality" type="text" value="1080p, fallback 720p" disabled>
-                  </label>
                   <label class="setting-field" for="media-confirmation-required">
                     <span>Confirmation</span>
-                    <input id="media-confirmation-required" type="text" value="Required before downloads" disabled>
+                    <select id="media-confirmation-required">
+                      <option value="true">Required before downloads</option>
+                      <option value="false">Optional</option>
+                    </select>
                   </label>
                 </div>
                 <div class="actions wrap">
-                  <button id="save-media-settings-button" type="button">Save Media Workflow</button>
+                  <button id="save-media-settings-button" type="button">Save</button>
                   <button id="refresh-media-settings-button" type="button" class="secondary">Refresh Jobs</button>
                 </div>
                 <div id="media-workflow-meta" class="meta"></div>
@@ -179,7 +178,17 @@
               </div>
             </div>
 
-            <div id="assistant-settings-prompt" class="settings-tab-panel" role="tabpanel" data-settings-panel="prompt" hidden>
+            <div id="assistant-settings-information" class="settings-tab-panel harness-information-panel" data-settings-panel="information">
+              <div class="settings-block">
+                <div class="settings-block-head">
+                  <h3>Harness Information</h3>
+                  <span class="mini-pill">Live</span>
+                </div>
+                <div id="assistant-harness-output" class="card-list empty-state">Loading HankAI harness details.</div>
+              </div>
+            </div>
+
+            <div id="assistant-settings-prompt" class="settings-tab-panel" data-settings-panel="prompt">
               <div class="settings-block">
                 <div class="settings-block-head">
                   <h3>Model</h3>
@@ -208,14 +217,6 @@
               <button id="reset-assistant-prompt-button" type="button" class="secondary">Reset Prompt</button>
             </div>
           </form>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Harness Information</h2>
-            <span class="pill">Live</span>
-          </div>
-          <div id="assistant-harness-output" class="card-list empty-state">Loading HankAI harness details.</div>
         </section>
       </main>
 

@@ -463,6 +463,21 @@ function renderSessions() {
   `).join("");
 }
 
+function messageRoleLabel(role) {
+  return role === "assistant" ? "Hank" : role;
+}
+
+function formatMessageTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const now = new Date();
+  const isSameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return isSameDay ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : date.toLocaleString();
+}
+
 function renderMessages(messages = []) {
   const session = state.sessions.find((item) => item.id === state.selectedSessionID);
   els.conversationTitle.textContent = session?.title || "HankAI";
@@ -477,7 +492,7 @@ function renderMessages(messages = []) {
   els.messageList.className = "hank-message-list";
   els.messageList.innerHTML = messages.map((message) => `
     <article class="hank-message ${escapeHTML(message.role)}">
-      <div class="meta">${escapeHTML(message.role)} · ${new Date(message.created_at).toLocaleString()}</div>
+      <div class="meta">${escapeHTML(messageRoleLabel(message.role))} · ${escapeHTML(formatMessageTimestamp(message.created_at))}</div>
       <p>${escapeHTML(message.text).replaceAll("\n", "<br>")}</p>
       ${renderCards(message.cards || [])}
     </article>

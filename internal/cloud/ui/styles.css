@@ -496,6 +496,57 @@ h3 {
   margin-bottom: 10px;
 }
 
+.collapsible-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.collapsible-panel:not([open]) {
+  align-self: start;
+}
+
+.collapsible-panel-head {
+  margin: 0;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collapsible-panel-head::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-panel-head h2 {
+  margin: 0;
+}
+
+.collapsible-panel-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.collapsible-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.chevron {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  color: var(--muted);
+  transform: rotate(45deg);
+  transition: transform 160ms ease, color 160ms ease;
+}
+
+.collapsible-panel[open] .chevron {
+  color: var(--brand-dark);
+  transform: rotate(225deg);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -528,7 +579,7 @@ h3 {
   gap: 14px;
 }
 
-.settings-subtabs {
+.settings-section-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -539,7 +590,7 @@ h3 {
   background: rgba(255, 255, 255, 0.035);
 }
 
-.settings-subtab {
+.settings-section-button {
   min-height: 34px;
   padding: 7px 12px;
   border: 1px solid transparent;
@@ -550,8 +601,8 @@ h3 {
   cursor: pointer;
 }
 
-.settings-subtab.active,
-.settings-subtab:hover,
+.settings-section-button.active,
+.settings-section-button:hover,
 .settings-page-tab.active,
 .settings-page-tab:hover {
   border-color: rgba(255, 255, 255, 0.12);
@@ -562,10 +613,7 @@ h3 {
 .settings-tab-panel {
   display: grid;
   gap: 12px;
-}
-
-.settings-tab-panel[hidden] {
-  display: none;
+  scroll-margin-top: 16px;
 }
 
 .settings-layout {
@@ -916,6 +964,26 @@ button:disabled {
 button.secondary {
   background: #293345;
   color: #eef4ff;
+}
+
+button.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+}
+
+button.icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 button.ghost {
@@ -1601,9 +1669,19 @@ body.kanban-note .kanban-board {
   grid-template-columns: minmax(220px, 0.7fr) minmax(220px, 0.7fr);
   grid-template-areas:
     "source transfer"
-    "explorer explorer"
-    "settings settings";
+    "explorer explorer";
   align-items: start;
+}
+
+.settings-blurb {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.settings-blurb a {
+  color: var(--brand-dark);
+  font-weight: 700;
 }
 
 .file-source-panel {
@@ -2422,6 +2500,26 @@ button:disabled {
   min-height: min(760px, calc(100vh - 230px));
 }
 
+.hank-chat-panel > .panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.hank-chat-panel > .panel-head #conversation-title {
+  grid-column: 2;
+  justify-self: center;
+  max-width: min(680px, 100%);
+  text-align: center;
+  font-size: 1.35rem;
+  line-height: 1.12;
+}
+
+.hank-chat-panel > .panel-head .actions {
+  grid-column: 3;
+  justify-self: end;
+}
+
 .hank-sessions-panel {
   padding: 10px 12px;
 }
@@ -2432,7 +2530,8 @@ button:disabled {
 }
 
 .hank-sessions-panel h2 {
-  font-size: 0.9rem;
+  font-size: 1.2rem;
+  line-height: 1.12;
 }
 
 .hank-sessions-panel .kv-grid {

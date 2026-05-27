@@ -39,10 +39,16 @@
           <div class="notes-topbar">
             <div class="notes-search-wrap">
               <input id="note-search" type="search" placeholder="Find notes">
-              <span id="note-count" class="pill">0 notes</span>
             </div>
             <div class="actions wrap">
-              <button id="refresh-button" type="button" class="secondary">Refresh</button>
+              <button id="refresh-button" type="button" class="secondary icon-button" aria-label="Refresh notes" title="Refresh notes">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 6v5h-5"></path>
+                  <path d="M4 18v-5h5"></path>
+                  <path d="M18.5 9A7 7 0 0 0 6.2 6.2L4 8"></path>
+                  <path d="M5.5 15A7 7 0 0 0 17.8 17.8L20 16"></path>
+                </svg>
+              </button>
               <button id="new-button" type="button">New Note</button>
             </div>
           </div>

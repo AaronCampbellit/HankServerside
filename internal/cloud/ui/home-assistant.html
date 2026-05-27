@@ -41,7 +41,7 @@
             <h2>Connector</h2>
             <span id="homeassistant-agent-pill" class="pill">Checking</span>
           </div>
-          <div id="homeassistant-agent-output" class="card-list empty-state">Checking connector.</div>
+          <div id="homeassistant-agent-output" class="card-list empty-state" hidden></div>
           <div class="actions wrap">
             <a class="button-link secondary" href="/dashboard/settings#connections">Connection Settings</a>
           </div>
@@ -79,7 +79,7 @@
               <span>Command Details</span>
               <textarea id="ha-service-body" rows="5" placeholder='{"entity_id":"light.kitchen"}'></textarea>
             </label>
-            <div id="ha-output" class="card-list empty-state">Run a Home Assistant command to see results.</div>
+            <div id="ha-output" class="card-list empty-state" hidden></div>
           </div>
         </section>
       </main>
