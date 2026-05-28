@@ -310,7 +310,7 @@ App WebSocket commands now route implicitly against the singleton Home. Hank sho
   - `POST /v1/ws/app-ticket`
   - connect to the returned `websocket_path`, currently `/ws/app?app_ticket={ticket}`
 - App tickets are one-use and short-lived. Current TTL is 90 seconds.
-- Legacy `/ws/app?session_token={token}` is still accepted by the server for compatibility and tests, but Hank should migrate to app tickets.
+- Long-lived `session_token` query auth is no longer accepted on `/ws/app`; Hank must use app tickets.
 - Requests must now include:
   - `request_id`
   - `command`

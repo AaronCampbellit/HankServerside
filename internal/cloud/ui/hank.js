@@ -54,6 +54,10 @@ const maxChatAttachmentBytes = 100 * 1024 * 1024;
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
+  const csrf = document.cookie.split("; ").find((part) => part.startsWith("hank_remote_csrf="))?.split("=")[1];
+  if (csrf && !headers.has("X-Hank-CSRF-Token")) {
+    headers.set("X-Hank-CSRF-Token", decodeURIComponent(csrf));
+  }
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");
   }

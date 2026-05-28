@@ -103,6 +103,10 @@ func (c *Client) runOnce(ctx context.Context) error {
 		HTTPClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		HTTPHeader: http.Header{
+			"Authorization":   []string{"Bearer " + c.token},
+			"X-Hank-Agent-ID": []string{c.agentID},
+		},
 	})
 	if err != nil {
 		return err
@@ -151,11 +155,6 @@ func (c *Client) connectionURL() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid cloud websocket url: %w", err)
 	}
-
-	query := parsed.Query()
-	query.Set("agent_id", c.agentID)
-	query.Set("token", c.token)
-	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
 }
 

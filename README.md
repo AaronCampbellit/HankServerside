@@ -11,12 +11,32 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `POST /v1/auth/login`
   - `POST /v1/auth/logout`
   - `GET /v1/me`
+  - `POST /v1/me/devices/apns`
+  - `DELETE /v1/me/devices/{deviceID}/apns`
+  - `GET /v1/me/notification-settings`
+  - `PUT /v1/me/notification-settings`
+  - `GET /v1/me/notes`
+  - `POST /v1/me/notes`
+  - `GET /v1/me/notes/{noteID}`
+  - `PUT /v1/me/notes/{noteID}`
+  - `DELETE /v1/me/notes/{noteID}`
+  - `GET /v1/me/profile`
+  - `PUT /v1/me/profile`
+  - `GET /v1/me/profile-secret-vault`
+  - `PUT /v1/me/profile-secret-vault`
+  - `GET /v1/me/profile-backup`
+  - `PUT /v1/me/profile-backup`
+  - `GET /v1/oauth/openai/status`
+  - `GET /v1/oauth/openai/start`
+  - `GET /v1/oauth/openai/callback`
   - `POST /v1/ws/app-ticket`
   - `GET /v1/home`
   - `PUT /v1/home`
   - `POST /v1/home/invitations/accept`
   - `GET /v1/home/members`
+  - `GET /v1/home/members/invitations`
   - `POST /v1/home/members/invitations`
+  - `DELETE /v1/home/members/invitations/{invitationID}`
   - `DELETE /v1/home/members/{userID}`
   - `PUT /v1/home/members/{userID}/role`
   - `GET /v1/home/permissions`
@@ -29,6 +49,39 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `DELETE /v1/home/agent/tokens/{tokenID}`
   - `POST /v1/home/files/downloads`
   - `POST /v1/home/files/uploads`
+  - `GET /v1/home/notes`
+  - `GET /v1/home/notes/{noteID}`
+  - `PUT /v1/home/notes/{noteID}`
+  - `DELETE /v1/home/notes/{noteID}`
+  - `GET /v1/home/sync`
+  - `GET /v1/home/service-profiles`
+  - `PUT /v1/home/service-profiles/{serviceType}`
+  - `GET /v1/home/storage/status`
+  - `GET /v1/home/storage/config`
+  - `PUT /v1/home/storage/config`
+  - `GET /v1/home/storage/events`
+  - `DELETE /v1/home/storage/events`
+  - `POST /v1/home/storage/backup`
+  - `POST /v1/home/storage/restore-test`
+  - `POST /v1/home/storage/restore-primary`
+  - `GET /v1/home/assistant/status`
+  - `GET /v1/home/assistant/settings`
+  - `PUT /v1/home/assistant/settings`
+  - `GET /v1/home/assistant/sessions`
+  - `POST /v1/home/assistant/sessions`
+  - `GET /v1/home/assistant/sessions/{sessionID}`
+  - `DELETE /v1/home/assistant/sessions/{sessionID}`
+  - `GET /v1/home/assistant/sessions/{sessionID}/messages`
+  - `POST /v1/home/assistant/sessions/{sessionID}/messages`
+  - `GET /v1/home/assistant/runs/{runID}`
+  - `POST /v1/home/assistant/runs/{runID}/confirm`
+  - `POST /v1/home/assistant/runs/{runID}/client-tool-results`
+  - `PUT /v1/home/assistant/calendar-index`
+  - `GET /v1/home/assistant/logs`
+  - `GET /v1/home/assistant/media-settings`
+  - `PUT /v1/home/assistant/media-settings`
+  - `GET /v1/home/assistant/media-jobs/{jobID}`
+  - `POST /v1/home/assistant/media-jobs/{jobID}/cancel`
   - `GET /v1/file-transfers/{transferID}`
   - `PUT /v1/file-transfers/{transferID}`
 - cloud WebSocket relay:
@@ -37,6 +90,12 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
 - cloud management UI:
   - `GET /`
   - `GET /dashboard`
+  - `GET /dashboard/hank`
+  - `GET /dashboard/home-assistant`
+  - `GET /dashboard/profile-notes`
+  - `GET /dashboard/file-server`
+  - `GET /dashboard/settings`
+  - `GET /dashboard/settings/connections-pane`
   - `GET /docs/deployment`
 - cloud operations endpoints:
   - `GET /healthz`
@@ -104,6 +163,7 @@ In another shell, point the cloud process at that local database:
 ```bash
 export HANK_REMOTE_CLOUD_ADDR=:8080
 export HANK_REMOTE_CLOUD_DATABASE_URL='postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable'
+export HANK_REMOTE_DB_OPS_INTENT_SECRET='local-dev-db-ops-intent-secret'
 export HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS='local-dev-backup-passphrase'
 make run-cloud
 ```

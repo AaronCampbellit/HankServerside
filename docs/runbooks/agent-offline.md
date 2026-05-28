@@ -20,7 +20,7 @@ Use this when app requests fail with `agent_offline` or the cloud shows a home w
 ## Recovery
 
 1. Restart the agent process.
-2. If auth is failing, issue a replacement token from `POST /v1/homes/{homeID}/agents/tokens`.
+2. If auth is failing, issue a replacement token from `POST /v1/home/agent/tokens`.
 3. Update the agent env file with the replacement token.
 4. Restart the agent and verify the cloud reports it online.
 5. Revoke the old token once the new token is confirmed working.

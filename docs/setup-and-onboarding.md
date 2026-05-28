@@ -64,6 +64,7 @@ HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-real-db-passwo
 
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=120
+HANK_REMOTE_SECRET_ENCRYPTION_KEY=replace-with-stable-random-secret-encryption-key
 
 HANK_REMOTE_AI_PROVIDER=auto
 HANK_REMOTE_OLLAMA_BASE_URL=http://ollama:11434
@@ -108,6 +109,8 @@ Use the same database password in `POSTGRES_PASSWORD`, `HANK_REMOTE_CLOUD_DATABA
 Do not wrap either database URL in `< >`; keep the query string exactly as `?sslmode=disable` for the Compose stack.
 
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot be restored without it.
+
+Keep `HANK_REMOTE_SECRET_ENCRYPTION_KEY` stable after first use. Hank Remote uses it to encrypt stored OAuth tokens, APNs device tokens, and profile secret vault data at rest. If this key is lost, already encrypted application secrets cannot be read and must be re-linked or re-entered.
 
 `HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
 
@@ -158,10 +161,11 @@ Check the server:
 ```bash
 curl http://127.0.0.1:18080/healthz
 curl http://127.0.0.1:18080/readyz
-curl http://127.0.0.1:18080/metrics | head
 ```
 
 Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
+
+`/metrics` requires a signed-in admin session. Scrape it through an authenticated internal path, or keep it behind an internal reverse proxy that injects admin credentials. `/healthz` and `/readyz` stay unauthenticated for deployment checks.
 
 ## 5. Public URL
 
@@ -181,6 +185,8 @@ The proxy must allow WebSocket upgrades for:
 
 - `/ws/app`
 - `/ws/agent`
+
+The agent authenticates to `/ws/agent` with `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID`. Older query-token agents are accepted only as a migration fallback and should be updated.
 
 Postgres is not published to the host. It stays on private Docker networks.
 
@@ -274,6 +280,8 @@ After first boot:
 3. Run a restore test after the first backup exists.
 4. Confirm storage status shows no new failures.
 
+Primary restore still requires the typed confirmation phrase and now also uses a short-lived admin action token issued immediately before the restore request. The dashboard handles this automatically.
+
 Default schedule:
 
 - full backup: Sunday at 02:00
@@ -316,6 +324,7 @@ Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
 
 - `.env.cloud` exists in `/srv/hank-remote/HankServerside`
 - `.env.cloud` has real database, db-ops, and backup encryption secrets
+- `.env.cloud` has a stable `HANK_REMOTE_SECRET_ENCRYPTION_KEY`
 - `.env.agent` does not exist until after the first admin creates an agent token
 - first boot starts `postgres`, `db-ops`, and `cloud`
 - first admin registration works once on a fresh database

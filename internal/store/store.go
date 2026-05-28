@@ -18,6 +18,7 @@ type Store struct {
 	db              *sql.DB
 	databaseURL     string
 	vectorAvailable bool
+	secretBox       *secretBox
 }
 
 type AgentTokenRecord struct {
@@ -45,6 +46,15 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	}
 
 	return store, nil
+}
+
+func (s *Store) ConfigureSecretEncryption(key string) error {
+	box, err := newSecretBox(key)
+	if err != nil {
+		return err
+	}
+	s.secretBox = box
+	return nil
 }
 
 func (s *Store) Close() error {

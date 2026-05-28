@@ -9,7 +9,15 @@ import (
 )
 
 func (s *Store) UpsertOpenAIAccount(ctx context.Context, account domain.OpenAIAccount) error {
-	_, err := s.exec(ctx, `INSERT INTO openai_accounts (user_id, provider_user_id, auth_provider, chatgpt_plan_type, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at)
+	accessToken, err := s.encryptSecret(account.AccessToken)
+	if err != nil {
+		return err
+	}
+	refreshToken, err := s.encryptSecret(account.RefreshToken)
+	if err != nil {
+		return err
+	}
+	_, err = s.exec(ctx, `INSERT INTO openai_accounts (user_id, provider_user_id, auth_provider, chatgpt_plan_type, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
 			provider_user_id = excluded.provider_user_id,
@@ -21,7 +29,7 @@ func (s *Store) UpsertOpenAIAccount(ctx context.Context, account domain.OpenAIAc
 			scope = excluded.scope,
 			expires_at = excluded.expires_at,
 			updated_at = excluded.updated_at`,
-		account.UserID, account.ProviderUserID, account.AuthProvider, account.ChatGPTPlanType, account.AccessToken, account.RefreshToken, account.TokenType, account.Scope, account.ExpiresAt, account.CreatedAt, account.UpdatedAt)
+		account.UserID, account.ProviderUserID, account.AuthProvider, account.ChatGPTPlanType, accessToken, refreshToken, account.TokenType, account.Scope, account.ExpiresAt, account.CreatedAt, account.UpdatedAt)
 	return err
 }
 
@@ -33,6 +41,12 @@ func (s *Store) GetOpenAIAccount(ctx context.Context, userID string) (domain.Ope
 		if err == sql.ErrNoRows {
 			return domain.OpenAIAccount{}, ErrNotFound
 		}
+		return domain.OpenAIAccount{}, err
+	}
+	if account.AccessToken, err = s.decryptSecret(account.AccessToken); err != nil {
+		return domain.OpenAIAccount{}, err
+	}
+	if account.RefreshToken, err = s.decryptSecret(account.RefreshToken); err != nil {
 		return domain.OpenAIAccount{}, err
 	}
 	return account, nil

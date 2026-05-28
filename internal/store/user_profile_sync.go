@@ -77,7 +77,16 @@ func (s *Store) GetUserProfileSecretVault(ctx context.Context, userID string) (d
 	row := s.queryRow(ctx, `SELECT user_id, revision, key_id, vault_json, created_at, updated_at
 		FROM user_profile_secret_vaults
 		WHERE user_id = ?`, userID)
-	return scanUserProfileSecretVault(row)
+	record, err := scanUserProfileSecretVault(row)
+	if err != nil {
+		return domain.UserProfileSecretVault{}, err
+	}
+	decrypted, err := s.decryptJSONSecret(string(record.Vault))
+	if err != nil {
+		return domain.UserProfileSecretVault{}, err
+	}
+	record.Vault = json.RawMessage(decrypted)
+	return record, nil
 }
 
 func (s *Store) SaveUserProfileSecretVault(ctx context.Context, userID string, expectedRevision *int, keyID string, vault json.RawMessage) (domain.UserProfileSecretVault, error) {
@@ -89,6 +98,10 @@ func (s *Store) SaveUserProfileSecretVault(ctx context.Context, userID string, e
 		return domain.UserProfileSecretVault{}, err
 	}
 	defer tx.Rollback()
+	storedVault, err := s.encryptJSONSecret(vault)
+	if err != nil {
+		return domain.UserProfileSecretVault{}, err
+	}
 
 	existing, err := scanUserProfileSecretVault(tx.QueryRowContext(ctx, `SELECT user_id, revision, key_id, vault_json, created_at, updated_at
 		FROM user_profile_secret_vaults
@@ -106,7 +119,7 @@ func (s *Store) SaveUserProfileSecretVault(ctx context.Context, userID string, e
 		existing.UpdatedAt = now
 		if _, err := tx.ExecContext(ctx, `UPDATE user_profile_secret_vaults
 			SET revision = ?, key_id = ?, vault_json = ?, updated_at = ?
-			WHERE user_id = ?`, existing.Revision, existing.KeyID, string(vault), existing.UpdatedAt, userID); err != nil {
+			WHERE user_id = ?`, existing.Revision, existing.KeyID, storedVault, existing.UpdatedAt, userID); err != nil {
 			return domain.UserProfileSecretVault{}, err
 		}
 	case ErrNotFound:
@@ -122,7 +135,7 @@ func (s *Store) SaveUserProfileSecretVault(ctx context.Context, userID string, e
 			UpdatedAt: now,
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO user_profile_secret_vaults (user_id, revision, key_id, vault_json, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`, existing.UserID, existing.Revision, existing.KeyID, string(vault), existing.CreatedAt, existing.UpdatedAt); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?)`, existing.UserID, existing.Revision, existing.KeyID, storedVault, existing.CreatedAt, existing.UpdatedAt); err != nil {
 			return domain.UserProfileSecretVault{}, err
 		}
 	default:
@@ -135,6 +148,7 @@ func (s *Store) SaveUserProfileSecretVault(ctx context.Context, userID string, e
 	if err := tx.Commit(); err != nil {
 		return domain.UserProfileSecretVault{}, err
 	}
+	existing.Vault = append(json.RawMessage(nil), vault...)
 	return existing, nil
 }
 

@@ -29,6 +29,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	if err := db.ConfigureSecretEncryption(cfg.SecretKey); err != nil {
+		logger.Error("failed to configure secret encryption", "error", err)
+		os.Exit(1)
+	}
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
 	server.ConfigureOpenAI(cfg.OpenAIClientID, cfg.OpenAIClientSecret, cfg.OpenAIRedirectURI, cfg.OpenAIScopes)

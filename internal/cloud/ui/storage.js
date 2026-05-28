@@ -50,6 +50,10 @@ const els = {
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
+  const csrf = document.cookie.split("; ").find((part) => part.startsWith("hank_remote_csrf="))?.split("=")[1];
+  if (csrf && !headers.has("X-Hank-CSRF-Token")) {
+    headers.set("X-Hank-CSRF-Token", decodeURIComponent(csrf));
+  }
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");
   }
@@ -449,11 +453,16 @@ async function requestRestoreTest() {
 async function requestPrimaryRestore(event) {
   event.preventDefault();
   try {
+    const tokenPayload = await api("/v1/home/storage/restore-primary", {
+      method: "POST",
+      body: JSON.stringify({ request_action_token: true }),
+    });
     await api("/v1/home/storage/restore-primary", {
       method: "POST",
       body: JSON.stringify({
         backup_label: els.restoreLabel.value,
         confirmation: els.restoreConfirmation.value,
+        admin_action_token: tokenPayload.admin_action_token,
       }),
     });
     els.restoreConfirmation.value = "";

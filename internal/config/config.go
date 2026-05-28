@@ -21,6 +21,7 @@ type Cloud struct {
 	OpenAIClientSecret string
 	OpenAIRedirectURI  string
 	OpenAIScopes       string
+	SecretKey          string
 	AssistantAI        AssistantAI
 	APNS               APNS
 }
@@ -118,6 +119,11 @@ func LoadCloud() (Cloud, error) {
 		return Cloud{}, fmt.Errorf("HANK_REMOTE_AI_EMBEDDING_DIMENSION must be a positive integer")
 	}
 
+	dbOpsIntentSecret := strings.TrimSpace(os.Getenv("HANK_REMOTE_DB_OPS_INTENT_SECRET"))
+	if dbOpsIntentSecret == "" {
+		return Cloud{}, fmt.Errorf("HANK_REMOTE_DB_OPS_INTENT_SECRET is required")
+	}
+
 	return Cloud{
 		Addr:               envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
 		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
@@ -125,12 +131,13 @@ func LoadCloud() (Cloud, error) {
 		RequestTimeout:     requestTimeout,
 		DBOpsStateDir:      envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
 		DBOpsLogDir:        envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
-		DBOpsIntentSecret:  envOrDefault("HANK_REMOTE_DB_OPS_INTENT_SECRET", "replace-with-a-long-random-db-ops-secret"),
+		DBOpsIntentSecret:  dbOpsIntentSecret,
 		NoteAttachmentDir:  envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
 		OpenAIClientID:     strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_ID")),
 		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
 		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
 		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
+		SecretKey:          strings.TrimSpace(os.Getenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY")),
 		APNS: APNS{
 			TeamID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TEAM_ID")),
 			KeyID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_KEY_ID")),
@@ -159,6 +166,11 @@ func LoadCloud() (Cloud, error) {
 }
 
 func LoadDBOps() (DBOps, error) {
+	intentSecret := strings.TrimSpace(os.Getenv("HANK_REMOTE_DB_OPS_INTENT_SECRET"))
+	if intentSecret == "" {
+		return DBOps{}, fmt.Errorf("HANK_REMOTE_DB_OPS_INTENT_SECRET is required")
+	}
+
 	repoCipherPass := strings.TrimSpace(os.Getenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS"))
 	if repoCipherPass == "" {
 		return DBOps{}, fmt.Errorf("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS is required")
@@ -167,7 +179,7 @@ func LoadDBOps() (DBOps, error) {
 	return DBOps{
 		StateDir:           envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
 		LogDir:             envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
-		IntentSecret:       envOrDefault("HANK_REMOTE_DB_OPS_INTENT_SECRET", "replace-with-a-long-random-db-ops-secret"),
+		IntentSecret:       intentSecret,
 		RepoCipherPass:     repoCipherPass,
 		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
 		Stanza:             envOrDefault("HANK_REMOTE_DB_OPS_STANZA", "hank"),

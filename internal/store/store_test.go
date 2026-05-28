@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,6 +166,87 @@ func TestNotificationSettingsAndAPNSDevices(t *testing.T) {
 	}
 	if len(devices) != 0 {
 		t.Fatalf("devices after delete = %#v", devices)
+	}
+}
+
+func TestSecretEncryptionProtectsStoredTokens(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+	if err := db.ConfigureSecretEncryption("test-secret-encryption-key"); err != nil {
+		t.Fatalf("ConfigureSecretEncryption: %v", err)
+	}
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_secret_store", Email: "secret-store@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_secret_store", UserID: user.ID, TokenHash: "session-hash", ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := db.CreateSession(ctx, session); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if err := db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
+		UserID:       user.ID,
+		AccessToken:  "openai-access-token",
+		RefreshToken: "openai-refresh-token",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		t.Fatalf("UpsertOpenAIAccount: %v", err)
+	}
+	if _, err := db.UpsertAPNSDevice(ctx, domain.APNSDevice{
+		UserID:            user.ID,
+		SessionID:         session.ID,
+		DeviceID:          "device-secret",
+		Token:             "apns-device-token",
+		Environment:       "sandbox",
+		BundleID:          "com.dropfile.Hank",
+		EnabledCategories: json.RawMessage(`[]`),
+	}); err != nil {
+		t.Fatalf("UpsertAPNSDevice: %v", err)
+	}
+	if _, err := db.SaveUserProfileSecretVault(ctx, user.ID, nil, "local", json.RawMessage(`{"password":"vault-secret"}`)); err != nil {
+		t.Fatalf("SaveUserProfileSecretVault: %v", err)
+	}
+
+	var storedAccess, storedRefresh, storedAPNS, storedVault string
+	if err := db.db.QueryRowContext(ctx, `SELECT access_token, refresh_token FROM openai_accounts WHERE user_id = ?`, user.ID).Scan(&storedAccess, &storedRefresh); err != nil {
+		t.Fatalf("raw openai query: %v", err)
+	}
+	if err := db.db.QueryRowContext(ctx, `SELECT token FROM apns_devices WHERE user_id = ? AND device_id = ?`, user.ID, "device-secret").Scan(&storedAPNS); err != nil {
+		t.Fatalf("raw apns query: %v", err)
+	}
+	if err := db.db.QueryRowContext(ctx, `SELECT vault_json::text FROM user_profile_secret_vaults WHERE user_id = ?`, user.ID).Scan(&storedVault); err != nil {
+		t.Fatalf("raw vault query: %v", err)
+	}
+	for label, value := range map[string]string{
+		"access":  storedAccess,
+		"refresh": storedRefresh,
+		"apns":    storedAPNS,
+		"vault":   storedVault,
+	} {
+		if strings.Contains(value, "token") || strings.Contains(value, "vault-secret") {
+			t.Fatalf("%s stored plaintext secret: %s", label, value)
+		}
+	}
+
+	account, err := db.GetOpenAIAccount(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetOpenAIAccount: %v", err)
+	}
+	if account.AccessToken != "openai-access-token" || account.RefreshToken != "openai-refresh-token" {
+		t.Fatalf("decrypted account = %#v", account)
+	}
+	vault, err := db.GetUserProfileSecretVault(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserProfileSecretVault: %v", err)
+	}
+	if string(vault.Vault) != `{"password":"vault-secret"}` {
+		t.Fatalf("decrypted vault = %s", vault.Vault)
 	}
 }
 

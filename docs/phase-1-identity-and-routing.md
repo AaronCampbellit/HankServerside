@@ -47,11 +47,17 @@ Use PostgreSQL from the start and keep the persistence layer thin enough to evol
 
 Cloud HTTP:
 
+- `POST /v1/auth/register`
 - `POST /v1/auth/login`
-- `POST /v1/homes`
-- `POST /v1/homes/{homeID}/agents/tokens`
-- `GET /v1/homes`
-- `GET /v1/homes/{homeID}`
+- `POST /v1/auth/logout`
+- `GET /v1/me`
+- `GET /v1/home`
+- `PUT /v1/home`
+- `GET /v1/home/agent`
+- `GET /v1/home/agent/tokens`
+- `POST /v1/home/agent/tokens`
+- `DELETE /v1/home/agent/tokens/{tokenID}`
+- `POST /v1/ws/app-ticket`
 
 Cloud WebSocket:
 
@@ -63,7 +69,7 @@ Cloud WebSocket:
 Extend the protocol envelope to support:
 
 - `request_id`
-- `home_id`
+- app commands without requiring `home_id`; the cloud resolves the singleton Home from the authenticated user
 - command routing
 - typed error responses
 - app-side command and response flow

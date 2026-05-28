@@ -27,6 +27,10 @@ const els = {
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
+  const csrf = document.cookie.split("; ").find((part) => part.startsWith("hank_remote_csrf="))?.split("=")[1];
+  if (csrf && !headers.has("X-Hank-CSRF-Token")) {
+    headers.set("X-Hank-CSRF-Token", decodeURIComponent(csrf));
+  }
   if (!headers.has("Content-Type") && options.body && !(options.body instanceof Blob)) {
     headers.set("Content-Type", "application/json");
   }

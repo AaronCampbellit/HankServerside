@@ -51,7 +51,7 @@ The desired user experience is:
 3. The home agent connects outbound to Hank Cloud.
 4. The app uses Hank Cloud to reach Home Assistant, files, and notes remotely.
 
-This should replace app-side protocol hacks and remove dependence on embedded Tailscale for the long-term remote-access path.
+This should replace app-side protocol hacks with the cloud-and-agent remote-access path.
 
 ## Near-Term Priorities
 
@@ -117,7 +117,9 @@ go run ./cmd/hank-remote-agent
 Cloud:
 
 - `HANK_REMOTE_CLOUD_ADDR`
-- `HANK_REMOTE_AGENT_KEYS`
+- `HANK_REMOTE_CLOUD_DATABASE_URL`
+- `HANK_REMOTE_DB_OPS_INTENT_SECRET`
+- `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`
 
 Agent:
 

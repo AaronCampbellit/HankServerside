@@ -9,6 +9,7 @@ import (
 func TestLoadCloudDefaults(t *testing.T) {
 	t.Setenv("HANK_REMOTE_CLOUD_ADDR", "")
 	t.Setenv("HANK_REMOTE_CLOUD_DATABASE_URL", "")
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
 	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "")
 	t.Setenv("HANK_REMOTE_REQUEST_TIMEOUT_SECONDS", "")
 	t.Setenv("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", "")
@@ -56,6 +57,7 @@ func TestLoadCloudDefaults(t *testing.T) {
 }
 
 func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
 	t.Setenv("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", "true")
 	t.Setenv("HANK_REMOTE_CHATGPT_AUTH_ISSUER", " https://auth.example.com/ ")
 	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", " https://chatgpt.example.com/backend-api/codex/ ")
@@ -88,6 +90,7 @@ func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
 }
 
 func TestLoadCloudRejectsInvalidDuration(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
 	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "0")
 
 	_, err := LoadCloud()
@@ -96,7 +99,27 @@ func TestLoadCloudRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadCloudRequiresDBOpsIntentSecret(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "")
+
+	_, err := LoadCloud()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_DB_OPS_INTENT_SECRET") {
+		t.Fatalf("LoadCloud error = %v, want missing db ops intent secret error", err)
+	}
+}
+
+func TestLoadDBOpsRequiresIntentSecret(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "")
+	t.Setenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS", "cipher-secret")
+
+	_, err := LoadDBOps()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_DB_OPS_INTENT_SECRET") {
+		t.Fatalf("LoadDBOps error = %v, want missing intent secret error", err)
+	}
+}
+
 func TestLoadDBOpsRequiresRepoCipherPass(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
 	t.Setenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS", "")
 
 	_, err := LoadDBOps()
@@ -106,6 +129,7 @@ func TestLoadDBOpsRequiresRepoCipherPass(t *testing.T) {
 }
 
 func TestLoadDBOpsParsesRepoCipherPass(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
 	t.Setenv("HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS", " cipher-secret ")
 
 	cfg, err := LoadDBOps()

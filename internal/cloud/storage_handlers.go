@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/storageops"
@@ -135,11 +136,23 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 
 	case len(parts) == 2 && parts[1] == "restore-primary" && r.Method == http.MethodPost:
 		var body struct {
-			BackupLabel  string `json:"backup_label"`
-			Confirmation string `json:"confirmation"`
+			BackupLabel        string `json:"backup_label"`
+			Confirmation       string `json:"confirmation"`
+			AdminActionToken   string `json:"admin_action_token"`
+			RequestActionToken bool   `json:"request_action_token"`
 		}
 		if err := parseJSON(w, r, &body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		if body.RequestActionToken {
+			token, expiresAt := s.adminActionTokens.Issue(auth.User.ID, "storage.restore-primary", 5*time.Minute)
+			s.logger.Warn("primary restore action token issued", "request_id", requestIDFromContext(r.Context()), "home_id", home.ID, "requested_by", auth.User.ID, "expires_at", expiresAt)
+			writeJSON(w, http.StatusCreated, map[string]any{"admin_action_token": token, "expires_at": expiresAt})
+			return true
+		}
+		if err := s.adminActionTokens.Consume(strings.TrimSpace(body.AdminActionToken), auth.User.ID, "storage.restore-primary"); err != nil {
+			http.Error(w, "admin action token is required", http.StatusForbidden)
 			return true
 		}
 		intent, err := s.storage.RequestPrimaryRestore(home.ID, auth.User.ID, body.BackupLabel, body.Confirmation)

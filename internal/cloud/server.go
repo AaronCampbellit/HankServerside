@@ -58,6 +58,8 @@ type Server struct {
 	chatGPTDeviceAuths *chatGPTDeviceAuthRegistry
 	noteAttachmentRoot string
 	assistantTrace     *assistantTraceLog
+	loginBackoff       *loginBackoffRegistry
+	adminActionTokens  *adminActionTokenRegistry
 }
 
 type authContext struct {
@@ -99,6 +101,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		chatGPTDeviceAuths: newChatGPTDeviceAuthRegistry(),
 		noteAttachmentRoot: filepath.Join("/tmp", "hank-note-attachments"),
 		assistantTrace:     newAssistantTraceLog(maxAssistantTraceLimit),
+		loginBackoff:       newLoginBackoffRegistry(),
+		adminActionTokens:  newAdminActionTokenRegistry(),
 	}
 
 	mux := http.NewServeMux()
@@ -113,7 +117,6 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/assistant-settings", server.handleAssistantSettingsPage)
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
 	mux.HandleFunc("/dashboard/file-server", server.handleFileServerPage)
-	mux.HandleFunc("/dashboard/file-transfers", server.handleFileTransfersPage)
 	mux.HandleFunc("/dashboard/settings", server.handleSettingsPage)
 	mux.HandleFunc("/dashboard/settings/connections-pane", server.handleSettingsConnectionsPane)
 	mux.HandleFunc("/dashboard/accept-invitation", server.handleAcceptInvitationPage)
@@ -223,7 +226,24 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	_, membership, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if membership.Role != domain.HomeRoleAdmin {
+		http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = io.WriteString(w, s.metrics.RenderPrometheus())
 	if s.storage != nil {
@@ -336,6 +356,13 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
+	if retryAfter, blocked := s.loginBackoff.Blocked(body.Email); blocked {
+		s.metrics.IncAuthFailure("login_email_backoff")
+		s.logger.Warn("login email backoff active", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email, "retry_after", retryAfter.String())
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
+		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
+		return
+	}
 	if !s.limiter.Allow("login:"+clientIP(r), 20, time.Minute) {
 		s.metrics.IncAuthFailure("login_rate_limited")
 		s.logger.Warn("login rate limited", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email)
@@ -345,6 +372,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.store.GetUserByEmail(r.Context(), body.Email)
 	if err != nil {
+		s.loginBackoff.RecordFailure(body.Email)
 		s.metrics.IncAuthFailure("login_unknown_user")
 		s.logger.Warn("login failed for unknown user", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
@@ -352,11 +380,13 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
+		s.loginBackoff.RecordFailure(body.Email)
 		s.metrics.IncAuthFailure("login_bad_password")
 		s.logger.Warn("login failed with bad password", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "user_id", user.ID, "email", body.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	s.loginBackoff.RecordSuccess(body.Email)
 
 	session, rawToken, err := s.createSession(r.Context(), user.ID)
 	if err != nil {
@@ -437,8 +467,13 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	agentID := strings.TrimSpace(firstNonBlank(r.Header.Get("X-Hank-Agent-ID"), r.URL.Query().Get("agent_id")))
+	token := ""
+	if headerToken, err := bearerToken(r.Header.Get("Authorization")); err == nil {
+		token = headerToken
+	} else {
+		token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
 	if agentID == "" || token == "" {
 		s.metrics.IncAuthFailure("agent_missing_credentials")
 		s.logger.Warn("agent websocket missing credentials", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r))
@@ -1132,7 +1167,30 @@ func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (authContex
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return authContext{}, false
 	}
+	if err := s.requireCSRFForCookieWrite(r); err != nil {
+		s.metrics.IncAuthFailure("csrf_invalid")
+		http.Error(w, "invalid csrf token", http.StatusForbidden)
+		return authContext{}, false
+	}
 	return auth, true
+}
+
+func (s *Server) requireCSRFForCookieWrite(r *http.Request) error {
+	if !unsafeHTTPMethod(r.Method) {
+		return nil
+	}
+	if sessionTokenFromCookie(r) == "" {
+		return nil
+	}
+	if _, err := bearerToken(r.Header.Get("Authorization")); err == nil {
+		return nil
+	}
+	cookieToken := csrfTokenFromCookie(r)
+	headerToken := strings.TrimSpace(r.Header.Get(csrfHeaderName))
+	if cookieToken == "" || headerToken == "" || cookieToken != headerToken {
+		return errors.New("csrf token mismatch")
+	}
+	return nil
 }
 
 func (s *Server) appAuthFromRequest(r *http.Request) (authContext, error) {
@@ -1162,10 +1220,7 @@ func (s *Server) appAuthFromRequest(r *http.Request) (authContext, error) {
 		}
 	}
 	if rawToken == "" {
-		rawToken = strings.TrimSpace(r.URL.Query().Get("session_token"))
-		if rawToken == "" {
-			return authContext{}, errors.New("missing session token")
-		}
+		return authContext{}, errors.New("missing session token")
 	}
 
 	session, err := s.store.GetSessionByHash(r.Context(), hashToken(rawToken))

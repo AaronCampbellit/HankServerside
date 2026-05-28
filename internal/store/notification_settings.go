@@ -50,7 +50,11 @@ func (s *Store) UpsertAPNSDevice(ctx context.Context, device domain.APNSDevice) 
 	if len(device.EnabledCategories) == 0 || !json.Valid(device.EnabledCategories) {
 		device.EnabledCategories = json.RawMessage(`[]`)
 	}
-	_, err := s.exec(ctx, `INSERT INTO apns_devices (
+	storedToken, err := s.encryptSecret(device.Token)
+	if err != nil {
+		return domain.APNSDevice{}, err
+	}
+	_, err = s.exec(ctx, `INSERT INTO apns_devices (
 			user_id, session_id, device_id, token, environment, bundle_id, enabled_categories,
 			created_at, updated_at, last_registered_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -65,7 +69,7 @@ func (s *Store) UpsertAPNSDevice(ctx context.Context, device domain.APNSDevice) 
 		device.UserID,
 		device.SessionID,
 		device.DeviceID,
-		device.Token,
+		storedToken,
 		device.Environment,
 		device.BundleID,
 		string(device.EnabledCategories),
@@ -126,6 +130,10 @@ func (s *Store) ListActiveAPNSDevicesForUsers(ctx context.Context, userIDs []str
 	var devices []domain.APNSDevice
 	for rows.Next() {
 		device, err := scanAPNSDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		device.Token, err = s.decryptSecret(device.Token)
 		if err != nil {
 			return nil, err
 		}

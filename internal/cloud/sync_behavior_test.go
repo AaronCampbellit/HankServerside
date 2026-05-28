@@ -92,7 +92,7 @@ func TestAppNotesSyncUsesCloudStoreWithoutChangingBackups(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=session-token"), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, "session-token")
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}

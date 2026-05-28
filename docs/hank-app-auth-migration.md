@@ -1,6 +1,6 @@
 # Hank App Auth Migration
 
-This document describes the next app-side auth change for Hank.
+This document describes the app-side WebSocket auth contract for Hank.
 
 ## Goal
 
@@ -68,19 +68,9 @@ wss://<cloud-host>/ws/app?app_ticket=<ticket>
 6. Do not reuse tickets.
    A ticket is intentionally single-use.
 
-## Recommended Rollout Order
-
-1. Add ticket fetch support in the app.
-2. Use tickets for all new `/ws/app` connections.
-3. Leave existing Bearer HTTP calls unchanged.
-4. After the app release is deployed, remove use of `session_token` query auth from the app.
-5. Only then remove legacy `session_token` query support from the cloud service.
-
 ## Current Compatibility
 
-The server still accepts legacy `session_token` query auth on `/ws/app` for backward compatibility during migration.
-
-That path should be considered deprecated.
+The server no longer accepts long-lived `session_token` values in the `/ws/app` query string. App WebSocket clients must use a short-lived app ticket, or authenticate with the normal Bearer header in non-browser test harnesses.
 
 ## Why This Is Better
 

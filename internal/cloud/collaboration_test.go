@@ -245,13 +245,13 @@ func TestNotesCollaborationBroadcastsOpsAndRevocation(t *testing.T) {
 		"user_id": member.ID,
 	}, nil)
 
-	ownerConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=owner-token"), nil)
+	ownerConn, _, err := appWebSocketDial(ctx, testServer, "owner-token")
 	if err != nil {
 		t.Fatalf("owner websocket dial: %v", err)
 	}
 	defer ownerConn.Close(websocket.StatusNormalClosure, "done")
 
-	memberConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=member-token"), nil)
+	memberConn, _, err := appWebSocketDial(ctx, testServer, "member-token")
 	if err != nil {
 		t.Fatalf("member websocket dial: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestNotesCommandsUseCloudStoreWhenAgentOffline(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=session-token"), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, "session-token")
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestProfileNoteHTTPWriteBroadcastsRealtimeEvent(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=live-token"), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, "live-token")
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestProfileScopedCollaborationDoesNotRequireHome(t *testing.T) {
 		"body_format": "markdown",
 	}, nil)
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=desktop-token"), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, "desktop-token")
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}

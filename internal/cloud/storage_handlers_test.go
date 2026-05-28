@@ -178,6 +178,22 @@ func TestPrimaryRestoreRequiresConfirmation(t *testing.T) {
 	response := requestJSONStatus(t, testServer, "restore-token", http.MethodPost, "/v1/home/storage/restore-primary", map[string]any{
 		"backup_label": "20260430-010101F",
 		"confirmation": "wrong",
+	}, http.StatusForbidden)
+	response.Body.Close()
+
+	var tokenPayload struct {
+		AdminActionToken string `json:"admin_action_token"`
+	}
+	requestJSON(t, testServer, "restore-token", http.MethodPost, "/v1/home/storage/restore-primary", map[string]any{
+		"request_action_token": true,
+	}, &tokenPayload)
+	if tokenPayload.AdminActionToken == "" {
+		t.Fatal("admin action token was empty")
+	}
+	response = requestJSONStatus(t, testServer, "restore-token", http.MethodPost, "/v1/home/storage/restore-primary", map[string]any{
+		"backup_label":       "20260430-010101F",
+		"confirmation":       "wrong",
+		"admin_action_token": tokenPayload.AdminActionToken,
 	}, http.StatusBadRequest)
 	response.Body.Close()
 }
@@ -202,7 +218,7 @@ func TestStorageRequestRealtimePayloadIsRedactedSummary(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token=storage-live-token"), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, "storage-live-token")
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}

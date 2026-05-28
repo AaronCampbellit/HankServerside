@@ -83,7 +83,7 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Connect to the returned `websocket_path`.
 - Treat app tickets as one-use and expiring. Do not store them in account state.
 - Keep bearer session tokens for regular HTTP requests.
-- Remove app-side reliance on `/ws/app?session_token=...` except as a temporary debug fallback.
+- Do not put long-lived session tokens in `/ws/app` URLs.
 - Stop sending `home_id` on `app.command`.
 - Keep sending:
   - `request_id`

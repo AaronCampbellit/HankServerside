@@ -126,7 +126,9 @@ func (s *Server) handleNoteAttachmentsHTTP(w http.ResponseWriter, r *http.Reques
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		_ = os.Remove(s.noteAttachmentPath(attachment.StorageKey))
+		if attachmentPath, err := s.noteAttachmentPath(attachment.StorageKey); err == nil {
+			_ = os.Remove(attachmentPath)
+		}
 		s.indexNoteAfterAttachmentUpload(r.Context(), updatedNote, userID)
 		s.emitNoteAttachmentChanged(r.Context(), note, scope, userID)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -147,7 +149,10 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 
 	attachmentID := newID("natt")
 	storageKey := filepath.Join(note.ID, attachmentID+"-"+filename)
-	targetPath := s.noteAttachmentPath(storageKey)
+	targetPath, err := s.noteAttachmentPathForWrite(storageKey)
+	if err != nil {
+		return domain.NoteAttachment{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return domain.NoteAttachment{}, err
 	}
@@ -263,7 +268,12 @@ func (s *Server) indexNoteAfterAttachmentUpload(ctx context.Context, note domain
 }
 
 func (s *Server) serveNoteAttachment(w http.ResponseWriter, r *http.Request, attachment domain.NoteAttachment) {
-	file, err := os.Open(s.noteAttachmentPath(attachment.StorageKey))
+	attachmentPath, err := s.noteAttachmentPath(attachment.StorageKey)
+	if err != nil {
+		http.Error(w, "invalid attachment path", http.StatusBadRequest)
+		return
+	}
+	file, err := os.Open(attachmentPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			http.NotFound(w, r)
@@ -279,8 +289,51 @@ func (s *Server) serveNoteAttachment(w http.ResponseWriter, r *http.Request, att
 	http.ServeContent(w, r, attachment.Filename, attachment.UpdatedAt, file)
 }
 
-func (s *Server) noteAttachmentPath(storageKey string) string {
-	return filepath.Join(s.noteAttachmentRoot, filepath.Clean(storageKey))
+func (s *Server) noteAttachmentPath(storageKey string) (string, error) {
+	return s.resolveNoteAttachmentPath(storageKey, false)
+}
+
+func (s *Server) noteAttachmentPathForWrite(storageKey string) (string, error) {
+	return s.resolveNoteAttachmentPath(storageKey, true)
+}
+
+func (s *Server) resolveNoteAttachmentPath(storageKey string, forWrite bool) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(storageKey))
+	if cleaned == "." || filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || cleaned == ".." {
+		return "", fmt.Errorf("attachment path escapes root")
+	}
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.noteAttachmentRoot))
+	if err != nil {
+		if forWrite && errors.Is(err, os.ErrNotExist) {
+			if err := os.MkdirAll(s.noteAttachmentRoot, 0o700); err != nil {
+				return "", err
+			}
+			root, err = filepath.EvalSymlinks(filepath.Clean(s.noteAttachmentRoot))
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	joined := filepath.Join(root, cleaned)
+	resolved, err := filepath.EvalSymlinks(joined)
+	if err == nil {
+		if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+			return "", fmt.Errorf("attachment path escapes root")
+		}
+		return resolved, nil
+	}
+	if !forWrite || !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	parent := filepath.Dir(joined)
+	realParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	if realParent != root && !strings.HasPrefix(realParent, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("attachment path escapes root")
+	}
+	return filepath.Join(realParent, filepath.Base(joined)), nil
 }
 
 func (s *Server) emitNoteAttachmentChanged(ctx context.Context, note domain.UserNote, scope string, userID string) {

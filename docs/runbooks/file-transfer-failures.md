@@ -1,6 +1,6 @@
 # Runbook: File Transfer Failure
 
-Use this when `POST /files/uploads`, `POST /files/downloads`, `GET /v1/file-transfers/{id}`, or `PUT /v1/file-transfers/{id}` fail.
+Use this when `POST /v1/home/files/uploads`, `POST /v1/home/files/downloads`, `GET /v1/file-transfers/{id}`, or `PUT /v1/file-transfers/{id}` fail.
 
 ## Check
 

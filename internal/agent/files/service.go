@@ -305,7 +305,7 @@ func (s *Service) statLocal(_ context.Context, path string) (protocol.FileItem, 
 }
 
 func (s *Service) createDirectoryLocal(_ context.Context, path string) error {
-	resolved, err := s.resolveLocal(path)
+	resolved, err := s.resolveLocalForWrite(path)
 	if err != nil {
 		return err
 	}
@@ -317,7 +317,7 @@ func (s *Service) renameLocal(_ context.Context, from string, to string) error {
 	if err != nil {
 		return err
 	}
-	resolvedTo, err := s.resolveLocal(to)
+	resolvedTo, err := s.resolveLocalForWrite(to)
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func (s *Service) downloadLocal(_ context.Context, path string) (string, error) 
 }
 
 func (s *Service) uploadLocal(_ context.Context, path string, contentBase64 string) error {
-	resolved, err := s.resolveLocal(path)
+	resolved, err := s.resolveLocalForWrite(path)
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ func (s *Service) openReaderLocal(_ context.Context, path string, offset int64) 
 }
 
 func (s *Service) openWriterLocal(_ context.Context, path string, offset int64) (WriteHandle, int64, error) {
-	resolved, err := s.resolveLocal(path)
+	resolved, err := s.resolveLocalForWrite(path)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -451,7 +451,7 @@ func (s *Service) openWriterLocal(_ context.Context, path string, offset int64) 
 }
 
 func (s *Service) openRandomWriterLocal(_ context.Context, path string) (RandomWriteHandle, error) {
-	resolved, err := s.resolveLocal(path)
+	resolved, err := s.resolveLocalForWrite(path)
 	if err != nil {
 		return nil, err
 	}
@@ -474,13 +474,60 @@ func (s *Service) resolveLocal(path string) (string, error) {
 	cleaned := cleanPath(path)
 	joined := filepath.Join(s.root, filepath.FromSlash(cleaned))
 	resolved := filepath.Clean(joined)
-	root := filepath.Clean(s.root)
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.root))
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = real
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	} else {
+		return "", err
+	}
 
 	if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escapes root")
 	}
 
 	return resolved, nil
+}
+
+func (s *Service) resolveLocalForWrite(path string) (string, error) {
+	resolved, err := s.resolveLocal(path)
+	if err == nil {
+		return resolved, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	cleaned := cleanPath(path)
+	joined := filepath.Join(s.root, filepath.FromSlash(cleaned))
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.root))
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Dir(filepath.Clean(joined))
+	existingParent := parent
+	missing := []string{filepath.Base(joined)}
+	for {
+		if realParent, err := filepath.EvalSymlinks(existingParent); err == nil {
+			if realParent != root && !strings.HasPrefix(realParent, root+string(filepath.Separator)) {
+				return "", fmt.Errorf("path escapes root")
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				realParent = filepath.Join(realParent, missing[i])
+			}
+			return realParent, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if filepath.Clean(existingParent) == root || filepath.Dir(existingParent) == existingParent {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(existingParent))
+		existingParent = filepath.Dir(existingParent)
+	}
 }
 
 func resolveSharePath(path string) string {

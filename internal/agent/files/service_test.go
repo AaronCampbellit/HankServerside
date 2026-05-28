@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -37,6 +39,28 @@ func TestUploadListDownloadAndBlockEscape(t *testing.T) {
 
 	if _, err := service.Download(context.Background(), "../secret.txt"); err == nil {
 		t.Fatal("Download escape: expected error")
+	}
+}
+
+func TestLocalSymlinkEscapeBlocked(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write outside secret: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "outside-link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	service := New(root)
+	content := base64.StdEncoding.EncodeToString([]byte("overwrite"))
+	if _, err := service.Download(context.Background(), "outside-link/secret.txt"); err == nil {
+		t.Fatal("Download through symlink escape succeeded, want error")
+	}
+	if err := service.Upload(context.Background(), "outside-link/new.txt", content); err == nil {
+		t.Fatal("Upload through symlink escape succeeded, want error")
 	}
 }
 

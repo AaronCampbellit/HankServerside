@@ -131,8 +131,8 @@ Add support for:
 
 ### Required Endpoints
 
-- `POST /v1/homes/{homeID}/agents/tokens`
-- `DELETE /v1/homes/{homeID}/agents/tokens/{tokenID}`
+- `POST /v1/home/agent/tokens`
+- `DELETE /v1/home/agent/tokens/{tokenID}`
 
 ### Rules
 
@@ -174,14 +174,14 @@ Protected routes should require a valid app session.
 
 Add endpoints:
 
-- `POST /v1/homes`
-- `GET /v1/homes`
-- `GET /v1/homes/{homeID}`
+- `GET /v1/home`
+- `PUT /v1/home`
 
 Rules:
 
-- a user can only see their own homes
-- a user can only issue agent tokens for homes they own
+- the first successful registration auto-creates the singleton Home
+- a user can only see the singleton Home if they are a member
+- only Home admins can issue agent tokens
 
 ### Suggested Data Validation
 

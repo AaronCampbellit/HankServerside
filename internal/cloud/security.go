@@ -13,6 +13,8 @@ import (
 )
 
 const sessionCookieName = "hank_remote_session"
+const csrfCookieName = "hank_remote_csrf"
+const csrfHeaderName = "X-Hank-CSRF-Token"
 
 func newID(prefix string) string {
 	return prefix + "_" + randomHex(12)
@@ -67,6 +69,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expi
 		Expires:  expiresAt,
 		MaxAge:   max(0, int(time.Until(expiresAt).Seconds())),
 	})
+	setCSRFCookie(w, r, newToken(), expiresAt)
 }
 
 func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +82,43 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Secure:   requestIsHTTPS(r),
 		MaxAge:   -1,
 	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    "",
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Secure:   requestIsHTTPS(r),
+		MaxAge:   -1,
+	})
+}
+
+func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, expiresAt time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    token,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Secure:   requestIsHTTPS(r),
+		Expires:  expiresAt,
+		MaxAge:   max(0, int(time.Until(expiresAt).Seconds())),
+	})
+}
+
+func csrfTokenFromCookie(r *http.Request) string {
+	cookie, err := r.Cookie(csrfCookieName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cookie.Value)
+}
+
+func unsafeHTTPMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 func requestIsHTTPS(r *http.Request) bool {

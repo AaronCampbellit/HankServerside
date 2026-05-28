@@ -54,7 +54,12 @@ func TestAppCommandRoutesToAgentAndBack(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent?agent_id="+agent.ID+"&token="+agentRawToken), nil)
+	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent"), &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Authorization":   []string{"Bearer " + agentRawToken},
+			"X-Hank-Agent-ID": []string{agent.ID},
+		},
+	})
 	if err != nil {
 		t.Fatalf("agent websocket dial: %v", err)
 	}
@@ -105,7 +110,7 @@ func TestAppCommandRoutesToAgentAndBack(t *testing.T) {
 		}
 	}()
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token="+sessionRawToken), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, sessionRawToken)
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}
@@ -363,7 +368,6 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
 		"/dashboard/file-server",
-		"/dashboard/file-transfers",
 		"/dashboard/settings",
 		"/dashboard/settings/connections-pane",
 		"/dashboard/accept-invitation",
@@ -444,17 +448,6 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		}
 		response.Body.Close()
 	}
-
-	legacyFileTransfers := requestDashboardPage(t, testServer, "/dashboard/file-transfers", "member-token")
-	if legacyFileTransfers.StatusCode != http.StatusSeeOther {
-		data, _ := io.ReadAll(legacyFileTransfers.Body)
-		legacyFileTransfers.Body.Close()
-		t.Fatalf("member legacy file-transfers status = %d, want %d body=%s", legacyFileTransfers.StatusCode, http.StatusSeeOther, string(data))
-	}
-	if location := legacyFileTransfers.Header.Get("Location"); location != "/dashboard/file-server" {
-		t.Fatalf("legacy file-transfers redirect location = %q, want %q", location, "/dashboard/file-server")
-	}
-	legacyFileTransfers.Body.Close()
 
 	redirects := map[string]string{
 		"/dashboard/home-users":         "/dashboard/settings#people",
@@ -652,10 +645,13 @@ func TestLoginSetsStrictHTTPOnlySessionCookie(t *testing.T) {
 		t.Fatal("expected session cookie")
 	}
 	var sessionCookie *http.Cookie
+	var csrfCookie *http.Cookie
 	for _, cookie := range cookies {
 		if cookie.Name == sessionCookieName {
 			sessionCookie = cookie
-			break
+		}
+		if cookie.Name == csrfCookieName {
+			csrfCookie = cookie
 		}
 	}
 	if sessionCookie == nil {
@@ -669,6 +665,60 @@ func TestLoginSetsStrictHTTPOnlySessionCookie(t *testing.T) {
 	}
 	if sessionCookie.Path != "/" {
 		t.Fatalf("session cookie path = %q, want /", sessionCookie.Path)
+	}
+	if csrfCookie == nil || csrfCookie.Value == "" {
+		t.Fatalf("expected %q cookie", csrfCookieName)
+	}
+	if csrfCookie.HttpOnly {
+		t.Fatal("csrf cookie should be readable by dashboard javascript")
+	}
+}
+
+func TestCookieWriteRequiresCSRFToken(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_csrf", Email: "csrf@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_csrf", UserID: user.ID, TokenHash: hashToken("session-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, session))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	request, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/logout", nil)
+	if err != nil {
+		t.Fatalf("logout request: %v", err)
+	}
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("logout response: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("logout without csrf status = %d, want %d", response.StatusCode, http.StatusForbidden)
+	}
+
+	request, err = http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/logout", nil)
+	if err != nil {
+		t.Fatalf("logout request with csrf: %v", err)
+	}
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	request.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "csrf-token"})
+	request.Header.Set(csrfHeaderName, "csrf-token")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("logout response with csrf: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("logout with csrf status = %d, want %d", response.StatusCode, http.StatusOK)
 	}
 }
 
@@ -732,8 +782,17 @@ func TestReadyzReturnsServiceUnavailableWhenStoreIsClosed(t *testing.T) {
 func TestMetricsEndpointRendersCounters(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	db := storeForTest(t)
 	defer db.Close()
+	now := time.Now().UTC()
+	admin := domain.User{ID: "usr_metrics", Email: "metrics@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_metrics", UserID: admin.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_metrics", UserID: admin.ID, TokenHash: hashToken("metrics-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, admin))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.AddHomeMembership(ctx, domain.HomeMembership{HomeID: home.ID, UserID: admin.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}))
+	must(t, db.CreateSession(ctx, session))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
 	testServer := httptest.NewServer(server.http.Handler)
@@ -745,7 +804,12 @@ func TestMetricsEndpointRendersCounters(t *testing.T) {
 	}
 	_, _ = http.DefaultClient.Do(request)
 
-	response, err := http.Get(testServer.URL + "/metrics")
+	request, err = http.NewRequest(http.MethodGet, testServer.URL+"/metrics", nil)
+	if err != nil {
+		t.Fatalf("metrics request: %v", err)
+	}
+	request.Header.Set("Authorization", "Bearer metrics-token")
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("metrics request: %v", err)
 	}
@@ -945,7 +1009,7 @@ func TestRequestTimeoutReturnsAppError(t *testing.T) {
 		t.Fatalf("agent read registered: %v", err)
 	}
 
-	appConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/app?session_token="+sessionRawToken), nil)
+	appConn, _, err := appWebSocketDial(ctx, testServer, sessionRawToken)
 	if err != nil {
 		t.Fatalf("app websocket dial: %v", err)
 	}
@@ -1328,6 +1392,12 @@ func (ioDiscard) Write(p []byte) (int, error) {
 
 func wsURL(base string, path string) string {
 	return "ws" + strings.TrimPrefix(base, "http") + path
+}
+
+func appWebSocketDial(ctx context.Context, server *httptest.Server, sessionToken string) (*websocket.Conn, *http.Response, error) {
+	return websocket.Dial(ctx, wsURL(server.URL, "/ws/app"), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + sessionToken}},
+	})
 }
 
 func must(t *testing.T, err error) {

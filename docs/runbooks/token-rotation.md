@@ -4,11 +4,11 @@ Use this when rotating agent credentials without losing service.
 
 ## Agent Token Rotation
 
-1. Issue a new token with `POST /v1/homes/{homeID}/agents/tokens`.
+1. Issue a new token with `POST /v1/home/agent/tokens`.
 2. Leave the old token valid temporarily.
 3. Update the agent env file with the new token.
 4. Restart the agent and verify it reconnects successfully.
-5. Revoke the old token with `DELETE /v1/homes/{homeID}/agents/tokens/{tokenID}`.
+5. Revoke the old token with `DELETE /v1/home/agent/tokens/{tokenID}`.
 
 This flow provides overlapping validity during rotation, which avoids unnecessary downtime.
 

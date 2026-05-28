@@ -82,27 +82,6 @@ func (s *Server) handleFileServerPage(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard/file-server", "file-server.html")
 }
 
-func (s *Server) handleFileTransfersPage(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/dashboard/file-transfers" {
-		http.NotFound(w, r)
-		return
-	}
-	auth, err := s.appAuthFromRequest(r)
-	if err != nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	if _, _, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID); err != nil {
-		http.Error(w, "home membership required", http.StatusForbidden)
-		return
-	}
-	target := "/dashboard/file-server"
-	if r.URL.RawQuery != "" {
-		target += "?" + r.URL.RawQuery
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
-}
-
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings", "settings.html")
 }
