@@ -192,10 +192,37 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	if cfg.SMB.Host != "192.168.1.20" || cfg.SMB.Share != "media" || cfg.SMB.Username != "aaron" || cfg.SMB.Password != "secret" || cfg.SMB.Domain != "WORKGROUP" {
 		t.Fatalf("SMB config = %#v", cfg.SMB)
 	}
+	if len(cfg.SMBShares) != 1 || cfg.SMBShares[0].Share != "media" {
+		t.Fatalf("SMBShares = %#v, want legacy SMB as first share", cfg.SMBShares)
+	}
 	if cfg.FilesRoot != "/srv/hank/files" || cfg.NotesRoot != "/srv/hank/notes" {
 		t.Fatalf("roots = files:%q notes:%q", cfg.FilesRoot, cfg.NotesRoot)
 	}
 	if cfg.Media.RequireConfirmation {
 		t.Fatal("Media.RequireConfirmation = true, want false")
+	}
+}
+
+func TestLoadAgentParsesMultipleSMBSharesJSON(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_SMB_SHARES_JSON", `[
+		{"id":"media","name":"Media","host":"192.168.1.20","share":"media","username":"aaron","password":"media-secret","domain":"WORKGROUP"},
+		{"id":"archive","name":"Archive","host":"192.168.1.21","share":"archive","username":"aaron","password":"archive-secret"}
+	]`)
+
+	cfg, err := LoadAgent()
+	if err != nil {
+		t.Fatalf("LoadAgent error: %v", err)
+	}
+
+	if len(cfg.SMBShares) != 2 {
+		t.Fatalf("SMBShares count = %d, want 2", len(cfg.SMBShares))
+	}
+	if cfg.SMBShares[0].ID != "media" || cfg.SMBShares[0].Password != "media-secret" {
+		t.Fatalf("first SMB share = %#v, want media with password", cfg.SMBShares[0])
+	}
+	if cfg.SMBShares[1].ID != "archive" || cfg.SMBShares[1].Share != "archive" {
+		t.Fatalf("second SMB share = %#v, want archive", cfg.SMBShares[1])
 	}
 }
