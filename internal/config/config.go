@@ -89,11 +89,11 @@ type HomeAssistant struct {
 type SMB struct {
 	ID       string `json:"id,omitempty"`
 	Name     string `json:"name,omitempty"`
-	Host     string
-	Share    string
-	Username string
-	Password string
-	Domain   string
+	Host     string `json:"host"`
+	Share    string `json:"share"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Domain   string `json:"domain,omitempty"`
 }
 
 type Media struct {

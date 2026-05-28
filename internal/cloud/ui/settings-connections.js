@@ -479,11 +479,12 @@ async function saveSMBSettings(event) {
   shareDraft.name = shareDraft.name || shareDraft.share || shareDraft.id;
   els.smbHost.value = shareDraft.host;
 
+  const existingShare = currentSMBShare() || {};
   const nextShares = state.smbShares.filter((share) => share.id !== state.editingSMBShareID && share.id !== shareDraft.id);
   nextShares.push({
-    ...currentSMBShare(),
+    ...existingShare,
     ...shareDraft,
-    password_set: Boolean(els.smbPassword.value || currentSMBShare()?.password_set),
+    password_set: Boolean(els.smbPassword.value || existingShare.password_set),
   });
   nextShares.sort((left, right) => shareLabel(left).localeCompare(shareLabel(right), undefined, { sensitivity: "base" }));
 
@@ -582,5 +583,7 @@ els.homeSelect.addEventListener("change", async () => {
 });
 els.haForm.addEventListener("submit", saveHomeAssistant);
 els.smbForm.addEventListener("submit", saveSMBSettings);
+els.smbAddShareButton.addEventListener("click", addSMBShare);
+els.smbRemoveShareButton.addEventListener("click", removeSMBShare);
 
 hydrate();

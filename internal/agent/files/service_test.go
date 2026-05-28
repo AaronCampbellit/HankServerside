@@ -204,6 +204,92 @@ func TestSMBConfigEnablesService(t *testing.T) {
 	}
 }
 
+func TestMultipleSMBSharesSnapshotAndDefaultSource(t *testing.T) {
+	t.Parallel()
+
+	service := NewWithConfig(Config{
+		Root: t.TempDir(),
+		Shares: []SMBConfig{
+			{ID: "media", Name: "Media", Host: "nas.local", Share: "media", Username: "aaron", Password: "secret"},
+			{ID: "archive", Name: "Archive", Host: "nas.local", Share: "archive", Username: "aaron"},
+		},
+	})
+
+	snapshot := service.Snapshot()
+	if got := snapshot["active_source_id"]; got != "media" {
+		t.Fatalf("active_source_id = %v, want media", got)
+	}
+	sources, ok := snapshot["file_sources"].([]SourceSnapshot)
+	if !ok {
+		t.Fatalf("file_sources type = %T, want []SourceSnapshot", snapshot["file_sources"])
+	}
+	if len(sources) != 3 {
+		t.Fatalf("source count = %d, want 3 including local", len(sources))
+	}
+	if sources[0].ID != "media" || !sources[0].SMBPasswordSet {
+		t.Fatalf("first source = %#v, want media with saved password", sources[0])
+	}
+	if sources[2].ID != LocalSourceID || !sources[2].LocalRootEnabled {
+		t.Fatalf("last source = %#v, want local source", sources[2])
+	}
+}
+
+func TestLocalSourceIDUsesLocalRootWhenSMBConfigured(t *testing.T) {
+	t.Parallel()
+
+	service := NewWithConfig(Config{
+		Root: t.TempDir(),
+		Shares: []SMBConfig{
+			{ID: "media", Host: "nas.local", Share: "media"},
+		},
+	})
+	content := base64.StdEncoding.EncodeToString([]byte("local"))
+	if err := service.UploadSource(context.Background(), LocalSourceID, "docs/local.txt", content); err != nil {
+		t.Fatalf("UploadSource local: %v", err)
+	}
+	downloaded, err := service.DownloadSource(context.Background(), LocalSourceID, "docs/local.txt")
+	if err != nil {
+		t.Fatalf("DownloadSource local: %v", err)
+	}
+	if downloaded != content {
+		t.Fatalf("DownloadSource content = %q, want %q", downloaded, content)
+	}
+}
+
+func TestApplySMBConfigsPreservesExistingPasswordsBySourceID(t *testing.T) {
+	t.Parallel()
+
+	service := NewWithConfig(Config{
+		Shares: []SMBConfig{
+			{ID: "media", Host: "nas.local", Share: "media", Username: "aaron", Password: "old-secret"},
+			{ID: "archive", Host: "nas.local", Share: "archive", Username: "aaron", Password: "archive-secret"},
+		},
+	})
+
+	service.ApplySMBConfigs([]SMBConfig{
+		{ID: "media", Host: "nas.local", Share: "media", Username: "aaron"},
+		{ID: "backup", Host: "nas.local", Share: "backup", Username: "aaron", Password: "backup-secret"},
+	})
+
+	configs := service.SMBConfigs()
+	if len(configs) != 2 {
+		t.Fatalf("SMB config count = %d, want 2", len(configs))
+	}
+	passwords := map[string]string{}
+	for _, cfg := range configs {
+		passwords[cfg.ID] = cfg.Password
+	}
+	if passwords["media"] != "old-secret" {
+		t.Fatalf("media password = %q, want old-secret", passwords["media"])
+	}
+	if passwords["backup"] != "backup-secret" {
+		t.Fatalf("backup password = %q, want backup-secret", passwords["backup"])
+	}
+	if _, ok := passwords["archive"]; ok {
+		t.Fatal("archive share was kept after apply, want removed")
+	}
+}
+
 func TestNormalizeSMBHostAcceptsWebAndSMBInputs(t *testing.T) {
 	t.Parallel()
 
