@@ -79,7 +79,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		items, err := d.files.List(ctx, request.Path)
+		items, err := d.files.ListSource(ctx, request.SourceID, request.Path)
 		if err != nil {
 			return nil, mapError(err)
 		}
@@ -90,7 +90,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		item, err := d.files.Stat(ctx, request.Path)
+		item, err := d.files.StatSource(ctx, request.SourceID, request.Path)
 		if err != nil {
 			return nil, mapError(err)
 		}
@@ -101,7 +101,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		items, err := d.files.Search(ctx, request.Query, request.Limit)
+		items, err := d.files.SearchSource(ctx, request.SourceID, request.Query, request.Limit)
 		if err != nil {
 			return nil, mapError(err)
 		}
@@ -112,7 +112,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		if err := d.files.CreateDirectory(ctx, request.Path); err != nil {
+		if err := d.files.CreateDirectorySource(ctx, request.SourceID, request.Path); err != nil {
 			return nil, mapError(err)
 		}
 		return protocol.EmptyResponse{OK: true}, nil
@@ -122,7 +122,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		if err := d.files.Rename(ctx, request.From, request.To); err != nil {
+		if err := d.files.RenameSource(ctx, request.SourceID, request.From, request.To); err != nil {
 			return nil, mapError(err)
 		}
 		return protocol.EmptyResponse{OK: true}, nil
@@ -132,7 +132,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		if err := d.files.Delete(ctx, request.Path, request.IsDirectory); err != nil {
+		if err := d.files.DeleteSource(ctx, request.SourceID, request.Path, request.IsDirectory); err != nil {
 			return nil, mapError(err)
 		}
 		return protocol.EmptyResponse{OK: true}, nil
@@ -142,7 +142,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		contentBase64, err := d.files.Download(ctx, request.Path)
+		contentBase64, err := d.files.DownloadSource(ctx, request.SourceID, request.Path)
 		if err != nil {
 			return nil, mapError(err)
 		}
@@ -153,7 +153,7 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err != nil {
 			return nil, badRequest("invalid_file_request", err)
 		}
-		if err := d.files.Upload(ctx, request.Path, request.ContentBase64); err != nil {
+		if err := d.files.UploadSource(ctx, request.SourceID, request.Path, request.ContentBase64); err != nil {
 			return nil, mapError(err)
 		}
 		return protocol.EmptyResponse{OK: true}, nil
@@ -209,6 +209,20 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 			return nil, badRequest("invalid_media_request", err)
 		}
 		response, err := d.media.Status(ctx, request.JobID)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
+	case protocol.CommandMediaImageFetch:
+		if d.media == nil || !d.media.Enabled() {
+			return nil, mapError(fmt.Errorf("media source is not configured"))
+		}
+		request, err := decodeBody[protocol.MediaImageFetchRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_media_image_request", err)
+		}
+		response, err := d.media.FetchImage(ctx, request.URL)
 		if err != nil {
 			return nil, mapError(err)
 		}

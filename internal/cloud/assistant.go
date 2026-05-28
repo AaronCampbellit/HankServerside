@@ -224,6 +224,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 	case len(parts) == 2 && parts[1] == "media-settings":
 		s.handleAssistantMediaSettings(w, r, home, membership)
 		return true
+	case len(parts) == 2 && parts[1] == "media-image":
+		s.handleAssistantMediaImage(w, r, home, membership)
+		return true
 	case len(parts) == 3 && parts[1] == "media-jobs":
 		s.handleAssistantMediaJobStatus(w, r, home, membership, parts[2])
 		return true

@@ -102,36 +102,24 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 		return profile, nil
 
 	case domain.ServiceTypeSMB:
-		var public struct {
-			Host     string `json:"host"`
-			Share    string `json:"share"`
-			Username string `json:"username"`
-			Domain   string `json:"domain"`
-		}
+		var public smbPublicConfig
 		if len(request.PublicConfig) > 0 {
 			if err := json.Unmarshal(request.PublicConfig, &public); err != nil {
 				return protocol.ServiceProfileSnapshot{}, err
 			}
 		}
-		var secrets struct {
-			Password string `json:"password"`
-		}
+		var secrets smbSecretConfig
 		if len(request.Secrets) > 0 {
 			if err := json.Unmarshal(request.Secrets, &secrets); err != nil {
 				return protocol.ServiceProfileSnapshot{}, err
 			}
 		}
-		m.files.ApplySMBConfig(agentfiles.SMBConfig{
-			Host:     public.Host,
-			Share:    public.Share,
-			Username: public.Username,
-			Password: secrets.Password,
-			Domain:   public.Domain,
-		})
+		configs := smbConfigsFromApply(public, secrets, m.files.SMBConfigs())
+		m.files.ApplySMBConfigs(configs)
 		profile := m.smbProfile(request.SecretVersion, request.SecretVersion, "")
 		m.profiles[request.ServiceType] = profile
 		if request.Persist {
-			if err := m.persistSMB(public.Host, public.Share, public.Username, secrets.Password, public.Domain); err != nil {
+			if err := m.persistSMBConfigs(m.files.SMBConfigs()); err != nil {
 				profile.Status = domain.SyncStatusDegraded
 				profile.LastError = err.Error()
 				m.profiles[request.ServiceType] = profile
@@ -179,6 +167,126 @@ func (m *configManager) smbProfile(secretVersion int, appliedVersion int, lastEr
 	}
 }
 
+type smbPublicConfig struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Host        string            `json:"host"`
+	Share       string            `json:"share"`
+	Username    string            `json:"username"`
+	Domain      string            `json:"domain"`
+	Shares      []smbSharePayload `json:"shares"`
+	FileSources []smbSharePayload `json:"file_sources"`
+	Sources     []smbSharePayload `json:"sources"`
+}
+
+type smbSecretConfig struct {
+	Password string            `json:"password"`
+	Shares   []smbShareSecret  `json:"shares"`
+	ByID     map[string]string `json:"by_id"`
+	SourceID string            `json:"source_id"`
+}
+
+type smbSharePayload struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Host        string `json:"host"`
+	Share       string `json:"share"`
+	Username    string `json:"username"`
+	Domain      string `json:"domain"`
+	SMBHost     string `json:"smb_host"`
+	SMBShare    string `json:"smb_share"`
+	SMBUsername string `json:"smb_username"`
+	SMBDomain   string `json:"smb_domain"`
+}
+
+type smbShareSecret struct {
+	ID       string `json:"id"`
+	SourceID string `json:"source_id"`
+	Password string `json:"password"`
+}
+
+func smbConfigsFromApply(public smbPublicConfig, secrets smbSecretConfig, existing []agentfiles.SMBConfig) []agentfiles.SMBConfig {
+	publicShares := public.Shares
+	if len(publicShares) == 0 {
+		publicShares = filterSMBSourcePayloads(public.FileSources)
+	}
+	if len(publicShares) == 0 {
+		publicShares = filterSMBSourcePayloads(public.Sources)
+	}
+
+	configs := make([]agentfiles.SMBConfig, 0, len(publicShares))
+	for _, share := range publicShares {
+		configs = append(configs, agentfiles.SMBConfig{
+			ID:       strings.TrimSpace(firstNonEmpty(share.ID, share.SourceID)),
+			Name:     strings.TrimSpace(share.Name),
+			Host:     strings.TrimSpace(firstNonEmpty(share.Host, share.SMBHost)),
+			Share:    strings.TrimSpace(firstNonEmpty(share.Share, share.SMBShare)),
+			Username: strings.TrimSpace(firstNonEmpty(share.Username, share.SMBUsername)),
+			Domain:   strings.TrimSpace(firstNonEmpty(share.Domain, share.SMBDomain)),
+		})
+	}
+	if len(configs) == 0 {
+		configs = append(configs, agentfiles.SMBConfig{
+			ID:       strings.TrimSpace(public.ID),
+			Name:     strings.TrimSpace(public.Name),
+			Host:     strings.TrimSpace(public.Host),
+			Share:    strings.TrimSpace(public.Share),
+			Username: strings.TrimSpace(public.Username),
+			Domain:   strings.TrimSpace(public.Domain),
+		})
+	}
+
+	passwords := map[string]string{}
+	for _, cfg := range existing {
+		passwords[cfg.ID] = cfg.Password
+	}
+	if secrets.Password != "" {
+		targetID := strings.TrimSpace(secrets.SourceID)
+		if targetID == "" && len(configs) == 1 {
+			targetID = configs[0].ID
+		}
+		if targetID != "" {
+			passwords[targetID] = secrets.Password
+		}
+	}
+	for id, password := range secrets.ByID {
+		if strings.TrimSpace(id) != "" && password != "" {
+			passwords[strings.TrimSpace(id)] = password
+		}
+	}
+	for _, secret := range secrets.Shares {
+		id := strings.TrimSpace(firstNonEmpty(secret.ID, secret.SourceID))
+		if id != "" && secret.Password != "" {
+			passwords[id] = secret.Password
+		}
+	}
+	for i := range configs {
+		configs[i].Password = passwords[configs[i].ID]
+	}
+	return configs
+}
+
+func filterSMBSourcePayloads(sources []smbSharePayload) []smbSharePayload {
+	filtered := make([]smbSharePayload, 0, len(sources))
+	for _, source := range sources {
+		if source.Type == "" || source.Type == "smb" {
+			filtered = append(filtered, source)
+		}
+	}
+	return filtered
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func (m *configManager) persistHomeAssistant(baseURL string, token string, timeoutSeconds int) error {
 	if m.envPath == "" {
 		return nil
@@ -196,6 +304,16 @@ func (m *configManager) persistHomeAssistant(baseURL string, token string, timeo
 }
 
 func (m *configManager) persistSMB(host string, share string, username string, password string, domainName string) error {
+	return m.persistSMBConfigs([]agentfiles.SMBConfig{{
+		Host:     host,
+		Share:    share,
+		Username: username,
+		Password: password,
+		Domain:   domainName,
+	}})
+}
+
+func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error {
 	if m.envPath == "" {
 		return nil
 	}
@@ -203,11 +321,48 @@ func (m *configManager) persistSMB(host string, share string, username string, p
 	if err != nil {
 		return err
 	}
-	env["HANK_REMOTE_SMB_HOST"] = strings.TrimSpace(host)
-	env["HANK_REMOTE_SMB_SHARE"] = strings.TrimSpace(share)
-	env["HANK_REMOTE_SMB_USERNAME"] = strings.TrimSpace(username)
-	env["HANK_REMOTE_SMB_PASSWORD"] = password
-	env["HANK_REMOTE_SMB_DOMAIN"] = strings.TrimSpace(domainName)
+	var primary agentfiles.SMBConfig
+	if len(configs) > 0 {
+		primary = configs[0]
+	}
+	env["HANK_REMOTE_SMB_HOST"] = strings.TrimSpace(primary.Host)
+	env["HANK_REMOTE_SMB_SHARE"] = strings.TrimSpace(primary.Share)
+	env["HANK_REMOTE_SMB_USERNAME"] = strings.TrimSpace(primary.Username)
+	env["HANK_REMOTE_SMB_PASSWORD"] = primary.Password
+	env["HANK_REMOTE_SMB_DOMAIN"] = strings.TrimSpace(primary.Domain)
+	type envShare struct {
+		ID       string `json:"id,omitempty"`
+		Name     string `json:"name,omitempty"`
+		Host     string `json:"host"`
+		Share    string `json:"share"`
+		Username string `json:"username,omitempty"`
+		Password string `json:"password,omitempty"`
+		Domain   string `json:"domain,omitempty"`
+	}
+	shares := make([]envShare, 0, len(configs))
+	for _, cfg := range configs {
+		if !cfg.Enabled() {
+			continue
+		}
+		shares = append(shares, envShare{
+			ID:       strings.TrimSpace(cfg.ID),
+			Name:     strings.TrimSpace(cfg.Name),
+			Host:     strings.TrimSpace(cfg.Host),
+			Share:    strings.TrimSpace(cfg.Share),
+			Username: strings.TrimSpace(cfg.Username),
+			Password: cfg.Password,
+			Domain:   strings.TrimSpace(cfg.Domain),
+		})
+	}
+	if len(shares) > 1 {
+		encoded, err := json.Marshal(shares)
+		if err != nil {
+			return err
+		}
+		env["HANK_REMOTE_SMB_SHARES_JSON"] = string(encoded)
+	} else {
+		delete(env, "HANK_REMOTE_SMB_SHARES_JSON")
+	}
 	return writeEnvFile(m.envPath, env)
 }
 

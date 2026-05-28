@@ -16,7 +16,8 @@ type FileItem struct {
 }
 
 type FilesListRequest struct {
-	Path string `json:"path"`
+	SourceID string `json:"source_id,omitempty"`
+	Path     string `json:"path"`
 }
 
 type FilesListResponse struct {
@@ -24,7 +25,8 @@ type FilesListResponse struct {
 }
 
 type FilesStatRequest struct {
-	Path string `json:"path"`
+	SourceID string `json:"source_id,omitempty"`
+	Path     string `json:"path"`
 }
 
 type FilesStatResponse struct {
@@ -32,8 +34,9 @@ type FilesStatResponse struct {
 }
 
 type FilesSearchRequest struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
+	SourceID string `json:"source_id,omitempty"`
+	Query    string `json:"query"`
+	Limit    int    `json:"limit,omitempty"`
 }
 
 type FilesSearchResponse struct {
@@ -41,21 +44,25 @@ type FilesSearchResponse struct {
 }
 
 type FilesCreateDirectoryRequest struct {
-	Path string `json:"path"`
+	SourceID string `json:"source_id,omitempty"`
+	Path     string `json:"path"`
 }
 
 type FilesRenameRequest struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+	SourceID string `json:"source_id,omitempty"`
+	From     string `json:"from"`
+	To       string `json:"to"`
 }
 
 type FilesDeleteRequest struct {
+	SourceID    string `json:"source_id,omitempty"`
 	Path        string `json:"path"`
 	IsDirectory bool   `json:"is_directory"`
 }
 
 type FilesDownloadRequest struct {
-	Path string `json:"path"`
+	SourceID string `json:"source_id,omitempty"`
+	Path     string `json:"path"`
 }
 
 type FilesDownloadResponse struct {
@@ -64,18 +71,21 @@ type FilesDownloadResponse struct {
 }
 
 type FilesUploadRequest struct {
+	SourceID      string `json:"source_id,omitempty"`
 	Path          string `json:"path"`
 	ContentBase64 string `json:"content_base64"`
 }
 
 type FileTransferOpen struct {
 	Operation string `json:"operation"`
+	SourceID  string `json:"source_id,omitempty"`
 	Path      string `json:"path"`
 	Offset    int64  `json:"offset,omitempty"`
 }
 
 type FileTransferReady struct {
 	Operation string `json:"operation"`
+	SourceID  string `json:"source_id,omitempty"`
 	Path      string `json:"path"`
 	Offset    int64  `json:"offset,omitempty"`
 	Size      int64  `json:"size,omitempty"`
@@ -88,6 +98,7 @@ type FileTransferChunk struct {
 
 type FileTransferComplete struct {
 	Operation string `json:"operation"`
+	SourceID  string `json:"source_id,omitempty"`
 	Path      string `json:"path"`
 	Offset    int64  `json:"offset,omitempty"`
 	Size      int64  `json:"size"`

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -73,6 +74,7 @@ type Agent struct {
 	ConfigPath string
 	HA         HomeAssistant
 	SMB        SMB
+	SMBShares  []SMB
 	FilesRoot  string
 	NotesRoot  string
 	Media      Media
@@ -85,6 +87,8 @@ type HomeAssistant struct {
 }
 
 type SMB struct {
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
 	Host     string
 	Share    string
 	Username string
@@ -196,6 +200,17 @@ func LoadAgent() (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
+	legacySMB := SMB{
+		Host:     strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_HOST")),
+		Share:    strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_SHARE")),
+		Username: strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_USERNAME")),
+		Password: os.Getenv("HANK_REMOTE_SMB_PASSWORD"),
+		Domain:   strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_DOMAIN")),
+	}
+	smbShares, err := loadSMBShares(legacySMB, os.Getenv("HANK_REMOTE_SMB_SHARES_JSON"))
+	if err != nil {
+		return Agent{}, err
+	}
 
 	cfg := Agent{
 		CloudURL:   envOrDefault("HANK_REMOTE_AGENT_CLOUD_URL", "ws://127.0.0.1:8080/ws/agent"),
@@ -221,12 +236,13 @@ func LoadAgent() (Agent, error) {
 			Timeout: haTimeout,
 		},
 		SMB: SMB{
-			Host:     strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_HOST")),
-			Share:    strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_SHARE")),
-			Username: strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_USERNAME")),
-			Password: os.Getenv("HANK_REMOTE_SMB_PASSWORD"),
-			Domain:   strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_DOMAIN")),
+			Host:     legacySMB.Host,
+			Share:    legacySMB.Share,
+			Username: legacySMB.Username,
+			Password: legacySMB.Password,
+			Domain:   legacySMB.Domain,
 		},
+		SMBShares: smbShares,
 	}
 
 	switch {
@@ -237,6 +253,49 @@ func LoadAgent() (Agent, error) {
 	default:
 		return cfg, nil
 	}
+}
+
+func loadSMBShares(legacy SMB, rawJSON string) ([]SMB, error) {
+	var shares []SMB
+	if strings.TrimSpace(rawJSON) != "" {
+		if err := json.Unmarshal([]byte(rawJSON), &shares); err != nil {
+			return nil, fmt.Errorf("HANK_REMOTE_SMB_SHARES_JSON: %w", err)
+		}
+		for i := range shares {
+			shares[i] = normalizeSMBEnv(shares[i])
+		}
+	}
+	legacy = normalizeSMBEnv(legacy)
+	if legacy.Host != "" || legacy.Share != "" {
+		if len(shares) == 0 {
+			shares = append(shares, legacy)
+		} else if !containsSMBShare(shares, legacy) {
+			shares = append([]SMB{legacy}, shares...)
+		}
+	}
+	return shares, nil
+}
+
+func normalizeSMBEnv(value SMB) SMB {
+	value.ID = strings.TrimSpace(value.ID)
+	value.Name = strings.TrimSpace(value.Name)
+	value.Host = strings.TrimSpace(value.Host)
+	value.Share = strings.TrimSpace(value.Share)
+	value.Username = strings.TrimSpace(value.Username)
+	value.Domain = strings.TrimSpace(value.Domain)
+	return value
+}
+
+func containsSMBShare(shares []SMB, candidate SMB) bool {
+	for _, share := range shares {
+		if strings.TrimSpace(candidate.ID) != "" && strings.TrimSpace(share.ID) == strings.TrimSpace(candidate.ID) {
+			return true
+		}
+		if strings.TrimSpace(share.Host) == strings.TrimSpace(candidate.Host) && strings.TrimSpace(share.Share) == strings.TrimSpace(candidate.Share) {
+			return true
+		}
+	}
+	return false
 }
 
 func envOrDefault(key string, fallback string) string {

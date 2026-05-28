@@ -25,6 +25,7 @@ type transferSession struct {
 	HomeID    string
 	AgentID   string
 	Operation string
+	SourceID  string
 	Path      string
 	TokenHash string
 	CreatedAt time.Time
@@ -72,7 +73,7 @@ func newTransferRegistry() *transferRegistry {
 	}
 }
 
-func (r *transferRegistry) Create(homeID string, agentID string, operation string, path string, ttl time.Duration) (*transferSession, string) {
+func (r *transferRegistry) Create(homeID string, agentID string, operation string, sourceID string, path string, ttl time.Duration) (*transferSession, string) {
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
@@ -84,6 +85,7 @@ func (r *transferRegistry) Create(homeID string, agentID string, operation strin
 		HomeID:    homeID,
 		AgentID:   agentID,
 		Operation: operation,
+		SourceID:  sourceID,
 		Path:      path,
 		TokenHash: hashToken(rawToken),
 		CreatedAt: time.Now().UTC(),
@@ -168,6 +170,7 @@ func (s *transferSession) Snapshot() map[string]any {
 
 	payload := map[string]any{
 		"transfer_id":  s.ID,
+		"source_id":    s.SourceID,
 		"path":         s.Path,
 		"operation":    s.Operation,
 		"size":         s.size,

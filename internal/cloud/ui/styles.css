@@ -1005,6 +1005,11 @@ button.ghost {
   font-weight: 700;
 }
 
+button.button-link {
+  font: inherit;
+  cursor: pointer;
+}
+
 .actions,
 .inline-form {
   display: flex;
@@ -2490,13 +2495,14 @@ button:disabled {
 
 .hank-chat-layout {
   display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 12px;
   align-items: stretch;
 }
 
 .hank-sessions-panel,
 .hank-chat-panel {
+  min-width: 0;
   min-height: min(760px, calc(100vh - 230px));
 }
 
@@ -2513,6 +2519,7 @@ button:disabled {
   text-align: center;
   font-size: 1.35rem;
   line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 
 .hank-chat-panel > .panel-head .actions {
@@ -2525,13 +2532,29 @@ button:disabled {
 }
 
 .hank-sessions-panel .panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
   margin-bottom: 8px;
 }
 
 .hank-sessions-panel h2 {
+  min-width: 0;
+  margin: 0;
   font-size: 1.2rem;
   line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.hank-sessions-panel .collapsible-panel-actions {
+  min-width: max-content;
+  gap: 8px;
+}
+
+.hank-sessions-panel #new-session-button {
+  min-height: 36px;
+  padding: 0 12px;
 }
 
 .hank-sessions-panel .kv-grid {
@@ -2618,6 +2641,11 @@ button:disabled {
 .hank-message p {
   margin: 6px 0 0;
   color: #fff;
+  overflow-wrap: anywhere;
+}
+
+.hank-message.pending {
+  opacity: 0.82;
 }
 
 .hank-result-cards {
@@ -2626,6 +2654,7 @@ button:disabled {
 
 .hank-result-card {
   display: grid;
+  min-width: 0;
   gap: 7px;
 }
 
@@ -2700,6 +2729,12 @@ button:disabled {
   gap: 6px 10px;
   color: var(--muted);
   font-size: 0.74rem;
+}
+
+.hank-media-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .hank-confirmation {

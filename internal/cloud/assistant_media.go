@@ -262,11 +262,11 @@ func (s *Server) answerMediaSearch(ctx context.Context, home domain.Home, query 
 
 	cards := make([]assistantResultCard, 0, len(payload.Results))
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("I found %d media matches for `%s`. Reply with the option number or title:", len(payload.Results), query))
+	builder.WriteString(fmt.Sprintf("I found %d media matches for `%s`. Choose one of the options below:", len(payload.Results), query))
 	for index, result := range payload.Results {
 		card := assistantMediaCard(result, index+1)
 		cards = append(cards, card)
-		builder.WriteString(fmt.Sprintf("\n%d. %s", index+1, mediaCardLine(card)))
+		builder.WriteString(fmt.Sprintf("\n%s", mediaCardLine(card)))
 	}
 	return assistantMessageContent{Text: builder.String(), Cards: cards}, nil
 }
@@ -499,7 +499,7 @@ func (s *Server) latestMediaCards(ctx context.Context, sessionID string) []assis
 	return nil
 }
 
-func assistantMediaCard(result protocol.MediaSearchResult, option int) assistantResultCard {
+func assistantMediaCard(result protocol.MediaSearchResult, _ int) assistantResultCard {
 	title := result.Title
 	if result.Year > 0 {
 		title = fmt.Sprintf("%s (%d)", result.Title, result.Year)
@@ -509,7 +509,7 @@ func assistantMediaCard(result protocol.MediaSearchResult, option int) assistant
 		Kind:          "media",
 		Title:         title,
 		Summary:       summary,
-		ActionTitle:   fmt.Sprintf("Reply %d to choose", option),
+		ActionTitle:   "Choose",
 		Path:          result.PagePath,
 		SearchText:    result.SearchText,
 		ImageURL:      result.PosterURL,

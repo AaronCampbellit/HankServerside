@@ -15,9 +15,10 @@ import (
 const transferChunkSize = 32 * 1024
 
 type uploadTransfer struct {
-	path string
-	file agentfiles.WriteHandle
-	size int64
+	sourceID string
+	path     string
+	file     agentfiles.WriteHandle
+	size     int64
 }
 
 func (c *Client) handleTransferOpen(ctx context.Context, conn *websocket.Conn, envelope protocol.Envelope) error {
@@ -28,9 +29,9 @@ func (c *Client) handleTransferOpen(ctx context.Context, conn *websocket.Conn, e
 
 	switch open.Operation {
 	case protocol.FileTransferOperationDownload:
-		return c.startDownloadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.Path, open.Offset)
+		return c.startDownloadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.SourceID, open.Path, open.Offset)
 	case protocol.FileTransferOperationUpload:
-		return c.startUploadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.Path, open.Offset)
+		return c.startUploadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.SourceID, open.Path, open.Offset)
 	default:
 		return c.writeTransferError(ctx, conn, envelope.RequestID, envelope.HomeID, "invalid_transfer_operation", "unsupported file transfer operation")
 	}
@@ -90,6 +91,7 @@ func (c *Client) handleTransferComplete(ctx context.Context, conn *websocket.Con
 
 	reply, err := protocol.NewEnvelope(protocol.TypeFileTransferComplete, envelope.RequestID, c.agentID, envelope.HomeID, protocol.FileTransferComplete{
 		Operation: protocol.FileTransferOperationUpload,
+		SourceID:  upload.sourceID,
 		Path:      upload.path,
 		Offset:    upload.size,
 		Size:      upload.size,
@@ -101,14 +103,15 @@ func (c *Client) handleTransferComplete(ctx context.Context, conn *websocket.Con
 	return c.writeJSON(ctx, conn, reply)
 }
 
-func (c *Client) startDownloadTransfer(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, path string, offset int64) error {
-	file, info, err := c.dispatcher.files.OpenReader(ctx, path, offset)
+func (c *Client) startDownloadTransfer(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64) error {
+	file, info, err := c.dispatcher.files.OpenReaderSource(ctx, sourceID, path, offset)
 	if err != nil {
 		return c.writeTransferError(ctx, conn, transferID, homeID, "transfer_open_failed", err.Error())
 	}
 
 	ready, err := protocol.NewEnvelope(protocol.TypeFileTransferReady, transferID, c.agentID, homeID, protocol.FileTransferReady{
 		Operation: protocol.FileTransferOperationDownload,
+		SourceID:  sourceID,
 		Path:      path,
 		Offset:    offset,
 		Size:      info.Size(),
@@ -122,30 +125,32 @@ func (c *Client) startDownloadTransfer(ctx context.Context, conn *websocket.Conn
 		return err
 	}
 
-	go c.streamDownload(ctx, conn, transferID, homeID, path, offset, info.Size(), file)
+	go c.streamDownload(ctx, conn, transferID, homeID, sourceID, path, offset, info.Size(), file)
 	return nil
 }
 
-func (c *Client) startUploadTransfer(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, path string, offset int64) error {
+func (c *Client) startUploadTransfer(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64) error {
 	if existing, ok := c.deleteUpload(transferID); ok {
 		_ = existing.file.Close()
 	}
 
-	file, size, err := c.dispatcher.files.OpenWriter(ctx, path, offset)
+	file, size, err := c.dispatcher.files.OpenWriterSource(ctx, sourceID, path, offset)
 	if err != nil {
 		return c.writeTransferError(ctx, conn, transferID, homeID, "transfer_open_failed", err.Error())
 	}
 
 	c.uploadsMu.Lock()
 	c.uploads[transferID] = &uploadTransfer{
-		path: path,
-		file: file,
-		size: size,
+		sourceID: sourceID,
+		path:     path,
+		file:     file,
+		size:     size,
 	}
 	c.uploadsMu.Unlock()
 
 	ready, err := protocol.NewEnvelope(protocol.TypeFileTransferReady, transferID, c.agentID, homeID, protocol.FileTransferReady{
 		Operation: protocol.FileTransferOperationUpload,
+		SourceID:  sourceID,
 		Path:      path,
 		Offset:    size,
 		Size:      size,
@@ -159,7 +164,7 @@ func (c *Client) startUploadTransfer(ctx context.Context, conn *websocket.Conn, 
 	return c.writeJSON(ctx, conn, ready)
 }
 
-func (c *Client) streamDownload(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, path string, offset int64, totalSize int64, file agentfiles.ReadHandle) {
+func (c *Client) streamDownload(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64, totalSize int64, file agentfiles.ReadHandle) {
 	defer file.Close()
 
 	buffer := make([]byte, transferChunkSize)
@@ -185,6 +190,7 @@ func (c *Client) streamDownload(ctx context.Context, conn *websocket.Conn, trans
 		if err == io.EOF {
 			complete, envelopeErr := protocol.NewEnvelope(protocol.TypeFileTransferComplete, transferID, c.agentID, homeID, protocol.FileTransferComplete{
 				Operation: protocol.FileTransferOperationDownload,
+				SourceID:  sourceID,
 				Path:      path,
 				Offset:    currentOffset,
 				Size:      totalSize,

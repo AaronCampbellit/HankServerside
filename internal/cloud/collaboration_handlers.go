@@ -882,49 +882,55 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 		}
 		profile.SecretVersion = secretVersion
 
-		if len(body.Secrets) > 0 {
-			agentConn, ok := s.router.GetAgent(home.ID)
+		applyToAgent := len(body.Secrets) > 0 || (serviceType == domain.ServiceTypeSMB && len(body.PublicConfig) > 0)
+		if applyToAgent {
+			_, ok := s.router.GetAgent(home.ID)
 			if !ok {
-				profile.Status = domain.SyncStatusDegraded
+				if len(body.Secrets) > 0 {
+					profile.Status = domain.SyncStatusDegraded
+					profile.LastError = "agent offline"
+					_ = s.store.UpsertHomeServiceProfile(r.Context(), profile)
+					writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline", "profile": profile})
+					return true
+				}
+				profile.Status = domain.SyncStatusPending
 				profile.LastError = "agent offline"
-				_ = s.store.UpsertHomeServiceProfile(r.Context(), profile)
-				writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline", "profile": profile})
-				return true
 			}
 
-			response, err := s.sendAgentCommand(r.Context(), home.ID, "config.apply", protocol.ConfigApplyRequest{
-				ServiceType:   serviceType,
-				PublicConfig:  body.PublicConfig,
-				Secrets:       body.Secrets,
-				SecretVersion: secretVersion,
-				Persist:       body.Persist,
-			})
-			if err != nil {
-				profile.Status = domain.SyncStatusDegraded
-				profile.LastError = err.Error()
-				_ = s.store.UpsertHomeServiceProfile(r.Context(), profile)
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return true
+			if ok {
+				response, err := s.sendAgentCommand(r.Context(), home.ID, "config.apply", protocol.ConfigApplyRequest{
+					ServiceType:   serviceType,
+					PublicConfig:  body.PublicConfig,
+					Secrets:       body.Secrets,
+					SecretVersion: secretVersion,
+					Persist:       body.Persist,
+				})
+				if err != nil {
+					profile.Status = domain.SyncStatusDegraded
+					profile.LastError = err.Error()
+					_ = s.store.UpsertHomeServiceProfile(r.Context(), profile)
+					http.Error(w, err.Error(), http.StatusBadGateway)
+					return true
+				}
+				if response.Error != nil {
+					profile.Status = domain.SyncStatusDegraded
+					profile.LastError = response.Error.Message
+					_ = s.store.UpsertHomeServiceProfile(r.Context(), profile)
+					http.Error(w, response.Error.Message, http.StatusBadGateway)
+					return true
+				}
+				applied, err := protocol.DecodePayload[protocol.ConfigApplyResponse](response)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadGateway)
+					return true
+				}
+				profile.PublicConfigJSON = strings.TrimSpace(string(applied.Profile.PublicConfig))
+				profile.AppliedVersion = applied.Profile.AppliedVersion
+				profile.Status = applied.Profile.Status
+				profile.LastError = applied.Profile.LastError
+				lastBackup := now
+				profile.LastBackupAt = &lastBackup
 			}
-			if response.Error != nil {
-				profile.Status = domain.SyncStatusDegraded
-				profile.LastError = response.Error.Message
-				_ = s.store.UpsertHomeServiceProfile(r.Context(), profile)
-				http.Error(w, response.Error.Message, http.StatusBadGateway)
-				return true
-			}
-			applied, err := protocol.DecodePayload[protocol.ConfigApplyResponse](response)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return true
-			}
-			profile.PublicConfigJSON = strings.TrimSpace(string(applied.Profile.PublicConfig))
-			profile.AppliedVersion = applied.Profile.AppliedVersion
-			profile.Status = applied.Profile.Status
-			profile.LastError = applied.Profile.LastError
-			lastBackup := now
-			profile.LastBackupAt = &lastBackup
-			_ = agentConn
 		} else {
 			profile.Status = domain.SyncStatusPending
 			profile.LastError = ""

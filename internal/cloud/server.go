@@ -799,7 +799,8 @@ func (s *Server) handlePendingTimeout(ctx context.Context, pending *pendingReque
 
 func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request, home domain.Home, operation string) {
 	type request struct {
-		Path string `json:"path"`
+		SourceID string `json:"source_id"`
+		Path     string `json:"path"`
 	}
 
 	var body request
@@ -808,6 +809,7 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	body.Path = strings.TrimSpace(body.Path)
+	body.SourceID = strings.TrimSpace(body.SourceID)
 	if body.Path == "" {
 		http.Error(w, "path is required", http.StatusBadRequest)
 		return
@@ -819,7 +821,7 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	transfer, rawToken := s.transfers.Create(home.ID, agentConn.agent.ID, operation, body.Path, 10*time.Minute)
+	transfer, rawToken := s.transfers.Create(home.ID, agentConn.agent.ID, operation, body.SourceID, body.Path, 10*time.Minute)
 
 	method := http.MethodGet
 	if operation == protocol.FileTransferOperationUpload {
@@ -873,6 +875,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 
 		open, err := protocol.NewEnvelope(protocol.TypeFileTransferOpen, attempt.ID, agentConn.agent.ID, transfer.HomeID, protocol.FileTransferOpen{
 			Operation: protocol.FileTransferOperationDownload,
+			SourceID:  transfer.SourceID,
 			Path:      transfer.Path,
 			Offset:    offset,
 		})
@@ -977,6 +980,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 
 		open, err := protocol.NewEnvelope(protocol.TypeFileTransferOpen, attempt.ID, agentConn.agent.ID, transfer.HomeID, protocol.FileTransferOpen{
 			Operation: protocol.FileTransferOperationUpload,
+			SourceID:  transfer.SourceID,
 			Path:      transfer.Path,
 			Offset:    offset,
 		})
@@ -1040,6 +1044,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 
 		complete, err := protocol.NewEnvelope(protocol.TypeFileTransferComplete, attempt.ID, agentConn.agent.ID, transfer.HomeID, protocol.FileTransferComplete{
 			Operation: protocol.FileTransferOperationUpload,
+			SourceID:  transfer.SourceID,
 			Path:      transfer.Path,
 			Offset:    currentOffset,
 			Size:      currentOffset,

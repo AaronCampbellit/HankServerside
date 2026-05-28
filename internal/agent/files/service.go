@@ -19,6 +19,14 @@ import (
 
 var ErrDisabled = errors.New("files root is not configured")
 
+const (
+	LocalSourceID      = "local"
+	DefaultSMBSourceID = "smb"
+
+	fileSourceTypeLocal = "local"
+	fileSourceTypeSMB   = "smb"
+)
+
 type ReadHandle interface {
 	io.Reader
 	io.Closer
@@ -36,6 +44,8 @@ type RandomWriteHandle interface {
 }
 
 type SMBConfig struct {
+	ID       string
+	Name     string
 	Host     string
 	Share    string
 	Username string
@@ -48,14 +58,46 @@ func (c SMBConfig) Enabled() bool {
 }
 
 type Config struct {
-	Root string
-	SMB  SMBConfig
+	Root   string
+	SMB    SMBConfig
+	Shares []SMBConfig
+}
+
+type SourceSnapshot struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Type             string `json:"type"`
+	Root             string `json:"root,omitempty"`
+	SMBHost          string `json:"smb_host,omitempty"`
+	SMBShare         string `json:"smb_share,omitempty"`
+	SMBUsername      string `json:"smb_username,omitempty"`
+	SMBDomain        string `json:"smb_domain,omitempty"`
+	SMBEnabled       bool   `json:"smb_enabled,omitempty"`
+	SMBPasswordSet   bool   `json:"smb_password_set,omitempty"`
+	LocalRootEnabled bool   `json:"local_root_enabled,omitempty"`
+}
+
+type smbShareSnapshot struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Share       string `json:"share"`
+	Username    string `json:"username,omitempty"`
+	Domain      string `json:"domain,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	PasswordSet bool   `json:"password_set"`
 }
 
 type Service struct {
-	mu   sync.RWMutex
-	root string
-	smb  SMBConfig
+	mu             sync.RWMutex
+	root           string
+	smbShares      []SMBConfig
+	smbConnections map[string]*smbConnection
+}
+
+type fileSourceSelection struct {
+	ID   string
+	Type string
 }
 
 func New(root string) *Service {
@@ -64,39 +106,185 @@ func New(root string) *Service {
 
 func NewWithConfig(cfg Config) *Service {
 	return &Service{
-		root: strings.TrimSpace(cfg.Root),
-		smb: SMBConfig{
-			Host:     NormalizeSMBHost(cfg.SMB.Host),
-			Share:    strings.TrimSpace(cfg.SMB.Share),
-			Username: strings.TrimSpace(cfg.SMB.Username),
-			Password: cfg.SMB.Password,
-			Domain:   strings.TrimSpace(cfg.SMB.Domain),
-		},
+		root:           strings.TrimSpace(cfg.Root),
+		smbShares:      normalizeSMBConfigs(appendLegacySMBConfig(cfg.SMB, cfg.Shares)),
+		smbConnections: make(map[string]*smbConnection),
 	}
 }
 
 func (s *Service) Enabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.root != "" || s.smb.Enabled()
+	return s.root != "" || hasEnabledSMBConfig(s.smbShares)
 }
 
-func (s *Service) usingSMB() bool {
+func (s *Service) defaultSourceLocked() (fileSourceSelection, error) {
+	for _, cfg := range s.smbShares {
+		if cfg.Enabled() {
+			return fileSourceSelection{ID: cfg.ID, Type: fileSourceTypeSMB}, nil
+		}
+	}
+	if s.root != "" {
+		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal}, nil
+	}
+	return fileSourceSelection{}, ErrDisabled
+}
+
+func (s *Service) sourceForID(sourceID string) (fileSourceSelection, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.smb.Enabled()
+
+	sourceID = cleanSourceID(sourceID)
+	if sourceID == "" {
+		return s.defaultSourceLocked()
+	}
+	if sourceID == LocalSourceID {
+		if s.root == "" {
+			return fileSourceSelection{}, ErrDisabled
+		}
+		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal}, nil
+	}
+	for _, cfg := range s.smbShares {
+		if cfg.ID == sourceID {
+			if !cfg.Enabled() {
+				return fileSourceSelection{}, ErrDisabled
+			}
+			return fileSourceSelection{ID: sourceID, Type: fileSourceTypeSMB}, nil
+		}
+	}
+	return fileSourceSelection{}, fmt.Errorf("file source %q is not configured", sourceID)
 }
 
 func (s *Service) ApplySMBConfig(cfg SMBConfig) {
+	s.ApplySMBConfigs([]SMBConfig{cfg})
+}
+
+func (s *Service) ApplySMBConfigs(configs []SMBConfig) {
+	next := normalizeSMBConfigs(configs)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.smb = SMBConfig{
-		Host:     NormalizeSMBHost(cfg.Host),
-		Share:    strings.TrimSpace(cfg.Share),
-		Username: strings.TrimSpace(cfg.Username),
-		Password: cfg.Password,
-		Domain:   strings.TrimSpace(cfg.Domain),
+
+	existingPasswords := make(map[string]string, len(s.smbShares))
+	for _, cfg := range s.smbShares {
+		existingPasswords[cfg.ID] = cfg.Password
 	}
+	for i := range next {
+		if next[i].Password == "" {
+			next[i].Password = existingPasswords[next[i].ID]
+		}
+	}
+
+	keep := make(map[string]SMBConfig, len(next))
+	for _, cfg := range next {
+		keep[cfg.ID] = cfg
+	}
+	for sourceID, conn := range s.smbConnections {
+		cfg, ok := keep[sourceID]
+		if !ok || !sameSMBConfig(conn.cfg, cfg) {
+			_ = conn.close()
+			delete(s.smbConnections, sourceID)
+		}
+	}
+	s.smbShares = next
+}
+
+func (s *Service) SMBConfigs() []SMBConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneSMBConfigs(s.smbShares)
+}
+
+func appendLegacySMBConfig(legacy SMBConfig, shares []SMBConfig) []SMBConfig {
+	configs := make([]SMBConfig, 0, len(shares)+1)
+	if legacy.Enabled() {
+		configs = append(configs, legacy)
+	}
+	configs = append(configs, shares...)
+	return configs
+}
+
+func normalizeSMBConfigs(configs []SMBConfig) []SMBConfig {
+	normalized := make([]SMBConfig, 0, len(configs))
+	seen := map[string]int{}
+	for index, cfg := range configs {
+		cfg.Host = NormalizeSMBHost(cfg.Host)
+		cfg.Share = strings.TrimSpace(cfg.Share)
+		cfg.Username = strings.TrimSpace(cfg.Username)
+		cfg.Domain = strings.TrimSpace(cfg.Domain)
+		cfg.Name = strings.TrimSpace(cfg.Name)
+
+		fallbackID := DefaultSMBSourceID
+		if index > 0 {
+			fallbackID = fmt.Sprintf("%s-%d", DefaultSMBSourceID, index+1)
+		}
+		if cfg.ID == "" {
+			cfg.ID = firstNonBlank(cfg.Name, cfg.Share, fallbackID)
+		}
+		cfg.ID = cleanSourceID(cfg.ID)
+		if cfg.ID == "" {
+			cfg.ID = fallbackID
+		}
+		baseID := cfg.ID
+		if count := seen[baseID]; count > 0 {
+			cfg.ID = fmt.Sprintf("%s-%d", baseID, count+1)
+		}
+		seen[baseID]++
+		if cfg.Name == "" {
+			cfg.Name = cfg.Share
+		}
+		if cfg.Name == "" {
+			cfg.Name = cfg.ID
+		}
+		normalized = append(normalized, cfg)
+	}
+	return normalized
+}
+
+func hasEnabledSMBConfig(configs []SMBConfig) bool {
+	for _, cfg := range configs {
+		if cfg.Enabled() {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneSMBConfigs(configs []SMBConfig) []SMBConfig {
+	cloned := make([]SMBConfig, len(configs))
+	copy(cloned, configs)
+	return cloned
+}
+
+func cleanSourceID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastDash := false
+	for _, char := range value {
+		switch {
+		case char >= 'a' && char <= 'z', char >= '0' && char <= '9':
+			builder.WriteRune(char)
+			lastDash = false
+		case char == '_' || char == '-' || char == '.':
+			builder.WriteRune(char)
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func NormalizeSMBHost(host string) string {
@@ -129,33 +317,120 @@ func NormalizeSMBHost(host string) string {
 func (s *Service) Snapshot() map[string]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	sources := s.sourceSnapshotsLocked()
+	primary := SMBConfig{}
+	if len(s.smbShares) > 0 {
+		primary = s.smbShares[0]
+	}
 	return map[string]any{
 		"root":               s.root,
-		"smb_host":           s.smb.Host,
-		"smb_share":          s.smb.Share,
-		"smb_username":       s.smb.Username,
-		"smb_domain":         s.smb.Domain,
-		"smb_enabled":        s.smb.Enabled(),
-		"smb_password_set":   s.smb.Password != "",
+		"smb_host":           primary.Host,
+		"smb_share":          primary.Share,
+		"smb_username":       primary.Username,
+		"smb_domain":         primary.Domain,
+		"smb_enabled":        primary.Enabled(),
+		"smb_password_set":   primary.Password != "",
 		"local_root_enabled": s.root != "",
+		"active_source_id":   defaultSourceID(sources),
+		"file_sources":       sources,
+		"sources":            sources,
+		"shares":             s.smbShareSnapshotsLocked(),
 	}
 }
 
+func (s *Service) sourceSnapshotsLocked() []SourceSnapshot {
+	sources := make([]SourceSnapshot, 0, len(s.smbShares)+1)
+	for _, cfg := range s.smbShares {
+		sources = append(sources, SourceSnapshot{
+			ID:             cfg.ID,
+			Name:           cfg.Name,
+			Type:           fileSourceTypeSMB,
+			SMBHost:        cfg.Host,
+			SMBShare:       cfg.Share,
+			SMBUsername:    cfg.Username,
+			SMBDomain:      cfg.Domain,
+			SMBEnabled:     cfg.Enabled(),
+			SMBPasswordSet: cfg.Password != "",
+		})
+	}
+	if s.root != "" {
+		sources = append(sources, SourceSnapshot{
+			ID:               LocalSourceID,
+			Name:             "Home connector files",
+			Type:             fileSourceTypeLocal,
+			Root:             s.root,
+			LocalRootEnabled: true,
+		})
+	}
+	return sources
+}
+
+func (s *Service) smbShareSnapshotsLocked() []smbShareSnapshot {
+	shares := make([]smbShareSnapshot, 0, len(s.smbShares))
+	for _, cfg := range s.smbShares {
+		shares = append(shares, smbShareSnapshot{
+			ID:          cfg.ID,
+			Name:        cfg.Name,
+			Host:        cfg.Host,
+			Share:       cfg.Share,
+			Username:    cfg.Username,
+			Domain:      cfg.Domain,
+			Enabled:     cfg.Enabled(),
+			PasswordSet: cfg.Password != "",
+		})
+	}
+	return shares
+}
+
+func defaultSourceID(sources []SourceSnapshot) string {
+	for _, source := range sources {
+		if source.Type == fileSourceTypeSMB && source.SMBEnabled {
+			return source.ID
+		}
+	}
+	for _, source := range sources {
+		if source.Type == fileSourceTypeLocal && source.LocalRootEnabled {
+			return source.ID
+		}
+	}
+	return ""
+}
+
 func (s *Service) List(ctx context.Context, path string) ([]protocol.FileItem, error) {
-	if s.usingSMB() {
-		return s.listSMB(ctx, path)
+	return s.ListSource(ctx, "", path)
+}
+
+func (s *Service) ListSource(ctx context.Context, sourceID string, path string) ([]protocol.FileItem, error) {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.listSMB(ctx, source.ID, path)
 	}
 	return s.listLocal(ctx, path)
 }
 
 func (s *Service) Stat(ctx context.Context, path string) (protocol.FileItem, error) {
-	if s.usingSMB() {
-		return s.statSMB(ctx, path)
+	return s.StatSource(ctx, "", path)
+}
+
+func (s *Service) StatSource(ctx context.Context, sourceID string, path string) (protocol.FileItem, error) {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return protocol.FileItem{}, err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.statSMB(ctx, source.ID, path)
 	}
 	return s.statLocal(ctx, path)
 }
 
 func (s *Service) Search(ctx context.Context, query string, limit int) ([]protocol.FileItem, error) {
+	return s.SearchSource(ctx, "", query, limit)
+}
+
+func (s *Service) SearchSource(ctx context.Context, sourceID string, query string, limit int) ([]protocol.FileItem, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return nil, nil
@@ -175,7 +450,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]protoc
 		current := queue[0]
 		queue = queue[1:]
 		visited++
-		items, err := s.List(ctx, current.path)
+		items, err := s.ListSource(ctx, sourceID, current.path)
 		if err != nil {
 			return nil, err
 		}
@@ -204,57 +479,121 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]protoc
 }
 
 func (s *Service) CreateDirectory(ctx context.Context, path string) error {
-	if s.usingSMB() {
-		return s.createDirectorySMB(ctx, path)
+	return s.CreateDirectorySource(ctx, "", path)
+}
+
+func (s *Service) CreateDirectorySource(ctx context.Context, sourceID string, path string) error {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.createDirectorySMB(ctx, source.ID, path)
 	}
 	return s.createDirectoryLocal(ctx, path)
 }
 
 func (s *Service) Rename(ctx context.Context, from string, to string) error {
-	if s.usingSMB() {
-		return s.renameSMB(ctx, from, to)
+	return s.RenameSource(ctx, "", from, to)
+}
+
+func (s *Service) RenameSource(ctx context.Context, sourceID string, from string, to string) error {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.renameSMB(ctx, source.ID, from, to)
 	}
 	return s.renameLocal(ctx, from, to)
 }
 
 func (s *Service) Delete(ctx context.Context, path string, isDirectory bool) error {
-	if s.usingSMB() {
-		return s.deleteSMB(ctx, path, isDirectory)
+	return s.DeleteSource(ctx, "", path, isDirectory)
+}
+
+func (s *Service) DeleteSource(ctx context.Context, sourceID string, path string, isDirectory bool) error {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.deleteSMB(ctx, source.ID, path, isDirectory)
 	}
 	return s.deleteLocal(ctx, path, isDirectory)
 }
 
 func (s *Service) Download(ctx context.Context, path string) (string, error) {
-	if s.usingSMB() {
-		return s.downloadSMB(ctx, path)
+	return s.DownloadSource(ctx, "", path)
+}
+
+func (s *Service) DownloadSource(ctx context.Context, sourceID string, path string) (string, error) {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return "", err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.downloadSMB(ctx, source.ID, path)
 	}
 	return s.downloadLocal(ctx, path)
 }
 
 func (s *Service) Upload(ctx context.Context, path string, contentBase64 string) error {
-	if s.usingSMB() {
-		return s.uploadSMB(ctx, path, contentBase64)
+	return s.UploadSource(ctx, "", path, contentBase64)
+}
+
+func (s *Service) UploadSource(ctx context.Context, sourceID string, path string, contentBase64 string) error {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.uploadSMB(ctx, source.ID, path, contentBase64)
 	}
 	return s.uploadLocal(ctx, path, contentBase64)
 }
 
 func (s *Service) OpenReader(ctx context.Context, path string, offset int64) (ReadHandle, fs.FileInfo, error) {
-	if s.usingSMB() {
-		return s.openReaderSMB(ctx, path, offset)
+	return s.OpenReaderSource(ctx, "", path, offset)
+}
+
+func (s *Service) OpenReaderSource(ctx context.Context, sourceID string, path string, offset int64) (ReadHandle, fs.FileInfo, error) {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.openReaderSMB(ctx, source.ID, path, offset)
 	}
 	return s.openReaderLocal(ctx, path, offset)
 }
 
 func (s *Service) OpenWriter(ctx context.Context, path string, offset int64) (WriteHandle, int64, error) {
-	if s.usingSMB() {
-		return s.openWriterSMB(ctx, path, offset)
+	return s.OpenWriterSource(ctx, "", path, offset)
+}
+
+func (s *Service) OpenWriterSource(ctx context.Context, sourceID string, path string, offset int64) (WriteHandle, int64, error) {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.openWriterSMB(ctx, source.ID, path, offset)
 	}
 	return s.openWriterLocal(ctx, path, offset)
 }
 
 func (s *Service) OpenRandomWriter(ctx context.Context, path string) (RandomWriteHandle, error) {
-	if s.usingSMB() {
-		return s.openRandomWriterSMB(ctx, path)
+	return s.OpenRandomWriterSource(ctx, "", path)
+}
+
+func (s *Service) OpenRandomWriterSource(ctx context.Context, sourceID string, path string) (RandomWriteHandle, error) {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if source.Type == fileSourceTypeSMB {
+		return s.openRandomWriterSMB(ctx, source.ID, path)
 	}
 	return s.openRandomWriterLocal(ctx, path)
 }

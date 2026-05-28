@@ -20,8 +20,8 @@ import (
 
 const smbDialTimeout = 15 * time.Second
 
-func (s *Service) listSMB(ctx context.Context, filePath string) ([]protocol.FileItem, error) {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) listSMB(ctx context.Context, sourceID string, filePath string) ([]protocol.FileItem, error) {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,8 @@ func (s *Service) listSMB(ctx context.Context, filePath string) ([]protocol.File
 	return items, nil
 }
 
-func (s *Service) statSMB(ctx context.Context, filePath string) (protocol.FileItem, error) {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) statSMB(ctx context.Context, sourceID string, filePath string) (protocol.FileItem, error) {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return protocol.FileItem{}, err
 	}
@@ -61,8 +61,8 @@ func (s *Service) statSMB(ctx context.Context, filePath string) (protocol.FileIt
 	return fileItem(cleanPath(filePath), info), nil
 }
 
-func (s *Service) createDirectorySMB(ctx context.Context, filePath string) error {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) createDirectorySMB(ctx context.Context, sourceID string, filePath string) error {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return err
 	}
@@ -71,8 +71,8 @@ func (s *Service) createDirectorySMB(ctx context.Context, filePath string) error
 	return share.MkdirAll(resolveSharePath(filePath), 0o755)
 }
 
-func (s *Service) renameSMB(ctx context.Context, from string, to string) error {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) renameSMB(ctx context.Context, sourceID string, from string, to string) error {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return err
 	}
@@ -88,8 +88,8 @@ func (s *Service) renameSMB(ctx context.Context, from string, to string) error {
 	return share.Rename(resolveSharePath(from), destination)
 }
 
-func (s *Service) deleteSMB(ctx context.Context, filePath string, isDirectory bool) error {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) deleteSMB(ctx context.Context, sourceID string, filePath string, isDirectory bool) error {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return err
 	}
@@ -101,8 +101,8 @@ func (s *Service) deleteSMB(ctx context.Context, filePath string, isDirectory bo
 	return share.Remove(resolveSharePath(filePath))
 }
 
-func (s *Service) downloadSMB(ctx context.Context, filePath string) (string, error) {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) downloadSMB(ctx context.Context, sourceID string, filePath string) (string, error) {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return "", err
 	}
@@ -115,8 +115,8 @@ func (s *Service) downloadSMB(ctx context.Context, filePath string) (string, err
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
-func (s *Service) uploadSMB(ctx context.Context, filePath string, contentBase64 string) error {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) uploadSMB(ctx context.Context, sourceID string, filePath string, contentBase64 string) error {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return err
 	}
@@ -136,8 +136,8 @@ func (s *Service) uploadSMB(ctx context.Context, filePath string, contentBase64 
 	return share.WriteFile(resolveSharePath(filePath), data, 0o644)
 }
 
-func (s *Service) openReaderSMB(ctx context.Context, filePath string, offset int64) (ReadHandle, fs.FileInfo, error) {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) openReaderSMB(ctx context.Context, sourceID string, filePath string, offset int64) (ReadHandle, fs.FileInfo, error) {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -173,8 +173,8 @@ func (s *Service) openReaderSMB(ctx context.Context, filePath string, offset int
 	return &smbReadHandle{file: file, cleanup: cleanup}, info, nil
 }
 
-func (s *Service) openWriterSMB(ctx context.Context, filePath string, offset int64) (WriteHandle, int64, error) {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) openWriterSMB(ctx context.Context, sourceID string, filePath string, offset int64) (WriteHandle, int64, error) {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -230,8 +230,8 @@ func (s *Service) openWriterSMB(ctx context.Context, filePath string, offset int
 	return &smbWriteHandle{file: file, cleanup: cleanup}, size, nil
 }
 
-func (s *Service) openRandomWriterSMB(ctx context.Context, filePath string) (RandomWriteHandle, error) {
-	share, cleanup, err := s.dialSMBShare(ctx)
+func (s *Service) openRandomWriterSMB(ctx context.Context, sourceID string, filePath string) (RandomWriteHandle, error) {
+	share, cleanup, err := s.dialSMBShare(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -252,15 +252,27 @@ func (s *Service) openRandomWriterSMB(ctx context.Context, filePath string) (Ran
 	return &smbRandomWriteHandle{file: file, cleanup: cleanup}, nil
 }
 
-func (s *Service) dialSMBShare(ctx context.Context) (*smb2.Share, func() error, error) {
-	s.mu.RLock()
-	cfg := s.smb
-	s.mu.RUnlock()
-
+func (s *Service) dialSMBShare(ctx context.Context, sourceID string) (*smb2.Share, func() error, error) {
+	cfg, err := s.smbConfigForSource(sourceID)
+	if err != nil {
+		return nil, nil, err
+	}
 	if !cfg.Enabled() {
 		return nil, nil, ErrDisabled
 	}
 
+	s.mu.RLock()
+	if conn := s.smbConnections[cfg.ID]; conn != nil && sameSMBConfig(conn.cfg, cfg) {
+		share := conn.share
+		s.mu.RUnlock()
+		return share.WithContext(ctx), func() error { return nil }, nil
+	}
+	s.mu.RUnlock()
+
+	return s.dialAndCacheSMBShare(ctx, cfg)
+}
+
+func (s *Service) dialAndCacheSMBShare(ctx context.Context, cfg SMBConfig) (*smb2.Share, func() error, error) {
 	address := smbAddress(cfg.Host)
 	conn, err := (&net.Dialer{Timeout: smbDialTimeout}).DialContext(ctx, "tcp", address)
 	if err != nil {
@@ -286,9 +298,77 @@ func (s *Service) dialSMBShare(ctx context.Context) (*smb2.Share, func() error, 
 		return nil, nil, err
 	}
 
-	return share.WithContext(ctx), func() error {
-		return errors.Join(share.Umount(), session.Logoff(), conn.Close())
-	}, nil
+	cached := &smbConnection{
+		cfg:     cfg,
+		conn:    conn,
+		session: session,
+		share:   share,
+	}
+
+	s.mu.Lock()
+	if current, ok := s.smbConfigForSourceLocked(cfg.ID); !ok || !sameSMBConfig(current, cfg) {
+		s.mu.Unlock()
+		_ = cached.close()
+		return nil, nil, ErrDisabled
+	}
+	if existing := s.smbConnections[cfg.ID]; existing != nil {
+		_ = existing.close()
+	}
+	s.smbConnections[cfg.ID] = cached
+	s.mu.Unlock()
+
+	return share.WithContext(ctx), func() error { return nil }, nil
+}
+
+func (s *Service) smbConfigForSource(sourceID string) (SMBConfig, error) {
+	sourceID = cleanSourceID(sourceID)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cfg, ok := s.smbConfigForSourceLocked(sourceID)
+	if !ok {
+		return SMBConfig{}, fmt.Errorf("file source %q is not configured", sourceID)
+	}
+	return cfg, nil
+}
+
+func (s *Service) smbConfigForSourceLocked(sourceID string) (SMBConfig, bool) {
+	if sourceID == "" {
+		for _, cfg := range s.smbShares {
+			if cfg.Enabled() {
+				return cfg, true
+			}
+		}
+		return SMBConfig{}, false
+	}
+	for _, cfg := range s.smbShares {
+		if cfg.ID == sourceID {
+			return cfg, true
+		}
+	}
+	return SMBConfig{}, false
+}
+
+type smbConnection struct {
+	cfg     SMBConfig
+	conn    net.Conn
+	session *smb2.Session
+	share   *smb2.Share
+}
+
+func (c *smbConnection) close() error {
+	if c == nil {
+		return nil
+	}
+	return errors.Join(c.share.Umount(), c.session.Logoff(), c.conn.Close())
+}
+
+func sameSMBConfig(left SMBConfig, right SMBConfig) bool {
+	return left.ID == right.ID &&
+		left.Host == right.Host &&
+		left.Share == right.Share &&
+		left.Username == right.Username &&
+		left.Password == right.Password &&
+		left.Domain == right.Domain
 }
 
 func smbAddress(host string) string {

@@ -2,9 +2,12 @@ package cloud
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -197,6 +200,57 @@ func TestAssistantMediaJobStatusEndpointRoutesToAgent(t *testing.T) {
 	}
 	if !response.Online || response.Job.Status != protocol.MediaJobStatusRunning || response.Job.BytesWritten != 42 {
 		t.Fatalf("status response = %#v", response)
+	}
+}
+
+func TestAssistantMediaImageEndpointProxiesThroughAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	imageBytes := []byte{0x89, 'P', 'N', 'G'}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaImageFetch, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaImageFetchRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			if request.URL != "https://image.example/poster.png" {
+				return nil, fmt.Errorf("media image URL = %q", request.URL)
+			}
+			return protocol.MediaImageFetchResponse{
+				URL:           request.URL,
+				ContentType:   "image/png",
+				ContentBase64: base64.StdEncoding.EncodeToString(imageBytes),
+			}, nil
+		})
+	}()
+
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+"/v1/home/assistant/media-image?url="+url.QueryEscape("https://image.example/poster.png"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+sessionToken)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "image/png" || string(data) != string(imageBytes) {
+		t.Fatalf("image response status=%d content-type=%q data=%v", response.StatusCode, response.Header.Get("Content-Type"), data)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
 	}
 }
 

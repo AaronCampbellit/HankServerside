@@ -329,6 +329,7 @@ func (c *Client) capabilities() []string {
 			protocol.CommandMediaPlanDownload,
 			protocol.CommandMediaDownloadStart,
 			protocol.CommandMediaDownloadStatus,
+			protocol.CommandMediaImageFetch,
 		)
 	}
 	capabilities = append(capabilities, "config.status", "config.apply")

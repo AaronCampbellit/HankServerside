@@ -2,6 +2,8 @@ const state = {
   user: null,
   sessions: [],
   selectedSessionID: "",
+  currentMessages: [],
+  optimisticMessages: [],
   pendingRun: null,
   isSending: false,
   draftAttachments: [],
@@ -482,20 +484,26 @@ function formatMessageTimestamp(value) {
   return isSameDay ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : date.toLocaleString();
 }
 
-function renderMessages(messages = []) {
+function renderMessages(messages = [], options = {}) {
   const session = state.sessions.find((item) => item.id === state.selectedSessionID);
   els.conversationTitle.textContent = session?.title || "HankAI";
   els.deleteSessionButton.disabled = !session;
-  if (!messages.length) {
+  state.currentMessages = Array.isArray(messages) ? messages : [];
+  if (!options.preserveOptimistic) {
+    state.optimisticMessages = state.optimisticMessages.filter((message) => message.session_id !== state.selectedSessionID);
+  }
+  const optimisticMessages = state.optimisticMessages.filter((message) => message.session_id === state.selectedSessionID);
+  const visibleMessages = [...state.currentMessages, ...optimisticMessages];
+  if (!visibleMessages.length) {
     els.messageList.className = "hank-message-list empty-state";
     els.messageList.textContent = "Ask Hank about your synced Hank data.";
     watchMediaJobs([]);
     return;
   }
-  const mediaJobIDs = mediaJobIDsFromMessages(messages);
+  const mediaJobIDs = mediaJobIDsFromMessages(visibleMessages);
   els.messageList.className = "hank-message-list";
-  els.messageList.innerHTML = messages.map((message) => `
-    <article class="hank-message ${escapeHTML(message.role)}">
+  els.messageList.innerHTML = visibleMessages.map((message) => `
+    <article class="hank-message ${escapeHTML(message.role)}${message.pending ? " pending" : ""}">
       <div class="meta">${escapeHTML(messageRoleLabel(message.role))} · ${escapeHTML(formatMessageTimestamp(message.created_at))}</div>
       <p>${escapeHTML(message.text).replaceAll("\n", "<br>")}</p>
       ${renderCards(message.cards || [])}
@@ -518,6 +526,26 @@ function mediaJobIDsFromMessages(messages = []) {
     }
   }
   return ids;
+}
+
+function addOptimisticUserMessage(text) {
+  const message = {
+    id: makeID("pending-message"),
+    session_id: state.selectedSessionID,
+    role: "user",
+    text,
+    created_at: new Date().toISOString(),
+    cards: [],
+    pending: true,
+  };
+  state.optimisticMessages.push(message);
+  renderMessages(state.currentMessages, { preserveOptimistic: true });
+  return message.id;
+}
+
+function removeOptimisticMessage(messageID) {
+  state.optimisticMessages = state.optimisticMessages.filter((message) => message.id !== messageID);
+  renderMessages(state.currentMessages, { preserveOptimistic: true });
 }
 
 function renderCards(cards) {
@@ -614,6 +642,7 @@ function mediaJobStatusHTML(job, jobID) {
     active ? `Last movement: ${lastProgress}` : "",
     `Last checked: ${lastSeen}`,
   ].filter(Boolean);
+  const fileHref = status === "completed" ? mediaJobFileHref(job) : "";
   return `
     <div class="hank-media-job-head">
       <span class="${statusClass}">${escapeHTML(status)}</span>
@@ -621,9 +650,17 @@ function mediaJobStatusHTML(job, jobID) {
     </div>
     ${total > 0 ? `<div class="hank-media-job-bar" aria-label="${escapeHTML(progressText)}"><span style="width: ${percent.toFixed(1)}%"></span></div>` : ""}
     <div class="hank-media-job-meta">${detailRows.map((row) => `<span>${escapeHTML(row)}</span>`).join("")}</div>
+    ${fileHref ? `<div class="hank-media-job-actions"><a class="button-link hank-result-action" href="${escapeHTML(fileHref)}">Open in File Server</a></div>` : ""}
     ${job.error_message ? `<div class="meta">${escapeHTML(job.error_message)}</div>` : ""}
     ${job._status_error ? `<div class="meta">${escapeHTML(job._status_error)}</div>` : ""}
   `;
+}
+
+function mediaJobFileHref(job) {
+  const path = String(job?.completed_path || "").trim();
+  if (!path) return "";
+  const params = new URLSearchParams({ path });
+  return `/dashboard/file-server?${params.toString()}`;
 }
 
 function cardImageURL(card) {
@@ -631,6 +668,10 @@ function cardImageURL(card) {
   if (!value) return "";
   try {
     const url = new URL(value, window.location.origin);
+    if (String(card.kind || "").toLowerCase() === "media" && ["http:", "https:"].includes(url.protocol)) {
+      const params = new URLSearchParams({ url: value });
+      return `/v1/home/assistant/media-image?${params.toString()}`;
+    }
     return ["http:", "https:"].includes(url.protocol) ? url.href : "";
   } catch (_) {
     return "";
@@ -638,6 +679,13 @@ function cardImageURL(card) {
 }
 
 function renderCardAction(card) {
+  const kind = String(card.kind || "").toLowerCase();
+  if (kind === "media" && !card.job_id && card.media_option_id) {
+    const selection = String(card.title || card.search_text || "").trim();
+    if (selection) {
+      return `<button type="button" class="button-link hank-result-action" data-media-select="${escapeHTML(selection)}">${escapeHTML(card.action_title || "Choose")}</button>`;
+    }
+  }
   const href = cardActionHref(card);
   if (!href) return "";
   return `<a class="button-link hank-result-action" href="${escapeHTML(href)}">${escapeHTML(card.action_title || "Open")}</a>`;
@@ -975,21 +1023,26 @@ async function deleteSession(sessionID = state.selectedSessionID) {
   showToast("Conversation deleted.");
 }
 
-async function sendMessage(event) {
-  event.preventDefault();
+async function submitChatMessage(content, attachmentsToSend = [], options = {}) {
   if (state.isSending) return;
-  const content = els.messageInput.value.trim();
-  const attachmentsToSend = [...state.draftAttachments];
+  content = String(content || "").trim();
+  attachmentsToSend = [...attachmentsToSend];
   if (!content && !attachmentsToSend.length) return;
-  if (!state.selectedSessionID) {
-    await createSession();
-  }
   state.isSending = true;
   els.sendButton.disabled = true;
   els.attachButton.disabled = true;
   els.runState.textContent = "Working";
+  if (options.fromDraft) {
+    els.messageInput.value = "";
+  }
+  let optimisticMessageID = "";
+  let acceptedByServer = false;
   try {
+    if (!state.selectedSessionID) {
+      await createSession();
+    }
     const messageContent = content || attachmentOnlyMessageText(attachmentsToSend);
+    optimisticMessageID = addOptimisticUserMessage(messageContent);
     const run = await api(`/v1/home/assistant/sessions/${encodeURIComponent(state.selectedSessionID)}/messages`, {
       method: "POST",
       body: JSON.stringify({
@@ -1001,19 +1054,27 @@ async function sendMessage(event) {
         },
       }),
     });
-    els.messageInput.value = "";
-    const sentIDs = new Set(attachmentsToSend.map((attachment) => attachment.id));
-    state.draftAttachments = state.draftAttachments.filter((attachment) => !sentIDs.has(attachment.id));
-    for (const attachment of attachmentsToSend) {
-      state.submittedAttachments.set(attachment.clientAttachmentID, attachment);
+    acceptedByServer = true;
+    if (options.fromDraft) {
+      const sentIDs = new Set(attachmentsToSend.map((attachment) => attachment.id));
+      state.draftAttachments = state.draftAttachments.filter((attachment) => !sentIDs.has(attachment.id));
+      for (const attachment of attachmentsToSend) {
+        state.submittedAttachments.set(attachment.clientAttachmentID, attachment);
+      }
+      renderAttachmentTray();
     }
-    renderAttachmentTray();
     await continueRun(run);
     await loadSessions();
     if (state.logsVisible) {
       await loadLogs();
     }
   } catch (error) {
+    if (!acceptedByServer && optimisticMessageID) {
+      removeOptimisticMessage(optimisticMessageID);
+    }
+    if (!acceptedByServer && options.fromDraft && content && !els.messageInput.value.trim()) {
+      els.messageInput.value = content;
+    }
     showToast(error.message, true);
   } finally {
     state.isSending = false;
@@ -1022,12 +1083,25 @@ async function sendMessage(event) {
   }
 }
 
+async function sendMessage(event) {
+  event.preventDefault();
+  await submitChatMessage(els.messageInput.value, state.draftAttachments, { fromDraft: true });
+}
+
 function handleMessageInputKeydown(event) {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
     return;
   }
   event.preventDefault();
   els.messageForm.requestSubmit();
+}
+
+function handleMessageListClick(event) {
+  const mediaSelect = event.target.closest("[data-media-select]");
+  if (!mediaSelect) return;
+  const selection = String(mediaSelect.dataset.mediaSelect || "").trim();
+  if (!selection) return;
+  submitChatMessage(selection).catch((error) => showToast(error.message, true));
 }
 
 async function executeClientToolRun(run) {
@@ -1254,6 +1328,7 @@ els.sessionList.addEventListener("click", (event) => {
 });
 els.messageForm.addEventListener("submit", sendMessage);
 els.messageInput.addEventListener("keydown", handleMessageInputKeydown);
+els.messageList.addEventListener("click", handleMessageListClick);
 els.attachButton.addEventListener("click", () => els.attachmentInput.click());
 els.attachmentInput.addEventListener("change", () => {
   addAttachmentsFromFiles(els.attachmentInput.files).catch((error) => showToast(error.message, true));

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -30,6 +32,7 @@ import (
 const (
 	preferredQuality                   = "1080p"
 	downloadSniffByteSize              = 4096
+	maxMediaImageBytes                 = 6 << 20
 	maxMediaDestinationOptionDepth     = 3
 	maxMediaDestinationOptionItemCount = 200
 )
@@ -576,6 +579,79 @@ func (s *Service) Status(_ context.Context, jobID string) (protocol.MediaDownloa
 	return protocol.MediaDownloadStatusResponse{Job: job.snapshot()}, nil
 }
 
+func (s *Service) FetchImage(ctx context.Context, rawURL string) (protocol.MediaImageFetchResponse, error) {
+	if err := s.ensureAuthenticated(ctx); err != nil {
+		return protocol.MediaImageFetchResponse{}, err
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return protocol.MediaImageFetchResponse{}, fmt.Errorf("media image URL is required")
+	}
+	target, err := s.resolveURL(rawURL)
+	if err != nil {
+		return protocol.MediaImageFetchResponse{}, err
+	}
+	parsed, err := url.Parse(target)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return protocol.MediaImageFetchResponse{}, fmt.Errorf("invalid media image URL")
+	}
+	if err := s.validateMediaImageURL(parsed); err != nil {
+		return protocol.MediaImageFetchResponse{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return protocol.MediaImageFetchResponse{}, err
+	}
+	req.Header.Set("User-Agent", "HankRemoteMedia/1.0")
+	if base := s.configSnapshot().BaseURL; base != "" {
+		req.Header.Set("Referer", strings.TrimRight(base, "/")+"/")
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return protocol.MediaImageFetchResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return protocol.MediaImageFetchResponse{}, fmt.Errorf("media image returned status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaImageBytes+1))
+	if err != nil {
+		return protocol.MediaImageFetchResponse{}, err
+	}
+	if len(data) > maxMediaImageBytes {
+		return protocol.MediaImageFetchResponse{}, fmt.Errorf("media image is too large")
+	}
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		return protocol.MediaImageFetchResponse{}, fmt.Errorf("media image response was not an image")
+	}
+	return protocol.MediaImageFetchResponse{
+		URL:           target,
+		ContentType:   contentType,
+		ContentBase64: base64.StdEncoding.EncodeToString(data),
+	}, nil
+}
+
+func (s *Service) validateMediaImageURL(parsed *url.URL) error {
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("invalid media image URL")
+	}
+	if base, err := url.Parse(s.configSnapshot().BaseURL); err == nil && strings.EqualFold(base.Hostname(), host) {
+		return nil
+	}
+	if strings.EqualFold(host, "localhost") {
+		return fmt.Errorf("media image host is not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()) {
+		return fmt.Errorf("media image host is not allowed")
+	}
+	return nil
+}
+
 func (s *Service) ensureAuthenticated(ctx context.Context) error {
 	if !s.Enabled() {
 		return errDisabled
@@ -986,15 +1062,18 @@ func (s *Service) runDownloadJob(ctx context.Context, job *downloadJob, download
 			return
 		}
 		item := download.item
+		currentPath := s.destinationFilePath(item.MediaType, download.mediaTitle, item.Filename)
 		job.update(func(status *protocol.MediaDownloadJobStatus) {
 			status.CurrentIndex = index + 1
 			status.CurrentFile = item.Filename
+			status.CurrentPath = currentPath
 			status.BytesWritten = 0
 		})
 		if item.Existing {
 			job.update(func(status *protocol.MediaDownloadJobStatus) {
 				status.SkippedCount++
 				status.CompletedCount++
+				status.CompletedPath = currentPath
 			})
 			s.emitJob(ctx, "media.download_progress", job)
 			continue
@@ -1027,6 +1106,7 @@ func (s *Service) runDownloadJob(ctx context.Context, job *downloadJob, download
 		}
 		job.update(func(status *protocol.MediaDownloadJobStatus) {
 			status.CompletedCount++
+			status.CompletedPath = currentPath
 			status.ErrorMessage = ""
 		})
 		s.emitJob(ctx, "media.download_progress", job)

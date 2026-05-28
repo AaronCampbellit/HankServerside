@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -789,6 +790,51 @@ func logLiveSearchFetch(t *testing.T, ctx context.Context, service *Service, med
 	t.Logf("provider raw type=%s endpoint=%s query=%q token_present=%v token_error=%v status=%d body_len=%d error=%v", mediaType, endpoint, query, token != "", tokenErr, status, len(body), err)
 }
 
+func TestFetchImageProxiesMediaPoster(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	imageBytes := []byte{0xff, 0xd8, 0xff, 0xd9}
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/poster.jpg", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); got != "HankRemoteMedia/1.0" {
+			t.Errorf("User-Agent = %q, want HankRemoteMedia/1.0", got)
+		}
+		if got := r.Header.Get("Referer"); got != baseURL+"/" {
+			t.Errorf("Referer = %q, want %q", got, baseURL+"/")
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(imageBytes)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+	response, err := service.FetchImage(ctx, "/poster.jpg")
+	if err != nil {
+		t.Fatalf("FetchImage: %v", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(response.ContentBase64)
+	if err != nil {
+		t.Fatalf("decode image: %v", err)
+	}
+	if response.ContentType != "image/jpeg" || string(data) != string(imageBytes) || response.URL != server.URL+"/poster.jpg" {
+		t.Fatalf("image response = %#v data=%v", response, data)
+	}
+}
+
 func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	t.Parallel()
 
@@ -861,6 +907,9 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	status := waitForJob(t, ctx, service, start.Job.JobID)
 	if status.Status != protocol.MediaJobStatusCompleted || status.CompletedCount != 2 || status.SkippedCount != 1 || status.FailedCount != 0 {
 		t.Fatalf("job status = %#v", status)
+	}
+	if status.CompletedPath != "Fixture_Show/Fixture_Show_S01E02_720p.mp4" || status.CurrentPath != status.CompletedPath {
+		t.Fatalf("job paths = current %q completed %q", status.CurrentPath, status.CompletedPath)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "Fixture_Show", "Fixture_Show_S01E01_1080p.mp4"))
 	if err != nil {

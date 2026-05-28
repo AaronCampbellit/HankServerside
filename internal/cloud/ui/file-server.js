@@ -9,6 +9,7 @@ const state = {
   user: null,
   homes: [],
   profiles: [],
+  activeSourceID: "",
   currentFilesPath: "/",
   currentItems: [],
   visibleItems: [],
@@ -41,6 +42,7 @@ const els = {
   sessionState: document.getElementById("session-state"),
   sessionMeta: document.getElementById("session-meta"),
   homeSelect: document.getElementById("home-select"),
+  sourceSelect: document.getElementById("source-select"),
   sourceStatus: document.getElementById("source-status"),
   sourceSummary: document.getElementById("source-summary"),
   transferOutput: document.getElementById("transfer-output"),
@@ -215,6 +217,10 @@ function selectedHomeID() {
   return els.homeSelect.value;
 }
 
+function selectedSourceID() {
+  return els.sourceSelect?.value || state.activeSourceID || "";
+}
+
 function startupParams() {
   return new URLSearchParams(window.location.search);
 }
@@ -227,6 +233,10 @@ function requestedPathIsDirectory() {
   return startupParams().get("directory") === "true";
 }
 
+function requestedSourceID() {
+  return startupParams().get("source_id") || "";
+}
+
 function selectedHome() {
   return state.homes.find((home) => home.id === selectedHomeID()) || null;
 }
@@ -237,12 +247,17 @@ function selectedHomeOrThrow() {
   return home;
 }
 
-function syncURL(homeID) {
+function syncURL(homeID, sourceID = state.activeSourceID) {
   const url = new URL(window.location.href);
   if (homeID) {
     url.searchParams.set("home_id", homeID);
   } else {
     url.searchParams.delete("home_id");
+  }
+  if (sourceID) {
+    url.searchParams.set("source_id", sourceID);
+  } else {
+    url.searchParams.delete("source_id");
   }
   window.history.replaceState({}, "", url);
 }
@@ -264,21 +279,131 @@ function parseConfigJSON(value) {
 function fileConfig() {
   const profile = profileByType("smb");
   const cfg = parseConfigJSON(profile?.public_config_json);
-  const host = cfg.host || cfg.smb_host || "";
-  const share = cfg.share || cfg.smb_share || "";
-  const username = cfg.username || cfg.smb_username || "";
-  const domain = cfg.domain || cfg.smb_domain || "";
+  const sources = fileSourcesFromConfig(cfg);
+  const requested = requestedSourceID();
+  const active = sources.find((source) => source.id === state.activeSourceID)
+    || sources.find((source) => source.id === requested)
+    || sources.find((source) => source.id === cfg.active_source_id)
+    || sources[0]
+    || null;
+  state.activeSourceID = active?.id || "";
   return {
     profile,
+    sources,
+    active,
+    host: active?.host || "",
+    share: active?.share || "",
+    username: active?.username || "",
+    domain: active?.domain || "",
+    root: active?.root || cfg.root || "",
+    smbEnabled: Boolean(active?.smbEnabled),
+    localRootEnabled: Boolean(active?.localRootEnabled),
+    passwordSet: Boolean(active?.passwordSet),
+  };
+}
+
+function fileSourcesFromConfig(cfg) {
+  const sources = [];
+  const rawSources = Array.isArray(cfg.file_sources) ? cfg.file_sources
+    : Array.isArray(cfg.sources) ? cfg.sources
+      : [];
+  rawSources.forEach((entry, index) => {
+    const source = normalizeSourceEntry(entry, index);
+    if (source) sources.push(source);
+  });
+
+  const rawShares = Array.isArray(cfg.shares) ? cfg.shares : [];
+  rawShares.forEach((entry, index) => {
+    const source = normalizeShareEntry(entry, index);
+    if (source && !sources.some((candidate) => candidate.id === source.id)) {
+      sources.push(source);
+    }
+  });
+
+  const host = cfg.host || cfg.smb_host || "";
+  const share = cfg.share || cfg.smb_share || "";
+  if (host || share) {
+    const source = normalizeShareEntry({
+      id: cfg.active_source_id || "smb",
+      name: cfg.name || share || "SMB share",
+      host,
+      share,
+      username: cfg.username || cfg.smb_username || "",
+      domain: cfg.domain || cfg.smb_domain || "",
+      enabled: cfg.smb_enabled,
+      password_set: cfg.smb_password_set,
+    }, sources.length);
+    if (source && !sources.some((candidate) => candidate.id === source.id)) {
+      sources.unshift(source);
+    }
+  }
+
+  if ((cfg.local_root_enabled || cfg.root) && !sources.some((source) => source.id === "local")) {
+    sources.push({
+      id: "local",
+      name: "Home connector files",
+      type: "local",
+      root: cfg.root || "/srv/hank/files",
+      localRootEnabled: true,
+      smbEnabled: false,
+      passwordSet: false,
+    });
+  }
+
+  return sources;
+}
+
+function normalizeSourceEntry(entry, index) {
+  if (!entry) return null;
+  const type = entry.type || (entry.smb_host || entry.host || entry.smb_share || entry.share ? "smb" : "local");
+  if (type === "local") {
+    return {
+      id: entry.id || "local",
+      name: entry.name || "Home connector files",
+      type: "local",
+      root: entry.root || "",
+      localRootEnabled: Boolean(entry.local_root_enabled ?? entry.root),
+      smbEnabled: false,
+      passwordSet: false,
+    };
+  }
+  return normalizeShareEntry({
+    id: entry.id || entry.source_id,
+    name: entry.name,
+    host: entry.host || entry.smb_host,
+    share: entry.share || entry.smb_share,
+    username: entry.username || entry.smb_username,
+    domain: entry.domain || entry.smb_domain,
+    enabled: entry.enabled ?? entry.smb_enabled,
+    password_set: entry.password_set ?? entry.smb_password_set,
+  }, index);
+}
+
+function normalizeShareEntry(entry, index) {
+  const host = entry?.host || "";
+  const share = entry?.share || "";
+  const id = cleanSourceID(entry?.id || entry?.source_id || entry?.name || share || `smb-${index + 1}`);
+  if (!id && !host && !share) return null;
+  return {
+    id: id || `smb-${index + 1}`,
+    name: entry?.name || share || host || "SMB share",
+    type: "smb",
     host,
     share,
-    username,
-    domain,
-    root: cfg.root || "",
-    smbEnabled: Boolean(cfg.smb_enabled ?? (host && share)),
-    localRootEnabled: Boolean(cfg.local_root_enabled),
-    passwordSet: Boolean(cfg.smb_password_set),
+    username: entry?.username || "",
+    domain: entry?.domain || "",
+    smbEnabled: Boolean(entry?.enabled ?? (host && share)),
+    localRootEnabled: false,
+    passwordSet: Boolean(entry?.password_set),
   };
+}
+
+function cleanSourceID(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function preferredAppSocketURL() {
@@ -372,6 +497,15 @@ async function sendCommand(command, body = {}) {
   });
 }
 
+function withSourceID(body = {}) {
+  const sourceID = selectedSourceID();
+  return sourceID ? { ...body, source_id: sourceID } : body;
+}
+
+async function sendFileCommand(command, body = {}) {
+  return sendCommand(command, withSourceID(body));
+}
+
 function openDialog(dialog) {
   if (!dialog) return;
   if (!dialog.open) dialog.showModal();
@@ -420,43 +554,89 @@ function renderHomes() {
 function renderSourceSummary() {
   const config = fileConfig();
   const profile = config.profile;
-  const sourceName = config.smbEnabled
-    ? `${config.host}/${config.share}`
-    : config.localRootEnabled
-      ? "Home connector files"
-      : "Not connected";
+  const active = config.active;
+  const sourceName = active ? sourceLabel(active) : "Not connected";
+
+  renderSourceSelect(config.sources);
 
   els.sourceStatus.textContent = profile?.status || "Not set up";
   els.sourceStatus.classList.toggle("offline", Boolean(profile?.status && profile.status !== "healthy"));
 
-  if (!profile) {
+  if (!profile || !config.sources.length) {
     els.sourceSummary.className = "card-list empty-state";
-    els.sourceSummary.textContent = "No file server has been saved for this home yet.";
+    els.sourceSummary.textContent = "No file server shares have been saved for this home yet.";
     return;
   }
 
   els.sourceSummary.className = "card-list";
-  els.sourceSummary.innerHTML = `
-    <article class="card split-card">
+  els.sourceSummary.innerHTML = config.sources.map((source) => `
+    <article class="card split-card ${source.id === active?.id ? "selected" : ""}">
       <div class="card-head">
         <div>
-          <div class="card-title">${escapeHTML(sourceName)}</div>
-          <div class="meta">Updated ${escapeHTML(formatDate(profile.updated_at))}</div>
+          <div class="card-title">${escapeHTML(sourceLabel(source))}</div>
+          <div class="meta">${source.id === active?.id ? "Active share" : "Available share"} - Updated ${escapeHTML(formatDate(profile.updated_at))}</div>
         </div>
-        <span class="status-chip ${profile.status === "healthy" ? "" : "offline"}">${escapeHTML(profile.status || "unknown")}</span>
+        <span class="status-chip ${profile.status === "healthy" && sourceEnabled(source) ? "" : "offline"}">${escapeHTML(sourceEnabled(source) ? profile.status || "unknown" : "not configured")}</span>
       </div>
       <div class="kv-grid">
-        <div class="kv-row"><div class="kv-label">Server</div><div>${escapeHTML(config.host || "Local connector volume")}</div></div>
-        <div class="kv-row"><div class="kv-label">Share</div><div>${escapeHTML(config.share || config.root || "/srv/hank/files")}</div></div>
-        <div class="kv-row"><div class="kv-label">Username</div><div>${escapeHTML(config.username || "Not set")}</div></div>
-        <div class="kv-row"><div class="kv-label">Password</div><div>${config.passwordSet ? "Saved" : "Not saved"}</div></div>
+        <div class="kv-row"><div class="kv-label">Server</div><div>${escapeHTML(source.host || "Local connector volume")}</div></div>
+        <div class="kv-row"><div class="kv-label">Share</div><div>${escapeHTML(source.share || source.root || "/srv/hank/files")}</div></div>
+        <div class="kv-row"><div class="kv-label">Username</div><div>${escapeHTML(source.username || "Not set")}</div></div>
+        <div class="kv-row"><div class="kv-label">Password</div><div>${source.type === "local" ? "Not required" : source.passwordSet ? "Saved" : "Not saved"}</div></div>
         <div class="kv-row"><div class="kv-label">Last Error</div><div>${escapeHTML(profile.last_error || "None")}</div></div>
       </div>
       <div class="item-actions">
+        ${source.id === active?.id ? "" : `<button type="button" class="secondary" data-source-id="${escapeHTML(source.id)}">Open Share</button>`}
         <a class="ops-card manage-link" href="/dashboard/settings#connections">Edit Settings</a>
       </div>
     </article>
-  `;
+  `).join("");
+  els.sourceSummary.querySelectorAll("[data-source-id]").forEach((button) => {
+    button.addEventListener("click", () => switchSource(button.dataset.sourceId));
+  });
+}
+
+function renderSourceSelect(sources) {
+  if (!els.sourceSelect) return;
+  els.sourceSelect.innerHTML = "";
+  if (!sources.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No shares";
+    els.sourceSelect.appendChild(option);
+    els.sourceSelect.disabled = true;
+    return;
+  }
+  sources.forEach((source) => {
+    const option = document.createElement("option");
+    option.value = source.id;
+    option.textContent = sourceLabel(source);
+    option.selected = source.id === state.activeSourceID;
+    els.sourceSelect.appendChild(option);
+  });
+  els.sourceSelect.disabled = false;
+  els.sourceSelect.value = state.activeSourceID || sources[0].id;
+}
+
+function sourceEnabled(source) {
+  return source?.type === "local" ? source.localRootEnabled : source?.smbEnabled;
+}
+
+function sourceLabel(source) {
+  if (!source) return "Not connected";
+  if (source.type === "local") return source.name || "Home connector files";
+  const target = [source.host, source.share].filter(Boolean).join("/");
+  return source.name && source.name !== source.share ? `${source.name} (${target || source.id})` : target || source.name || source.id;
+}
+
+async function switchSource(sourceID) {
+  if (!sourceID || sourceID === state.activeSourceID) return;
+  state.activeSourceID = sourceID;
+  syncURL(selectedHomeID(), state.activeSourceID);
+  resetSearch();
+  clearSelection();
+  renderSourceSummary();
+  await browseFiles("/");
 }
 
 function renderBreadcrumbs() {
@@ -867,7 +1047,7 @@ async function browseFiles(path = state.currentFilesPath, options = {}) {
     const normalized = normalizePath(path);
     if (!options.keepSearch) resetSearch();
     setFilesLoading("Loading folder.");
-    const payload = await sendCommand("files.list", { path: normalized });
+    const payload = await sendFileCommand("files.list", { path: normalized });
     state.currentFilesPath = normalized;
     state.currentItems = payload.items || [];
     state.visibleItems = [];
@@ -903,7 +1083,7 @@ async function searchFiles(query = els.filesSearch.value) {
   }
   try {
     setFilesLoading("Searching files.");
-    const payload = await sendCommand("files.search", { query: trimmed, limit: 100 });
+    const payload = await sendFileCommand("files.search", { query: trimmed, limit: 100 });
     state.searchMode = true;
     state.searchQuery = trimmed;
     state.currentItems = payload.items || [];
@@ -948,7 +1128,7 @@ async function createDirectoryFromDialog(event) {
       showToast("A file or folder already exists with that name.", true);
       return;
     }
-    await sendCommand("files.create_directory", { path: targetPath });
+    await sendFileCommand("files.create_directory", { path: targetPath });
     closeDialog(els.newFolderDialog);
     await browseFiles(state.currentFilesPath);
     showToast("Folder created.");
@@ -994,7 +1174,7 @@ async function renameCurrentItem(event) {
       if (!approved) return;
     }
 
-    await sendCommand("files.rename", { from: rawItemPath(item), to: targetPath });
+    await sendFileCommand("files.rename", { from: rawItemPath(item), to: targetPath });
     closeDialog(els.renameDialog);
     clearSelection();
     await refreshCurrentView();
@@ -1024,7 +1204,7 @@ async function deleteItemsFromDialog(event) {
   closeDialog(els.deleteDialog);
   try {
     for (const item of targets) {
-      await sendCommand("files.delete", { path: rawItemPath(item), is_directory: Boolean(item.is_directory) });
+      await sendFileCommand("files.delete", { path: rawItemPath(item), is_directory: Boolean(item.is_directory) });
     }
     clearSelection();
     await refreshCurrentView();
@@ -1036,7 +1216,7 @@ async function deleteItemsFromDialog(event) {
 
 async function statItem(path) {
   try {
-    const payload = await sendCommand("files.stat", { path: normalizePath(path) });
+    const payload = await sendFileCommand("files.stat", { path: normalizePath(path) });
     return payload.item || null;
   } catch (_) {
     return null;
@@ -1096,7 +1276,7 @@ async function browseMoveFolder(path) {
   renderMoveTarget();
   renderMoveBreadcrumbs();
   try {
-    const payload = await sendCommand("files.list", { path: normalized });
+    const payload = await sendFileCommand("files.list", { path: normalized });
     const folders = (payload.items || []).filter((item) => item.is_directory);
     renderMoveFolders(folders);
   } catch (error) {
@@ -1219,7 +1399,7 @@ async function moveItemsToDestination(items, destination, options = {}) {
 
   try {
     for (const move of moves) {
-      await sendCommand("files.rename", { from: rawItemPath(move.item), to: move.to });
+      await sendFileCommand("files.rename", { from: rawItemPath(move.item), to: move.to });
     }
     closeDialog(els.moveDialog);
     clearSelection();
@@ -1349,7 +1529,7 @@ async function fetchFileBlob(path, resultLabel) {
   selectedHomeOrThrow();
   const setup = await api("/v1/home/files/downloads", {
     method: "POST",
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(withSourceID({ path })),
   });
   const response = await fetch(setup.url);
   if (!response.ok) throw new Error(await response.text());
@@ -1535,7 +1715,7 @@ async function loadTextPreview(item, requestID) {
 async function uploadOneFile(file, targetPath) {
   const setup = await api("/v1/home/files/uploads", {
     method: "POST",
-    body: JSON.stringify({ path: targetPath }),
+    body: JSON.stringify(withSourceID({ path: targetPath })),
   });
   const response = await fetch(setup.url, {
     method: "PUT",
@@ -1700,13 +1880,15 @@ async function hydrate() {
 
 els.logoutButton.addEventListener("click", logout);
 els.homeSelect.addEventListener("change", async () => {
-  syncURL(selectedHomeID());
+  state.activeSourceID = "";
+  syncURL(selectedHomeID(), "");
   closeAppSocket();
   resetSearch();
   clearSelection();
   await loadProfiles();
   await browseFiles("/");
 });
+els.sourceSelect?.addEventListener("change", () => switchSource(selectedSourceID()));
 els.filesSearchButton.addEventListener("click", () => searchFiles());
 els.filesSearchClearButton.addEventListener("click", () => browseFiles(state.currentFilesPath));
 els.filesSearch.addEventListener("keydown", (event) => {

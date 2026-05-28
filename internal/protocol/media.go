@@ -11,6 +11,7 @@ const (
 	CommandMediaSettingsApply  = "media.settings_apply"
 	CommandMediaDownloadJobs   = "media.download_jobs"
 	CommandMediaDownloadCancel = "media.download_cancel"
+	CommandMediaImageFetch     = "media.image_fetch"
 
 	MediaTypeMovie  = "movie"
 	MediaTypeSeries = "series"
@@ -147,6 +148,16 @@ type MediaDownloadCancelResponse struct {
 	Job MediaDownloadJobStatus `json:"job"`
 }
 
+type MediaImageFetchRequest struct {
+	URL string `json:"url"`
+}
+
+type MediaImageFetchResponse struct {
+	URL           string `json:"url"`
+	ContentType   string `json:"content_type"`
+	ContentBase64 string `json:"content_base64"`
+}
+
 type MediaDownloadJobStatus struct {
 	JobID          string    `json:"job_id"`
 	Status         string    `json:"status"`
@@ -157,6 +168,8 @@ type MediaDownloadJobStatus struct {
 	FailedCount    int       `json:"failed_count"`
 	CurrentIndex   int       `json:"current_index,omitempty"`
 	CurrentFile    string    `json:"current_file,omitempty"`
+	CurrentPath    string    `json:"current_path,omitempty"`
+	CompletedPath  string    `json:"completed_path,omitempty"`
 	BytesWritten   int64     `json:"bytes_written,omitempty"`
 	BytesTotal     int64     `json:"bytes_total,omitempty"`
 	DownloadMode   string    `json:"download_mode,omitempty"`

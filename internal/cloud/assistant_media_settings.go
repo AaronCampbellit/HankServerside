@@ -2,8 +2,10 @@ package cloud
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
@@ -11,6 +13,7 @@ import (
 )
 
 const assistantMediaSettingsStatusTimeout = 8 * time.Second
+const assistantMediaImageFetchTimeout = 12 * time.Second
 
 type assistantMediaSettingsResponse struct {
 	Online             bool                              `json:"online"`
@@ -122,6 +125,52 @@ func (s *Server) handleAssistantMediaJobStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, assistantMediaJobStatusResponse{Online: true, Job: payload.Job})
+}
+
+func (s *Server) handleAssistantMediaImage(w http.ResponseWriter, r *http.Request, home domain.Home, _ domain.HomeMembership) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rawURL := strings.TrimSpace(r.URL.Query().Get("url"))
+	if rawURL == "" {
+		http.Error(w, "media image URL is required", http.StatusBadRequest)
+		return
+	}
+	if len(rawURL) > 4096 {
+		http.Error(w, "media image URL is too long", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), assistantMediaImageFetchTimeout)
+	defer cancel()
+	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandMediaImageFetch, protocol.MediaImageFetchRequest{URL: rawURL})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if envelope.Error != nil {
+		http.Error(w, envelope.Error.Message, http.StatusBadGateway)
+		return
+	}
+	payload, err := protocol.DecodePayload[protocol.MediaImageFetchResponse](envelope)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	image, err := base64.StdEncoding.DecodeString(payload.ContentBase64)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	contentType := strings.TrimSpace(strings.NewReplacer("\r", "", "\n", "").Replace(payload.ContentType))
+	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		http.Error(w, "media image response was not an image", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(image)
 }
 
 func (s *Server) handleAssistantMediaJobCancel(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, jobID string) {
