@@ -2531,6 +2531,11 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.hank-sessions-panel:not([open]) {
+  min-height: 0;
+  padding: 0;
+}
+
 .hank-sessions-panel .panel-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2555,6 +2560,17 @@ button:disabled {
 .hank-sessions-panel #new-session-button {
   min-height: 36px;
   padding: 0 12px;
+}
+
+.hank-sessions-panel:not([open]) .collapsible-panel-head {
+  min-height: 52px;
+  margin-bottom: 0;
+  padding: 8px 14px;
+}
+
+.hank-sessions-panel:not([open]) #new-session-button {
+  min-height: 32px;
+  padding: 0 10px;
 }
 
 .hank-sessions-panel .kv-grid {

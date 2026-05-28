@@ -114,6 +114,7 @@ function agentEnvFile(payload, home) {
     "HANK_REMOTE_SMB_USERNAME=",
     "HANK_REMOTE_SMB_PASSWORD=",
     "HANK_REMOTE_SMB_DOMAIN=",
+    "HANK_REMOTE_SMB_SHARES_JSON=",
     "",
     "HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files",
     "HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes",

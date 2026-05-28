@@ -271,7 +271,7 @@ docker compose --env-file .env.cloud --profile agent up -d agent
 - agent and app auth are separate
 - the cloud and agent run on the same machine under one Compose stack, but the agent starts only after a token exists
 - the dashboard issues tokens and generates the `.env.agent` file content; deployment changes are applied by editing `.env.agent` and refreshing the `agent` profile
-- file access can use either the Docker-managed `hank_agent_files` volume or a direct SMB connection configured in the dashboard
+- file access can use either the Docker-managed `hank_agent_files` volume or one or more direct SMB shares configured in the dashboard
 - remote notes now expose additive metadata for `page_type`, preview text, extracted tags, remote search, tag rollups, and kanban board payloads
 
 ## Operations Docs

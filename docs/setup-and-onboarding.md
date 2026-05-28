@@ -232,6 +232,7 @@ HANK_REMOTE_SMB_SHARE=
 HANK_REMOTE_SMB_USERNAME=
 HANK_REMOTE_SMB_PASSWORD=
 HANK_REMOTE_SMB_DOMAIN=
+HANK_REMOTE_SMB_SHARES_JSON=
 
 HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files
 HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes
@@ -250,7 +251,7 @@ Keep this value unchanged for the single-server Compose deployment:
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-Leave the SMB values blank unless you are using SMB. When SMB is blank, the agent uses the Docker-managed `hank_agent_files` volume for file operations.
+Leave the SMB values blank unless you are using SMB. When SMB is blank, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For multiple SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
 
 ## 8. Start The Agent
 

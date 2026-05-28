@@ -184,10 +184,6 @@
       }
     });
     const page = pageForURL(url);
-    const footer = document.querySelector(".dashboard-shell .sidebar-context");
-    if (footer) {
-      footer.textContent = page?.detail || "Manage Hank Remote from one place.";
-    }
     setHeroForPage(page);
   }
 
@@ -292,12 +288,6 @@
       });
     });
     nav.appendChild(list);
-
-    const activePage = dashboardPages.find((page) => !page.searchOnly && isActivePage(page));
-    const footer = document.createElement("div");
-    footer.className = "sidebar-context";
-    footer.textContent = activePage?.detail || "Manage Hank Remote from one place.";
-    nav.appendChild(footer);
 
     installSettingsSearch(
       searchShell.querySelector("#dashboard-settings-search"),
