@@ -1062,9 +1062,13 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 			if err != nil || open.Operation != protocol.FileTransferOperationDownload {
 				return
 			}
+			if open.SourceID != "media" {
+				return
+			}
 
 			ready, _ := protocol.NewEnvelope(protocol.TypeFileTransferReady, envelope.RequestID, agentID, homeID, protocol.FileTransferReady{
 				Operation: open.Operation,
+				SourceID:  open.SourceID,
 				Path:      open.Path,
 				Offset:    open.Offset,
 				Size:      int64(len("hello world")),
@@ -1085,6 +1089,7 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 
 			complete, _ := protocol.NewEnvelope(protocol.TypeFileTransferComplete, envelope.RequestID, agentID, homeID, protocol.FileTransferComplete{
 				Operation: open.Operation,
+				SourceID:  open.SourceID,
 				Path:      open.Path,
 				Offset:    int64(len("hello world")),
 				Size:      int64(len("hello world")),
@@ -1094,9 +1099,13 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 	}()
 
 	setupResponse := struct {
-		URL string `json:"url"`
+		URL      string `json:"url"`
+		SourceID string `json:"source_id"`
 	}{}
-	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/downloads", map[string]string{"path": "docs/report.txt"}, &setupResponse)
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/downloads", map[string]string{"path": "docs/report.txt", "source_id": "media"}, &setupResponse)
+	if setupResponse.SourceID != "media" {
+		t.Fatalf("download source_id = %q, want media", setupResponse.SourceID)
+	}
 
 	response, err := http.Get(testServer.URL + setupResponse.URL)
 	if err != nil {
