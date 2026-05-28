@@ -329,7 +329,7 @@ function fileSourcesFromConfig(cfg) {
   const share = cfg.share || cfg.smb_share || "";
   if (host || share) {
     const source = normalizeShareEntry({
-      id: cfg.active_source_id || "smb",
+      id: cfg.source_id || cfg.id || "",
       name: cfg.name || share || "SMB share",
       host,
       share,
