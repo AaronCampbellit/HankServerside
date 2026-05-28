@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hank Remote File Server</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260525-file-explorer-reference">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260528-smb-share-move">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -40,15 +40,12 @@
       <main class="grid file-server-grid">
         <section class="panel file-source-panel">
           <div class="panel-head">
-            <h2>Connected File Servers</h2>
+            <h2>SMB Shares</h2>
             <span id="source-status" class="pill">Loading</span>
           </div>
+          <select id="home-select" class="visually-hidden" aria-hidden="true" tabindex="-1"></select>
           <label>
-            <span>Home</span>
-            <select id="home-select"></select>
-          </label>
-          <label>
-            <span>File Server Share</span>
+            <span>SMB Share</span>
             <select id="source-select"></select>
           </label>
           <div id="source-summary" class="card-list empty-state">Loading file server.</div>
@@ -189,6 +186,13 @@
         <form id="move-form" method="dialog">
           <h3>Move</h3>
           <p id="move-target-label" class="meta"></p>
+          <details class="advanced-tool">
+            <summary>Advanced</summary>
+            <label>
+              <span>Destination SMB Share</span>
+              <select id="move-source-select"></select>
+            </label>
+          </details>
           <div class="file-location-row compact">
             <label>
               <span>Destination</span>
@@ -228,7 +232,7 @@
       </dialog>
     </div>
 
-    <script src="/assets/file-server.js?v=20260525-file-explorer-reference" defer></script>
-    <script src="/assets/admin-nav.js?v=20260525-file-explorer-reference" defer></script>
+    <script src="/assets/file-server.js?v=20260528-smb-share-move" defer></script>
+    <script src="/assets/admin-nav.js?v=20260528-smb-share-move" defer></script>
   </body>
 </html>

@@ -2358,6 +2358,21 @@ body.kanban-note .kanban-board {
   width: min(720px, calc(100vw - 28px));
 }
 
+.advanced-tool {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.advanced-tool summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .dialog-copy {
   display: grid;
   gap: 8px;

@@ -29,6 +29,8 @@ const state = {
   renameItem: null,
   moveItems: [],
   moveDialogPath: "/",
+  moveSourceID: "",
+  moveDestinationSourceID: "",
   deleteItems: [],
   confirmResolver: null,
   appSocket: null,
@@ -88,6 +90,7 @@ const els = {
   moveForm: document.getElementById("move-form"),
   movePath: document.getElementById("move-path"),
   moveOpenButton: document.getElementById("move-open-button"),
+  moveSourceSelect: document.getElementById("move-source-select"),
   moveBreadcrumbs: document.getElementById("move-breadcrumbs"),
   moveFolders: document.getElementById("move-folders"),
   moveTargetLabel: document.getElementById("move-target-label"),
@@ -218,7 +221,9 @@ function selectedHomeID() {
 }
 
 function selectedSourceID() {
-  return els.sourceSelect?.value || state.activeSourceID || "";
+  const config = fileConfig();
+  const sourceID = els.sourceSelect?.value || state.activeSourceID || "";
+  return config.sources.some((source) => source.id === sourceID) ? sourceID : "";
 }
 
 function startupParams() {
@@ -309,7 +314,7 @@ function fileSourcesFromConfig(cfg) {
       : [];
   rawSources.forEach((entry, index) => {
     const source = normalizeSourceEntry(entry, index);
-    if (source) sources.push(source);
+    if (source?.type === "smb") sources.push(source);
   });
 
   const rawShares = Array.isArray(cfg.shares) ? cfg.shares : [];
@@ -338,18 +343,6 @@ function fileSourcesFromConfig(cfg) {
     }
   }
 
-  if ((cfg.local_root_enabled || cfg.root) && !sources.some((source) => source.id === "local")) {
-    sources.push({
-      id: "local",
-      name: "Home connector files",
-      type: "local",
-      root: cfg.root || "/srv/hank/files",
-      localRootEnabled: true,
-      smbEnabled: false,
-      passwordSet: false,
-    });
-  }
-
   return sources;
 }
 
@@ -357,15 +350,7 @@ function normalizeSourceEntry(entry, index) {
   if (!entry) return null;
   const type = entry.type || (entry.smb_host || entry.host || entry.smb_share || entry.share ? "smb" : "local");
   if (type === "local") {
-    return {
-      id: entry.id || "local",
-      name: entry.name || "Home connector files",
-      type: "local",
-      root: entry.root || "",
-      localRootEnabled: Boolean(entry.local_root_enabled ?? entry.root),
-      smbEnabled: false,
-      passwordSet: false,
-    };
+    return null;
   }
   return normalizeShareEntry({
     id: entry.id || entry.source_id,
@@ -499,11 +484,25 @@ async function sendCommand(command, body = {}) {
 
 function withSourceID(body = {}) {
   const sourceID = selectedSourceID();
-  return sourceID ? { ...body, source_id: sourceID } : body;
+  if (!sourceID) {
+    throw new Error("No SMB share is configured for this home.");
+  }
+  return withExplicitSourceID(sourceID, body);
+}
+
+function withExplicitSourceID(sourceID, body = {}) {
+  if (!sourceID) {
+    throw new Error("No SMB share is configured for this home.");
+  }
+  return { ...body, source_id: sourceID };
 }
 
 async function sendFileCommand(command, body = {}) {
   return sendCommand(command, withSourceID(body));
+}
+
+async function sendFileCommandForSource(sourceID, command, body = {}) {
+  return sendCommand(command, withExplicitSourceID(sourceID, body));
 }
 
 function openDialog(dialog) {
@@ -568,25 +567,25 @@ function renderSourceSummary() {
     return;
   }
 
+  const visibleSources = active ? [active] : config.sources;
   els.sourceSummary.className = "card-list";
-  els.sourceSummary.innerHTML = config.sources.map((source) => `
+  els.sourceSummary.innerHTML = visibleSources.map((source) => `
     <article class="card split-card ${source.id === active?.id ? "selected" : ""}">
       <div class="card-head">
         <div>
           <div class="card-title">${escapeHTML(sourceLabel(source))}</div>
-          <div class="meta">${source.id === active?.id ? "Active share" : "Available share"} - Updated ${escapeHTML(formatDate(profile.updated_at))}</div>
+          <div class="meta">Active share - Updated ${escapeHTML(formatDate(profile.updated_at))}</div>
         </div>
         <span class="status-chip ${profile.status === "healthy" && sourceEnabled(source) ? "" : "offline"}">${escapeHTML(sourceEnabled(source) ? profile.status || "unknown" : "not configured")}</span>
       </div>
       <div class="kv-grid">
-        <div class="kv-row"><div class="kv-label">Server</div><div>${escapeHTML(source.host || "Local connector volume")}</div></div>
-        <div class="kv-row"><div class="kv-label">Share</div><div>${escapeHTML(source.share || source.root || "/srv/hank/files")}</div></div>
+        <div class="kv-row"><div class="kv-label">Server</div><div>${escapeHTML(source.host || "Not set")}</div></div>
+        <div class="kv-row"><div class="kv-label">Share</div><div>${escapeHTML(source.share || "Not set")}</div></div>
         <div class="kv-row"><div class="kv-label">Username</div><div>${escapeHTML(source.username || "Not set")}</div></div>
-        <div class="kv-row"><div class="kv-label">Password</div><div>${source.type === "local" ? "Not required" : source.passwordSet ? "Saved" : "Not saved"}</div></div>
+        <div class="kv-row"><div class="kv-label">Password</div><div>${source.passwordSet ? "Saved" : "Not saved"}</div></div>
         <div class="kv-row"><div class="kv-label">Last Error</div><div>${escapeHTML(profile.last_error || "None")}</div></div>
       </div>
       <div class="item-actions">
-        ${source.id === active?.id ? "" : `<button type="button" class="secondary" data-source-id="${escapeHTML(source.id)}">Open Share</button>`}
         <a class="ops-card manage-link" href="/dashboard/settings#connections">Edit Settings</a>
       </div>
     </article>
@@ -619,12 +618,11 @@ function renderSourceSelect(sources) {
 }
 
 function sourceEnabled(source) {
-  return source?.type === "local" ? source.localRootEnabled : source?.smbEnabled;
+  return Boolean(source?.smbEnabled);
 }
 
 function sourceLabel(source) {
   if (!source) return "Not connected";
-  if (source.type === "local") return source.name || "Home connector files";
   const target = [source.host, source.share].filter(Boolean).join("/");
   return source.name && source.name !== source.share ? `${source.name} (${target || source.id})` : target || source.name || source.id;
 }
@@ -1044,6 +1042,17 @@ function resetSearch() {
 
 async function browseFiles(path = state.currentFilesPath, options = {}) {
   try {
+    if (!fileConfig().active) {
+      state.currentItems = [];
+      state.visibleItems = [];
+      renderPathStatus();
+      renderBreadcrumbs();
+      renderFolderTree();
+      renderSelectionState();
+      renderPreview();
+      setFilesLoading("No SMB share is configured for this home.");
+      return;
+    }
     const normalized = normalizePath(path);
     if (!options.keepSearch) resetSearch();
     setFilesLoading("Loading folder.");
@@ -1214,19 +1223,19 @@ async function deleteItemsFromDialog(event) {
   }
 }
 
-async function statItem(path) {
+async function statItem(path, sourceID = selectedSourceID()) {
   try {
-    const payload = await sendFileCommand("files.stat", { path: normalizePath(path) });
+    const payload = await sendFileCommandForSource(sourceID, "files.stat", { path: normalizePath(path) });
     return payload.item || null;
   } catch (_) {
     return null;
   }
 }
 
-async function collectCollisions(targetPaths) {
+async function collectCollisions(targetPaths, sourceID = selectedSourceID()) {
   const collisions = [];
   for (const targetPath of targetPaths) {
-    const item = await statItem(targetPath);
+    const item = await statItem(targetPath, sourceID);
     if (item) collisions.push({ path: normalizePath(targetPath), item });
   }
   return collisions;
@@ -1262,13 +1271,42 @@ async function openMoveDialog(items) {
     showToast("Select an item first.", true);
     return;
   }
+  const activeSourceID = selectedSourceID();
+  if (!activeSourceID) {
+    showToast("Choose an SMB share first.", true);
+    return;
+  }
   state.moveItems = targets;
+  state.moveSourceID = activeSourceID;
+  state.moveDestinationSourceID = activeSourceID;
+  renderMoveSourceSelect();
   openDialog(els.moveDialog);
   await browseMoveFolder(state.currentFilesPath);
 }
 
+function renderMoveSourceSelect() {
+  if (!els.moveSourceSelect) return;
+  const config = fileConfig();
+  els.moveSourceSelect.innerHTML = "";
+  config.sources.forEach((source) => {
+    const option = document.createElement("option");
+    option.value = source.id;
+    option.textContent = sourceLabel(source);
+    option.selected = source.id === state.moveDestinationSourceID;
+    els.moveSourceSelect.appendChild(option);
+  });
+  els.moveSourceSelect.disabled = config.sources.length <= 1;
+  els.moveSourceSelect.value = state.moveDestinationSourceID;
+}
+
+function moveDestinationSourceID() {
+  return els.moveSourceSelect?.value || state.moveDestinationSourceID || state.moveSourceID;
+}
+
 async function browseMoveFolder(path) {
   const normalized = normalizePath(path);
+  const destinationSourceID = moveDestinationSourceID();
+  state.moveDestinationSourceID = destinationSourceID;
   state.moveDialogPath = normalized;
   els.movePath.value = normalized;
   els.moveFolders.className = "file-list compact empty-state";
@@ -1276,7 +1314,7 @@ async function browseMoveFolder(path) {
   renderMoveTarget();
   renderMoveBreadcrumbs();
   try {
-    const payload = await sendFileCommand("files.list", { path: normalized });
+    const payload = await sendFileCommandForSource(destinationSourceID, "files.list", { path: normalized });
     const folders = (payload.items || []).filter((item) => item.is_directory);
     renderMoveFolders(folders);
   } catch (error) {
@@ -1288,8 +1326,12 @@ async function browseMoveFolder(path) {
 
 function renderMoveTarget() {
   const count = state.moveItems.length;
-  const reason = invalidMoveDestinationReason(state.moveItems, state.moveDialogPath);
-  els.moveTargetLabel.textContent = reason || `Move ${count === 1 ? itemName(state.moveItems[0]) : `${count} items`} to ${state.moveDialogPath}`;
+  const destinationSourceID = moveDestinationSourceID();
+  const reason = invalidMoveDestinationReason(state.moveItems, state.moveDialogPath, destinationSourceID);
+  const config = fileConfig();
+  const destinationSource = config.sources.find((source) => source.id === destinationSourceID);
+  const shareName = destinationSource ? sourceLabel(destinationSource) : "selected share";
+  els.moveTargetLabel.textContent = reason || `Move ${count === 1 ? itemName(state.moveItems[0]) : `${count} items`} to ${shareName}:${state.moveDialogPath}`;
   els.moveConfirmButton.disabled = Boolean(reason);
 }
 
@@ -1344,17 +1386,19 @@ function renderMoveFolders(folders) {
   });
 }
 
-function invalidMoveDestinationReason(items, destination) {
+function invalidMoveDestinationReason(items, destination, destinationSourceID = moveDestinationSourceID()) {
   const normalizedDestination = normalizePath(destination);
   if (!items.length) return "Select an item first.";
-  for (const item of items) {
-    const source = itemPath(item);
-    if (item.is_directory && (normalizedDestination === source || normalizedDestination.startsWith(`${source}/`))) {
-      return "Choose a destination outside the folder being moved.";
+  if (destinationSourceID === state.moveSourceID) {
+    for (const item of items) {
+      const source = itemPath(item);
+      if (item.is_directory && (normalizedDestination === source || normalizedDestination.startsWith(`${source}/`))) {
+        return "Choose a destination outside the folder being moved.";
+      }
     }
-  }
-  if (items.every((item) => normalizePath(joinPath(normalizedDestination, itemName(item))) === itemPath(item))) {
-    return "These items are already in this folder.";
+    if (items.every((item) => normalizePath(joinPath(normalizedDestination, itemName(item))) === itemPath(item))) {
+      return "These items are already in this folder.";
+    }
   }
   return "";
 }
@@ -1365,8 +1409,10 @@ async function moveItemsToDestination(items, destination, options = {}) {
     showToast("Select an item first.", true);
     return;
   }
+  const sourceID = state.moveSourceID || selectedSourceID();
+  const destinationSourceID = moveDestinationSourceID();
   const normalizedDestination = normalizePath(destination);
-  const reason = invalidMoveDestinationReason(targets, normalizedDestination);
+  const reason = invalidMoveDestinationReason(targets, normalizedDestination, destinationSourceID);
   if (reason) {
     showToast(reason, true);
     return;
@@ -1375,6 +1421,10 @@ async function moveItemsToDestination(items, destination, options = {}) {
   const moves = targets
     .map((item) => ({ item, to: joinPath(normalizedDestination, itemName(item)) }))
     .filter((move) => normalizePath(move.to) !== itemPath(move.item));
+  if (!moves.length) {
+    showToast("These items are already in this folder.", true);
+    return;
+  }
 
   if (options.confirmMove) {
     const approved = await confirmAction({
@@ -1385,7 +1435,7 @@ async function moveItemsToDestination(items, destination, options = {}) {
     if (!approved) return;
   }
 
-  const collisions = await collectCollisions(moves.map((move) => move.to));
+  const collisions = await collectCollisions(moves.map((move) => move.to), destinationSourceID);
   if (collisions.length) {
     closeDialog(els.moveDialog);
     const approved = await confirmAction({
@@ -1398,8 +1448,17 @@ async function moveItemsToDestination(items, destination, options = {}) {
   }
 
   try {
-    for (const move of moves) {
-      await sendFileCommand("files.rename", { from: rawItemPath(move.item), to: move.to });
+    if (destinationSourceID === sourceID) {
+      for (const move of moves) {
+        await sendFileCommandForSource(sourceID, "files.rename", { from: rawItemPath(move.item), to: move.to });
+      }
+    } else {
+      for (const move of moves) {
+        await copyItemBetweenSources(move.item, sourceID, destinationSourceID, move.to);
+      }
+      for (const move of moves.slice().reverse()) {
+        await sendFileCommandForSource(sourceID, "files.delete", { path: rawItemPath(move.item), is_directory: Boolean(move.item.is_directory) });
+      }
     }
     closeDialog(els.moveDialog);
     clearSelection();
@@ -1408,6 +1467,27 @@ async function moveItemsToDestination(items, destination, options = {}) {
   } catch (error) {
     showToast(error.message, true);
   }
+}
+
+async function copyItemBetweenSources(item, sourceID, destinationSourceID, destinationPath) {
+  if (item.is_directory) {
+    try {
+      await sendFileCommandForSource(destinationSourceID, "files.create_directory", { path: destinationPath });
+    } catch (_) {
+      // Existing folders are allowed when the user approves destination collisions.
+    }
+    const payload = await sendFileCommandForSource(sourceID, "files.list", { path: rawItemPath(item) });
+    for (const child of payload.items || []) {
+      await copyItemBetweenSources(child, sourceID, destinationSourceID, joinPath(destinationPath, itemName(child)));
+    }
+    return;
+  }
+
+  const payload = await sendFileCommandForSource(sourceID, "files.download", { path: rawItemPath(item) });
+  await sendFileCommandForSource(destinationSourceID, "files.upload", {
+    path: destinationPath,
+    content_base64: payload.content_base64 || "",
+  });
 }
 
 async function submitMoveDialog(event) {
@@ -1927,6 +2007,7 @@ els.renameCancelButton.addEventListener("click", () => closeDialog(els.renameDia
 els.moveForm.addEventListener("submit", submitMoveDialog);
 els.moveCancelButton.addEventListener("click", () => closeDialog(els.moveDialog));
 els.moveOpenButton.addEventListener("click", () => browseMoveFolder(els.movePath.value));
+els.moveSourceSelect?.addEventListener("change", () => browseMoveFolder(els.movePath.value));
 els.movePath.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
