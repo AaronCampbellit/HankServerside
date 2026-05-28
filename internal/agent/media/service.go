@@ -72,14 +72,16 @@ var (
 )
 
 type Config struct {
-	Enabled              bool
-	BaseURL              string
-	Username             string
-	Password             string
-	DestinationPath      string
-	MovieDestinationPath string
-	TVDestinationPath    string
-	EnvPath              string
+	Enabled                       bool
+	BaseURL                       string
+	Username                      string
+	Password                      string
+	DestinationPath               string
+	MovieDestinationPath          string
+	TVDestinationPath             string
+	RequireConfirmation           bool
+	RequireConfirmationConfigured bool
+	EnvPath                       string
 }
 
 type EventSink func(ctx context.Context, event string, topic string, payload any) error
@@ -120,17 +122,23 @@ func New(cfg Config, files *agentfiles.Service, logger *slog.Logger) *Service {
 	if files == nil {
 		files = agentfiles.New("")
 	}
+	requireConfirmation := true
+	if cfg.RequireConfirmationConfigured {
+		requireConfirmation = cfg.RequireConfirmation
+	}
 	jar, _ := cookiejar.New(nil)
 	return &Service{
 		cfg: Config{
-			Enabled:              cfg.Enabled,
-			BaseURL:              strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
-			Username:             strings.TrimSpace(cfg.Username),
-			Password:             cfg.Password,
-			DestinationPath:      cleanSharePath(cfg.DestinationPath),
-			MovieDestinationPath: cleanSharePath(firstNonBlank(cfg.MovieDestinationPath, cfg.DestinationPath)),
-			TVDestinationPath:    cleanSharePath(firstNonBlank(cfg.TVDestinationPath, cfg.DestinationPath)),
-			EnvPath:              strings.TrimSpace(cfg.EnvPath),
+			Enabled:                       cfg.Enabled,
+			BaseURL:                       strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
+			Username:                      strings.TrimSpace(cfg.Username),
+			Password:                      cfg.Password,
+			DestinationPath:               cleanSharePath(cfg.DestinationPath),
+			MovieDestinationPath:          cleanSharePath(firstNonBlank(cfg.MovieDestinationPath, cfg.DestinationPath)),
+			TVDestinationPath:             cleanSharePath(firstNonBlank(cfg.TVDestinationPath, cfg.DestinationPath)),
+			RequireConfirmation:           requireConfirmation,
+			RequireConfirmationConfigured: true,
+			EnvPath:                       strings.TrimSpace(cfg.EnvPath),
 		},
 		files:  files,
 		client: &http.Client{Jar: jar},
@@ -173,6 +181,8 @@ func (s *Service) ApplySettings(_ context.Context, request protocol.MediaSetting
 	cfg.DestinationPath = cleanSharePath(settings.DestinationPath)
 	cfg.MovieDestinationPath = cleanSharePath(firstNonBlank(settings.MovieDestinationPath, settings.DestinationPath))
 	cfg.TVDestinationPath = cleanSharePath(firstNonBlank(settings.TVDestinationPath, settings.DestinationPath))
+	cfg.RequireConfirmation = settings.RequireConfirmation
+	cfg.RequireConfirmationConfigured = true
 	if request.Password != "" {
 		cfg.Password = request.Password
 	}
@@ -232,7 +242,7 @@ func (s *Service) settingsSnapshot() protocol.MediaSettings {
 		MovieDestinationPath: cfg.MovieDestinationPath,
 		TVDestinationPath:    cfg.TVDestinationPath,
 		PreferredQuality:     preferredQuality,
-		RequireConfirmation:  true,
+		RequireConfirmation:  cfg.RequireConfirmation,
 	}
 }
 
@@ -1482,6 +1492,8 @@ func (s *Service) planFromDownloads(selection protocol.MediaSearchResult, downlo
 		Selection:       selection,
 		DestinationPath: s.destinationLabel(),
 	}
+	requireConfirmation := s.configSnapshot().RequireConfirmation
+	plan.RequireConfirmation = &requireConfirmation
 	for _, download := range downloads {
 		item := download.item
 		items = append(items, item)
@@ -1532,6 +1544,7 @@ func (s *Service) persistSettings(cfg Config) error {
 	env["HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"] = cfg.Password
 	env["HANK_REMOTE_MEDIA_DESTINATION_PATH"] = cleanSharePath(cfg.DestinationPath)
 	env["HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH"] = cleanSharePath(cfg.MovieDestinationPath)
+	env["HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION"] = strconv.FormatBool(cfg.RequireConfirmation)
 	env["HANK_REMOTE_MEDIA_TV_DESTINATION_PATH"] = cleanSharePath(cfg.TVDestinationPath)
 	return writeEnvFile(cfg.EnvPath, env)
 }

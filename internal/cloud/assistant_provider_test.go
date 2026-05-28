@@ -121,6 +121,77 @@ func TestAssistantStatusUsesLinkedChatGPTCodexWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestAssistantModelsEndpointUsesLinkedChatGPTCodexModels(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_assistant_models", Email: "assistant-models@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_assistant_models", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_assistant_models", UserID: user.ID, TokenHash: hashToken("assistant-models-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, session))
+	must(t, db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
+		UserID:          user.ID,
+		ProviderUserID:  "workspace-123",
+		AuthProvider:    openAIAccountProviderChatGPTCodex,
+		ChatGPTPlanType: "plus",
+		AccessToken:     "linked-token",
+		TokenType:       "Bearer",
+		Scope:           "chatgpt_codex",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}))
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer linked-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.Header.Get("ChatGPT-Account-ID"); got != "workspace-123" {
+			t.Fatalf("ChatGPT-Account-ID = %q", got)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"models": []map[string]any{
+				{"id": "gpt-codex-large"},
+				{"slug": "gpt-codex-small"},
+				{"id": "text-embedding-3-small"},
+			},
+		})
+	}))
+	defer provider.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{Provider: assistantProviderChatGPTCodex, ChatGPTOAuthEnabled: true, ChatGPTBackendBaseURL: provider.URL, ChatGPTChatModel: "gpt-codex-test"})
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var response assistantModelOptionsResponse
+	requestJSON(t, testServer, "assistant-models-token", http.MethodGet, "/v1/home/assistant/models", nil, &response)
+	if response.Provider != assistantProviderChatGPTCodex || response.Source != assistantProviderChatGPTCodex {
+		t.Fatalf("model response provider/source = %#v", response)
+	}
+	models := map[string]bool{}
+	for _, model := range response.Models {
+		models[model] = true
+	}
+	for _, want := range []string{"gpt-codex-test", "gpt-codex-large", "gpt-codex-small"} {
+		if !models[want] {
+			t.Fatalf("models missing %q: %#v", want, response.Models)
+		}
+	}
+	if models["text-embedding-3-small"] {
+		t.Fatalf("embedding model should not be offered as chat model: %#v", response.Models)
+	}
+}
+
 func TestChatGPTCodexProviderPostsResponsesWithBearerAndAccount(t *testing.T) {
 	t.Parallel()
 

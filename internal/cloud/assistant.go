@@ -212,6 +212,9 @@ func (s *Server) handleHomeAssistant(w http.ResponseWriter, r *http.Request, hom
 	case len(parts) == 2 && parts[1] == "status":
 		s.handleAssistantStatus(w, r, home, auth)
 		return true
+	case len(parts) == 2 && parts[1] == "models":
+		s.handleAssistantModels(w, r, home, auth)
+		return true
 	case len(parts) == 2 && parts[1] == "settings":
 		s.handleAssistantSettings(w, r, home, auth)
 		return true
@@ -2688,20 +2691,7 @@ func (s *Server) executeConfirmedAssistantAction(
 			return assistantRunResponse{}, err
 		}
 		job := response.Job
-		content := assistantMessageContent{
-			Text: fmt.Sprintf("Started the media download job for `%s`.", pending.MediaDownload.Title),
-			Cards: []assistantResultCard{
-				{
-					Kind:        "media",
-					Title:       pending.MediaDownload.Title,
-					Summary:     fmt.Sprintf("Job %s is %s. %d item(s) queued for the Media share root.", job.JobID, job.Status, job.TotalCount),
-					ActionTitle: "View Job",
-					Path:        pending.MediaDownload.Selection.PagePath,
-					MediaType:   pending.MediaDownload.MediaType,
-					JobID:       job.JobID,
-				},
-			},
-		}
+		content := mediaDownloadStartedContent(pending.MediaDownload.Title, pending.MediaDownload.Selection, job, pending.MediaDownload.DestinationPath)
 		message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, content)
 		if err != nil {
 			return assistantRunResponse{}, err

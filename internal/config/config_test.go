@@ -173,6 +173,7 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	t.Setenv("HANK_REMOTE_SMB_DOMAIN", "WORKGROUP")
 	t.Setenv("HANK_REMOTE_AGENT_FILES_ROOT", "/srv/hank/files")
 	t.Setenv("HANK_REMOTE_AGENT_NOTES_ROOT", "/srv/hank/notes")
+	t.Setenv("HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION", "false")
 
 	cfg, err := LoadAgent()
 	if err != nil {
@@ -193,5 +194,8 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	}
 	if cfg.FilesRoot != "/srv/hank/files" || cfg.NotesRoot != "/srv/hank/notes" {
 		t.Fatalf("roots = files:%q notes:%q", cfg.FilesRoot, cfg.NotesRoot)
+	}
+	if cfg.Media.RequireConfirmation {
+		t.Fatal("Media.RequireConfirmation = true, want false")
 	}
 }

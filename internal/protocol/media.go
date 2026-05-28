@@ -110,6 +110,7 @@ type MediaDownloadPlan struct {
 	MissingLinkCount      int                 `json:"missing_link_count"`
 	ExistingCount         int                 `json:"existing_count"`
 	DestinationPath       string              `json:"destination_path"`
+	RequireConfirmation   *bool               `json:"require_confirmation,omitempty"`
 }
 
 type MediaPlanDownloadResponse struct {

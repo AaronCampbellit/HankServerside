@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/store"
 )
 
@@ -45,6 +46,17 @@ type assistantProviderStatus struct {
 	ChatModelOptions    []string
 	EmbeddingModel      string
 	VectorStore         string
+}
+
+type assistantModelOptionsResponse struct {
+	Provider       string   `json:"provider"`
+	ChatConfigured bool     `json:"chat_configured"`
+	CurrentModel   string   `json:"current_model"`
+	DefaultModel   string   `json:"default_model"`
+	Override       string   `json:"override,omitempty"`
+	Models         []string `json:"models"`
+	Source         string   `json:"source"`
+	Error          string   `json:"error,omitempty"`
 }
 
 type assistantLLMMessage struct {
@@ -170,6 +182,81 @@ func (s *Server) assistantStatus(ctx context.Context, userID string, modelOverri
 		status.VectorStore = "postgres_without_pgvector"
 	}
 	return status
+}
+
+func (s *Server) handleAssistantModels(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	settings, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	status := s.assistantStatus(r.Context(), auth.User.ID, settings.ChatModel)
+	modelsCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+
+	models, source, err := s.fetchAssistantChatModels(modelsCtx, auth.User.ID, status.Provider)
+	errorMessage := ""
+	if err != nil {
+		errorMessage = err.Error()
+	}
+	if len(models) == 0 {
+		models = status.ChatModelOptions
+		source = "configured"
+	}
+	models = assistantModelOptionsWithConfigured(models, status.DefaultChatModel, settings.ChatModel)
+	writeJSON(w, http.StatusOK, assistantModelOptionsResponse{
+		Provider:       status.Provider,
+		ChatConfigured: status.ChatConfigured,
+		CurrentModel:   status.ChatModel,
+		DefaultModel:   status.DefaultChatModel,
+		Override:       settings.ChatModel,
+		Models:         models,
+		Source:         source,
+		Error:          errorMessage,
+	})
+}
+
+func (s *Server) fetchAssistantChatModels(ctx context.Context, userID string, provider string) ([]string, string, error) {
+	cfg := s.assistantAI
+	cfg.normalize()
+	switch provider {
+	case "openai":
+		token := strings.TrimSpace(cfg.OpenAIAPIKey)
+		if token == "" {
+			return nil, "", errors.New("OpenAI API key is not configured")
+		}
+		models, err := fetchOpenAIChatModels(ctx, cfg.OpenAIBaseURL, token)
+		return models, "openai_api", err
+	case assistantProviderChatGPTCodex:
+		if !cfg.ChatGPTOAuthEnabled {
+			return nil, "", errChatGPTRelinkRequired
+		}
+		account, err := s.chatGPTCodexAccount(ctx, userID)
+		if err != nil {
+			return nil, "", err
+		}
+		models, err := fetchChatGPTCodexModels(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID)
+		return models, assistantProviderChatGPTCodex, err
+	case "ollama":
+		if cfg.OllamaBaseURL == "" {
+			return nil, "", errors.New("Ollama is not configured")
+		}
+		models, err := fetchOllamaChatModels(ctx, cfg.OllamaBaseURL)
+		return models, "ollama", err
+	default:
+		return nil, "", nil
+	}
+}
+
+func assistantModelOptionsWithConfigured(models []string, defaultModel string, override string) []string {
+	values := make([]string, 0, len(models)+2)
+	values = append(values, override, defaultModel)
+	values = append(values, models...)
+	return uniqueStrings(values)
 }
 
 func (s *Server) resolveAssistantProvider(ctx context.Context, userID string) (string, string) {
@@ -378,6 +465,41 @@ func postOpenAIEmbedding(ctx context.Context, baseURL string, token string, mode
 	return response.Data[0].Embedding, nil
 }
 
+func fetchOpenAIChatModels(ctx context.Context, baseURL string, token string) ([]string, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/v1/models"
+	data, err := getEndpointBody(ctx, endpoint, map[string]string{"Authorization": "Bearer " + token})
+	if err != nil {
+		return nil, err
+	}
+	return assistantModelIDsFromJSON(data, true), nil
+}
+
+func fetchChatGPTCodexModels(ctx context.Context, baseURL string, token string, accountID string) ([]string, error) {
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	if strings.TrimSpace(accountID) != "" {
+		headers["ChatGPT-Account-ID"] = accountID
+	}
+	endpoint := strings.TrimRight(baseURL, "/") + "/models"
+	data, err := getEndpointBody(ctx, endpoint, headers)
+	if err != nil {
+		return nil, err
+	}
+	models := assistantModelIDsFromJSON(data, true)
+	if len(models) == 0 {
+		return nil, errors.New("ChatGPT/Codex did not return chat models")
+	}
+	return models, nil
+}
+
+func fetchOllamaChatModels(ctx context.Context, baseURL string) ([]string, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/tags"
+	data, err := getEndpointBody(ctx, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	return assistantModelIDsFromJSON(data, false), nil
+}
+
 func postChatGPTCodexResponse(ctx context.Context, baseURL string, token string, accountID string, model string, messages []assistantLLMMessage) (string, error) {
 	body := map[string]any{
 		"model": model,
@@ -463,6 +585,89 @@ func postJSON(ctx context.Context, url string, bearerToken string, body any, out
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+func getEndpointBody(ctx context.Context, endpoint string, headers map[string]string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(value) != "" {
+			request.Header.Set(key, value)
+		}
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, &providerHTTPError{StatusCode: response.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	return data, nil
+}
+
+func assistantModelIDsFromJSON(data []byte, chatOnly bool) []string {
+	var raw any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	var ids []string
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case []any:
+			for _, item := range typed {
+				if text, ok := item.(string); ok {
+					if assistantModelIDAllowed(text, chatOnly) {
+						ids = append(ids, strings.TrimSpace(text))
+					}
+					continue
+				}
+				walk(item)
+			}
+		case map[string]any:
+			for _, key := range []string{"id", "model", "slug", "model_slug", "name"} {
+				if text, ok := typed[key].(string); ok && assistantModelIDAllowed(text, chatOnly) {
+					ids = append(ids, strings.TrimSpace(text))
+					break
+				}
+			}
+			for _, key := range []string{"models", "data", "items", "available_models"} {
+				if child, ok := typed[key]; ok {
+					walk(child)
+				}
+			}
+		}
+	}
+	walk(raw)
+	return uniqueStrings(ids)
+}
+
+func assistantModelIDAllowed(value string, chatOnly bool) bool {
+	id := strings.TrimSpace(value)
+	if id == "" || strings.ContainsAny(id, "\r\n\t") {
+		return false
+	}
+	if !chatOnly {
+		return true
+	}
+	lowered := strings.ToLower(id)
+	for _, blocked := range []string{"embedding", "whisper", "tts", "dall-e", "image", "moderation", "audio", "transcribe", "speech", "realtime"} {
+		if strings.Contains(lowered, blocked) {
+			return false
+		}
+	}
+	return strings.HasPrefix(lowered, "gpt-") ||
+		strings.HasPrefix(lowered, "o") ||
+		strings.Contains(lowered, "codex") ||
+		strings.Contains(lowered, "chat")
 }
 
 func localEmbedding(text string, dimension int) []float64 {

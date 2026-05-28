@@ -325,6 +325,34 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 	if plan.ItemCount == 0 || plan.MissingLinkCount >= plan.ItemCount {
 		return assistantMessageContent{Text: fmt.Sprintf("I found `%s`, but no downloadable movie or episode entries were available.", card.Title)}, nil
 	}
+	if !mediaPlanRequiresConfirmation(plan) {
+		response, err := s.startMediaDownload(ctx, home.ID, plan.Selection)
+		if err != nil {
+			s.recordAssistantTrace(ctx, assistantTraceEvent{
+				Level:   "error",
+				Scope:   "media",
+				Event:   "media.download.failed",
+				Summary: "Could not start the media download after planning.",
+				Details: traceDetails(map[string]any{
+					"title": firstNonBlank(plan.Selection.Title, card.Title),
+					"path":  card.Path,
+					"error": err.Error(),
+				}),
+			})
+			return assistantMessageContent{Text: fmt.Sprintf("I found `%s`, but I couldn't start the download through the home agent right now.", card.Title)}, nil
+		}
+		s.recordAssistantTrace(ctx, assistantTraceEvent{
+			Scope:   "media",
+			Event:   "media.confirmation.skipped",
+			Summary: "Media workflow is configured to start downloads without an approval pause.",
+			Details: traceDetails(map[string]any{
+				"title":       firstNonBlank(plan.Selection.Title, card.Title),
+				"destination": plan.DestinationPath,
+				"job_id":      response.Job.JobID,
+			}),
+		})
+		return mediaDownloadStartedContent(firstNonBlank(plan.Selection.Title, card.Title), plan.Selection, response.Job, plan.DestinationPath), nil
+	}
 	pending := assistantPendingAction{
 		Kind: "media_download",
 		MediaDownload: &assistantPendingMediaDownload{
@@ -347,6 +375,13 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 			"pending_action": pending,
 		},
 	}, nil
+}
+
+func mediaPlanRequiresConfirmation(plan protocol.MediaDownloadPlan) bool {
+	if plan.RequireConfirmation == nil {
+		return true
+	}
+	return *plan.RequireConfirmation
 }
 
 func (s *Server) planMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, error) {
@@ -388,6 +423,26 @@ func (s *Server) startMediaDownload(ctx context.Context, homeID string, selectio
 		}),
 	})
 	return response, nil
+}
+
+func mediaDownloadStartedContent(title string, selection protocol.MediaSearchResult, job protocol.MediaDownloadJobStatus, destination string) assistantMessageContent {
+	title = firstNonBlank(title, job.Title, selection.Title, "selected media")
+	destination = firstNonBlank(destination, "Media destination")
+	return assistantMessageContent{
+		Text: fmt.Sprintf("Started the media download job for `%s`.", title),
+		Cards: []assistantResultCard{
+			{
+				Kind:        "media",
+				Title:       title,
+				Summary:     fmt.Sprintf("Job %s is %s. %d item(s) queued for %s.", job.JobID, job.Status, job.TotalCount, destination),
+				ActionTitle: "View Job",
+				Path:        selection.PagePath,
+				MediaType:   selection.Type,
+				ImageURL:    selection.PosterURL,
+				JobID:       job.JobID,
+			},
+		},
+	}
 }
 
 func (s *Server) resolvePreviousMediaSelection(ctx context.Context, sessionID string, prompt string) (assistantResultCard, bool) {

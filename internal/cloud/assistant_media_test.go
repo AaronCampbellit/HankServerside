@@ -146,6 +146,88 @@ func TestAssistantMediaConfirmationCarriesPosterCard(t *testing.T) {
 	}
 }
 
+func TestAssistantMediaStartsImmediatelyWhenConfirmationDisabled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	requireConfirmation := false
+	errCh := make(chan error, 1)
+	go func() {
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSearch, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaSearchRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaSearchResponse{
+				Query: request.Query,
+				Results: []protocol.MediaSearchResult{{
+					ID:        "movies/fixture-movie",
+					Title:     "Fixture Movie",
+					Year:      2026,
+					Type:      protocol.MediaTypeMovie,
+					PosterURL: "https://image.example/fixture-movie.jpg",
+					PagePath:  "/movies/fixture-movie",
+				}},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaPlanDownloadResponse{
+				Plan: protocol.MediaDownloadPlan{
+					Selection:             request.Selection,
+					Items:                 []protocol.MediaDownloadItem{{Title: "Fixture Movie", MediaType: protocol.MediaTypeMovie, Quality: "1080p", Filename: "Fixture Movie.mp4", DownloadOK: true}},
+					ItemCount:             1,
+					PreferredQualityCount: 1,
+					DestinationPath:       "SMB share/Movies",
+					RequireConfirmation:   &requireConfirmation,
+				},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaDownloadStart, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaDownloadStartRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaDownloadStartResponse{Job: protocol.MediaDownloadJobStatus{
+				JobID:      "job_fixture",
+				Status:     protocol.MediaJobStatusQueued,
+				Title:      request.Selection.Title,
+				TotalCount: 1,
+			}}, nil
+		})
+	}()
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "find Fixture Movie for download",
+	}, &run)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if run.RequiresConfirmation || run.State != assistantStateCompleted || run.AssistantMessage == nil {
+		t.Fatalf("run should complete without confirmation: %#v", run)
+	}
+	if len(run.AssistantMessage.Cards) != 1 || run.AssistantMessage.Cards[0].JobID != "job_fixture" {
+		t.Fatalf("started job card = %#v", run.AssistantMessage.Cards)
+	}
+}
+
 func TestResolvePreviousMediaSelection(t *testing.T) {
 	t.Parallel()
 

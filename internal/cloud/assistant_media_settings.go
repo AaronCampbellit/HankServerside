@@ -1,12 +1,16 @@
 package cloud
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
+
+const assistantMediaSettingsStatusTimeout = 8 * time.Second
 
 type assistantMediaSettingsResponse struct {
 	Online             bool                              `json:"online"`
@@ -76,7 +80,9 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) fetchAssistantMediaSettings(r *http.Request, home domain.Home, membership domain.HomeMembership) (assistantMediaSettingsResponse, error) {
-	envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandMediaSettingsStatus, protocol.MediaSettingsStatusRequest{})
+	ctx, cancel := context.WithTimeout(r.Context(), assistantMediaSettingsStatusTimeout)
+	defer cancel()
+	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandMediaSettingsStatus, protocol.MediaSettingsStatusRequest{})
 	if err != nil {
 		return assistantMediaSettingsResponse{}, err
 	}

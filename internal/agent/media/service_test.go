@@ -1184,6 +1184,7 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 			DestinationPath:      "Media",
 			MovieDestinationPath: "Movies",
 			TVDestinationPath:    "Shows/Fixture",
+			RequireConfirmation:  false,
 		},
 		Password: "test-password",
 		Persist:  true,
@@ -1191,7 +1192,7 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplySettings: %v", err)
 	}
-	if !response.Settings.Enabled || !response.Settings.HasPassword || response.Settings.MovieDestinationPath != "Movies" || response.Settings.TVDestinationPath != "Shows/Fixture" {
+	if !response.Settings.Enabled || !response.Settings.HasPassword || response.Settings.MovieDestinationPath != "Movies" || response.Settings.TVDestinationPath != "Shows/Fixture" || response.Settings.RequireConfirmation {
 		t.Fatalf("settings response = %#v", response.Settings)
 	}
 	data, err := os.ReadFile(envPath)
@@ -1207,6 +1208,7 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 		"HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=test-password",
 		"HANK_REMOTE_MEDIA_DESTINATION_PATH=Media",
 		"HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH=Movies",
+		"HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION=false",
 		"HANK_REMOTE_MEDIA_TV_DESTINATION_PATH=Shows/Fixture",
 	} {
 		if !strings.Contains(env, want) {

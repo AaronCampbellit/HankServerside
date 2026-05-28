@@ -4,7 +4,9 @@ const state = {
   assistant: null,
   settings: null,
   media: null,
+  models: null,
   statusTimer: null,
+  mediaTimer: null,
   highlightedMediaJobID: new URLSearchParams(window.location.search).get("media_job") || "",
   highlightedMediaJobScrolled: false,
 };
@@ -45,7 +47,7 @@ const els = {
   harnessProjectDocsEnabled: document.getElementById("harness-project-docs-enabled"),
   harnessConversationsEnabled: document.getElementById("harness-conversations-enabled"),
   harnessChatModel: document.getElementById("harness-chat-model"),
-  harnessChatModelOptions: document.getElementById("harness-chat-model-options"),
+  harnessModelMeta: document.getElementById("harness-model-meta"),
   harnessSystemPrompt: document.getElementById("harness-system-prompt"),
   resetAssistantPromptButton: document.getElementById("reset-assistant-prompt-button"),
   toast: document.getElementById("toast"),
@@ -231,6 +233,63 @@ function renderKV(rows) {
   `).join("");
 }
 
+function uniqueValues(values) {
+  const seen = new Set();
+  const unique = [];
+  values.forEach((value) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    unique.push(trimmed);
+  });
+  return unique;
+}
+
+function modelSourceLabel(source, provider) {
+  switch (source) {
+    case "chatgpt_codex":
+      return "linked ChatGPT/Codex account";
+    case "openai_api":
+      return "OpenAI API key";
+    case "ollama":
+      return "Ollama";
+    case "configured":
+      return "configured fallback";
+    default:
+      return provider || "provider";
+  }
+}
+
+function renderChatModelSelect(settings, defaults) {
+  const selected = String(settings.chat_model || "").trim();
+  const assistant = state.assistant || {};
+  const modelState = state.models || {};
+  const defaultModel = String(modelState.default_model || assistant.chat_model_default || defaults.chat_model || "").trim();
+  const models = uniqueValues([
+    ...(modelState.models || []),
+    ...(assistant.chat_model_options || []),
+    ...(defaults.chat_model_options || []),
+    selected,
+    defaultModel,
+  ]);
+  const defaultLabel = defaultModel ? `Provider default (${defaultModel})` : "Provider default";
+  const options = [{ value: "", label: defaultLabel }].concat(models.map((model) => ({ value: model, label: model })));
+  els.harnessChatModel.innerHTML = options.map((option) => (
+    `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
+  )).join("");
+  els.harnessChatModel.value = selected;
+
+  if (modelState.loading) {
+    els.harnessModelMeta.textContent = "Loading available models from the active provider.";
+  } else if (modelState.error) {
+    els.harnessModelMeta.textContent = `Using fallback model list. ${modelState.error}`;
+  } else if (modelState.source) {
+    els.harnessModelMeta.textContent = `${models.length} model${models.length === 1 ? "" : "s"} from ${modelSourceLabel(modelState.source, modelState.provider)}.`;
+  } else {
+    els.harnessModelMeta.textContent = "Using configured provider defaults until the live model list is loaded.";
+  }
+}
+
 function renderStatus() {
   const status = state.status || {};
   const assistant = state.assistant || {};
@@ -318,7 +377,6 @@ function renderAssistantSettings() {
   const sources = payload.sources || [];
   const tools = payload.tools || [];
   const enabledSources = sources.filter((source) => source.enabled);
-  const modelOptions = state.assistant?.chat_model_options || defaults.chat_model_options || [];
 
   els.assistantSettingsPill.textContent = enabledSources.length ? `${enabledSources.length} sources` : "No sources";
   els.assistantSettingsPill.className = enabledSources.length ? "status-chip" : "status-chip offline";
@@ -330,11 +388,7 @@ function renderAssistantSettings() {
   els.harnessHomeAssistantEnabled.checked = settings.homeassistant_enabled !== false;
   els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
   els.harnessConversationsEnabled.checked = settings.conversations_enabled !== false;
-  els.harnessChatModel.value = settings.chat_model || "";
-  els.harnessChatModel.placeholder = state.assistant?.chat_model_default ? `Default: ${state.assistant.chat_model_default}` : "Provider default";
-  els.harnessChatModelOptions.innerHTML = modelOptions.map((model) => (
-    `<option value="${escapeHTML(model)}"></option>`
-  )).join("");
+  renderChatModelSelect(settings, defaults);
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
   renderToolSettings(tools);
   renderMediaWorkflowSettings();
@@ -412,6 +466,28 @@ function renderToolSettings(tools) {
 }
 
 function renderMediaWorkflowSettings() {
+  if (!state.media) {
+    els.mediaWorkflowPill.textContent = "Checking";
+    els.mediaWorkflowPill.className = "status-chip offline";
+    els.mediaWorkflowMeta.textContent = "Loading agent-backed media workflow settings.";
+    els.mediaJobsOutput.className = "card-list empty-state";
+    els.mediaJobsOutput.textContent = "Checking media jobs.";
+    [
+      els.mediaWorkflowEnabled,
+      els.mediaGramatonBaseURL,
+      els.mediaGramatonUsername,
+      els.mediaGramatonPassword,
+      els.mediaDestinationPath,
+      els.mediaMovieDestinationPath,
+      els.mediaTVDestinationPath,
+      els.mediaConfirmationRequired,
+      els.saveMediaSettingsButton,
+      els.refreshMediaSettingsButton,
+    ].forEach((element) => {
+      element.disabled = true;
+    });
+    return;
+  }
   const payload = state.media || {};
   const settings = payload.settings || {};
   const online = payload.online === true;
@@ -534,36 +610,67 @@ function assistantSettingsFormPayload() {
   };
 }
 
-async function loadStatus() {
-  const [status, assistant, settings, media] = await Promise.all([
+async function loadStatus(options = {}) {
+  clearTimeout(state.statusTimer);
+  const wasLinked = state.status?.linked === true;
+  const [status, assistant, settings] = await Promise.all([
     api("/v1/oauth/openai/status"),
     api("/v1/home/assistant/status"),
     api("/v1/home/assistant/settings"),
-    api("/v1/home/assistant/media-settings").catch((error) => ({
-      online: false,
-      can_edit: false,
-      settings: { base_url: "https://gramaton.io", preferred_quality: "1080p", require_confirmation: true },
-      destination_options: [{ value: "", label: "SMB share root" }],
-      jobs: [],
-      error: error.message,
-    })),
   ]);
   state.status = status;
   state.assistant = assistant;
   state.settings = settings;
-  state.media = media;
   renderStatus();
   renderAssistantSettings();
-  clearTimeout(state.statusTimer);
-  const hasActiveMediaJobs = (media.jobs || []).some(isActiveMediaJob);
+  if (status.linked && (!wasLinked || state.models?.error)) {
+    loadModelOptions().catch((error) => showToast(error.message, true));
+  }
   if (status.pending?.state === "pending") {
     const waitSeconds = Math.max(Number(status.pending.poll_after_seconds || 3), 2);
     state.statusTimer = window.setTimeout(() => {
-      loadStatus().catch((error) => showToast(error.message, true));
+      loadStatus({ includeMedia: false }).catch((error) => showToast(error.message, true));
     }, waitSeconds * 1000);
-  } else if (hasActiveMediaJobs) {
-    state.statusTimer = window.setTimeout(() => {
-      loadStatus().catch((error) => showToast(error.message, true));
+  }
+  if (options.includeMedia !== false) {
+    loadMediaStatus().catch((error) => showToast(error.message, true));
+  }
+}
+
+async function loadModelOptions() {
+  if (state.models?.loading) {
+    return;
+  }
+  state.models = { loading: true };
+  if (state.settings) {
+    renderAssistantSettings();
+  }
+  try {
+    state.models = await api("/v1/home/assistant/models");
+  } catch (error) {
+    state.models = { models: [], source: "configured", error: error.message };
+  }
+  if (state.settings) {
+    renderAssistantSettings();
+  }
+}
+
+async function loadMediaStatus() {
+  clearTimeout(state.mediaTimer);
+  const media = await api("/v1/home/assistant/media-settings").catch((error) => ({
+    online: false,
+    can_edit: false,
+    settings: { base_url: "https://gramaton.io", preferred_quality: "1080p", require_confirmation: true },
+    destination_options: [{ value: "", label: "SMB share root" }],
+    jobs: [],
+    error: error.message,
+  }));
+  state.media = media;
+  renderMediaWorkflowSettings();
+  const hasActiveMediaJobs = (media.jobs || []).some(isActiveMediaJob);
+  if (hasActiveMediaJobs) {
+    state.mediaTimer = window.setTimeout(() => {
+      loadMediaStatus().catch((error) => showToast(error.message, true));
     }, 3000);
   }
 }
@@ -575,7 +682,7 @@ async function saveAssistantSettings(event) {
       method: "PUT",
       body: JSON.stringify(assistantSettingsFormPayload()),
     });
-    await loadStatus();
+    await loadStatus({ includeMedia: false });
     showToast("HankAI settings saved.");
   } catch (error) {
     showToast(error.message, true);
@@ -608,7 +715,7 @@ async function saveMediaSettings() {
     });
     els.mediaGramatonPassword.value = "";
     state.media = { ...state.media, ...payload, jobs: state.media?.jobs || [] };
-    await loadStatus();
+    await loadMediaStatus();
     showToast("Media workflow settings saved.");
   } catch (error) {
     showToast(error.message, true);
@@ -618,7 +725,7 @@ async function saveMediaSettings() {
 async function cancelMediaJob(jobID) {
   try {
     await api(`/v1/home/assistant/media-jobs/${encodeURIComponent(jobID)}/cancel`, { method: "POST" });
-    await loadStatus();
+    await loadMediaStatus();
     showToast("Media job cancelled.");
   } catch (error) {
     showToast(error.message, true);
@@ -635,7 +742,8 @@ async function linkOpenAI() {
     if (payload.auth_mode === "device_code" && payload.verification_url && payload.user_code) {
       showToast(`Enter code ${payload.user_code} to finish linking.`);
       window.open(payload.verification_url, "_blank", "noopener");
-      await loadStatus();
+      await loadStatus({ includeMedia: false });
+      loadModelOptions().catch((error) => showToast(error.message, true));
       return;
     }
     throw new Error("Link flow did not return an authorization step.");
@@ -662,6 +770,7 @@ async function hydrate() {
       setSettingsSection(params.get("settings_tab") || "tools");
     }
     await loadStatus();
+    loadModelOptions().catch((error) => showToast(error.message, true));
   } catch (_) {
     window.location.replace("/");
   }
@@ -671,7 +780,7 @@ els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
 els.saveMediaSettingsButton.addEventListener("click", saveMediaSettings);
-els.refreshMediaSettingsButton.addEventListener("click", () => loadStatus().then(() => showToast("Media jobs refreshed.")).catch((error) => showToast(error.message, true)));
+els.refreshMediaSettingsButton.addEventListener("click", () => loadMediaStatus().then(() => showToast("Media jobs refreshed.")).catch((error) => showToast(error.message, true)));
 els.mediaDestinationPath.addEventListener("change", () => {
   const destination = els.mediaDestinationPath.value;
   refreshScopedMediaDestinationOptions({

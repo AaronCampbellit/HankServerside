@@ -100,6 +100,7 @@ type Media struct {
 	DestinationPath      string
 	MovieDestinationPath string
 	TVDestinationPath    string
+	RequireConfirmation  bool
 }
 
 func LoadCloud() (Cloud, error) {
@@ -212,6 +213,7 @@ func LoadAgent() (Agent, error) {
 			DestinationPath:      strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_DESTINATION_PATH")),
 			MovieDestinationPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH")),
 			TVDestinationPath:    strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_TV_DESTINATION_PATH")),
+			RequireConfirmation:  boolEnvOrDefault("HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION", true),
 		},
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),
