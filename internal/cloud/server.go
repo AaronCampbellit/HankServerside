@@ -724,7 +724,7 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if _, err := s.router.AddPending(context.Background(), envelope.RequestID, envelope.HomeID, command.Command, appConn, s.requestTimeout, s.handlePendingTimeout); err != nil {
+		if _, err := s.router.AddPending(context.Background(), envelope.RequestID, envelope.HomeID, command.Command, appConn, s.timeoutForCommand(command.Command), s.handlePendingTimeout); err != nil {
 			code := "request_rejected"
 			statusMessage := err.Error()
 			if errors.Is(err, ErrTooManyInFlight) {
@@ -754,6 +754,17 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 	}
+}
+
+func (s *Server) timeoutForCommand(command string) time.Duration {
+	if command == "files.move" {
+		timeout := s.requestTimeout * 15
+		if timeout < 30*time.Minute {
+			return 30 * time.Minute
+		}
+		return timeout
+	}
+	return s.requestTimeout
 }
 
 func (s *Server) handleAgentResponse(ctx context.Context, envelope protocol.Envelope) {

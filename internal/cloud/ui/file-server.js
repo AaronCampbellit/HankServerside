@@ -1448,17 +1448,13 @@ async function moveItemsToDestination(items, destination, options = {}) {
   }
 
   try {
-    if (destinationSourceID === sourceID) {
-      for (const move of moves) {
-        await sendFileCommandForSource(sourceID, "files.rename", { from: rawItemPath(move.item), to: move.to });
-      }
-    } else {
-      for (const move of moves) {
-        await copyItemBetweenSources(move.item, sourceID, destinationSourceID, move.to);
-      }
-      for (const move of moves.slice().reverse()) {
-        await sendFileCommandForSource(sourceID, "files.delete", { path: rawItemPath(move.item), is_directory: Boolean(move.item.is_directory) });
-      }
+    for (const move of moves) {
+      await sendFileCommandForSource(sourceID, "files.move", {
+        destination_source_id: destinationSourceID,
+        from: rawItemPath(move.item),
+        to: move.to,
+        is_directory: Boolean(move.item.is_directory),
+      });
     }
     closeDialog(els.moveDialog);
     clearSelection();
@@ -1467,27 +1463,6 @@ async function moveItemsToDestination(items, destination, options = {}) {
   } catch (error) {
     showToast(error.message, true);
   }
-}
-
-async function copyItemBetweenSources(item, sourceID, destinationSourceID, destinationPath) {
-  if (item.is_directory) {
-    try {
-      await sendFileCommandForSource(destinationSourceID, "files.create_directory", { path: destinationPath });
-    } catch (_) {
-      // Existing folders are allowed when the user approves destination collisions.
-    }
-    const payload = await sendFileCommandForSource(sourceID, "files.list", { path: rawItemPath(item) });
-    for (const child of payload.items || []) {
-      await copyItemBetweenSources(child, sourceID, destinationSourceID, joinPath(destinationPath, itemName(child)));
-    }
-    return;
-  }
-
-  const payload = await sendFileCommandForSource(sourceID, "files.download", { path: rawItemPath(item) });
-  await sendFileCommandForSource(destinationSourceID, "files.upload", {
-    path: destinationPath,
-    content_base64: payload.content_base64 || "",
-  });
 }
 
 async function submitMoveDialog(event) {

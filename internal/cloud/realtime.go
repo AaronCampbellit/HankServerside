@@ -232,7 +232,7 @@ func (s *Server) emitCommandSideEffect(ctx context.Context, command string, payl
 	switch command {
 	case "homeassistant.fetch_state":
 		s.broadcastRawAppEvent(ctx, topicHomeAssistantStates, "homeassistant.state_changed", payload)
-	case "files.create_directory", "files.upload", "files.rename", "files.delete":
+	case "files.create_directory", "files.upload", "files.rename", "files.move", "files.delete":
 		s.emitFileDirectoryChanged(ctx, "/", map[string]any{"path": "/"})
 	}
 }

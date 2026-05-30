@@ -127,6 +127,16 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		}
 		return protocol.EmptyResponse{OK: true}, nil
 
+	case "files.move":
+		request, err := decodeBody[protocol.FilesMoveRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_file_request", err)
+		}
+		if err := d.files.MoveBetweenSources(ctx, request.SourceID, request.DestinationSourceID, request.From, request.To, request.IsDirectory); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.EmptyResponse{OK: true}, nil
+
 	case "files.delete":
 		request, err := decodeBody[protocol.FilesDeleteRequest](command.Body)
 		if err != nil {

@@ -299,6 +299,7 @@ func (c *Client) capabilities() []string {
 			"files.upload",
 			"files.create_directory",
 			"files.rename",
+			"files.move",
 			"files.delete",
 		)
 	}

@@ -508,6 +508,63 @@ func (s *Service) RenameSource(ctx context.Context, sourceID string, from string
 	return s.renameLocal(ctx, from, to)
 }
 
+func (s *Service) MoveBetweenSources(ctx context.Context, sourceID string, destinationSourceID string, from string, to string, isDirectory bool) error {
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return err
+	}
+	destination, err := s.sourceForID(destinationSourceID)
+	if err != nil {
+		return err
+	}
+	if source.ID == destination.ID && source.Type == destination.Type {
+		return s.RenameSource(ctx, source.ID, from, to)
+	}
+	if err := s.copyBetweenSources(ctx, source.ID, destination.ID, from, to, isDirectory); err != nil {
+		return err
+	}
+	return s.DeleteSource(ctx, source.ID, from, isDirectory)
+}
+
+func (s *Service) copyBetweenSources(ctx context.Context, sourceID string, destinationSourceID string, from string, to string, isDirectory bool) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	if isDirectory {
+		if err := s.CreateDirectorySource(ctx, destinationSourceID, to); err != nil {
+			return err
+		}
+		items, err := s.ListSource(ctx, sourceID, from)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if err := s.copyBetweenSources(ctx, sourceID, destinationSourceID, item.Path, filepath.ToSlash(filepath.Join(to, item.Name)), item.IsDirectory); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	reader, _, err := s.OpenReaderSource(ctx, sourceID, from, 0)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	writer, _, err := s.OpenWriterSource(ctx, destinationSourceID, to, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(writer, reader); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	return writer.Close()
+}
+
 func (s *Service) Delete(ctx context.Context, path string, isDirectory bool) error {
 	return s.DeleteSource(ctx, "", path, isDirectory)
 }

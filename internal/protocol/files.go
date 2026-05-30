@@ -54,6 +54,14 @@ type FilesRenameRequest struct {
 	To       string `json:"to"`
 }
 
+type FilesMoveRequest struct {
+	SourceID            string `json:"source_id,omitempty"`
+	DestinationSourceID string `json:"destination_source_id,omitempty"`
+	From                string `json:"from"`
+	To                  string `json:"to"`
+	IsDirectory         bool   `json:"is_directory"`
+}
+
 type FilesDeleteRequest struct {
 	SourceID    string `json:"source_id,omitempty"`
 	Path        string `json:"path"`
