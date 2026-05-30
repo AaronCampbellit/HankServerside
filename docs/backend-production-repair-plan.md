@@ -6,26 +6,28 @@ Related audit: `docs/backend-architecture-audit.md`
 
 ## Objective
 
-Bring Hank Remote backend readiness from the current audit score of 58/100 to 100/100 for the first production target.
+Bring Hank Remote backend readiness from the current audit score of 58/100 to 100/100 for the first production target: a single-home deployment that a client runs for their own home and their own invited users.
 
 This is not a statement of work. It is the concrete repair plan: what to build, where to build it, what schema changes are needed, how to migrate safely, what tests prove the repair, and what changes users, operators, and admins will experience.
 
 ## Production Target
 
-The first 100-readiness target is not "infinite scale." It is a safe production baseline that can grow without another architectural reset.
+The first 100-readiness target is not "infinite scale" and is not a multi-tenant SaaS target. It is a safe production baseline for one deployed Hank Remote instance serving one home.
+
+Each client is expected to deploy their own cloud/agent stack for their own home. A deployment may have multiple app users, browser sessions, devices, service profiles, notes, and file shares, but it has exactly one deployment home and one active home-agent path. Multi-home tenancy and multi-cloud-node clustering are outside this 100-readiness plan.
 
 Target capacity:
 
-- 100 homes.
-- 100 connected agents.
-- 500 concurrent app/dashboard WebSocket connections.
-- 1,000 active user sessions.
+- 1 deployment home.
+- 1 active connected home agent, with clean reconnect handling.
+- 50 concurrent app/dashboard WebSocket connections.
+- 100 active user sessions.
 - 1 million assistant file-index rows.
 - 100,000 notes.
 - 100 GB note attachments.
-- 25 concurrent file transfers.
-- 25 concurrent assistant requests.
-- 3 cloud replicas behind a reverse proxy.
+- 10 concurrent file transfers.
+- 10 concurrent assistant requests.
+- 1 cloud process behind a reverse proxy, firewall, or tunnel.
 - 1 Postgres primary with backups and restore-tested recovery.
 
 Target service levels:
@@ -43,10 +45,10 @@ Target service levels:
 Hank reaches 100/100 when all of these are true:
 
 - The database schema is versioned, constrained, drift-checked, and upgrade-tested.
-- The cloud can run at least three replicas without losing app tickets, file transfers, rate limits, login backoff, or pending routed requests.
-- Home routing is explicit by `home_id`; singleton assumptions are compatibility wrappers only.
+- The single cloud process can restart without silently losing app tickets, file transfers, rate limits, login backoff, or pending routed request state.
+- Single-home behavior is explicit and enforced: one deployment home per instance, with `home_id` used as an internal scope and audit key rather than a multi-home route selector.
 - Agent and app connections are tracked by connection ID, not only by session or home.
-- Realtime subscriptions are authorized server-side per user and home.
+- Realtime subscriptions are authorized server-side per user and deployment home.
 - Destructive file operations are recoverable, audited, progress-tracked, and tested.
 - Secrets never appear in URLs, logs, checked-in docs, or world-readable env files.
 - Backup, attachment backup, and restore procedures are tested and timed.
@@ -60,8 +62,9 @@ Hank reaches 100/100 when all of these are true:
 - Keep local credentials on the home agent.
 - Avoid exposing SMB or Home Assistant directly to the internet.
 - Prefer Postgres for the first durable coordination repair because the stack already depends on it.
-- Hide coordination behind interfaces so Redis, NATS, or another broker can be added later without rewriting handlers.
-- Preserve existing `/v1/home` behavior as a compatibility alias while adding explicit multi-home routes.
+- Use Postgres-backed durable state for restart safety; do not introduce distributed brokers or cloud-node coordination for the single-home production target.
+- Treat `/v1/home` as the canonical app-facing home API for this deployment model.
+- Preserve the existing `homes` table and `home_id` fields as internal scoping, authorization, and audit boundaries, but do not build user-facing multi-home selection unless the product scope changes.
 - Add tests with every behavior repair.
 - Add migration and operational proof before deleting compatibility paths.
 
@@ -69,26 +72,17 @@ Hank reaches 100/100 when all of these are true:
 
 ```mermaid
 flowchart LR
-  App[App / Dashboard] --> LB[Reverse proxy]
-  LB --> CloudA[cloud node A]
-  LB --> CloudB[cloud node B]
-  LB --> CloudC[cloud node C]
-  CloudA --> DB[(Postgres)]
-  CloudB --> DB
-  CloudC --> DB
-  CloudA --> Bus[Postgres NOTIFY relay bus]
-  CloudB --> Bus
-  CloudC --> Bus
-  Agent[Home agent] --> LB
-  CloudB --> Agent
-  CloudA --> Attach[(attachment storage)]
-  CloudB --> Attach
-  CloudC --> Attach
+  App[App / Dashboard] --> Edge[Reverse proxy / firewall / tunnel]
+  Edge --> Cloud[single cloud process]
+  Cloud --> DB[(Postgres)]
+  Agent[Home agent] --> Edge
+  Cloud --> Agent
+  Cloud --> Attach[(attachment storage)]
   DBOps[db-ops worker] --> DB
   DBOps --> Backups[(pgBackRest repo + attachment backup)]
 ```
 
-Postgres remains the first durable coordination backend. The code should expose interfaces in packages such as `internal/relay`, `internal/ratelimit`, `internal/audit`, and `internal/migrations` so higher-throughput infrastructure can replace Postgres-backed implementations later.
+Postgres remains the first durable state backend. The code should expose focused interfaces in packages such as `internal/relay`, `internal/ratelimit`, `internal/audit`, and `internal/migrations` so restart-safe behavior is testable without turning the first production target into a clustered deployment.
 
 ## Repair Waves
 
@@ -96,13 +90,13 @@ Postgres remains the first durable coordination backend. The code should expose 
 | --- | --- | ---: |
 | 0 | Immediate security and doc hardening | 65 |
 | 1 | Versioned migrations and schema integrity | 75 |
-| 2 | Durable coordination and multi-node routing | 86 |
-| 3 | Multi-home API and authorization hardening | 91 |
+| 2 | Durable single-runtime coordination and restart recovery | 86 |
+| 3 | Single-home API contract and authorization hardening | 91 |
 | 4 | File-operation safety and agent policy | 94 |
 | 5 | Observability, audit, alerts, and recovery proof | 97 |
 | 6 | Performance/load proof and cleanup of compatibility debt | 100 |
 
-The waves are ordered to avoid unsafe growth. Migrations come before large data-model changes. Durable coordination comes before three-replica operation. Multi-home routes come before removing singleton startup validation.
+The waves are ordered to avoid unsafe growth. Migrations come before large data-model changes. Durable state comes before restart-sensitive behavior. Single-home API and authorization hardening come before removing old ambiguous helpers.
 
 ## Wave 0: Immediate Security and Operator Hardening
 
@@ -348,7 +342,7 @@ Repair:
   - purge soft-deleted note attachments after retention
   - prune old assistant traces/audit details by policy
   - delete stale file-transfer leases
-  - delete stale cloud node/connection records
+  - delete stale connection and relay request records
 
 Acceptance:
 
@@ -356,30 +350,32 @@ Acceptance:
 - Jobs emit metrics and audit summaries.
 - Retention values are configurable.
 
-## Wave 2: Durable Coordination and Horizontal Routing
+## Wave 2: Durable Coordination and Restart Recovery
 
-### R2.1 Add cloud node registry
+### R2.1 Add single-runtime health tracking
 
 Repair:
 
 Add table:
 
 ```sql
-CREATE TABLE cloud_nodes (
-  id TEXT PRIMARY KEY,
+CREATE TABLE cloud_runtime (
+  deployment_id TEXT PRIMARY KEY CHECK (deployment_id = 'singleton'),
+  runtime_id TEXT NOT NULL,
   version TEXT NOT NULL,
   started_at TIMESTAMPTZ NOT NULL,
   heartbeat_at TIMESTAMPTZ NOT NULL,
-  drain_at TIMESTAMPTZ NULL
+  shutdown_at TIMESTAMPTZ NULL
 );
 ```
 
-Each cloud process generates a node ID on startup and heartbeats every 10 seconds.
+Each cloud process generates a runtime ID on startup and heartbeats the singleton row every 10 seconds. This is not a cluster registry; it exists to make readiness, cleanup, and restart diagnostics explicit.
 
 Acceptance:
 
-- `/readyz` reports node ID and DB coordination health.
-- Stale nodes are ignored after TTL.
+- `/readyz` reports runtime ID, deployment mode, and DB coordination health.
+- Restart replaces the singleton runtime row without requiring manual cleanup.
+- Stale connection and relay rows from older runtime IDs are pruned or marked failed by lifecycle cleanup.
 
 ### R2.2 Track connections by connection ID
 
@@ -390,25 +386,27 @@ Add tables:
 ```sql
 CREATE TABLE agent_connections (
   connection_id TEXT PRIMARY KEY,
-  node_id TEXT NOT NULL REFERENCES cloud_nodes(id) ON DELETE CASCADE,
+  runtime_id TEXT NOT NULL,
   home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE CASCADE,
   agent_id TEXT NOT NULL REFERENCES agents(id),
   capabilities_json TEXT NOT NULL DEFAULT '[]',
   connected_at TIMESTAMPTZ NOT NULL,
-  heartbeat_at TIMESTAMPTZ NOT NULL
+  heartbeat_at TIMESTAMPTZ NOT NULL,
+  disconnected_at TIMESTAMPTZ NULL
 );
 
 CREATE TABLE app_connections (
   connection_id TEXT PRIMARY KEY,
-  node_id TEXT NOT NULL REFERENCES cloud_nodes(id) ON DELETE CASCADE,
+  runtime_id TEXT NOT NULL,
   session_id TEXT NOT NULL REFERENCES app_sessions(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id),
   connected_at TIMESTAMPTZ NOT NULL,
-  heartbeat_at TIMESTAMPTZ NOT NULL
+  heartbeat_at TIMESTAMPTZ NOT NULL,
+  disconnected_at TIMESTAMPTZ NULL
 );
 ```
 
-In memory, keep only live socket pointers. In Postgres, keep routeable connection metadata.
+In memory, keep only live socket pointers. In Postgres, keep connection metadata for observability, cleanup, and restart-safe failure handling.
 
 Acceptance:
 
@@ -445,20 +443,20 @@ CREATE TABLE relay_requests (
 Add `internal/relay`:
 
 - `CreateRequest`
-- `ClaimForAgentNode`
+- `MarkSentToAgent`
 - `CompleteRequest`
 - `FailRequest`
 - `ExpireRequests`
-- `NotifyNode`
+- `ListActiveForConnection`
 
-Use Postgres `LISTEN/NOTIFY` to wake the node that owns the needed agent/app connection.
+Use in-process wakeups for the live single cloud process. Use Postgres as the source of truth for timeout handling, restart cleanup, duplicate request detection, and admin/debug visibility.
 
 Acceptance:
 
-- App on node A can route to agent on node B.
-- Agent response on node B reaches app on node A.
-- Cloud node restart fails or resumes pending requests predictably.
-- Per-connection in-flight caps are enforced from durable state.
+- App command handling writes a durable relay row before sending work to the agent.
+- Agent responses complete the durable relay row and wake the waiting app connection when it is still live.
+- Cloud restart marks or expires pending requests predictably instead of losing them silently.
+- Per-connection and per-home in-flight caps are enforced from durable state.
 
 ### R2.4 Persist app tickets
 
@@ -481,7 +479,7 @@ Consume tickets atomically with `UPDATE ... WHERE consumed_at IS NULL AND expire
 
 Acceptance:
 
-- Ticket issued on one node can be consumed on another.
+- Ticket issued before a cloud restart can be consumed after restart if it is still valid.
 - Ticket cannot be reused.
 - Expired tickets are pruned.
 
@@ -511,7 +509,7 @@ CREATE TABLE file_transfers (
 
 Acceptance:
 
-- Transfer setup on one node can be used on another.
+- Transfer setup survives cloud restart until expiry.
 - Expired transfers cannot be used.
 - Transfer progress is queryable.
 - Transfer token never appears in returned URL.
@@ -544,51 +542,46 @@ Hash IP/email identifiers with a server-side pepper before storing.
 
 Acceptance:
 
-- Rate limits hold across restarts and nodes.
+- Rate limits hold across cloud restarts.
 - High-cardinality attack cannot grow unbounded because cleanup runs and keys are hashed.
-- Login backoff is enforced across all cloud replicas.
+- Login backoff survives cloud restarts.
 
-## Wave 3: Multi-Home API and Authorization
+## Wave 3: Single-Home API Contract and Authorization
 
-### R3.1 Add explicit home routes
-
-Repair:
-
-Add `/v1/homes` and `/v1/homes/{home_id}/...` equivalents for:
-
-- home summary
-- members
-- invitations
-- agent status/tokens
-- service profiles
-- Home Assistant
-- files
-- notes
-- assistant
-- storage
-- sync
-
-Keep `/v1/home` as a compatibility alias that resolves to the user's default home only when the user has exactly one home.
-
-Acceptance:
-
-- User with two homes must use explicit home ID.
-- User cannot access another home by guessing ID.
-- Existing single-home app/dashboard flows continue during compatibility period.
-
-### R3.2 Remove singleton startup validation
+### R3.1 Codify the singleton deployment-home contract
 
 Repair:
 
-- Delete `validateSingletonHome` as a production startup blocker.
-- Replace singleton helper calls with explicit home membership lookups.
-- Add a user default-home preference if needed for the compatibility alias.
+- Keep `/v1/home` and `/v1/home/...` as the canonical app and dashboard routes.
+- Do not add `/v1/homes` or `/v1/homes/{home_id}` as part of this readiness plan.
+- Ensure first setup creates the one deployment home and later users join that same home by invitation or admin-controlled membership.
+- Resolve the deployment home server-side after authentication; app clients should not choose a home ID.
+- Keep `home_id` in tables, protocol messages, metrics, and audit events as an internal scope key.
+- Add an admin repair path or runbook for accidental extra home rows instead of turning that state into supported multi-home behavior.
 
 Acceptance:
 
-- Two homes can exist.
-- One user can belong to multiple homes with different roles.
-- Agent routing is by explicit home ID.
+- A normal user cannot create or select a second home in the same deployment.
+- Non-members cannot access the deployment home by guessing IDs or calling home routes directly.
+- Existing app/dashboard flows continue to use `/v1/home`.
+- Startup or readiness reports a clear operator error if the database contains more than one active home.
+
+### R3.2 Replace brittle singleton helpers with a deployment-home resolver
+
+Repair:
+
+- Replace scattered singleton helper calls with a small `DeploymentHomeResolver`.
+- Allow zero homes only during first setup.
+- After setup, enforce exactly one active deployment home as a readiness invariant.
+- Make membership and feature permission checks take the resolved deployment home ID explicitly.
+- Make agent routing use the resolved deployment home ID, not client-provided home selection.
+
+Acceptance:
+
+- Zero-home first boot works until the first admin registration creates the deployment home.
+- More than one active home produces a clear readiness/admin error, not undefined routing behavior.
+- One user can belong to the deployment home with one role.
+- Agent routing is tied to the deployment home ID.
 
 ### R3.3 Server-scope realtime topics
 
@@ -604,7 +597,7 @@ Acceptance:
 
 - User A cannot subscribe to User B profile events.
 - Member without notes permission cannot subscribe to home note events.
-- Multi-home user only receives events for selected homes.
+- Users only receive home-scoped events for the singleton deployment home they are a member of.
 
 ### R3.4 Strengthen role and feature permission model
 
@@ -613,12 +606,12 @@ Repair:
 - Add permission checks at service boundaries, not only route handlers.
 - Define `Authorizer` interface used by HTTP and WebSocket command paths.
 - Add audit events for permission denied and administrative permission changes.
-- Add tests for user-to-user and home-to-home access attempts.
+- Add tests for user-to-user, non-member, revoked-member, and feature-disabled access attempts.
 
 Acceptance:
 
 - Every app command path has an explicit authorization test.
-- Agent requests cannot be invoked without matching home permission.
+- Agent requests cannot be invoked without matching deployment-home permission.
 - Admin-only actions are centrally listed and tested.
 
 ## Wave 4: File Safety and Agent Policy
@@ -767,7 +760,7 @@ Repair:
 
 Acceptance:
 
-- Metrics survive multi-node scrape by including node labels.
+- Metrics include runtime/deployment labels where useful for restart diagnostics and local dashboards.
 - Alerting rules can be written for all production risks.
 - Existing dashboard still works.
 
@@ -787,7 +780,7 @@ Add deployable alert definitions for:
 - disk usage high
 - file job failure spike
 - assistant provider error spike
-- cloud node heartbeat missing
+- cloud runtime heartbeat missing
 
 Files:
 
@@ -862,7 +855,7 @@ Add `tests/load` or `tools/loadtest` with scenarios:
 - login/session validation
 - app WebSocket connect/reconnect
 - agent WebSocket connect/reconnect
-- app node A to agent node B relay
+- app to agent relay through the single cloud process
 - file transfer setup and streaming
 - cross-source file move job progress
 - assistant context search
@@ -871,7 +864,7 @@ Add `tests/load` or `tools/loadtest` with scenarios:
 
 Acceptance:
 
-- Load tests run against three cloud replicas.
+- Load tests run against the single-home target deployment shape.
 - Report includes p50/p95/p99, error rate, DB CPU/memory, and cloud memory.
 - No target service level fails.
 
@@ -881,15 +874,15 @@ Repair:
 
 - Remove query-parameter agent auth after compatibility window.
 - Remove transfer query tokens.
-- Remove singleton-only startup validation.
+- Remove ambiguous or bypass-prone singleton helper paths after `DeploymentHomeResolver` is in place.
 - Remove legacy `home_notes` reads.
-- Remove `/v1/home` ambiguity for users with multiple homes.
+- Remove any UI/API affordance that suggests multiple homes are supported in one deployment.
 - Retire phase docs that conflict with current runbooks.
 
 Acceptance:
 
 - Deprecated paths return clear errors or redirects.
-- App/dashboard uses explicit supported routes.
+- App/dashboard uses the canonical single-home routes.
 - Docs and tests do not reference removed behavior.
 
 ## Complete Issue-to-Repair Map
@@ -898,7 +891,7 @@ Acceptance:
 | --- | --- |
 | H1 no versioned migrations | R1.1, R1.2 |
 | H2 in-memory router/tickets/transfers/rate limits | R2.1 through R2.6 |
-| H3 singleton-home API/startup validation | R3.1, R3.2, R6.4 |
+| H3 ambiguous singleton-home helpers/startup validation | R3.1, R3.2, R6.4 |
 | H4 db-ops Docker socket/root privilege | R0.3, R5.4 |
 | H5 weak DB constraints/FKs | R1.3, R1.4 |
 | H6 unsafe cross-source file move | R4.1, R4.3 |
@@ -982,23 +975,21 @@ Acceptance:
 3. Deploy migration runner in status-only mode.
 4. Baseline existing DB.
 5. Deploy Wave 1 migrations.
-6. Deploy Wave 2 durable coordination while still running one node.
-7. Start second cloud node in shadow mode.
-8. Enable multi-node relay.
-9. Deploy explicit multi-home routes.
-10. Update dashboard/app to explicit routes.
-11. Remove singleton constraints after compatibility verification.
-12. Enable production alerts.
-13. Run restore test.
-14. Run load test.
-15. Remove deprecated paths.
+6. Deploy Wave 2 durable coordination and restart-recovery tables.
+7. Restart the single cloud process and verify app tickets, transfer leases, rate limits, and relay failures behave predictably.
+8. Deploy the singleton deployment-home resolver and authorization hardening.
+9. Update dashboard/app copy that implies multi-home selection.
+10. Enable production alerts.
+11. Run restore test.
+12. Run load test against the single-home target.
+13. Remove deprecated paths.
 
 ### Rollback Rules
 
 - No migration ships without a forward-fix plan.
 - Destructive migrations are delayed by at least one release after data is no longer read.
 - Compatibility aliases remain until app/dashboard usage telemetry shows no active dependency.
-- If durable relay fails, disable multi-node routing and run one cloud node while preserving persisted data.
+- If durable relay fails, fall back to the previous in-process relay while preserving persisted data for inspection and forward repair.
 
 ## Required Test Matrix
 
@@ -1006,8 +997,8 @@ Acceptance:
 | --- | --- |
 | Migrations | fresh DB, existing baseline, checksum mismatch, drift detection |
 | Auth | cookie, bearer, CSRF, header-only agent auth, expired sessions |
-| Authorization | user-to-user, home-to-home, role changes, feature permissions |
-| Relay | node A app to node B agent, node restart, timeout, duplicate request ID |
+| Authorization | user-to-user, non-member, revoked member, role changes, feature permissions |
+| Relay | app to agent, cloud restart, timeout, duplicate request ID |
 | Realtime | profile isolation, home isolation, note-share isolation |
 | File ops | traversal, symlink escape, cross-source copy failure, checksum mismatch, retry, cancel |
 | Backups | backup success, restore-test success, restore-test failure, attachment manifest mismatch |
@@ -1024,12 +1015,12 @@ Positive changes:
 - Multiple browser tabs/devices work reliably.
 - File moves become safer and show progress instead of appearing stuck.
 - Search and assistant context retrieval become faster at larger data sizes.
-- Multi-home support becomes explicit and predictable.
-- Permissions become clearer because access is checked per home and feature.
+- Single-home behavior becomes explicit and predictable.
+- Permissions become clearer because access is checked per deployment home and feature.
 
 User-visible changes:
 
-- Users with more than one home will select a home explicitly.
+- Users stay in the one home for this deployment; admins invite or remove users from that home.
 - Large destructive file actions may require confirmation.
 - File transfer links may no longer be directly copyable without auth; downloads/uploads stay inside authenticated flows.
 - Some old agent setup URLs will stop working after the compatibility window.
@@ -1048,7 +1039,7 @@ New setup requirements:
 - Operators must run or allow `migrate up` before starting a new release.
 - Operators must protect `.env.cloud` and `.env.agent` with `chmod 600`.
 - Operators must configure attachment backup in addition to database backup.
-- Multi-node deployments need shared Postgres access and a reverse proxy that preserves WebSocket support.
+- Deployments still need a reverse proxy, firewall rule, or tunnel that preserves WebSocket support for the single cloud process.
 
 ### Maintenance
 
@@ -1081,7 +1072,7 @@ Admin-visible changes:
 
 - Storage/restore actions may require stronger confirmation.
 - Metrics access remains authenticated or internal-only.
-- Admin dashboards should show migration status, node health, backup freshness, restore-test age, and recent critical audit events.
+- Admin dashboards should show migration status, runtime health, backup freshness, restore-test age, and recent critical audit events.
 
 ## Final Gate Checklist
 
@@ -1094,8 +1085,8 @@ Hank reaches 100 readiness only when this checklist is green:
 - migration fresh install test
 - migration baseline test
 - schema drift check
-- three-node relay integration test
-- multi-home authorization test suite
+- single-runtime relay restart test
+- singleton-home authorization test suite
 - file job safety test suite
 - restore test report generated
 - attachment restore verified
