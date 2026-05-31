@@ -24,7 +24,7 @@ Target capacity:
 - 100 active user sessions.
 - 1 million assistant file-index rows.
 - 100,000 notes.
-- 100 GB note attachments.
+- 10 GB note attachments for the first production validation target.
 - 10 concurrent file transfers.
 - 10 concurrent assistant requests.
 - 1 cloud process behind a reverse proxy, firewall, or tunnel.
@@ -128,8 +128,7 @@ Repair:
 
 - Deprecate `/ws/agent?agent_id=...&token=...`.
 - Require `X-Hank-Agent-ID` and `Authorization: Bearer <token>` for agent WebSocket auth.
-- Keep query fallback behind `HANK_REMOTE_ALLOW_AGENT_QUERY_AUTH=false` default.
-- Remove the fallback completely after one compatibility release.
+- Remove the URL query fallback completely.
 - Change file transfer setup to return `transfer_id` and require `Authorization: Bearer <transfer_token>` on `/v1/file-transfers/{id}`.
 - Stop returning token-bearing transfer URLs.
 
@@ -1095,3 +1094,5 @@ Hank reaches 100 readiness only when this checklist is green:
 - top 20 query report generated from telemetry
 - deprecated URL-token paths disabled
 - docs updated for setup, admin, runbooks, and recovery
+
+Demo-server validation inputs, commands, and generated report locations are tracked separately in `docs/demo-validation.md` so production code stays free of demo hostnames, live tokens, LAN addresses, and generated `data/` artifacts.

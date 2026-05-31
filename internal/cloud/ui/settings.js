@@ -130,7 +130,9 @@ function installFrameResizer(frame) {
       const resize = () => scheduleFrameResize(frame);
       frame._settingsPaneResizeObserver?.disconnect();
       const contentRoot = doc?.querySelector(".shell") || doc?.querySelector("main") || doc?.body;
-      if (frame.contentWindow?.ResizeObserver && contentRoot) {
+      const nodeType = frame.contentWindow?.Node;
+      const canObserve = contentRoot && (!nodeType || contentRoot instanceof nodeType);
+      if (frame.contentWindow?.ResizeObserver && canObserve) {
         const observer = new frame.contentWindow.ResizeObserver(resize);
         observer.observe(contentRoot);
         frame._settingsPaneResizeObserver = observer;

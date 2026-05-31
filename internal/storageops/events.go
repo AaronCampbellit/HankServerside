@@ -76,7 +76,7 @@ func AppendEvent(logDir string, event Event) (Event, error) {
 	}
 	event.Severity = normalizeSeverity(event.Severity)
 	event = RedactEvent(event)
-	if err := os.MkdirAll(dirOrDefault(logDir, DefaultLogDir), 0o777); err != nil {
+	if err := ensurePrivateDir(dirOrDefault(logDir, DefaultLogDir)); err != nil {
 		return Event{}, err
 	}
 	data, err := json.Marshal(event)
@@ -84,10 +84,11 @@ func AppendEvent(logDir string, event Event) (Event, error) {
 		return Event{}, err
 	}
 	path := EventLogPath(logDir)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, privateFileMode)
 	if err != nil {
 		return Event{}, err
 	}
+	_ = os.Chmod(path, privateFileMode)
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		_ = file.Close()
 		return Event{}, err
@@ -177,7 +178,7 @@ func IsFailureEvent(event Event) bool {
 }
 
 func ClearEventLog(logDir string) error {
-	if err := os.MkdirAll(dirOrDefault(logDir, DefaultLogDir), 0o777); err != nil {
+	if err := ensurePrivateDir(dirOrDefault(logDir, DefaultLogDir)); err != nil {
 		return err
 	}
 	err := os.Remove(EventLogPath(logDir))
@@ -245,10 +246,10 @@ func pruneEventLog(logDir string, maxEntries int, maxBytes int64) error {
 	if output != "" {
 		output += "\n"
 	}
-	if err := os.WriteFile(tmp, []byte(output), 0o666); err != nil {
+	if err := writePrivateFile(tmp, []byte(output)); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return renamePrivateFile(tmp, path)
 }
 
 func newEventID() string {

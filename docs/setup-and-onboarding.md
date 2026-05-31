@@ -48,6 +48,7 @@ Create this file before first boot:
 ```bash
 cd /srv/hank-remote/HankServerside
 nano .env.cloud
+chmod 600 .env.cloud
 ```
 
 Use this shape:
@@ -70,7 +71,7 @@ HANK_REMOTE_AI_PROVIDER=auto
 HANK_REMOTE_OLLAMA_BASE_URL=http://ollama:11434
 HANK_REMOTE_OLLAMA_CHAT_MODEL=llama3.1
 HANK_REMOTE_OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-HANK_REMOTE_AI_EMBEDDING_DIMENSION=768
+# Embedding dimension is fixed at 768 by the production schema.
 HANK_REMOTE_PROJECT_DOCS_DIR=/app
 
 # Optional OpenAI fallback/provider.
@@ -103,6 +104,8 @@ HANK_REMOTE_DB_OPS_PGDATA=/var/lib/postgresql/data
 HANK_REMOTE_DB_OPS_RESTORE_PGDATA=/var/lib/postgresql/restore
 HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL=postgres://hankremote:replace-with-real-db-password@postgres-restore:5432/hankremote?sslmode=disable
 HANK_REMOTE_DB_OPS_COMPOSE_FILE=/workspace/docker-compose.yml
+# Host Docker socket group id. On Linux: stat -c '%g' /var/run/docker.sock
+HANK_REMOTE_DB_OPS_DOCKER_GID=
 ```
 
 Use the same database password in `POSTGRES_PASSWORD`, `HANK_REMOTE_CLOUD_DATABASE_URL`, and `HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL`.
@@ -110,9 +113,12 @@ Do not wrap either database URL in `< >`; keep the query string exactly as `?ssl
 
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot be restored without it.
 
+Set `HANK_REMOTE_DB_OPS_DOCKER_GID` to the numeric group owner of `/var/run/docker.sock` before starting `db-ops`. The db-ops container runs as a non-root user and needs that supplementary group for restore-test orchestration.
+
 Keep `HANK_REMOTE_SECRET_ENCRYPTION_KEY` stable after first use. Hank Remote uses it to encrypt stored OAuth tokens, APNs device tokens, and profile secret vault data at rest. If this key is lost, already encrypted application secrets cannot be read and must be re-linked or re-entered.
 
 `HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
+The production vector schema is fixed at 768 dimensions. Do not set `HANK_REMOTE_AI_EMBEDDING_DIMENSION` in production unless a future migration explicitly changes the vector dimension.
 
 After signing in to the dashboard, open `AI Settings` to manage the HankAI harness. Those settings are stored in the database and apply immediately to the next HankAI message:
 - which Hank sources can be sent to the active provider
@@ -165,7 +171,14 @@ curl http://127.0.0.1:18080/readyz
 
 Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
 
-`/metrics` requires a signed-in admin session. Scrape it through an authenticated internal path, or keep it behind an internal reverse proxy that injects admin credentials. `/healthz` and `/readyz` stay unauthenticated for deployment checks.
+`/metrics` requires a signed-in admin session. Scrape it through an authenticated internal path, or keep it behind an internal reverse proxy that injects admin credentials, for example:
+
+```bash
+curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" \
+  http://127.0.0.1:18080/metrics | head
+```
+
+Do not expose unauthenticated `/metrics` to the public internet. `/healthz` and `/readyz` stay unauthenticated for deployment checks.
 
 ## 5. Public URL
 
@@ -186,7 +199,7 @@ The proxy must allow WebSocket upgrades for:
 - `/ws/app`
 - `/ws/agent`
 
-The agent authenticates to `/ws/agent` with `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID`. Older query-token agents are accepted only as a migration fallback and should be updated.
+The agent authenticates to `/ws/agent` with `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID`. Query-string agent credentials are not supported.
 
 Postgres is not published to the host. It stays on private Docker networks.
 
@@ -212,7 +225,10 @@ Paste that block into:
 ```bash
 cd /srv/hank-remote/HankServerside
 nano .env.agent
+chmod 600 .env.agent
 ```
+
+`.env.agent` can contain Home Assistant tokens, SMB usernames/passwords, media-service credentials, and the Hank Remote agent token. Treat it as a secret file and keep mode `0600`.
 
 The generated file should look like this:
 

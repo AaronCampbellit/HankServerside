@@ -48,7 +48,7 @@ func CreateIntent(stateDir string, secret string, intent Intent) (Intent, error)
 		intent.CreatedAt = time.Now().UTC()
 	}
 	intent.Signature = signIntent(secret, intent)
-	if err := os.MkdirAll(IntentDir(stateDir), 0o777); err != nil {
+	if err := ensurePrivateDir(IntentDir(stateDir)); err != nil {
 		return Intent{}, err
 	}
 	data, err := json.MarshalIndent(intent, "", "  ")
@@ -57,10 +57,10 @@ func CreateIntent(stateDir string, secret string, intent Intent) (Intent, error)
 	}
 	path := filepath.Join(IntentDir(stateDir), intent.ID+".json")
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o666); err != nil {
+	if err := writePrivateFile(tmp, data); err != nil {
 		return Intent{}, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renamePrivateFile(tmp, path); err != nil {
 		return Intent{}, err
 	}
 	return intent, nil
@@ -105,7 +105,7 @@ func CompleteIntent(stateDir string, intentID string) error {
 	}
 	path := filepath.Join(IntentDir(stateDir), intentID+".json")
 	doneDir := filepath.Join(dirOrDefault(stateDir, DefaultStateDir), "intents-done")
-	if err := os.MkdirAll(doneDir, 0o777); err != nil {
+	if err := ensurePrivateDir(doneDir); err != nil {
 		return err
 	}
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {

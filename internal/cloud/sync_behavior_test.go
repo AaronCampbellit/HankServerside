@@ -133,7 +133,7 @@ func TestAppNotesSyncUsesCloudStoreWithoutChangingBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHomeServiceProfile after sync: %v", err)
 	}
-	if profile.LastBackupAt == nil || !profile.LastBackupAt.Equal(profileBackupAt) {
+	if profile.LastBackupAt == nil || !samePostgresTime(*profile.LastBackupAt, profileBackupAt) {
 		t.Fatalf("profile backup timestamp changed across app notes.sync: want %v got %v", profileBackupAt, profile.LastBackupAt)
 	}
 }
@@ -171,7 +171,12 @@ func TestReconcileHomeNotesPullsAgentNoteIntoCloudBackup(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent?agent_id=agent_1&token=agent-token"), nil)
+	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent"), &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Authorization":   []string{"Bearer agent-token"},
+			"X-Hank-Agent-ID": []string{"agent_1"},
+		},
+	})
 	if err != nil {
 		t.Fatalf("agent websocket dial: %v", err)
 	}
@@ -240,7 +245,7 @@ func TestReconcileHomeNotesPullsAgentNoteIntoCloudBackup(t *testing.T) {
 	if note.Content != "agent version" {
 		t.Fatalf("cloud note content = %q, want %q", note.Content, "agent version")
 	}
-	if !note.UpdatedAt.Equal(localUpdatedAt) {
+	if !samePostgresTime(note.UpdatedAt, localUpdatedAt) {
 		t.Fatalf("cloud note updated_at = %v, want %v", note.UpdatedAt, localUpdatedAt)
 	}
 
@@ -248,7 +253,7 @@ func TestReconcileHomeNotesPullsAgentNoteIntoCloudBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLatestHomeNoteUpdate: %v", err)
 	}
-	if latestBackupAt == nil || !latestBackupAt.Equal(localUpdatedAt) {
+	if latestBackupAt == nil || !samePostgresTime(*latestBackupAt, localUpdatedAt) {
 		t.Fatalf("latest backup timestamp = %v, want %v", latestBackupAt, localUpdatedAt)
 	}
 
@@ -265,6 +270,10 @@ func TestReconcileHomeNotesPullsAgentNoteIntoCloudBackup(t *testing.T) {
 	if state.Status != domain.SyncStatusHealthy {
 		t.Fatalf("sync status = %q, want %q", state.Status, domain.SyncStatusHealthy)
 	}
+}
+
+func samePostgresTime(left, right time.Time) bool {
+	return left.UTC().Truncate(time.Microsecond).Equal(right.UTC().Truncate(time.Microsecond))
 }
 
 func TestServiceProfileApplySetsBackupTimestamp(t *testing.T) {

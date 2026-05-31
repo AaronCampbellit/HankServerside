@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/maintenance"
 	"github.com/dropfile/hankremote/internal/observability"
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/storageops"
@@ -30,36 +32,43 @@ const maxHTTPBodyBytes = 1 << 20
 const maxWSMessageBytes = 2 << 20
 
 type Server struct {
-	addr               string
-	store              *store.Store
-	router             *Router
-	logger             *slog.Logger
-	http               *http.Server
-	metrics            *observability.Metrics
-	limiter            *rateLimiter
-	transfers          *transferRegistry
-	appTickets         *appWebSocketTicketRegistry
-	notes              *cloudNotesService
-	collaboration      *noteCollaborationHub
-	agentRequests      *agentRequestRegistry
-	syncs              *homeSyncController
-	storage            *storageops.Service
-	storageEvents      map[string]struct{}
-	storageEventsMu    sync.Mutex
-	pushSender         PushSender
-	realtimeCancel     context.CancelFunc
-	sessionTTL         time.Duration
-	requestTimeout     time.Duration
-	openAIClientID     string
-	openAIClientSecret string
-	openAIRedirectURI  string
-	openAIScopes       string
-	assistantAI        AssistantAIConfig
-	chatGPTDeviceAuths *chatGPTDeviceAuthRegistry
-	noteAttachmentRoot string
-	assistantTrace     *assistantTraceLog
-	loginBackoff       *loginBackoffRegistry
-	adminActionTokens  *adminActionTokenRegistry
+	addr                 string
+	store                *store.Store
+	router               *Router
+	logger               *slog.Logger
+	http                 *http.Server
+	metrics              *observability.Metrics
+	limiter              *rateLimiter
+	transfers            *transferRegistry
+	appTickets           *appWebSocketTicketRegistry
+	notes                *cloudNotesService
+	collaboration        *noteCollaborationHub
+	agentRequests        *agentRequestRegistry
+	syncs                *homeSyncController
+	storage              *storageops.Service
+	storageEvents        map[string]struct{}
+	storageEventsMu      sync.Mutex
+	notificationEvents   map[string]time.Time
+	notificationEventsMu sync.Mutex
+	pushSender           PushSender
+	realtimeCancel       context.CancelFunc
+	sessionTTL           time.Duration
+	requestTimeout       time.Duration
+	openAIClientID       string
+	openAIClientSecret   string
+	openAIRedirectURI    string
+	openAIScopes         string
+	assistantAI          AssistantAIConfig
+	chatGPTDeviceAuths   *chatGPTDeviceAuthRegistry
+	noteAttachmentRoot   string
+	assistantTrace       *assistantTraceLog
+	loginBackoff         *loginBackoffRegistry
+	adminActionTokens    *adminActionTokenRegistry
+	runtimeID            string
+	runtimeVersion       string
+	runtimeCancel        context.CancelFunc
+	maintenanceCancel    context.CancelFunc
+	httpBaseCancel       context.CancelFunc
 }
 
 type authContext struct {
@@ -79,6 +88,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	}
 
 	realtimeCtx, realtimeCancel := context.WithCancel(context.Background())
+	httpBaseCtx, httpBaseCancel := context.WithCancel(context.Background())
 	server := &Server{
 		addr:               addr,
 		store:              db,
@@ -94,6 +104,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		syncs:              newHomeSyncController(),
 		storage:            storageops.NewService("", "", ""),
 		storageEvents:      make(map[string]struct{}),
+		notificationEvents: make(map[string]time.Time),
 		pushSender:         noopPushSender{},
 		realtimeCancel:     realtimeCancel,
 		sessionTTL:         sessionTTL,
@@ -103,6 +114,9 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		assistantTrace:     newAssistantTraceLog(maxAssistantTraceLimit),
 		loginBackoff:       newLoginBackoffRegistry(),
 		adminActionTokens:  newAdminActionTokenRegistry(),
+		runtimeID:          newID("run"),
+		runtimeVersion:     "dev",
+		httpBaseCancel:     httpBaseCancel,
 	}
 
 	mux := http.NewServeMux()
@@ -151,8 +165,14 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 
 	server.http = &http.Server{
 		Addr:              addr,
-		Handler:           securityHeadersMiddleware(requestIDMiddleware(mux)),
+		Handler:           securityHeadersMiddleware(requestIDMiddleware(server.metricsMiddleware(mux))),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		BaseContext: func(net.Listener) context.Context {
+			return httpBaseCtx
+		},
 	}
 
 	go server.forwardStoreNotifications(realtimeCtx)
@@ -188,6 +208,57 @@ func (s *Server) ConfigureNoteAttachmentStorage(root string) {
 func (s *Server) ConfigureAPNS(cfg APNSConfig) {
 	s.pushSender = NewAPNSSender(cfg, s.logger)
 }
+
+func (s *Server) StartRuntime(ctx context.Context, version string) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = "dev"
+	}
+	s.runtimeVersion = version
+	if err := s.store.UpsertCloudRuntime(ctx, s.runtimeID, s.runtimeVersion); err != nil {
+		return err
+	}
+	if expired, err := s.store.ExpireRelayRequests(ctx, time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to expire relay requests on startup", "runtime_id", s.runtimeID, "error", err)
+	} else if expired > 0 {
+		s.logger.Info("expired stale relay requests on startup", "runtime_id", s.runtimeID, "count", expired)
+	}
+	if err := s.store.MarkInterruptedFileOperationJobs(ctx, time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to mark interrupted file operation jobs", "runtime_id", s.runtimeID, "error", err)
+	}
+	runtimeCtx, cancel := context.WithCancel(context.Background())
+	s.runtimeCancel = cancel
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runtimeCtx.Done():
+				return
+			case <-ticker.C:
+				if err := s.store.HeartbeatCloudRuntime(context.Background(), s.runtimeID); err != nil {
+					s.logger.Warn("failed to heartbeat cloud runtime", "runtime_id", s.runtimeID, "error", err)
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func (s *Server) StartMaintenance(interval time.Duration, retention time.Duration) {
+	if s.maintenanceCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.maintenanceCancel = cancel
+	jobs := maintenance.Jobs{Store: s.store, Retention: retention, Logger: s.logger}
+	go func() {
+		if err := jobs.Run(ctx, interval); err != nil && ctx.Err() == nil {
+			s.logger.Warn("maintenance loop stopped", "error", err)
+		}
+	}()
+}
+
 func (s *Server) ListenAndServe() error {
 	s.logger.Info("starting Hank Remote cloud service", "addr", s.addr)
 	err := s.http.ListenAndServe()
@@ -198,8 +269,18 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.runtimeCancel != nil {
+		s.runtimeCancel()
+	}
+	if s.maintenanceCancel != nil {
+		s.maintenanceCancel()
+	}
+	_ = s.store.ShutdownCloudRuntime(context.Background(), s.runtimeID)
 	if s.realtimeCancel != nil {
 		s.realtimeCancel()
+	}
+	if s.httpBaseCancel != nil {
+		s.httpBaseCancel()
 	}
 	return s.http.Shutdown(ctx)
 }
@@ -217,13 +298,42 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"ok":               true,
 		"storage":          "ready",
+		"deployment_mode":  "single_home",
+		"runtime_id":       s.runtimeID,
 		"online_agents":    s.router.AgentCount(),
 		"online_apps":      s.router.AppCount(),
 		"pending_requests": s.router.PendingCount(),
-	})
+	}
+	if status, err := s.store.GetCloudRuntime(r.Context()); err == nil {
+		payload["runtime"] = map[string]any{
+			"deployment_id": status.DeploymentID,
+			"runtime_id":    status.RuntimeID,
+			"version":       status.Version,
+			"started_at":    status.StartedAt,
+			"heartbeat_at":  status.HeartbeatAt,
+			"shutdown_at":   status.ShutdownAt,
+		}
+	}
+	if count, err := s.store.CountHomes(r.Context()); err == nil {
+		payload["deployment_home_count"] = count
+		if count > 1 {
+			payload["ok"] = false
+			payload["error"] = "multiple deployment homes found; single-home mode requires repair"
+			writeJSON(w, http.StatusServiceUnavailable, payload)
+			return
+		}
+	}
+	if err := s.store.CheckMigrations(r.Context()); err != nil {
+		payload["ok"] = false
+		payload["migration_error"] = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, payload)
+		return
+	}
+	payload["migrations"] = "ready"
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +356,37 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = io.WriteString(w, s.metrics.RenderPrometheus())
+	if db := s.store.DB(); db != nil {
+		stats := db.Stats()
+		_, _ = io.WriteString(w, "hank_remote_db_open_connections "+strconv.Itoa(stats.OpenConnections)+"\n")
+		_, _ = io.WriteString(w, "hank_remote_db_in_use_connections "+strconv.Itoa(stats.InUse)+"\n")
+		_, _ = io.WriteString(w, "hank_remote_db_idle_connections "+strconv.Itoa(stats.Idle)+"\n")
+	}
+	if err := s.store.Ping(r.Context()); err != nil {
+		_, _ = io.WriteString(w, "hank_remote_db_ping_success 0\n")
+	} else {
+		_, _ = io.WriteString(w, "hank_remote_db_ping_success 1\n")
+	}
+	if status, err := s.store.GetCloudRuntime(r.Context()); err == nil {
+		age := time.Since(status.HeartbeatAt).Seconds()
+		if age < 0 {
+			age = 0
+		}
+		_, _ = io.WriteString(w, "hank_remote_cloud_runtime_heartbeat_age_seconds "+strconv.FormatFloat(age, 'f', 3, 64)+"\n")
+		_, _ = io.WriteString(w, "hank_remote_cloud_runtime_up 1\n")
+	} else {
+		_, _ = io.WriteString(w, "hank_remote_cloud_runtime_up 0\n")
+	}
+	if home, _, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID); err == nil {
+		if counts, err := s.store.CountFileOperationJobsByStatus(r.Context(), home.ID); err == nil {
+			for _, status := range []string{"queued", "running", "completed", "failed", "cancelled", "rollback_required", "rolled_back"} {
+				_, _ = io.WriteString(w, "hank_remote_file_operation_jobs{status="+strconv.Quote(status)+"} "+strconv.FormatInt(counts[status], 10)+"\n")
+			}
+		}
+		if total, err := s.store.TotalReadyNoteAttachmentBytes(r.Context(), home.ID); err == nil {
+			_, _ = io.WriteString(w, "hank_remote_attachment_storage_bytes "+strconv.FormatInt(total, 10)+"\n")
+		}
+	}
 	if s.storage != nil {
 		if status, err := s.storage.Status(); err == nil {
 			_, _ = io.WriteString(w, storageops.RenderMetrics(status))
@@ -275,11 +416,11 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.store.GetSingletonHome(r.Context()); err == nil {
-		http.Error(w, "registration is disabled after first setup", http.StatusForbidden)
-		return
-	} else if !errors.Is(err, store.ErrNotFound) {
+	if count, err := s.store.CountHomes(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	} else if count > 0 {
+		http.Error(w, "registration is disabled after first setup", http.StatusForbidden)
 		return
 	}
 
@@ -329,6 +470,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("app user registered", "request_id", requestIDFromContext(r.Context()), "user_id", user.ID, "email", user.Email, "session_id", session.ID)
+	s.audit(r.Context(), "session.created", auditSeverityInfo, user.ID, "", "", requestIDFromContext(r.Context()), "session", session.ID, map[string]any{"reason": "registration"})
 	setSessionCookie(w, r, rawToken, session.ExpiresAt)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -356,14 +498,22 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
-	if retryAfter, blocked := s.loginBackoff.Blocked(body.Email); blocked {
+	retryAfter, blocked, backoffErr := s.store.LoginBackoffBlocked(r.Context(), body.Email)
+	if backoffErr != nil {
+		retryAfter, blocked = s.loginBackoff.Blocked(body.Email)
+	}
+	if blocked {
 		s.metrics.IncAuthFailure("login_email_backoff")
 		s.logger.Warn("login email backoff active", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email, "retry_after", retryAfter.String())
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
 		return
 	}
-	if !s.limiter.Allow("login:"+clientIP(r), 20, time.Minute) {
+	allowed, limitErr := s.store.AllowRateLimit(r.Context(), "login", clientIP(r), 20, time.Minute)
+	if limitErr != nil {
+		allowed = s.limiter.Allow("login:"+clientIP(r), 20, time.Minute)
+	}
+	if !allowed {
 		s.metrics.IncAuthFailure("login_rate_limited")
 		s.logger.Warn("login rate limited", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email)
 		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
@@ -372,7 +522,9 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.store.GetUserByEmail(r.Context(), body.Email)
 	if err != nil {
+		_ = s.store.RecordLoginFailure(r.Context(), body.Email)
 		s.loginBackoff.RecordFailure(body.Email)
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", "", requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "unknown_user"})
 		s.metrics.IncAuthFailure("login_unknown_user")
 		s.logger.Warn("login failed for unknown user", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
@@ -380,12 +532,15 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
+		_ = s.store.RecordLoginFailure(r.Context(), body.Email)
 		s.loginBackoff.RecordFailure(body.Email)
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, user.ID, "", "", requestIDFromContext(r.Context()), "user", user.ID, map[string]any{"reason": "bad_password"})
 		s.metrics.IncAuthFailure("login_bad_password")
 		s.logger.Warn("login failed with bad password", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "user_id", user.ID, "email", body.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	_ = s.store.RecordLoginSuccess(r.Context(), body.Email)
 	s.loginBackoff.RecordSuccess(body.Email)
 
 	session, rawToken, err := s.createSession(r.Context(), user.ID)
@@ -395,6 +550,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("app user logged in", "request_id", requestIDFromContext(r.Context()), "user_id", user.ID, "session_id", session.ID)
+	s.audit(r.Context(), "login.succeeded", auditSeverityInfo, user.ID, "", "", requestIDFromContext(r.Context()), "session", session.ID, nil)
 	setSessionCookie(w, r, rawToken, session.ExpiresAt)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -423,6 +579,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	clearSessionCookie(w, r)
 	s.logger.Info("app session revoked", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID)
+	s.audit(r.Context(), "session.revoked", auditSeverityInfo, auth.User.ID, "", "", requestIDFromContext(r.Context()), "session", auth.Session.ID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -452,7 +609,12 @@ func (s *Server) handleAppWebSocketTicket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	rawTicket, expiresAt := s.appTickets.Issue(auth.Session.ID, auth.User.ID, 90*time.Second)
+	rawTicket := newToken()
+	expiresAt, err := s.store.CreateAppWebSocketTicket(r.Context(), hashToken(rawTicket), auth.Session.ID, auth.User.ID, 90*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.logger.Info("issued app websocket ticket", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID, "expires_at", expiresAt)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ticket":         rawTicket,
@@ -467,12 +629,10 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	agentID := strings.TrimSpace(firstNonBlank(r.Header.Get("X-Hank-Agent-ID"), r.URL.Query().Get("agent_id")))
+	agentID := strings.TrimSpace(r.Header.Get("X-Hank-Agent-ID"))
 	token := ""
 	if headerToken, err := bearerToken(r.Header.Get("Authorization")); err == nil {
 		token = headerToken
-	} else {
-		token = strings.TrimSpace(r.URL.Query().Get("token"))
 	}
 	if agentID == "" || token == "" {
 		s.metrics.IncAuthFailure("agent_missing_credentials")
@@ -481,7 +641,11 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.limiter.Allow("agent:"+clientIP(r), 40, time.Minute) {
+	allowed, limitErr := s.store.AllowRateLimit(r.Context(), "agent", clientIP(r), 40, time.Minute)
+	if limitErr != nil {
+		allowed = s.limiter.Allow("agent:"+clientIP(r), 40, time.Minute)
+	}
+	if !allowed {
 		s.metrics.IncAuthFailure("agent_rate_limited")
 		s.logger.Warn("agent websocket rate limited", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "agent_id", agentID)
 		http.Error(w, "too many agent auth attempts", http.StatusTooManyRequests)
@@ -508,10 +672,14 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	peer := newWSPeer(conn)
+	agentConnectionID := ""
 
 	s.logger.Info("agent websocket connected", "request_id", requestIDFromContext(r.Context()), "agent_id", record.Agent.ID, "home_id", record.Home.ID)
 	defer func() {
-		s.router.UnregisterAgent(record.Home.ID)
+		s.router.UnregisterAgent(record.Home.ID, agentConnectionID)
+		if agentConnectionID != "" {
+			_ = s.store.MarkAgentConnection(context.Background(), agentConnectionID, s.runtimeID, record.Home.ID, record.Agent.ID, nil, false)
+		}
 		s.metrics.SetOnlineAgents(s.router.AgentCount())
 		now := time.Now().UTC()
 		_ = s.store.SetAgentStatus(context.Background(), record.Agent.ID, domain.AgentStatusOffline, &now)
@@ -553,7 +721,8 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 				s.logger.Error("failed to mark agent online", "agent_id", agent.ID, "error", err)
 				return
 			}
-			s.router.RegisterAgent(record.Home.ID, agent, peer, nil)
+			agentConnectionID = s.router.RegisterAgent(record.Home.ID, agent, peer, nil)
+			_ = s.store.MarkAgentConnection(ctx, agentConnectionID, s.runtimeID, record.Home.ID, agent.ID, nil, true)
 			s.metrics.SetOnlineAgents(s.router.AgentCount())
 			s.emitHomeStatus(ctx, record.Home.ID, map[string]any{"home_id": record.Home.ID, "agent_id": agent.ID, "status": domain.AgentStatusOnline})
 
@@ -580,6 +749,9 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			now := time.Now().UTC()
 			_ = s.store.SetAgentStatus(ctx, record.Agent.ID, domain.AgentStatusOnline, &now)
 			s.router.UpdateAgentCapabilities(record.Home.ID, payload.Capabilities)
+			if agentConnectionID != "" {
+				_ = s.store.HeartbeatAgentConnection(ctx, agentConnectionID, payload.Capabilities)
+			}
 			if slices.Contains(payload.Capabilities, "notes.sync") {
 				if state, err := s.store.GetHomeNoteSyncState(ctx, record.Home.ID); err == nil {
 					if state.LastManifestAt == nil || now.Sub(*state.LastManifestAt) > time.Minute {
@@ -641,13 +813,15 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	appPeer := newWSPeer(conn)
 	appConn := s.router.RegisterApp(auth.Session.ID, auth.User.ID, appPeer)
+	_ = s.store.MarkAppConnection(ctx, appConn.connectionID, s.runtimeID, auth.Session.ID, auth.User.ID, true)
 	s.metrics.SetOnlineApps(s.router.AppCount())
-	s.logger.Info("app websocket connected", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID)
+	s.logger.Info("app websocket connected", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID, "connection_id", appConn.connectionID)
 	defer func() {
 		s.collaboration.removeApp(auth.Session.ID)
-		s.router.UnregisterApp(auth.Session.ID)
+		s.router.UnregisterApp(appConn.connectionID)
+		_ = s.store.MarkAppConnection(context.Background(), appConn.connectionID, s.runtimeID, auth.Session.ID, auth.User.ID, false)
 		s.metrics.SetOnlineApps(s.router.AppCount())
-		s.logger.Info("app websocket disconnected", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID)
+		s.logger.Info("app websocket disconnected", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID, "connection_id", appConn.connectionID)
 	}()
 
 	for {
@@ -674,7 +848,7 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if s.handleRealtimeCommand(ctx, appConn, appPeer, envelope, command) {
+		if s.handleRealtimeCommand(ctx, appConn, appPeer, envelope, auth, command) {
 			continue
 		}
 
@@ -709,6 +883,13 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		if strings.HasPrefix(command.Command, "files.") {
+			if err := s.authorizeFileCommandPolicy(ctx, home.ID, command); err != nil {
+				s.audit(ctx, "file_operation.denied", auditSeverityWarning, auth.User.ID, "", home.ID, envelope.RequestID, "file_policy", command.Command, map[string]any{"reason": err.Error()})
+				s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "permission_denied", err.Error(), nil)
+				continue
+			}
+		}
 
 		if strings.HasPrefix(command.Command, "notes.") {
 			if err := s.handleCloudNotesCommand(ctx, appPeer, envelope, auth, command); err != nil {
@@ -717,14 +898,32 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		var fileJobID string
+		command, fileJobID, err = s.prepareManagedFileCommand(ctx, home, auth, command)
+		if err != nil {
+			s.metrics.IncRouteFailure("file_job_rejected")
+			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "file_job_rejected", err.Error(), nil)
+			continue
+		}
+
 		agentConn, ok := s.router.GetAgent(home.ID)
 		if !ok {
 			s.metrics.IncRouteFailure("agent_offline")
+			s.failFileJob(context.Background(), fileJobID, "failed", "target home agent is offline")
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "agent_offline", "target home agent is offline", nil)
 			continue
 		}
 
-		if _, err := s.router.AddPending(context.Background(), envelope.RequestID, envelope.HomeID, command.Command, appConn, s.timeoutForCommand(command.Command), s.handlePendingTimeout); err != nil {
+		timeout := s.timeoutForCommand(command.Command)
+		if err := s.store.CreateRelayRequest(ctx, envelope.RequestID, envelope.HomeID, appConn.connectionID, command.Command, command.Body, timeout); err != nil {
+			s.metrics.IncRouteFailure("relay_persist_failed")
+			s.failFileJob(context.Background(), fileJobID, "failed", "request could not be persisted")
+			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "request_rejected", "request could not be persisted", nil)
+			continue
+		}
+		if _, err := s.router.AddPending(context.Background(), envelope.RequestID, envelope.HomeID, command.Command, fileJobID, appConn, timeout, s.handlePendingTimeout); err != nil {
+			_ = s.store.FailRelayRequest(context.Background(), envelope.RequestID, "failed", "request_rejected", err.Error())
+			s.failFileJob(context.Background(), fileJobID, "failed", err.Error())
 			code := "request_rejected"
 			statusMessage := err.Error()
 			if errors.Is(err, ErrTooManyInFlight) {
@@ -742,6 +941,8 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			if _, ok := s.router.ResolvePending(envelope.RequestID); ok {
 				s.metrics.IncRouteFailure("encoding_failed")
 			}
+			_ = s.store.FailRelayRequest(context.Background(), envelope.RequestID, "failed", "encoding_failed", err.Error())
+			s.failFileJob(context.Background(), fileJobID, "failed", err.Error())
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "encoding_failed", err.Error(), nil)
 			continue
 		}
@@ -750,9 +951,13 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			if _, ok := s.router.ResolvePending(envelope.RequestID); ok {
 				s.metrics.IncRouteFailure("route_write_failed")
 			}
+			_ = s.store.FailRelayRequest(context.Background(), envelope.RequestID, "failed", "route_write_failed", err.Error())
+			s.failFileJob(context.Background(), fileJobID, "failed", err.Error())
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "route_write_failed", err.Error(), nil)
 			continue
 		}
+		s.markFileJobRunning(context.Background(), fileJobID)
+		_ = s.store.MarkRelayRequestSent(context.Background(), envelope.RequestID, agentConn.connectionID)
 	}
 }
 
@@ -780,12 +985,16 @@ func (s *Server) handleAgentResponse(ctx context.Context, envelope protocol.Enve
 	duration := time.Since(pending.startedAt)
 	failed := envelope.Error != nil
 	s.metrics.RecordCommand(pending.command, duration, failed)
+	s.metrics.RecordRelay(duration, failed)
 	s.logger.Info("agent response relayed", "request_id", envelope.RequestID, "home_id", envelope.HomeID, "agent_id", envelope.AgentID, "command", pending.command, "duration", duration.String(), "failed", failed)
+	s.completePendingFileJob(context.Background(), pending, envelope)
 
 	if envelope.Error != nil {
+		_ = s.store.FailRelayRequest(context.Background(), envelope.RequestID, "failed", envelope.Error.Code, envelope.Error.Message)
 		_ = pending.app.peer.Write(ctx, protocol.NewErrorEnvelope(protocol.TypeAppError, envelope.RequestID, envelope.AgentID, envelope.HomeID, envelope.Error.Code, envelope.Error.Message, envelope.Error.Details))
 		return
 	}
+	_ = s.store.CompleteRelayRequest(context.Background(), envelope.RequestID, envelope.Payload)
 
 	response := protocol.Envelope{
 		Version:   protocol.Version,
@@ -804,14 +1013,18 @@ func (s *Server) handlePendingTimeout(ctx context.Context, pending *pendingReque
 	duration := time.Since(pending.startedAt)
 	s.metrics.IncRouteFailure("request_timeout")
 	s.metrics.RecordCommand(pending.command, duration, true)
+	s.metrics.RecordRelay(duration, true)
+	_ = s.store.FailRelayRequest(context.Background(), pending.requestID, "timed_out", "request_timeout", "agent did not respond before timeout")
+	s.failFileJob(context.Background(), pending.fileJobID, "rollback_required", "agent did not respond before timeout")
 	s.logger.Warn("app command timed out", "request_id", pending.requestID, "home_id", pending.homeID, "command", pending.command, "duration", duration.String())
 	_ = pending.app.peer.Write(ctx, protocol.NewErrorEnvelope(protocol.TypeAppError, pending.requestID, "", pending.homeID, "request_timeout", "agent did not respond before timeout", nil))
 }
 
-func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request, home domain.Home, operation string) {
+func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, operation string) {
 	type request struct {
 		SourceID string `json:"source_id"`
 		Path     string `json:"path"`
+		Size     int64  `json:"size,omitempty"`
 	}
 
 	var body request
@@ -825,6 +1038,28 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "path is required", http.StatusBadRequest)
 		return
 	}
+	policyCommand := protocol.RoutedCommand{Command: "files.download"}
+	if operation == protocol.FileTransferOperationUpload {
+		policyCommand.Command = "files.upload"
+	}
+	policyBody, _ := json.Marshal(map[string]string{"path": body.Path, "source_id": body.SourceID})
+	policyCommand.Body = policyBody
+	if err := s.authorizeFileCommandPolicy(r.Context(), home.ID, policyCommand); err != nil {
+		s.audit(r.Context(), "file_operation.denied", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_policy", operation, map[string]any{"reason": err.Error()})
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	if operation == protocol.FileTransferOperationUpload && body.Size > 0 {
+		maxUploadBytes, err := s.maxFileUploadBytes(r.Context(), home.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if maxUploadBytes > 0 && body.Size > maxUploadBytes {
+			http.Error(w, "file source policy upload size limit exceeded", http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
 
 	agentConn, ok := s.router.GetAgent(home.ID)
 	if !ok {
@@ -832,7 +1067,40 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	transfer, rawToken := s.transfers.Create(home.ID, agentConn.agent.ID, operation, body.SourceID, body.Path, 10*time.Minute)
+	now := time.Now().UTC()
+	jobID := newID("filejob")
+	if err := s.store.CreateFileOperationJob(r.Context(), store.FileOperationJob{
+		ID:        jobID,
+		HomeID:    home.ID,
+		UserID:    auth.User.ID,
+		Operation: operation,
+		SourceID:  body.SourceID,
+		FromPath:  body.Path,
+		Status:    "queued",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		s.logger.Warn("failed to persist file operation job", "job_id", jobID, "error", err)
+	}
+
+	transfer, rawToken := s.transfers.Create(home.ID, agentConn.agent.ID, jobID, operation, body.SourceID, body.Path, 10*time.Minute)
+	if err := s.store.CreateFileTransfer(r.Context(), store.FileTransferRecord{
+		ID:        transfer.ID,
+		TokenHash: transfer.TokenHash,
+		JobID:     jobID,
+		HomeID:    home.ID,
+		UserID:    auth.User.ID,
+		AgentID:   agentConn.agent.ID,
+		Operation: operation,
+		SourceID:  body.SourceID,
+		Path:      body.Path,
+		Status:    "pending",
+		CreatedAt: transfer.CreatedAt,
+		ExpiresAt: transfer.ExpiresAt,
+	}); err != nil {
+		s.logger.Warn("failed to persist file transfer lease", "transfer_id", transfer.ID, "error", err)
+	}
+	s.audit(r.Context(), "file_operation.requested", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_transfer", transfer.ID, map[string]any{"operation": operation, "source_id": body.SourceID})
 
 	method := http.MethodGet
 	if operation == protocol.FileTransferOperationUpload {
@@ -840,28 +1108,62 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 	}
 
 	payload := transfer.Snapshot()
+	if body.Size > 0 {
+		payload["requested_size"] = body.Size
+	}
+	payload["transfer_id"] = transfer.ID
+	payload["job_id"] = jobID
 	payload["transfer_token"] = rawToken
 	payload["method"] = method
-	payload["url"] = "/v1/file-transfers/" + transfer.ID + "?token=" + rawToken
+	payload["url"] = "/v1/file-transfers/" + transfer.ID
 	writeJSON(w, http.StatusCreated, payload)
 }
 
 func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 	transferID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/file-transfers/"), "/")
+	statusOnly := false
+	if strings.HasSuffix(transferID, "/status") {
+		statusOnly = true
+		transferID = strings.TrimSuffix(transferID, "/status")
+	}
 	if transferID == "" {
 		http.NotFound(w, r)
 		return
 	}
 
-	rawToken := strings.TrimSpace(r.URL.Query().Get("token"))
+	rawToken := ""
+	if headerToken, err := bearerToken(r.Header.Get("Authorization")); err == nil {
+		rawToken = headerToken
+	}
 	if rawToken == "" {
 		http.Error(w, "transfer token is required", http.StatusUnauthorized)
 		return
 	}
 
+	if statusOnly {
+		record, err := s.store.GetFileTransfer(r.Context(), transferID)
+		if err != nil || record.TokenHash != hashToken(rawToken) {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"transfer_id":  record.ID,
+			"operation":    record.Operation,
+			"source_id":    record.SourceID,
+			"path":         record.Path,
+			"status":       record.Status,
+			"bytes_total":  record.BytesTotal,
+			"bytes_done":   record.BytesDone,
+			"created_at":   record.CreatedAt,
+			"expires_at":   record.ExpiresAt,
+			"completed_at": record.CompletedAt,
+		})
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
-		transfer, err := s.transfers.Authorize(transferID, rawToken, protocol.FileTransferOperationDownload)
+		transfer, err := s.authorizeTransfer(r.Context(), transferID, rawToken, protocol.FileTransferOperationDownload)
 		if err != nil {
 			http.Error(w, "transfer not found", http.StatusNotFound)
 			return
@@ -876,6 +1178,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 			s.writeTransferAttemptError(w, transfer, err)
 			return
 		}
+		s.persistTransferStatus(r.Context(), transfer, "active")
 		defer s.transfers.EndAttempt(attempt.ID)
 
 		agentConn, ok := s.router.GetAgent(transfer.HomeID)
@@ -906,6 +1209,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		}
 		if protocolErr != nil {
 			transfer.Fail(protocolErr)
+			s.persistTransferStatus(r.Context(), transfer, "failed")
 			http.Error(w, protocolErr.Message, http.StatusBadGateway)
 			return
 		}
@@ -928,10 +1232,12 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 			case frame := <-attempt.DataCh:
 				if frame.Error != nil {
 					transfer.Fail(frame.Error)
+					s.persistTransferStatus(r.Context(), transfer, "failed")
 					return
 				}
 				if frame.Offset != currentOffset {
 					transfer.Fail(&protocol.ErrorPayload{Code: "transfer_offset_mismatch", Message: "download stream offset mismatch"})
+					s.persistTransferStatus(r.Context(), transfer, "failed")
 					return
 				}
 				if len(frame.Data) == 0 {
@@ -945,6 +1251,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 				transfer.Advance(currentOffset, ready.Size)
 				if pendingComplete != nil && currentOffset >= pendingComplete.Offset {
 					transfer.Complete(*pendingComplete)
+					s.persistTransferStatus(r.Context(), transfer, "completed")
 					return
 				}
 				if flusher != nil {
@@ -954,11 +1261,13 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 				protocolErr := result.Error
 				if protocolErr != nil {
 					transfer.Fail(protocolErr)
+					s.persistTransferStatus(r.Context(), transfer, "failed")
 					return
 				}
 				complete := result.Complete
 				if currentOffset >= complete.Offset {
 					transfer.Complete(complete)
+					s.persistTransferStatus(r.Context(), transfer, "completed")
 					return
 				}
 				pendingComplete = &complete
@@ -966,9 +1275,14 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
-		transfer, err := s.transfers.Authorize(transferID, rawToken, protocol.FileTransferOperationUpload)
+		transfer, err := s.authorizeTransfer(r.Context(), transferID, rawToken, protocol.FileTransferOperationUpload)
 		if err != nil {
 			http.Error(w, "transfer not found", http.StatusNotFound)
+			return
+		}
+		maxUploadBytes, err := s.maxFileUploadBytes(r.Context(), transfer.HomeID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		offset, err := offsetParam(r, transfer.NextOffset())
@@ -976,11 +1290,18 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if maxUploadBytes > 0 && r.ContentLength > 0 && offset+r.ContentLength > maxUploadBytes {
+			transfer.Fail(&protocol.ErrorPayload{Code: "upload_too_large", Message: "file source policy upload size limit exceeded"})
+			s.persistTransferStatus(r.Context(), transfer, "failed")
+			http.Error(w, "file source policy upload size limit exceeded", http.StatusRequestEntityTooLarge)
+			return
+		}
 		attempt, err := s.transfers.BeginAttempt(transfer, offset)
 		if err != nil {
 			s.writeTransferAttemptError(w, transfer, err)
 			return
 		}
+		s.persistTransferStatus(r.Context(), transfer, "active")
 		defer s.transfers.EndAttempt(attempt.ID)
 
 		agentConn, ok := s.router.GetAgent(transfer.HomeID)
@@ -1011,6 +1332,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		}
 		if protocolErr != nil {
 			transfer.Fail(protocolErr)
+			s.persistTransferStatus(r.Context(), transfer, "failed")
 			http.Error(w, protocolErr.Message, http.StatusBadGateway)
 			return
 		}
@@ -1029,6 +1351,12 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, err := r.Body.Read(buffer)
 			if n > 0 {
+				if maxUploadBytes > 0 && currentOffset+int64(n) > maxUploadBytes {
+					transfer.Fail(&protocol.ErrorPayload{Code: "upload_too_large", Message: "file source policy upload size limit exceeded"})
+					s.persistTransferStatus(r.Context(), transfer, "failed")
+					http.Error(w, "file source policy upload size limit exceeded", http.StatusRequestEntityTooLarge)
+					return
+				}
 				envelope, envelopeErr := protocol.NewEnvelope(protocol.TypeFileTransferData, attempt.ID, agentConn.agent.ID, transfer.HomeID, protocol.FileTransferChunk{
 					Offset:        currentOffset,
 					ContentBase64: base64.StdEncoding.EncodeToString(buffer[:n]),
@@ -1076,10 +1404,12 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		}
 		if protocolErr != nil {
 			transfer.Fail(protocolErr)
+			s.persistTransferStatus(r.Context(), transfer, "failed")
 			http.Error(w, protocolErr.Message, http.StatusBadGateway)
 			return
 		}
 		transfer.Complete(done)
+		s.persistTransferStatus(r.Context(), transfer, "completed")
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":          true,
@@ -1091,6 +1421,92 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) authorizeTransfer(ctx context.Context, transferID string, rawToken string, operation string) (*transferSession, error) {
+	transfer, err := s.transfers.Authorize(transferID, rawToken, operation)
+	if err == nil {
+		return transfer, nil
+	}
+	record, recordErr := s.store.GetFileTransfer(ctx, transferID)
+	if recordErr != nil {
+		return nil, err
+	}
+	if record.Operation != operation || record.TokenHash != hashToken(rawToken) || !record.ExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrTransferNotFound
+	}
+	if record.Status == "expired" || record.Status == "failed" {
+		return nil, ErrTransferNotFound
+	}
+	transfer = &transferSession{
+		ID:          record.ID,
+		HomeID:      record.HomeID,
+		AgentID:     record.AgentID,
+		JobID:       record.JobID,
+		Operation:   record.Operation,
+		SourceID:    record.SourceID,
+		Path:        record.Path,
+		TokenHash:   record.TokenHash,
+		CreatedAt:   record.CreatedAt,
+		ExpiresAt:   record.ExpiresAt,
+		nextOffset:  record.BytesDone,
+		completedAt: record.CompletedAt,
+	}
+	if record.BytesTotal != nil {
+		transfer.size = *record.BytesTotal
+	}
+	s.transfers.Restore(transfer)
+	return transfer, nil
+}
+
+func (s *Server) persistTransferStatus(ctx context.Context, transfer *transferSession, status string) {
+	if transfer == nil {
+		return
+	}
+	size, done, completedAt := transfer.Progress()
+	var total *int64
+	if size > 0 {
+		total = &size
+	}
+	if err := s.store.UpdateFileTransferProgress(ctx, transfer.ID, status, total, done, completedAt); err != nil {
+		s.logger.Warn("failed to persist file transfer status", "transfer_id", transfer.ID, "status", status, "error", err)
+	}
+	s.persistTransferJobStatus(ctx, transfer, status, done, completedAt)
+}
+
+func (s *Server) persistTransferJobStatus(ctx context.Context, transfer *transferSession, transferStatus string, bytesDone int64, completedAt *time.Time) {
+	if transfer == nil || transfer.JobID == "" {
+		return
+	}
+	jobStatus := "running"
+	filesDone := int64(0)
+	errorMessage := ""
+	var jobCompletedAt *time.Time
+	switch transferStatus {
+	case "active":
+		jobStatus = "running"
+	case "completed":
+		jobStatus = "completed"
+		filesDone = 1
+		if completedAt != nil {
+			jobCompletedAt = completedAt
+		} else {
+			now := time.Now().UTC()
+			jobCompletedAt = &now
+		}
+	case "failed", "expired":
+		jobStatus = "failed"
+		if lastError := transfer.LastError(); lastError != nil {
+			errorMessage = lastError.Message
+		}
+		now := time.Now().UTC()
+		jobCompletedAt = &now
+	default:
+		return
+	}
+	if err := s.store.UpdateFileOperationJob(ctx, transfer.JobID, jobStatus, bytesDone, filesDone, errorMessage, jobCompletedAt); err != nil {
+		s.logger.Warn("failed to persist file operation job status", "job_id", transfer.JobID, "transfer_id", transfer.ID, "status", jobStatus, "error", err)
 	}
 }
 
@@ -1220,7 +1636,7 @@ func (s *Server) appAuthFromRequest(r *http.Request) (authContext, error) {
 	if rawToken == "" {
 		appTicket := strings.TrimSpace(r.URL.Query().Get("app_ticket"))
 		if appTicket != "" {
-			ticket, err := s.appTickets.Consume(appTicket)
+			ticket, err := s.store.ConsumeAppWebSocketTicket(r.Context(), hashToken(appTicket))
 			if err != nil {
 				return authContext{}, err
 			}

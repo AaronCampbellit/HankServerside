@@ -16,7 +16,7 @@ func TestUserProfileSettingsAndSecretVaultNotify(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	db, err := Open(ctx, testutil.PostgreSQLTestURL(t))
+	db, err := OpenMigrating(ctx, testutil.PostgreSQLTestURL(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

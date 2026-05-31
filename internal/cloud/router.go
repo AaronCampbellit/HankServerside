@@ -12,6 +12,7 @@ import (
 var ErrTooManyInFlight = errors.New("too many in-flight requests")
 
 type agentConnection struct {
+	connectionID string
 	agent        domain.Agent
 	homeID       string
 	peer         *wsPeer
@@ -19,6 +20,7 @@ type agentConnection struct {
 }
 
 type appConnection struct {
+	connectionID  string
 	sessionID     string
 	userID        string
 	peer          *wsPeer
@@ -31,6 +33,7 @@ type pendingRequest struct {
 	requestID string
 	homeID    string
 	command   string
+	fileJobID string
 	app       *appConnection
 	startedAt time.Time
 	timer     *time.Timer
@@ -46,29 +49,32 @@ type AgentSnapshot struct {
 }
 
 type Router struct {
-	mu             sync.RWMutex
-	agentsByHomeID map[string]*agentConnection
-	appsBySession  map[string]*appConnection
-	pendingByID    map[string]*pendingRequest
+	mu                 sync.RWMutex
+	agentsByHomeID     map[string]*agentConnection
+	appsByConnectionID map[string]*appConnection
+	pendingByID        map[string]*pendingRequest
 }
 
 func NewRouter() *Router {
 	return &Router{
-		agentsByHomeID: make(map[string]*agentConnection),
-		appsBySession:  make(map[string]*appConnection),
-		pendingByID:    make(map[string]*pendingRequest),
+		agentsByHomeID:     make(map[string]*agentConnection),
+		appsByConnectionID: make(map[string]*appConnection),
+		pendingByID:        make(map[string]*pendingRequest),
 	}
 }
 
-func (r *Router) RegisterAgent(homeID string, agent domain.Agent, peer *wsPeer, capabilities []string) {
+func (r *Router) RegisterAgent(homeID string, agent domain.Agent, peer *wsPeer, capabilities []string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	connectionID := newID("agentconn")
 	r.agentsByHomeID[homeID] = &agentConnection{
+		connectionID: connectionID,
 		agent:        agent,
 		homeID:       homeID,
 		peer:         peer,
 		capabilities: append([]string(nil), capabilities...),
 	}
+	return connectionID
 }
 
 func (r *Router) UpdateAgentCapabilities(homeID string, capabilities []string) {
@@ -79,10 +85,12 @@ func (r *Router) UpdateAgentCapabilities(homeID string, capabilities []string) {
 	}
 }
 
-func (r *Router) UnregisterAgent(homeID string) {
+func (r *Router) UnregisterAgent(homeID string, connectionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.agentsByHomeID, homeID)
+	if current := r.agentsByHomeID[homeID]; current != nil && (connectionID == "" || current.connectionID == connectionID) {
+		delete(r.agentsByHomeID, homeID)
+	}
 }
 
 func (r *Router) GetAgent(homeID string) (*agentConnection, bool) {
@@ -96,12 +104,13 @@ func (r *Router) RegisterApp(sessionID string, userID string, peer *wsPeer) *app
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	connection := &appConnection{
+		connectionID:  newID("appconn"),
 		sessionID:     sessionID,
 		userID:        userID,
 		peer:          peer,
 		subscriptions: make(map[string]struct{}),
 	}
-	r.appsBySession[sessionID] = connection
+	r.appsByConnectionID[connection.connectionID] = connection
 	return connection
 }
 
@@ -110,7 +119,7 @@ func (r *Router) AppsForTopic(topic string) []*appConnection {
 	defer r.mu.RUnlock()
 
 	apps := make([]*appConnection, 0)
-	for _, app := range r.appsBySession {
+	for _, app := range r.appsByConnectionID {
 		if app.isSubscribed(topic) {
 			apps = append(apps, app)
 		}
@@ -118,13 +127,13 @@ func (r *Router) AppsForTopic(topic string) []*appConnection {
 	return apps
 }
 
-func (r *Router) UnregisterApp(sessionID string) {
+func (r *Router) UnregisterApp(connectionID string) {
 	r.mu.Lock()
-	_, ok := r.appsBySession[sessionID]
-	delete(r.appsBySession, sessionID)
+	app, ok := r.appsByConnectionID[connectionID]
+	delete(r.appsByConnectionID, connectionID)
 	if ok {
 		for requestID, pending := range r.pendingByID {
-			if pending.app.sessionID == sessionID {
+			if pending.app.connectionID == app.connectionID {
 				if pending.timer != nil {
 					pending.timer.Stop()
 				}
@@ -136,7 +145,7 @@ func (r *Router) UnregisterApp(sessionID string) {
 	r.mu.Unlock()
 }
 
-func (r *Router) AddPending(ctx context.Context, requestID string, homeID string, command string, app *appConnection, timeout time.Duration, onTimeout func(context.Context, *pendingRequest)) (*pendingRequest, error) {
+func (r *Router) AddPending(ctx context.Context, requestID string, homeID string, command string, fileJobID string, app *appConnection, timeout time.Duration, onTimeout func(context.Context, *pendingRequest)) (*pendingRequest, error) {
 	if !app.acquire() {
 		return nil, ErrTooManyInFlight
 	}
@@ -152,6 +161,7 @@ func (r *Router) AddPending(ctx context.Context, requestID string, homeID string
 		requestID: requestID,
 		homeID:    homeID,
 		command:   command,
+		fileJobID: fileJobID,
 		app:       app,
 		startedAt: time.Now().UTC(),
 	}
@@ -203,7 +213,7 @@ func (r *Router) AgentCount() int {
 func (r *Router) AppCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.appsBySession)
+	return len(r.appsByConnectionID)
 }
 
 func (r *Router) Snapshots(homeNames map[string]string, agents map[string]domain.Agent) []AgentSnapshot {

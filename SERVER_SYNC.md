@@ -491,8 +491,8 @@ Shared Home notes, sync health, and integration settings are still the Remote co
 - File transfer setup and transfer routes:
   - `POST /v1/home/files/downloads`
   - `POST /v1/home/files/uploads`
-  - `GET /v1/file-transfers/{transferID}?token={transferToken}`
-  - `PUT /v1/file-transfers/{transferID}?token={transferToken}`
+  - `GET /v1/file-transfers/{transferID}` with `Authorization: Bearer {transferToken}`
+  - `PUT /v1/file-transfers/{transferID}` with `Authorization: Bearer {transferToken}`
 - File transfer setup responses include `transfer_id`, `transfer_token`, `method`, `url`, `expires_at`, `next_offset`, `resumable`, and transfer status fields.
 - Service-profile writes accept:
   - `public_config`

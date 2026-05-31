@@ -23,6 +23,13 @@ func main() {
 		logger.Error("failed to load agent config", "error", err)
 		os.Exit(1)
 	}
+	envPaths := []string{".env.agent"}
+	if cfg.ConfigPath != "" {
+		envPaths = append(envPaths, cfg.ConfigPath)
+	}
+	for _, warning := range config.RuntimeEnvFileWarnings(envPaths...) {
+		logger.Warn("runtime env file is group/world-readable; run chmod 600", "path", warning.Path, "mode", warning.Mode.String())
+	}
 
 	ha := agentha.New(cfg.HA.BaseURL, cfg.HA.Token, cfg.HA.Timeout)
 	legacySMB := cfg.SMB
@@ -39,6 +46,7 @@ func main() {
 			Username: legacySMB.Username,
 			Password: legacySMB.Password,
 			Domain:   legacySMB.Domain,
+			Policy:   agentFilePolicy(legacySMB.Policy),
 		},
 		Shares: agentSMBShares(cfg.SMBShares),
 	})
@@ -78,7 +86,19 @@ func agentSMBShares(shares []config.SMB) []agentfiles.SMBConfig {
 			Username: share.Username,
 			Password: share.Password,
 			Domain:   share.Domain,
+			Policy:   agentFilePolicy(share.Policy),
 		})
 	}
 	return configs
+}
+
+func agentFilePolicy(policy config.FileAccessPolicy) agentfiles.AccessPolicy {
+	return agentfiles.AccessPolicy{
+		Read:            policy.Read,
+		Write:           policy.Write,
+		Delete:          policy.Delete,
+		AllowedPrefixes: append([]string(nil), policy.AllowedPrefixes...),
+		BlockedPrefixes: append([]string(nil), policy.BlockedPrefixes...),
+		MaxUploadBytes:  policy.MaxUploadBytes,
+	}
 }

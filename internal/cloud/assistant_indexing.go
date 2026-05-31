@@ -13,22 +13,26 @@ import (
 )
 
 const assistantConversationSourceType = "assistant_conversation"
+const assistantIndexRefreshTimeout = 2 * time.Second
 
 func (s *Server) refreshAssistantIndex(ctx context.Context, runtime assistantToolRuntime, tool assistantTool, intent assistantIntent) {
+	refreshCtx, cancel := context.WithTimeout(ctx, assistantIndexRefreshTimeout)
+	defer cancel()
+
 	settings := runtime.Settings
 	settings = normalizeAssistantSettings(settings)
 	if settings.ProfileNotesEnabled || settings.HomeNotesEnabled {
-		if err := s.indexAssistantNotes(ctx, runtime.Home, runtime.Membership, runtime.Auth, settings); err != nil {
+		if err := s.indexAssistantNotes(refreshCtx, runtime.Home, runtime.Membership, runtime.Auth, settings); err != nil {
 			s.logger.Warn("assistant note indexing failed", "error", err)
 		}
 	}
 	if settings.CalendarEnabled {
-		if err := s.indexAssistantCalendarSnapshot(ctx, runtime.Home.ID, runtime.Auth.User.ID); err != nil {
+		if err := s.indexAssistantCalendarSnapshot(refreshCtx, runtime.Home.ID, runtime.Auth.User.ID); err != nil {
 			s.logger.Warn("assistant calendar indexing failed", "error", err)
 		}
 	}
 	if tool.RefreshIndex != nil {
-		tool.RefreshIndex(ctx, s, runtime, intent)
+		tool.RefreshIndex(refreshCtx, s, runtime, intent)
 	}
 }
 

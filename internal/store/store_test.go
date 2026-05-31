@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/migrations"
 	"github.com/dropfile/hankremote/internal/testutil"
 )
 
@@ -129,7 +130,11 @@ func TestNotificationSettingsAndAPNSDevices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNotificationSettings: %v", err)
 	}
-	if loaded != settings {
+	if loaded.UserID != settings.UserID ||
+		loaded.StorageEnabled != settings.StorageEnabled ||
+		loaded.NotesEnabled != settings.NotesEnabled ||
+		loaded.DashboardEntitiesEnabled != settings.DashboardEntitiesEnabled ||
+		!loaded.UpdatedAt.UTC().Truncate(time.Microsecond).Equal(settings.UpdatedAt.UTC().Truncate(time.Microsecond)) {
 		t.Fatalf("loaded settings = %#v, want %#v", loaded, settings)
 	}
 
@@ -166,6 +171,42 @@ func TestNotificationSettingsAndAPNSDevices(t *testing.T) {
 	}
 	if len(devices) != 0 {
 		t.Fatalf("devices after delete = %#v", devices)
+	}
+}
+
+func TestLoginBackoffPersistsAndClears(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	email := "backoff@example.com"
+	for i := 0; i < 4; i++ {
+		if err := db.RecordLoginFailure(ctx, email); err != nil {
+			t.Fatalf("RecordLoginFailure %d: %v", i+1, err)
+		}
+		if retryAfter, blocked, err := db.LoginBackoffBlocked(ctx, email); err != nil {
+			t.Fatalf("LoginBackoffBlocked %d: %v", i+1, err)
+		} else if blocked {
+			t.Fatalf("LoginBackoffBlocked %d blocked with retry_after=%v, want not blocked", i+1, retryAfter)
+		}
+	}
+	if err := db.RecordLoginFailure(ctx, email); err != nil {
+		t.Fatalf("RecordLoginFailure 5: %v", err)
+	}
+	if retryAfter, blocked, err := db.LoginBackoffBlocked(ctx, email); err != nil {
+		t.Fatalf("LoginBackoffBlocked after threshold: %v", err)
+	} else if !blocked || retryAfter <= 0 {
+		t.Fatalf("LoginBackoffBlocked after threshold = blocked %v retry_after %v, want active backoff", blocked, retryAfter)
+	}
+	if err := db.RecordLoginSuccess(ctx, email); err != nil {
+		t.Fatalf("RecordLoginSuccess: %v", err)
+	}
+	if retryAfter, blocked, err := db.LoginBackoffBlocked(ctx, email); err != nil {
+		t.Fatalf("LoginBackoffBlocked after clear: %v", err)
+	} else if blocked {
+		t.Fatalf("LoginBackoffBlocked after clear blocked with retry_after=%v", retryAfter)
 	}
 }
 
@@ -214,13 +255,13 @@ func TestSecretEncryptionProtectsStoredTokens(t *testing.T) {
 	}
 
 	var storedAccess, storedRefresh, storedAPNS, storedVault string
-	if err := db.db.QueryRowContext(ctx, `SELECT access_token, refresh_token FROM openai_accounts WHERE user_id = ?`, user.ID).Scan(&storedAccess, &storedRefresh); err != nil {
+	if err := db.queryRow(ctx, `SELECT access_token, refresh_token FROM openai_accounts WHERE user_id = ?`, user.ID).Scan(&storedAccess, &storedRefresh); err != nil {
 		t.Fatalf("raw openai query: %v", err)
 	}
-	if err := db.db.QueryRowContext(ctx, `SELECT token FROM apns_devices WHERE user_id = ? AND device_id = ?`, user.ID, "device-secret").Scan(&storedAPNS); err != nil {
+	if err := db.queryRow(ctx, `SELECT token FROM apns_devices WHERE user_id = ? AND device_id = ?`, user.ID, "device-secret").Scan(&storedAPNS); err != nil {
 		t.Fatalf("raw apns query: %v", err)
 	}
-	if err := db.db.QueryRowContext(ctx, `SELECT vault_json::text FROM user_profile_secret_vaults WHERE user_id = ?`, user.ID).Scan(&storedVault); err != nil {
+	if err := db.queryRow(ctx, `SELECT vault_json::text FROM user_profile_secret_vaults WHERE user_id = ?`, user.ID).Scan(&storedVault); err != nil {
 		t.Fatalf("raw vault query: %v", err)
 	}
 	for label, value := range map[string]string{
@@ -399,10 +440,66 @@ func TestOpenFailsWhenMultipleHomesExist(t *testing.T) {
 		}
 	}
 
-	if _, err := Open(ctx, url); err == nil {
+	if _, err := OpenMigrating(ctx, url); err == nil {
 		t.Fatal("expected Open to fail when multiple homes exist")
 	} else if !errors.Is(err, ErrUnsupportedMultiHome) {
 		t.Fatalf("Open error = %v, want ErrUnsupportedMultiHome", err)
+	}
+}
+
+func TestOpenReadOnlyDoesNotCreateSchema(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	url := testutil.PostgreSQLTestURL(t)
+	raw, err := sql.Open(driverName, url)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+
+	before := countPublicTables(t, ctx, raw)
+	opened, err := Open(ctx, url)
+	if err == nil {
+		_ = opened.Close()
+		t.Fatal("expected Open to fail when schema_migrations is missing")
+	}
+	after := countPublicTables(t, ctx, raw)
+	if after != before {
+		t.Fatalf("Open created schema objects: before=%d after=%d", before, after)
+	}
+}
+
+func TestBaselineExistingSchemaThenReadOnlyStatus(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	url := testutil.PostgreSQLTestURL(t)
+	db, err := OpenMigrating(ctx, url)
+	if err != nil {
+		t.Fatalf("OpenMigrating: %v", err)
+	}
+	if _, err := db.exec(ctx, `DROP TABLE schema_migrations`); err != nil {
+		t.Fatalf("drop schema_migrations: %v", err)
+	}
+	if err := migrations.BaselineExisting(ctx, db.DB(), 0); err != nil {
+		t.Fatalf("BaselineExisting: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close migrating store: %v", err)
+	}
+
+	opened, err := Open(ctx, url)
+	if err != nil {
+		t.Fatalf("Open after baseline: %v", err)
+	}
+	defer opened.Close()
+	statuses, err := opened.MigrationStatuses(ctx)
+	if err != nil {
+		t.Fatalf("MigrationStatuses: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Version != migrations.Baseline().Version || statuses[0].Checksum != migrations.Checksum(migrations.Baseline()) {
+		t.Fatalf("migration statuses = %#v, want baseline", statuses)
 	}
 }
 
@@ -456,14 +553,49 @@ func TestListAndDeletePendingHomeInvitations(t *testing.T) {
 	}
 }
 
+func TestOpenFailsOnMigrationChecksumMismatch(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	url := testutil.PostgreSQLTestURL(t)
+	db, err := OpenMigrating(ctx, url)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := db.exec(ctx, `UPDATE schema_migrations SET checksum = ? WHERE version = 1`, "bad-checksum-for-test"); err != nil {
+		t.Fatalf("tamper checksum: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	reopened, err := Open(ctx, url)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("expected Open to fail on migration checksum mismatch")
+	}
+	if !errors.Is(err, migrations.ErrChecksumMismatch) {
+		t.Fatalf("Open error = %v, want ErrChecksumMismatch", err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 
-	db, err := Open(context.Background(), testutil.PostgreSQLTestURL(t))
+	db, err := OpenMigrating(context.Background(), testutil.PostgreSQLTestURL(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	return db
+}
+
+func countPublicTables(t *testing.T, ctx context.Context, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'`).Scan(&count); err != nil {
+		t.Fatalf("count public tables: %v", err)
+	}
+	return count
 }
 
 func assertSameStrings(t *testing.T, got []string, want []string) {

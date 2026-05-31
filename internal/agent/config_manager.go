@@ -168,15 +168,16 @@ func (m *configManager) smbProfile(secretVersion int, appliedVersion int, lastEr
 }
 
 type smbPublicConfig struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Host        string            `json:"host"`
-	Share       string            `json:"share"`
-	Username    string            `json:"username"`
-	Domain      string            `json:"domain"`
-	Shares      []smbSharePayload `json:"shares"`
-	FileSources []smbSharePayload `json:"file_sources"`
-	Sources     []smbSharePayload `json:"sources"`
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Host        string                  `json:"host"`
+	Share       string                  `json:"share"`
+	Username    string                  `json:"username"`
+	Domain      string                  `json:"domain"`
+	Policy      agentfiles.AccessPolicy `json:"policy"`
+	Shares      []smbSharePayload       `json:"shares"`
+	FileSources []smbSharePayload       `json:"file_sources"`
+	Sources     []smbSharePayload       `json:"sources"`
 }
 
 type smbSecretConfig struct {
@@ -187,18 +188,19 @@ type smbSecretConfig struct {
 }
 
 type smbSharePayload struct {
-	ID          string `json:"id"`
-	SourceID    string `json:"source_id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Host        string `json:"host"`
-	Share       string `json:"share"`
-	Username    string `json:"username"`
-	Domain      string `json:"domain"`
-	SMBHost     string `json:"smb_host"`
-	SMBShare    string `json:"smb_share"`
-	SMBUsername string `json:"smb_username"`
-	SMBDomain   string `json:"smb_domain"`
+	ID          string                  `json:"id"`
+	SourceID    string                  `json:"source_id"`
+	Name        string                  `json:"name"`
+	Type        string                  `json:"type"`
+	Host        string                  `json:"host"`
+	Share       string                  `json:"share"`
+	Username    string                  `json:"username"`
+	Domain      string                  `json:"domain"`
+	SMBHost     string                  `json:"smb_host"`
+	SMBShare    string                  `json:"smb_share"`
+	SMBUsername string                  `json:"smb_username"`
+	SMBDomain   string                  `json:"smb_domain"`
+	Policy      agentfiles.AccessPolicy `json:"policy"`
 }
 
 type smbShareSecret struct {
@@ -218,6 +220,10 @@ func smbConfigsFromApply(public smbPublicConfig, secrets smbSecretConfig, existi
 
 	configs := make([]agentfiles.SMBConfig, 0, len(publicShares))
 	for _, share := range publicShares {
+		policy := share.Policy
+		if !policy.HasRules() {
+			policy = public.Policy
+		}
 		configs = append(configs, agentfiles.SMBConfig{
 			ID:       strings.TrimSpace(firstNonEmpty(share.ID, share.SourceID)),
 			Name:     strings.TrimSpace(share.Name),
@@ -225,6 +231,7 @@ func smbConfigsFromApply(public smbPublicConfig, secrets smbSecretConfig, existi
 			Share:    strings.TrimSpace(firstNonEmpty(share.Share, share.SMBShare)),
 			Username: strings.TrimSpace(firstNonEmpty(share.Username, share.SMBUsername)),
 			Domain:   strings.TrimSpace(firstNonEmpty(share.Domain, share.SMBDomain)),
+			Policy:   policy,
 		})
 	}
 	if len(configs) == 0 {
@@ -235,6 +242,7 @@ func smbConfigsFromApply(public smbPublicConfig, secrets smbSecretConfig, existi
 			Share:    strings.TrimSpace(public.Share),
 			Username: strings.TrimSpace(public.Username),
 			Domain:   strings.TrimSpace(public.Domain),
+			Policy:   public.Policy,
 		})
 	}
 
@@ -331,13 +339,14 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 	env["HANK_REMOTE_SMB_PASSWORD"] = primary.Password
 	env["HANK_REMOTE_SMB_DOMAIN"] = strings.TrimSpace(primary.Domain)
 	type envShare struct {
-		ID       string `json:"id,omitempty"`
-		Name     string `json:"name,omitempty"`
-		Host     string `json:"host"`
-		Share    string `json:"share"`
-		Username string `json:"username,omitempty"`
-		Password string `json:"password,omitempty"`
-		Domain   string `json:"domain,omitempty"`
+		ID       string                  `json:"id,omitempty"`
+		Name     string                  `json:"name,omitempty"`
+		Host     string                  `json:"host"`
+		Share    string                  `json:"share"`
+		Username string                  `json:"username,omitempty"`
+		Password string                  `json:"password,omitempty"`
+		Domain   string                  `json:"domain,omitempty"`
+		Policy   agentfiles.AccessPolicy `json:"policy,omitempty"`
 	}
 	shares := make([]envShare, 0, len(configs))
 	for _, cfg := range configs {
@@ -352,6 +361,7 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 			Username: strings.TrimSpace(cfg.Username),
 			Password: cfg.Password,
 			Domain:   strings.TrimSpace(cfg.Domain),
+			Policy:   cfg.Policy,
 		})
 	}
 	if len(shares) > 1 {

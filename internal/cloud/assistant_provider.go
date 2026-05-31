@@ -87,9 +87,6 @@ func (c *AssistantAIConfig) normalize() {
 		c.OpenAIChatModel = "gpt-4o-mini"
 	}
 	c.OpenAIEmbeddingModel = strings.TrimSpace(c.OpenAIEmbeddingModel)
-	if c.OpenAIEmbeddingModel == "" {
-		c.OpenAIEmbeddingModel = "text-embedding-3-small"
-	}
 	c.ChatGPTAuthIssuer = strings.TrimRight(strings.TrimSpace(c.ChatGPTAuthIssuer), "/")
 	if c.ChatGPTAuthIssuer == "" {
 		c.ChatGPTAuthIssuer = "https://auth.openai.com"
@@ -168,7 +165,7 @@ func (s *Server) assistantStatus(ctx context.Context, userID string, modelOverri
 	if cfg.OllamaBaseURL != "" {
 		status.EmbeddingConfigured = true
 		status.EmbeddingModel = cfg.OllamaEmbeddingModel
-	} else if strings.TrimSpace(cfg.OpenAIAPIKey) != "" {
+	} else if strings.TrimSpace(cfg.OpenAIAPIKey) != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
 		status.EmbeddingConfigured = true
 		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
 	}
@@ -310,25 +307,36 @@ func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string
 	cfg.normalize()
 	provider, token := s.resolveAssistantProvider(ctx, userID)
 	chatModel := defaultString(assistantChatModelOverride(modelOverride...), cfg.defaultChatModelForProvider(provider))
+	record := func(err error) {
+		if s.metrics != nil {
+			s.metrics.RecordAssistantProvider(provider, err != nil)
+		}
+	}
 	switch provider {
 	case "ollama":
 		if cfg.OllamaBaseURL == "" {
+			record(errors.New("not configured"))
 			return "", "", errors.New("Ollama is not configured")
 		}
 		text, err := postOllamaChat(ctx, cfg.OllamaBaseURL, chatModel, messages)
+		record(err)
 		return text, "ollama:" + chatModel, err
 	case "openai":
 		if token == "" {
+			record(errors.New("not configured"))
 			return "", "", errors.New("OpenAI is not configured")
 		}
 		text, err := postOpenAIChat(ctx, cfg.OpenAIBaseURL, token, chatModel, messages)
+		record(err)
 		return text, "openai:" + chatModel, err
 	case assistantProviderChatGPTCodex:
 		if !cfg.ChatGPTOAuthEnabled {
+			record(errChatGPTRelinkRequired)
 			return "", "", errChatGPTRelinkRequired
 		}
 		account, err := s.chatGPTCodexAccount(ctx, userID)
 		if err != nil {
+			record(err)
 			return "", "", err
 		}
 		text, err := postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, chatModel, messages)
@@ -336,16 +344,20 @@ func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string
 		if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			account, err = s.refreshChatGPTCodexAccount(ctx, account)
 			if err != nil {
+				record(err)
 				return "", "", err
 			}
 			text, err = postChatGPTCodexResponse(ctx, cfg.ChatGPTBackendBaseURL, account.AccessToken, account.ProviderUserID, chatModel, messages)
 			if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 				_ = s.store.DeleteOpenAIAccount(ctx, userID)
+				record(errChatGPTRelinkRequired)
 				return "", "", errChatGPTRelinkRequired
 			}
 		}
+		record(err)
 		return text, assistantProviderChatGPTCodex + ":" + chatModel, err
 	default:
+		record(errors.New("not configured"))
 		return "", "local", errors.New("assistant provider is not configured")
 	}
 }
@@ -360,7 +372,7 @@ func (s *Server) embedAssistantText(ctx context.Context, userID string, text str
 			s.logger.Warn("assistant Ollama embedding failed", "error", err)
 		}
 	}
-	if strings.TrimSpace(cfg.OpenAIAPIKey) != "" {
+	if strings.TrimSpace(cfg.OpenAIAPIKey) != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
 		if embedding, err := postOpenAIEmbedding(ctx, cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIEmbeddingModel, cfg.EmbeddingDimension, text); err == nil && len(embedding) > 0 {
 			return normalizeEmbedding(embedding, cfg.EmbeddingDimension), cfg.OpenAIEmbeddingModel, "openai"
 		} else if err != nil {

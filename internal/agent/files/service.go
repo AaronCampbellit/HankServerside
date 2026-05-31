@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -51,6 +52,7 @@ type SMBConfig struct {
 	Username string
 	Password string
 	Domain   string
+	Policy   AccessPolicy
 }
 
 func (c SMBConfig) Enabled() bool {
@@ -61,6 +63,20 @@ type Config struct {
 	Root   string
 	SMB    SMBConfig
 	Shares []SMBConfig
+	Policy AccessPolicy
+}
+
+type AccessPolicy struct {
+	Read            *bool    `json:"read,omitempty"`
+	Write           *bool    `json:"write,omitempty"`
+	Delete          *bool    `json:"delete,omitempty"`
+	AllowedPrefixes []string `json:"allowed_prefixes,omitempty"`
+	BlockedPrefixes []string `json:"blocked_prefixes,omitempty"`
+	MaxUploadBytes  int64    `json:"max_upload_bytes,omitempty"`
+}
+
+func (p AccessPolicy) HasRules() bool {
+	return p.Read != nil || p.Write != nil || p.Delete != nil || len(p.AllowedPrefixes) > 0 || len(p.BlockedPrefixes) > 0 || p.MaxUploadBytes > 0
 }
 
 type SourceSnapshot struct {
@@ -91,13 +107,15 @@ type smbShareSnapshot struct {
 type Service struct {
 	mu             sync.RWMutex
 	root           string
+	localPolicy    AccessPolicy
 	smbShares      []SMBConfig
 	smbConnections map[string]*smbConnection
 }
 
 type fileSourceSelection struct {
-	ID   string
-	Type string
+	ID     string
+	Type   string
+	Policy AccessPolicy
 }
 
 func New(root string) *Service {
@@ -107,6 +125,7 @@ func New(root string) *Service {
 func NewWithConfig(cfg Config) *Service {
 	return &Service{
 		root:           strings.TrimSpace(cfg.Root),
+		localPolicy:    cfg.Policy,
 		smbShares:      normalizeSMBConfigs(appendLegacySMBConfig(cfg.SMB, cfg.Shares)),
 		smbConnections: make(map[string]*smbConnection),
 	}
@@ -121,11 +140,11 @@ func (s *Service) Enabled() bool {
 func (s *Service) defaultSourceLocked() (fileSourceSelection, error) {
 	for _, cfg := range s.smbShares {
 		if cfg.Enabled() {
-			return fileSourceSelection{ID: cfg.ID, Type: fileSourceTypeSMB}, nil
+			return fileSourceSelection{ID: cfg.ID, Type: fileSourceTypeSMB, Policy: cfg.Policy}, nil
 		}
 	}
 	if s.root != "" {
-		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal}, nil
+		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal, Policy: s.localPolicy}, nil
 	}
 	return fileSourceSelection{}, ErrDisabled
 }
@@ -142,14 +161,14 @@ func (s *Service) sourceForID(sourceID string) (fileSourceSelection, error) {
 		if s.root == "" {
 			return fileSourceSelection{}, ErrDisabled
 		}
-		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal}, nil
+		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal, Policy: s.localPolicy}, nil
 	}
 	for _, cfg := range s.smbShares {
 		if cfg.ID == sourceID {
 			if !cfg.Enabled() {
 				return fileSourceSelection{}, ErrDisabled
 			}
-			return fileSourceSelection{ID: sourceID, Type: fileSourceTypeSMB}, nil
+			return fileSourceSelection{ID: sourceID, Type: fileSourceTypeSMB, Policy: cfg.Policy}, nil
 		}
 	}
 	return fileSourceSelection{}, fmt.Errorf("file source %q is not configured", sourceID)
@@ -396,6 +415,68 @@ func defaultSourceID(sources []SourceSnapshot) string {
 	return ""
 }
 
+func (s fileSourceSelection) authorize(action string, path string, size int64) error {
+	return s.Policy.allow(action, path, size)
+}
+
+func (p AccessPolicy) allow(action string, rawPath string, size int64) error {
+	switch action {
+	case "read":
+		if p.Read != nil && !*p.Read {
+			return errors.New("file source policy denies read")
+		}
+	case "write":
+		if p.Write != nil && !*p.Write {
+			return errors.New("file source policy denies write")
+		}
+		if p.MaxUploadBytes > 0 && size > p.MaxUploadBytes {
+			return errors.New("file source policy upload size limit exceeded")
+		}
+	case "delete":
+		if p.Delete != nil && !*p.Delete {
+			return errors.New("file source policy denies delete")
+		}
+	}
+	path := cleanPolicyPath(rawPath)
+	for _, prefix := range p.BlockedPrefixes {
+		if pathHasPolicyPrefix(path, prefix) {
+			return errors.New("file source policy blocks this path")
+		}
+	}
+	if len(p.AllowedPrefixes) > 0 {
+		for _, prefix := range p.AllowedPrefixes {
+			if pathHasPolicyPrefix(path, prefix) {
+				return nil
+			}
+		}
+		return errors.New("file source policy does not allow this path")
+	}
+	return nil
+}
+
+func cleanPolicyPath(value string) string {
+	value = filepath.ToSlash(filepath.Clean("/" + strings.TrimSpace(value)))
+	return strings.TrimSuffix(value, "/")
+}
+
+func pathHasPolicyPrefix(path string, prefix string) bool {
+	prefix = cleanPolicyPath(prefix)
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
+
+func decodedBase64Size(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	size := base64.StdEncoding.DecodedLen(len(value))
+	for strings.HasSuffix(value, "=") && size > 0 {
+		size--
+		value = strings.TrimSuffix(value, "=")
+	}
+	return int64(size)
+}
+
 func (s *Service) List(ctx context.Context, path string) ([]protocol.FileItem, error) {
 	return s.ListSource(ctx, "", path)
 }
@@ -403,6 +484,9 @@ func (s *Service) List(ctx context.Context, path string) ([]protocol.FileItem, e
 func (s *Service) ListSource(ctx context.Context, sourceID string, path string) ([]protocol.FileItem, error) {
 	source, err := s.sourceForID(sourceID)
 	if err != nil {
+		return nil, err
+	}
+	if err := source.authorize("read", path, 0); err != nil {
 		return nil, err
 	}
 	if source.Type == fileSourceTypeSMB {
@@ -418,6 +502,9 @@ func (s *Service) Stat(ctx context.Context, path string) (protocol.FileItem, err
 func (s *Service) StatSource(ctx context.Context, sourceID string, path string) (protocol.FileItem, error) {
 	source, err := s.sourceForID(sourceID)
 	if err != nil {
+		return protocol.FileItem{}, err
+	}
+	if err := source.authorize("read", path, 0); err != nil {
 		return protocol.FileItem{}, err
 	}
 	if source.Type == fileSourceTypeSMB {
@@ -487,6 +574,9 @@ func (s *Service) CreateDirectorySource(ctx context.Context, sourceID string, pa
 	if err != nil {
 		return err
 	}
+	if err := source.authorize("write", path, 0); err != nil {
+		return err
+	}
 	if source.Type == fileSourceTypeSMB {
 		return s.createDirectorySMB(ctx, source.ID, path)
 	}
@@ -500,6 +590,12 @@ func (s *Service) Rename(ctx context.Context, from string, to string) error {
 func (s *Service) RenameSource(ctx context.Context, sourceID string, from string, to string) error {
 	source, err := s.sourceForID(sourceID)
 	if err != nil {
+		return err
+	}
+	if err := source.authorize("write", from, 0); err != nil {
+		return err
+	}
+	if err := source.authorize("write", to, 0); err != nil {
 		return err
 	}
 	if source.Type == fileSourceTypeSMB {
@@ -517,11 +613,22 @@ func (s *Service) MoveBetweenSources(ctx context.Context, sourceID string, desti
 	if err != nil {
 		return err
 	}
+	if err := source.authorize("delete", from, 0); err != nil {
+		return err
+	}
+	if err := destination.authorize("write", to, 0); err != nil {
+		return err
+	}
 	if source.ID == destination.ID && source.Type == destination.Type {
 		return s.RenameSource(ctx, source.ID, from, to)
 	}
 	if err := s.copyBetweenSources(ctx, source.ID, destination.ID, from, to, isDirectory); err != nil {
 		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 	return s.DeleteSource(ctx, source.ID, from, isDirectory)
 }
@@ -562,7 +669,52 @@ func (s *Service) copyBetweenSources(ctx context.Context, sourceID string, desti
 		_ = writer.Close()
 		return err
 	}
-	return writer.Close()
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	return s.verifyCopiedFile(ctx, sourceID, destinationSourceID, from, to)
+}
+
+func (s *Service) verifyCopiedFile(ctx context.Context, sourceID string, destinationSourceID string, from string, to string) error {
+	sourceInfo, err := s.StatSource(ctx, sourceID, from)
+	if err != nil {
+		return err
+	}
+	destinationInfo, err := s.StatSource(ctx, destinationSourceID, to)
+	if err != nil {
+		return err
+	}
+	if sourceInfo.IsDirectory || destinationInfo.IsDirectory {
+		return fmt.Errorf("copy verification expected files")
+	}
+	if sourceInfo.Size != destinationInfo.Size {
+		return fmt.Errorf("copy verification failed: size mismatch")
+	}
+	sourceHash, err := s.fileHash(ctx, sourceID, from)
+	if err != nil {
+		return err
+	}
+	destinationHash, err := s.fileHash(ctx, destinationSourceID, to)
+	if err != nil {
+		return err
+	}
+	if sourceHash != destinationHash {
+		return fmt.Errorf("copy verification failed: checksum mismatch")
+	}
+	return nil
+}
+
+func (s *Service) fileHash(ctx context.Context, sourceID string, filePath string) (string, error) {
+	reader, _, err := s.OpenReaderSource(ctx, sourceID, filePath, 0)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, reader); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
 func (s *Service) Delete(ctx context.Context, path string, isDirectory bool) error {
@@ -572,6 +724,9 @@ func (s *Service) Delete(ctx context.Context, path string, isDirectory bool) err
 func (s *Service) DeleteSource(ctx context.Context, sourceID string, path string, isDirectory bool) error {
 	source, err := s.sourceForID(sourceID)
 	if err != nil {
+		return err
+	}
+	if err := source.authorize("delete", path, 0); err != nil {
 		return err
 	}
 	if source.Type == fileSourceTypeSMB {
@@ -589,6 +744,9 @@ func (s *Service) DownloadSource(ctx context.Context, sourceID string, path stri
 	if err != nil {
 		return "", err
 	}
+	if err := source.authorize("read", path, 0); err != nil {
+		return "", err
+	}
 	if source.Type == fileSourceTypeSMB {
 		return s.downloadSMB(ctx, source.ID, path)
 	}
@@ -602,6 +760,9 @@ func (s *Service) Upload(ctx context.Context, path string, contentBase64 string)
 func (s *Service) UploadSource(ctx context.Context, sourceID string, path string, contentBase64 string) error {
 	source, err := s.sourceForID(sourceID)
 	if err != nil {
+		return err
+	}
+	if err := source.authorize("write", path, decodedBase64Size(contentBase64)); err != nil {
 		return err
 	}
 	if source.Type == fileSourceTypeSMB {
@@ -619,6 +780,9 @@ func (s *Service) OpenReaderSource(ctx context.Context, sourceID string, path st
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := source.authorize("read", path, 0); err != nil {
+		return nil, nil, err
+	}
 	if source.Type == fileSourceTypeSMB {
 		return s.openReaderSMB(ctx, source.ID, path, offset)
 	}
@@ -634,10 +798,22 @@ func (s *Service) OpenWriterSource(ctx context.Context, sourceID string, path st
 	if err != nil {
 		return nil, 0, err
 	}
-	if source.Type == fileSourceTypeSMB {
-		return s.openWriterSMB(ctx, source.ID, path, offset)
+	if err := source.authorize("write", path, offset); err != nil {
+		return nil, 0, err
 	}
-	return s.openWriterLocal(ctx, path, offset)
+	maxBytes := source.Policy.MaxUploadBytes
+	if source.Type == fileSourceTypeSMB {
+		writer, size, err := s.openWriterSMB(ctx, source.ID, path, offset)
+		if err != nil {
+			return nil, 0, err
+		}
+		return limitWriteHandle(writer, maxBytes, offset), size, nil
+	}
+	writer, size, err := s.openWriterLocal(ctx, path, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return limitWriteHandle(writer, maxBytes, offset), size, nil
 }
 
 func (s *Service) OpenRandomWriter(ctx context.Context, path string) (RandomWriteHandle, error) {
@@ -649,10 +825,22 @@ func (s *Service) OpenRandomWriterSource(ctx context.Context, sourceID string, p
 	if err != nil {
 		return nil, err
 	}
-	if source.Type == fileSourceTypeSMB {
-		return s.openRandomWriterSMB(ctx, source.ID, path)
+	if err := source.authorize("write", path, 0); err != nil {
+		return nil, err
 	}
-	return s.openRandomWriterLocal(ctx, path)
+	maxBytes := source.Policy.MaxUploadBytes
+	if source.Type == fileSourceTypeSMB {
+		writer, err := s.openRandomWriterSMB(ctx, source.ID, path)
+		if err != nil {
+			return nil, err
+		}
+		return limitRandomWriteHandle(writer, maxBytes), nil
+	}
+	writer, err := s.openRandomWriterLocal(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	return limitRandomWriteHandle(writer, maxBytes), nil
 }
 
 func (s *Service) listLocal(ctx context.Context, path string) ([]protocol.FileItem, error) {
@@ -857,6 +1045,62 @@ func (s *Service) openRandomWriterLocal(_ context.Context, path string) (RandomW
 	}
 
 	return os.OpenFile(resolved, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+}
+
+type maxWriteHandle struct {
+	inner   WriteHandle
+	max     int64
+	current int64
+}
+
+func limitWriteHandle(inner WriteHandle, max int64, current int64) WriteHandle {
+	if inner == nil || max <= 0 {
+		return inner
+	}
+	return &maxWriteHandle{inner: inner, max: max, current: current}
+}
+
+func (w *maxWriteHandle) Write(data []byte) (int, error) {
+	if w.max > 0 && w.current+int64(len(data)) > w.max {
+		return 0, errors.New("file source policy upload size limit exceeded")
+	}
+	n, err := w.inner.Write(data)
+	w.current += int64(n)
+	return n, err
+}
+
+func (w *maxWriteHandle) Close() error {
+	return w.inner.Close()
+}
+
+type maxRandomWriteHandle struct {
+	inner RandomWriteHandle
+	max   int64
+}
+
+func limitRandomWriteHandle(inner RandomWriteHandle, max int64) RandomWriteHandle {
+	if inner == nil || max <= 0 {
+		return inner
+	}
+	return &maxRandomWriteHandle{inner: inner, max: max}
+}
+
+func (w *maxRandomWriteHandle) WriteAt(data []byte, offset int64) (int, error) {
+	if w.max > 0 && offset+int64(len(data)) > w.max {
+		return 0, errors.New("file source policy upload size limit exceeded")
+	}
+	return w.inner.WriteAt(data, offset)
+}
+
+func (w *maxRandomWriteHandle) Truncate(size int64) error {
+	if w.max > 0 && size > w.max {
+		return errors.New("file source policy upload size limit exceeded")
+	}
+	return w.inner.Truncate(size)
+}
+
+func (w *maxRandomWriteHandle) Close() error {
+	return w.inner.Close()
 }
 
 func (s *Service) resolveLocal(path string) (string, error) {

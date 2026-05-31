@@ -213,6 +213,12 @@ func (s *Server) notifyNoteChanged(ctx context.Context, noteInternalID string, n
 		s.logger.Warn("note notification recipient lookup failed", "note_id", noteKey, "error", err)
 		return
 	}
+	if len(cleanUserIDs(recipients)) == 0 {
+		return
+	}
+	if !s.claimNotificationEvent("notes:"+strings.TrimSpace(noteInternalID)+":"+strings.TrimSpace(noteKey)+":"+strings.TrimSpace(actorUserID), 2*time.Second) {
+		return
+	}
 	deepLinkID := strings.TrimSpace(noteInternalID)
 	if deepLinkID == "" {
 		deepLinkID = strings.TrimSpace(noteKey)
@@ -224,6 +230,29 @@ func (s *Server) notifyNoteChanged(ctx context.Context, noteInternalID string, n
 		URL:      "hank://notifications/notes/" + url.PathEscape(deepLinkID),
 		ThreadID: "notes-" + strings.TrimSpace(noteInternalID),
 	})
+}
+
+func (s *Server) claimNotificationEvent(key string, window time.Duration) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return true
+	}
+	now := time.Now().UTC()
+	s.notificationEventsMu.Lock()
+	defer s.notificationEventsMu.Unlock()
+	if s.notificationEvents == nil {
+		s.notificationEvents = make(map[string]time.Time)
+	}
+	if seenAt, ok := s.notificationEvents[key]; ok && now.Sub(seenAt) < window {
+		return false
+	}
+	for eventKey, seenAt := range s.notificationEvents {
+		if now.Sub(seenAt) > window*4 {
+			delete(s.notificationEvents, eventKey)
+		}
+	}
+	s.notificationEvents[key] = now
+	return true
 }
 
 func (s *Server) notifyDashboardEntityChanged(ctx context.Context, homeID string, body json.RawMessage) {

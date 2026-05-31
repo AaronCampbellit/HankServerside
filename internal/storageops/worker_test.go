@@ -134,7 +134,7 @@ func TestWorkerAddsEncryptedPgBackRestTypeAndKeepsCipherPassOutOfEvents(t *testi
 	}
 	var encryptedCall string
 	for _, call := range runner.calls {
-		if strings.Contains(call, " pgbackrest ") && strings.Contains(call, " backup") {
+		if strings.Contains(call, "pgbackrest ") && strings.Contains(call, " backup") {
 			encryptedCall = call
 			break
 		}
@@ -397,7 +397,10 @@ func TestScheduledRestoreVerificationUsesLatestBackup(t *testing.T) {
 	runner := &scriptedRunner{responses: []scriptedResponse{
 		{contains: "select 1", output: "1"},
 		{contains: "to_regclass", output: ""},
+		{contains: "WITH table_counts", output: "agents=1,assistant_file_index=0,file_operation_jobs=0,file_transfers=0,homes=1,note_attachments=0,user_notes=0,users=1"},
+		{contains: "WITH sample_records", output: "users=fixture,homes=fixture"},
 		{contains: "postgres://main", output: "hankremote|f|t|f|f|t|f|f"},
+		{contains: "count(*) FROM note_attachments", output: "0"},
 		{contains: "postgres://restore", output: "hankremote|f|t|f|f|t|f|f"},
 	}}
 	worker := NewWorker(WorkerOptions{

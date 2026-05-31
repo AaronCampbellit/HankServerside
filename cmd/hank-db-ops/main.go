@@ -20,16 +20,18 @@ func main() {
 	}
 
 	worker := storageops.NewWorker(storageops.WorkerOptions{
-		StateDir:           cfg.StateDir,
-		LogDir:             cfg.LogDir,
-		IntentSecret:       cfg.IntentSecret,
-		RepoCipherPass:     cfg.RepoCipherPass,
-		DatabaseURL:        cfg.DatabaseURL,
-		Stanza:             cfg.Stanza,
-		PGDataPath:         cfg.PGDataPath,
-		RestoreDataPath:    cfg.RestoreDataPath,
-		RestoreDatabaseURL: cfg.RestoreDatabaseURL,
-		ComposeFile:        cfg.ComposeFile,
+		StateDir:             cfg.StateDir,
+		LogDir:               cfg.LogDir,
+		IntentSecret:         cfg.IntentSecret,
+		RepoCipherPass:       cfg.RepoCipherPass,
+		DatabaseURL:          cfg.DatabaseURL,
+		Stanza:               cfg.Stanza,
+		PGDataPath:           cfg.PGDataPath,
+		RestoreDataPath:      cfg.RestoreDataPath,
+		RestoreDatabaseURL:   cfg.RestoreDatabaseURL,
+		NoteAttachmentDir:    cfg.NoteAttachmentDir,
+		AttachmentRestoreDir: cfg.AttachmentRestoreDir,
+		ComposeFile:          cfg.ComposeFile,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

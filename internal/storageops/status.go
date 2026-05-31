@@ -116,7 +116,7 @@ func ActiveTaskPath(stateDir string) string {
 
 func SaveActiveTask(stateDir string, task TaskStatus) error {
 	task = task.normalized()
-	if err := os.MkdirAll(dirOrDefault(stateDir, DefaultStateDir), 0o777); err != nil {
+	if err := ensurePrivateDir(dirOrDefault(stateDir, DefaultStateDir)); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(task, "", "  ")
@@ -125,10 +125,10 @@ func SaveActiveTask(stateDir string, task TaskStatus) error {
 	}
 	path := ActiveTaskPath(stateDir)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o666); err != nil {
+	if err := writePrivateFile(tmp, data); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return renamePrivateFile(tmp, path)
 }
 
 func LoadActiveTask(stateDir string) (TaskStatus, bool, error) {
@@ -317,14 +317,14 @@ func BackupInfoPath(stateDir string) string {
 }
 
 func SaveBackupSets(stateDir string, backups []BackupSet) error {
-	if err := os.MkdirAll(dirOrDefault(stateDir, DefaultStateDir), 0o777); err != nil {
+	if err := ensurePrivateDir(dirOrDefault(stateDir, DefaultStateDir)); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(backups, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(BackupInfoPath(stateDir), data, 0o666)
+	return writePrivateFile(BackupInfoPath(stateDir), data)
 }
 
 func LoadBackupSets(stateDir string) ([]BackupSet, error) {

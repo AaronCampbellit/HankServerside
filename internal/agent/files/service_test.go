@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +62,85 @@ func TestLocalSymlinkEscapeBlocked(t *testing.T) {
 	}
 	if err := service.Upload(context.Background(), "outside-link/new.txt", content); err == nil {
 		t.Fatal("Upload through symlink escape succeeded, want error")
+	}
+}
+
+func TestLocalSourcePolicyDeniesPrefixesDeleteAndMaxUpload(t *testing.T) {
+	t.Parallel()
+
+	allow := true
+	deny := false
+	service := NewWithConfig(Config{
+		Root: t.TempDir(),
+		Policy: AccessPolicy{
+			Read:            &allow,
+			Write:           &allow,
+			Delete:          &deny,
+			AllowedPrefixes: []string{"/Allowed"},
+			BlockedPrefixes: []string{"/Allowed/Private"},
+			MaxUploadBytes:  4,
+		},
+	})
+
+	if err := service.Upload(context.Background(), "/Allowed/ok.txt", base64.StdEncoding.EncodeToString([]byte("1234"))); err != nil {
+		t.Fatalf("Upload allowed: %v", err)
+	}
+	if _, err := service.List(context.Background(), "/Allowed/Private"); err == nil {
+		t.Fatal("List blocked prefix succeeded, want error")
+	}
+	if err := service.Delete(context.Background(), "/Allowed/ok.txt", false); err == nil {
+		t.Fatal("Delete with disabled policy succeeded, want error")
+	}
+	if err := service.Upload(context.Background(), "/Allowed/too-large.txt", base64.StdEncoding.EncodeToString([]byte("12345"))); err == nil {
+		t.Fatal("Upload over policy size limit succeeded, want error")
+	}
+	writer, _, err := service.OpenWriter(context.Background(), "/Allowed/stream.txt", 0)
+	if err != nil {
+		t.Fatalf("OpenWriter: %v", err)
+	}
+	if _, err := writer.Write([]byte("12345")); err == nil {
+		t.Fatal("stream upload over policy size limit succeeded, want error")
+	}
+	_ = writer.Close()
+}
+
+func TestLocalSourcePolicyDefaultAllowsDelete(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	if err := service.Upload(context.Background(), "/ok.txt", base64.StdEncoding.EncodeToString([]byte("ok"))); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if err := service.Delete(context.Background(), "/ok.txt", false); err != nil {
+		t.Fatalf("Delete with default policy: %v", err)
+	}
+}
+
+func TestMoveFailureBeforeDeleteKeepsSourceAndChecksumMismatchFails(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	ctx := context.Background()
+	sourcePayload := base64.StdEncoding.EncodeToString([]byte("source"))
+	destinationPayload := base64.StdEncoding.EncodeToString([]byte("target"))
+	if err := service.Upload(ctx, "/source.txt", sourcePayload); err != nil {
+		t.Fatalf("Upload source: %v", err)
+	}
+	if err := service.Upload(ctx, "/dest.txt", destinationPayload); err != nil {
+		t.Fatalf("Upload dest: %v", err)
+	}
+	if err := service.verifyCopiedFile(ctx, LocalSourceID, LocalSourceID, "/source.txt", "/dest.txt"); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("verifyCopiedFile error = %v, want checksum mismatch", err)
+	}
+	if err := service.MoveBetweenSources(ctx, LocalSourceID, "missing-source", "/source.txt", "/moved.txt", false); err == nil {
+		t.Fatal("MoveBetweenSources to missing source succeeded, want error")
+	}
+	downloaded, err := service.Download(ctx, "/source.txt")
+	if err != nil {
+		t.Fatalf("Download source after failed move: %v", err)
+	}
+	if downloaded != sourcePayload {
+		t.Fatalf("source after failed move = %q, want original payload", downloaded)
 	}
 }
 
@@ -294,10 +374,10 @@ func TestNormalizeSMBHostAcceptsWebAndSMBInputs(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"192.168.86.138":             "192.168.86.138",
-		"https://192.168.86.138":     "192.168.86.138",
-		"https://192.168.86.138/ui":  "192.168.86.138",
-		"https://192.168.86.138:443": "192.168.86.138",
+		"192.0.2.10":             "192.0.2.10",
+		"https://192.0.2.10":     "192.0.2.10",
+		"https://192.0.2.10/ui":  "192.0.2.10",
+		"https://192.0.2.10:443": "192.0.2.10",
 		"smb://truenas.local/media":  "truenas.local",
 		"smb://truenas.local:1445/x": "truenas.local:1445",
 		"//truenas.local/media":      "truenas.local",
@@ -314,8 +394,8 @@ func TestNormalizeSMBHostAcceptsWebAndSMBInputs(t *testing.T) {
 func TestSMBAddressDialsNormalizedHostOnPort445(t *testing.T) {
 	t.Parallel()
 
-	if got := smbAddress("https://192.168.86.138"); got != "192.168.86.138:445" {
-		t.Fatalf("smbAddress() = %q, want %q", got, "192.168.86.138:445")
+	if got := smbAddress("https://192.0.2.10"); got != "192.0.2.10:445" {
+		t.Fatalf("smbAddress() = %q, want %q", got, "192.0.2.10:445")
 	}
 	if got := smbAddress("smb://truenas.local:1445/share"); got != "truenas.local:1445" {
 		t.Fatalf("smbAddress() = %q, want %q", got, "truenas.local:1445")
@@ -325,7 +405,7 @@ func TestSMBAddressDialsNormalizedHostOnPort445(t *testing.T) {
 func TestSMBFinishCleanupIgnoresClosedNetworkCleanupError(t *testing.T) {
 	t.Parallel()
 
-	err := finishSMBCleanup(nil, fmt.Errorf("close tcp 192.168.48.3:34698->192.168.86.137:445: use of closed network connection"))
+	err := finishSMBCleanup(nil, fmt.Errorf("close tcp 198.51.100.3:34698->192.0.2.20:445: use of closed network connection"))
 	if err != nil {
 		t.Fatalf("finishSMBCleanup() = %v, want nil for benign SMB cleanup close", err)
 	}
@@ -335,7 +415,7 @@ func TestSMBFinishCleanupPreservesRealCloseErrors(t *testing.T) {
 	t.Parallel()
 
 	fileErr := errors.New("file close failed")
-	cleanupErr := fmt.Errorf("close tcp 192.168.48.3:34698->192.168.86.137:445: use of closed network connection")
+	cleanupErr := fmt.Errorf("close tcp 198.51.100.3:34698->192.0.2.20:445: use of closed network connection")
 	if err := finishSMBCleanup(fileErr, cleanupErr); !errors.Is(err, fileErr) {
 		t.Fatalf("finishSMBCleanup() = %v, want file close error", err)
 	}

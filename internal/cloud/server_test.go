@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -828,36 +827,39 @@ func TestMetricsEndpointRendersCounters(t *testing.T) {
 	}
 }
 
-func TestRegistrationRateLimitIsEnforced(t *testing.T) {
+func TestLoginRateLimitIsEnforced(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	db := storeForTest(t)
 	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_rate", Email: "rate@example.com", PasswordHash: string(mustPasswordHash(t, "correct-password")), CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	for i := 0; i < 10; i++ {
-		body := fmt.Sprintf(`{"email":"user-%d@example.com","password":"change-me-123"}`, i)
-		request, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/register", strings.NewReader(body))
+	for i := 0; i < 20; i++ {
+		request, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/login", strings.NewReader(`{"email":"rate@example.com","password":"wrong-password"}`))
 		if err != nil {
-			t.Fatalf("register request %d: %v", i, err)
+			t.Fatalf("login request %d: %v", i, err)
 		}
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Forwarded-For", "203.0.113.10")
 
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
-			t.Fatalf("register response %d: %v", i, err)
+			t.Fatalf("login response %d: %v", i, err)
 		}
 		_ = response.Body.Close()
-		if response.StatusCode != http.StatusCreated {
-			t.Fatalf("register status %d = %d, want %d", i, response.StatusCode, http.StatusCreated)
+		if response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("login status %d = %d, want unauthorized or rate limited", i, response.StatusCode)
 		}
 	}
 
-	request, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/register", strings.NewReader(`{"email":"blocked@example.com","password":"change-me-123"}`))
+	request, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/auth/login", strings.NewReader(`{"email":"rate@example.com","password":"wrong-password"}`))
 	if err != nil {
 		t.Fatalf("rate limit request: %v", err)
 	}
@@ -990,7 +992,12 @@ func TestRequestTimeoutReturnsAppError(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent?agent_id="+agent.ID+"&token="+agentRawToken), nil)
+	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent"), &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Authorization":   []string{"Bearer " + agentRawToken},
+			"X-Hank-Agent-ID": []string{agent.ID},
+		},
+	})
 	if err != nil {
 		t.Fatalf("agent websocket dial: %v", err)
 	}
@@ -1099,15 +1106,21 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 	}()
 
 	setupResponse := struct {
-		URL      string `json:"url"`
-		SourceID string `json:"source_id"`
+		URL           string `json:"url"`
+		TransferToken string `json:"transfer_token"`
+		SourceID      string `json:"source_id"`
 	}{}
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/downloads", map[string]string{"path": "docs/report.txt", "source_id": "media"}, &setupResponse)
 	if setupResponse.SourceID != "media" {
 		t.Fatalf("download source_id = %q, want media", setupResponse.SourceID)
 	}
 
-	response, err := http.Get(testServer.URL + setupResponse.URL)
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+setupResponse.URL, nil)
+	if err != nil {
+		t.Fatalf("download request: %v", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+setupResponse.TransferToken)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("download GET: %v", err)
 	}
@@ -1187,7 +1200,8 @@ func TestFileUploadTransferStreamsOverHTTP(t *testing.T) {
 	}()
 
 	setupResponse := struct {
-		URL string `json:"url"`
+		URL           string `json:"url"`
+		TransferToken string `json:"transfer_token"`
 	}{}
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/uploads", map[string]string{"path": "docs/upload.txt"}, &setupResponse)
 
@@ -1195,6 +1209,7 @@ func TestFileUploadTransferStreamsOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload request: %v", err)
 	}
+	putRequest.Header.Set("Authorization", "Bearer "+setupResponse.TransferToken)
 	putResponse, err := http.DefaultClient.Do(putRequest)
 	if err != nil {
 		t.Fatalf("upload PUT: %v", err)
@@ -1262,11 +1277,17 @@ func TestFileDownloadTransferResumeFromOffset(t *testing.T) {
 	}()
 
 	setupResponse := struct {
-		URL string `json:"url"`
+		URL           string `json:"url"`
+		TransferToken string `json:"transfer_token"`
 	}{}
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/downloads", map[string]string{"path": "docs/report.txt"}, &setupResponse)
 
-	firstResponse, err := http.Get(testServer.URL + setupResponse.URL + "&offset=0")
+	firstRequest, err := http.NewRequest(http.MethodGet, testServer.URL+setupResponse.URL+"?offset=0", nil)
+	if err != nil {
+		t.Fatalf("first download request: %v", err)
+	}
+	firstRequest.Header.Set("Authorization", "Bearer "+setupResponse.TransferToken)
+	firstResponse, err := http.DefaultClient.Do(firstRequest)
 	if err != nil {
 		t.Fatalf("first download GET: %v", err)
 	}
@@ -1276,7 +1297,12 @@ func TestFileDownloadTransferResumeFromOffset(t *testing.T) {
 	}
 	_ = firstResponse.Body.Close()
 
-	secondResponse, err := http.Get(testServer.URL + setupResponse.URL + "&offset=5")
+	secondRequest, err := http.NewRequest(http.MethodGet, testServer.URL+setupResponse.URL+"?offset=5", nil)
+	if err != nil {
+		t.Fatalf("second download request: %v", err)
+	}
+	secondRequest.Header.Set("Authorization", "Bearer "+setupResponse.TransferToken)
+	secondResponse, err := http.DefaultClient.Do(secondRequest)
 	if err != nil {
 		t.Fatalf("second download GET: %v", err)
 	}
@@ -1357,14 +1383,16 @@ func TestFileUploadTransferResumeFromOffset(t *testing.T) {
 	}()
 
 	setupResponse := struct {
-		URL string `json:"url"`
+		URL           string `json:"url"`
+		TransferToken string `json:"transfer_token"`
 	}{}
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/uploads", map[string]string{"path": "docs/upload.txt"}, &setupResponse)
 
-	firstRequest, err := http.NewRequest(http.MethodPut, testServer.URL+setupResponse.URL+"&offset=0", strings.NewReader("stream "))
+	firstRequest, err := http.NewRequest(http.MethodPut, testServer.URL+setupResponse.URL+"?offset=0", strings.NewReader("stream "))
 	if err != nil {
 		t.Fatalf("first upload request: %v", err)
 	}
+	firstRequest.Header.Set("Authorization", "Bearer "+setupResponse.TransferToken)
 	firstResponse, err := http.DefaultClient.Do(firstRequest)
 	if err != nil {
 		t.Fatalf("first upload PUT: %v", err)
@@ -1374,10 +1402,11 @@ func TestFileUploadTransferResumeFromOffset(t *testing.T) {
 		t.Fatalf("first upload status = %d, want 200", firstResponse.StatusCode)
 	}
 
-	secondRequest, err := http.NewRequest(http.MethodPut, testServer.URL+setupResponse.URL+"&offset=7", strings.NewReader("me"))
+	secondRequest, err := http.NewRequest(http.MethodPut, testServer.URL+setupResponse.URL+"?offset=7", strings.NewReader("me"))
 	if err != nil {
 		t.Fatalf("second upload request: %v", err)
 	}
+	secondRequest.Header.Set("Authorization", "Bearer "+setupResponse.TransferToken)
 	secondResponse, err := http.DefaultClient.Do(secondRequest)
 	if err != nil {
 		t.Fatalf("second upload PUT: %v", err)
@@ -1416,9 +1445,18 @@ func must(t *testing.T, err error) {
 	}
 }
 
+func mustPasswordHash(t *testing.T, password string) []byte {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hash
+}
+
 func storeForTest(t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(context.Background(), testutil.PostgreSQLTestURL(t))
+	db, err := store.OpenMigrating(context.Background(), testutil.PostgreSQLTestURL(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1449,7 +1487,12 @@ func setupServerAndAgent(t *testing.T, ctx context.Context) (*httptest.Server, s
 	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
 	testServer := httptest.NewServer(server.http.Handler)
 
-	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent?agent_id="+agent.ID+"&token="+agentRawToken), nil)
+	agentConn, _, err := websocket.Dial(ctx, wsURL(testServer.URL, "/ws/agent"), &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Authorization":   []string{"Bearer " + agentRawToken},
+			"X-Hank-Agent-ID": []string{agent.ID},
+		},
+	})
 	if err != nil {
 		t.Fatalf("agent websocket dial: %v", err)
 	}

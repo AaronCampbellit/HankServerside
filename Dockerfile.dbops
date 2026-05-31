@@ -9,9 +9,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hank-db-ops ./cmd/hank-db-ops
 
 FROM postgres:17-alpine
 RUN apk add --no-cache pgbackrest docker-cli docker-cli-compose bash tar
+RUN addgroup -S hankdbops \
+	&& addgroup -S docker \
+	&& adduser -S -G hankdbops hankdbops \
+	&& addgroup hankdbops docker
 WORKDIR /app
 COPY --from=build /out/hank-db-ops /usr/local/bin/hank-db-ops
 COPY configs/pgbackrest.conf /etc/pgbackrest/pgbackrest.conf
+COPY docker/dbops/entrypoint.sh /usr/local/bin/hank-db-ops-entrypoint
 RUN chmod 755 /usr/local/bin/hank-db-ops \
+	&& chmod 755 /usr/local/bin/hank-db-ops-entrypoint \
 	&& chmod 644 /etc/pgbackrest/pgbackrest.conf
+ENTRYPOINT ["hank-db-ops-entrypoint"]
 CMD ["/usr/local/bin/hank-db-ops"]

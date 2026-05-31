@@ -172,7 +172,7 @@ func SaveConfig(stateDir string, cfg Config) (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
-	if err := os.MkdirAll(dirOrDefault(stateDir, DefaultStateDir), 0o777); err != nil {
+	if err := ensurePrivateDir(dirOrDefault(stateDir, DefaultStateDir)); err != nil {
 		return Config{}, err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -181,10 +181,10 @@ func SaveConfig(stateDir string, cfg Config) (Config, error) {
 	}
 	path := ConfigPath(stateDir)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o666); err != nil {
+	if err := writePrivateFile(tmp, data); err != nil {
 		return Config{}, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renamePrivateFile(tmp, path); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

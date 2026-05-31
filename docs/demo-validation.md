@@ -1,0 +1,110 @@
+# Hank Demo Validation
+
+This document keeps demo-server testing separate from production code. The validation harness is committed because it proves production readiness, but demo secrets, live host details, and generated reports stay private and untracked.
+
+## Committed Validation Files
+
+These files are production-safe and should be committed with the backend repair work:
+
+- `tools/livevalidation/main.go`: end-to-end live app, agent, Home Assistant, and file-flow validation.
+- `tools/adminvalidation/main.go`: admin UI/API validation for audit events, file jobs, and query telemetry.
+- `tools/loadtest/loadtest_test.go`: single-home target load scenarios and JSON report output.
+- `scripts/restart-validation.sh`: restart-recovery test wrapper.
+- `scripts/file-safety-validation.sh`: file policy and managed-job safety wrapper.
+- `scripts/migration-baseline-validation.sh`: fresh DB plus baseline validation.
+- `scripts/schema-drift-check.sh`: live schema drift comparison.
+- `scripts/scale-validation.sh`: synthetic 1M file-index, 100k note, and attachment-size fixture.
+- `scripts/production-load-report.sh`: load test plus resource report.
+- `scripts/backup-during-traffic.sh`: backup and restore-test while load is running.
+- `scripts/restore-proof.sh`: restore proof report against `postgres-restore`.
+- `scripts/query-telemetry-report.sh`: top query report from `pg_stat_statements`.
+- `scripts/metrics-assert.sh`: authenticated metrics coverage assertion.
+
+## Demo-Only Private Inputs
+
+Do not commit these:
+
+- `.env.cloud`
+- `.env.agent`
+- any Home Assistant token
+- any SMB username/password or share-specific secret
+- any Cloudflare tunnel token or one-off tunnel command
+- any demo host SSH key, known-host file, or password
+- any live session token used by validation tools
+- generated `data/` report artifacts
+
+The repository `.gitignore` keeps `.env.*` and `data/` out of source control. Keep any demo-specific credentials in the operator's private password manager or private server notes.
+
+## Demo Environment Variables
+
+Use environment variables to bind the generic validation tools to a specific demo server. Do not hard-code demo hostnames, LAN IPs, share names, or tokens into source files.
+
+Common variables:
+
+```bash
+export HANK_REMOTE_LIVE_BASE_URL="https://your-demo-host.example.com"
+export HANK_REMOTE_LIVE_SESSION_TOKEN="<private session token>"
+export HANK_REMOTE_LIVE_SOURCE_ONE="replace-with-first-demo-source-id"
+export HANK_REMOTE_LIVE_SOURCE_TWO="replace-with-second-demo-source-id"
+
+export HANK_REMOTE_LOADTEST_BASE_URL="$HANK_REMOTE_LIVE_BASE_URL"
+export HANK_REMOTE_LOADTEST_SESSION_TOKEN="$HANK_REMOTE_LIVE_SESSION_TOKEN"
+export HANK_REMOTE_LOADTEST_FILE_SOURCE="$HANK_REMOTE_LIVE_SOURCE_ONE"
+export HANK_REMOTE_LOADTEST_FILE_SOURCE_TWO="$HANK_REMOTE_LIVE_SOURCE_TWO"
+```
+
+For local compose validation, also set:
+
+```bash
+export COMPOSE_PROJECT_NAME="hank_validation"
+export HANK_REMOTE_CLOUD_ENV_FILE=".env.cloud"
+```
+
+## Future Demo Run Order
+
+Run this sequence after the demo stack is up, the agent is online, Home Assistant is reachable, and two file sources are configured with synthetic test data only:
+
+```bash
+make fmt
+make tidy
+make build
+go test -count=1 ./...
+```
+
+```bash
+promtool check rules ops/prometheus/alerts.yml
+scripts/restart-validation.sh
+scripts/file-safety-validation.sh
+scripts/schema-drift-check.sh
+scripts/migration-baseline-validation.sh
+go run ./tools/livevalidation
+go run ./tools/adminvalidation
+scripts/scale-validation.sh
+scripts/production-load-report.sh
+scripts/backup-during-traffic.sh
+scripts/restore-proof.sh
+scripts/query-telemetry-report.sh
+scripts/metrics-assert.sh
+```
+
+If `promtool` is unavailable on the demo host, install Prometheus tooling on that host rather than editing the alert rules around the missing binary.
+
+## Generated Artifacts
+
+Validation output is intentionally generated under `data/` and should remain untracked:
+
+- `data/restart-validation/`
+- `data/file-safety-validation/`
+- `data/schema-drift/`
+- `data/migration-baseline/`
+- `data/scale-validation/`
+- `data/load-reports/`
+- `data/backup-traffic/`
+- `data/restore-reports/`
+- `data/query-telemetry/`
+
+Keep important demo evidence by copying report paths into the release notes or operator notes, not by committing generated reports.
+
+## Synthetic Data Rule
+
+Demo validation must use synthetic files, notes, attachments, and assistant-index rows. Do not run destructive file-operation tests against real user data. The validation tools create paths under `_hank_validation/` and `_hank_load/`; if a run fails midway, clean those prefixes from the configured demo file sources before the next run.

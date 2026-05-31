@@ -235,6 +235,60 @@
           </div>
           <div id="log-output" class="card-list empty-state">No storage logs reported.</div>
         </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Audit Trail</h2>
+            <span id="audit-count" class="pill">0 events</span>
+          </div>
+          <div class="actions wrap compact">
+            <label>
+              <span>Event</span>
+              <select id="audit-event-type">
+                <option value="">All events</option>
+                <option value="agent_token.created">Agent token created</option>
+                <option value="file_operation.denied">File operation denied</option>
+                <option value="file_operation.requested">File operation requested</option>
+                <option value="service_profile.changed">Service profile changed</option>
+                <option value="storage.backup_requested">Backup requested</option>
+                <option value="storage.restore_test_requested">Restore test requested</option>
+              </select>
+            </label>
+            <label>
+              <span>Severity</span>
+              <select id="audit-severity">
+                <option value="">All severities</option>
+                <option value="info">Info</option>
+                <option value="warning">Warning</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+            <label>
+              <span>Target</span>
+              <select id="audit-target-type">
+                <option value="">All targets</option>
+                <option value="agent_token">Agent token</option>
+                <option value="file_policy">File policy</option>
+                <option value="file_transfer">File transfer</option>
+                <option value="service_profile">Service profile</option>
+                <option value="storage">Storage</option>
+              </select>
+            </label>
+            <button id="audit-refresh-button" type="button" class="secondary">Apply Filters</button>
+          </div>
+          <div id="audit-output" class="card-list empty-state">No audit events reported.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Query Telemetry</h2>
+            <span id="query-count" class="pill">0 queries</span>
+          </div>
+          <div class="actions wrap">
+            <button id="query-refresh-button" type="button" class="secondary">Refresh</button>
+          </div>
+          <div id="query-output" class="card-list empty-state">No query telemetry reported.</div>
+        </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>

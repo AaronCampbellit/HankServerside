@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -25,9 +26,10 @@ func TestNotificationSettingsAndAPNSHandlers(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now().UTC()
-	user := domain.User{ID: "usr_notify_handler", Email: "notify-handler@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
-	sessionRawToken := "session-notify-handler"
-	session := domain.AppSession{ID: "sess_notify_handler", UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	suffix := strconv.FormatInt(now.UnixNano(), 36)
+	user := domain.User{ID: "usr_notify_handler_" + suffix, Email: "notify-handler+" + suffix + "@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	sessionRawToken := "session-notify-handler-" + suffix
+	session := domain.AppSession{ID: "sess_notify_handler_" + suffix, UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
 	must(t, db.CreateUser(ctx, user))
 	must(t, db.CreateSession(ctx, session))
 
@@ -65,13 +67,13 @@ func TestNotificationSettingsAndAPNSHandlers(t *testing.T) {
 		Categories []string `json:"categories"`
 	}
 	requestJSON(t, testServer, sessionRawToken, http.MethodPost, "/v1/me/devices/apns", map[string]any{
-		"device_id":          "device-handler",
-		"token":              "token-handler",
+		"device_id":          "device-handler-" + suffix,
+		"token":              "token-handler-" + suffix,
 		"environment":        "production",
 		"bundle_id":          "com.dropfile.Hank",
 		"enabled_categories": []string{"notes", "bad-category", "notes"},
 	}, &registration)
-	if !registration.OK || registration.DeviceID != "device-handler" || !slices.Equal(registration.Categories, []string{domain.NotificationCategoryNotes}) {
+	if !registration.OK || registration.DeviceID != "device-handler-"+suffix || !slices.Equal(registration.Categories, []string{domain.NotificationCategoryNotes}) {
 		t.Fatalf("registration = %#v", registration)
 	}
 
@@ -79,11 +81,11 @@ func TestNotificationSettingsAndAPNSHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListActiveAPNSDevicesForUsers: %v", err)
 	}
-	if len(devices) != 1 || devices[0].DeviceID != "device-handler" || devices[0].Environment != "production" {
+	if len(devices) != 1 || devices[0].DeviceID != "device-handler-"+suffix || devices[0].Environment != "production" {
 		t.Fatalf("devices = %#v", devices)
 	}
 
-	requestJSON(t, testServer, sessionRawToken, http.MethodDelete, "/v1/me/devices/device-handler/apns", nil, nil)
+	requestJSON(t, testServer, sessionRawToken, http.MethodDelete, "/v1/me/devices/device-handler-"+suffix+"/apns", nil, nil)
 	devices, err = db.ListActiveAPNSDevicesForUsers(ctx, []string{user.ID})
 	if err != nil {
 		t.Fatalf("ListActiveAPNSDevicesForUsers after delete: %v", err)
@@ -101,10 +103,11 @@ func TestNotificationEventsTargetRelevantUsers(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now().UTC()
-	owner := domain.User{ID: "usr_notify_owner", Email: "notify-owner@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
-	admin := domain.User{ID: "usr_notify_admin", Email: "notify-admin@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
-	member := domain.User{ID: "usr_notify_member", Email: "notify-member@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
-	home := domain.Home{ID: "home_notify_events", UserID: owner.ID, Name: "Notify Events", CreatedAt: now, UpdatedAt: now}
+	suffix := strconv.FormatInt(now.UnixNano(), 36)
+	owner := domain.User{ID: "usr_notify_owner_" + suffix, Email: "notify-owner+" + suffix + "@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	admin := domain.User{ID: "usr_notify_admin_" + suffix, Email: "notify-admin+" + suffix + "@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_notify_member_" + suffix, Email: "notify-member+" + suffix + "@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_notify_events_" + suffix, UserID: owner.ID, Name: "Notify Events", CreatedAt: now, UpdatedAt: now}
 	for _, user := range []domain.User{owner, admin, member} {
 		must(t, db.CreateUser(ctx, user))
 		must(t, db.CreateSession(ctx, domain.AppSession{
@@ -152,8 +155,8 @@ func TestNotificationEventsTargetRelevantUsers(t *testing.T) {
 	assertNotificationUsers(t, sender.drain(), []string{owner.ID, admin.ID})
 
 	note := domain.UserNote{
-		ID:            "note_notify_events",
-		NoteID:        "note-events.md",
+		ID:            "note_notify_events_" + suffix,
+		NoteID:        "note-events-" + suffix + ".md",
 		OwnerUserID:   owner.ID,
 		HomeID:        home.ID,
 		Title:         "Events",

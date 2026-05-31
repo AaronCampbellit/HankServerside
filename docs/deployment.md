@@ -58,6 +58,12 @@ Private repo-root files:
 - `.env.cloud`
 - `.env.agent`
 
+Keep both files private:
+
+```bash
+chmod 600 .env.cloud .env.agent
+```
+
 The old `configs/*.env.example` files are gone. Env examples now live in `docs/setup-and-onboarding.md`, and runtime env files live only in the repo root.
 
 For deployment commands, use:
@@ -125,7 +131,7 @@ Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`; backups cannot be restored without t
 ```bash
 curl http://127.0.0.1:18080/healthz
 curl http://127.0.0.1:18080/readyz
-curl http://127.0.0.1:18080/metrics | head
+curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" http://127.0.0.1:18080/metrics | head
 docker compose --env-file .env.cloud --profile agent ps
 ```
 

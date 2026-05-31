@@ -3,223 +3,15 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"path"
 	"strings"
 
 	"github.com/dropfile/hankremote/internal/domain"
 )
 
-type migratedNoteState struct {
-	Title         string `json:"title"`
-	Content       string `json:"content"`
-	PageType      string `json:"page_type"`
-	BoardJSON     string `json:"board_json,omitempty"`
-	CollabVersion int64  `json:"collab_version"`
-}
-
 const userNoteColumns = `id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by`
 
 const userNoteColumnsWithUN = `un.id, un.note_id, un.owner_user_id, un.home_id, un.parent_id, un.sort_order, un.title, un.content, un.body_markdown, un.body_format, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by`
-
-func (s *Store) migrateLegacyHomeNotes(ctx context.Context) error {
-	rows, err := s.query(ctx, `SELECT
-			hn.home_id,
-			hn.note_id,
-			hn.title,
-			hn.content,
-			hn.page_type,
-			hn.board_json,
-			hn.revision,
-			hn.checksum,
-			hn.deleted_at,
-			hn.updated_at,
-			hn.updated_by,
-			CASE
-				WHEN EXISTS (
-					SELECT 1
-					FROM home_memberships hm
-					WHERE hm.home_id = hn.home_id AND hm.user_id = hn.updated_by
-				) THEN hn.updated_by
-				ELSE h.user_id
-			END AS owner_user_id
-		FROM home_notes hn
-		JOIN homes h ON h.id = hn.home_id
-		ORDER BY hn.updated_at ASC`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type legacyRow struct {
-		domain.HomeNote
-		OwnerUserID string
-	}
-
-	var legacyNotes []legacyRow
-	for rows.Next() {
-		var note legacyRow
-		var deletedAt sql.NullTime
-		if err := rows.Scan(
-			&note.HomeID,
-			&note.NoteID,
-			&note.Title,
-			&note.Content,
-			&note.PageType,
-			&note.BoardJSON,
-			&note.Revision,
-			&note.Checksum,
-			&deletedAt,
-			&note.UpdatedAt,
-			&note.UpdatedBy,
-			&note.OwnerUserID,
-		); err != nil {
-			return err
-		}
-		if deletedAt.Valid {
-			note.DeletedAt = &deletedAt.Time
-		}
-		legacyNotes = append(legacyNotes, note)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-
-	if len(legacyNotes) == 0 {
-		return nil
-	}
-
-	tx, err := s.beginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	for _, legacy := range legacyNotes {
-		internalID := legacyNoteInternalID(legacy.HomeID, legacy.NoteID)
-		exists, err := txRecordExists(ctx, tx, `SELECT 1 FROM user_notes WHERE id = ?`, internalID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			noteID, err := uniqueMigratedNoteID(ctx, tx, legacy.OwnerUserID, legacy.HomeID, legacy.NoteID)
-			if err != nil {
-				return err
-			}
-			stateJSON, err := json.Marshal(migratedNoteState{
-				Title:         legacy.Title,
-				Content:       legacy.Content,
-				PageType:      legacy.PageType,
-				BoardJSON:     legacy.BoardJSON,
-				CollabVersion: 0,
-			})
-			if err != nil {
-				return err
-			}
-
-			if _, err := tx.ExecContext(ctx, `INSERT INTO user_notes (
-					id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
-					revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				internalID,
-				noteID,
-				legacy.OwnerUserID,
-				legacy.HomeID,
-				nil,
-				0,
-				legacy.Title,
-				legacy.Content,
-				legacy.Content,
-				"markdown",
-				legacy.PageType,
-				legacy.BoardJSON,
-				legacy.Revision,
-				legacy.Checksum,
-				string(stateJSON),
-				int64(0),
-				legacy.DeletedAt,
-				legacy.UpdatedAt,
-				legacy.UpdatedAt,
-				legacy.UpdatedBy,
-			); err != nil {
-				return err
-			}
-		}
-
-		memberRows, err := tx.QueryContext(ctx, `SELECT user_id FROM home_memberships WHERE home_id = ?`, legacy.HomeID)
-		if err != nil {
-			return err
-		}
-		var memberIDs []string
-		for memberRows.Next() {
-			var userID string
-			if err := memberRows.Scan(&userID); err != nil {
-				memberRows.Close()
-				return err
-			}
-			memberIDs = append(memberIDs, userID)
-		}
-		if err := memberRows.Close(); err != nil {
-			return err
-		}
-		for _, userID := range memberIDs {
-			if userID == legacy.OwnerUserID {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO note_shares (
-					note_id, home_id, target_user_id, shared_by, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?)
-				ON CONFLICT DO NOTHING`,
-				internalID,
-				legacy.HomeID,
-				userID,
-				legacy.OwnerUserID,
-				legacy.UpdatedAt,
-				legacy.UpdatedAt,
-			); err != nil {
-				return err
-			}
-		}
-	}
-
-	return tx.Commit()
-}
-
-func legacyNoteInternalID(homeID string, noteID string) string {
-	return "note_" + homeID + ":" + noteID
-}
-
-func uniqueMigratedNoteID(ctx context.Context, tx *dbTx, ownerUserID string, homeID string, base string) (string, error) {
-	candidate := strings.TrimSpace(base)
-	if candidate == "" {
-		candidate = "note"
-	}
-	ext := path.Ext(candidate)
-	name := strings.TrimSuffix(candidate, ext)
-	if name == "" {
-		name = "note"
-	}
-	for attempt := 0; attempt < 1000; attempt++ {
-		exists, err := txRecordExists(ctx, tx, `SELECT 1
-			FROM user_notes
-			WHERE (owner_user_id = ? AND note_id = ?)
-				OR (home_id = ? AND note_id = ?)
-			LIMIT 1`, ownerUserID, candidate, homeID, candidate)
-		if err != nil {
-			return "", err
-		}
-		if !exists {
-			return candidate, nil
-		}
-		candidate = fmt.Sprintf("%s-migrated-%d%s", name, attempt+1, ext)
-	}
-	return "", fmt.Errorf("unable to generate migrated note_id for owner %s note %s", ownerUserID, base)
-}
 
 func txRecordExists(ctx context.Context, tx *dbTx, query string, args ...any) (bool, error) {
 	row := tx.QueryRowContext(ctx, query, args...)
@@ -328,12 +120,14 @@ func (s *Store) GetProfileNote(ctx context.Context, ownerUserID string, noteKey 
 }
 
 func (s *Store) GetHomeNoteVisibleToUser(ctx context.Context, homeID string, userID string, noteKey string) (domain.UserNote, error) {
-	row := s.queryRow(ctx, `SELECT DISTINCT `+userNoteColumnsWithUN+`
-		FROM user_notes un
-		LEFT JOIN note_shares ns ON ns.note_id = un.id AND ns.target_user_id = ?
-		WHERE un.home_id = ? AND un.note_id = ?
-			AND (un.owner_user_id = ? OR ns.target_user_id = ?)`,
-		userID, homeID, noteKey, userID, userID)
+	row := s.queryRow(ctx, `SELECT `+userNoteColumnsWithUN+`
+			FROM user_notes un
+			WHERE un.home_id = ? AND un.note_id = ?
+				AND (un.owner_user_id = ? OR EXISTS (
+					SELECT 1 FROM note_shares ns
+					WHERE ns.note_id = un.id AND ns.target_user_id = ?
+				))`,
+		homeID, noteKey, userID, userID)
 	return scanUserNote(row)
 }
 
@@ -382,7 +176,7 @@ func (s *Store) UpsertUserNote(ctx context.Context, note domain.UserNote) error 
 		nullableText(note.ParentID),
 		note.SortOrder,
 		note.Title,
-		note.Content,
+		noteBodyMarkdown(note),
 		noteBodyMarkdown(note),
 		noteBodyFormat(note),
 		note.PageType,
@@ -436,7 +230,7 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 		nullableText(note.ParentID),
 		note.SortOrder,
 		note.Title,
-		note.Content,
+		noteBodyMarkdown(note),
 		noteBodyMarkdown(note),
 		noteBodyFormat(note),
 		note.PageType,
@@ -454,6 +248,10 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 	}
 
 	for _, operation := range operations {
+		sessionID, err := nullableExistingSessionID(ctx, tx, operation.SessionID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO note_operations (
 				note_id, op_id, actor_user_id, session_id, base_version, applied_version, op_json, created_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -461,7 +259,7 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 			operation.NoteID,
 			operation.OpID,
 			operation.ActorUserID,
-			operation.SessionID,
+			sessionID,
 			operation.BaseVersion,
 			operation.AppliedVersion,
 			operation.OpJSON,
@@ -476,6 +274,21 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 	}
 
 	return tx.Commit()
+}
+
+func nullableExistingSessionID(ctx context.Context, tx *dbTx, sessionID string) (any, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+	exists, err := txRecordExists(ctx, tx, `SELECT 1 FROM app_sessions WHERE id = ?`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
+	return sessionID, nil
 }
 
 func (s *Store) ListNoteShares(ctx context.Context, noteID string) ([]domain.NoteShareMember, error) {
@@ -685,11 +498,12 @@ func scanNoteShareMember(scanner interface{ Scan(dest ...any) error }) (domain.N
 
 func scanNoteOperation(scanner interface{ Scan(dest ...any) error }) (domain.NoteOperation, error) {
 	var operation domain.NoteOperation
+	var sessionID sql.NullString
 	err := scanner.Scan(
 		&operation.NoteID,
 		&operation.OpID,
 		&operation.ActorUserID,
-		&operation.SessionID,
+		&sessionID,
 		&operation.BaseVersion,
 		&operation.AppliedVersion,
 		&operation.OpJSON,
@@ -698,5 +512,11 @@ func scanNoteOperation(scanner interface{ Scan(dest ...any) error }) (domain.Not
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.NoteOperation{}, ErrNotFound
 	}
-	return operation, err
+	if err != nil {
+		return domain.NoteOperation{}, err
+	}
+	if sessionID.Valid {
+		operation.SessionID = sessionID.String
+	}
+	return operation, nil
 }

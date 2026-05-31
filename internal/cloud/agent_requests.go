@@ -142,7 +142,7 @@ func (s *Server) sendAgentCommand(ctx context.Context, homeID string, command st
 		return protocol.Envelope{}, err
 	}
 
-	timeout := s.requestTimeout
+	timeout := s.timeoutForCommand(command)
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}

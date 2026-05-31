@@ -230,39 +230,6 @@ func (s *Store) UpsertHomeMemberPermissions(ctx context.Context, permissions dom
 	return err
 }
 
-func (s *Store) ListHomeNotes(ctx context.Context, homeID string, includeDeleted bool) ([]domain.HomeNote, error) {
-	query := `SELECT home_id, note_id, title, content, page_type, board_json, revision, checksum, deleted_at, updated_at, updated_by
-		FROM home_notes
-		WHERE home_id = ?`
-	if !includeDeleted {
-		query += ` AND deleted_at IS NULL`
-	}
-	query += ` ORDER BY updated_at DESC`
-
-	rows, err := s.query(ctx, query, homeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var notes []domain.HomeNote
-	for rows.Next() {
-		note, err := scanHomeNote(rows)
-		if err != nil {
-			return nil, err
-		}
-		notes = append(notes, note)
-	}
-	return notes, rows.Err()
-}
-
-func (s *Store) GetHomeNote(ctx context.Context, homeID string, noteID string) (domain.HomeNote, error) {
-	row := s.queryRow(ctx, `SELECT home_id, note_id, title, content, page_type, board_json, revision, checksum, deleted_at, updated_at, updated_by
-		FROM home_notes
-		WHERE home_id = ? AND note_id = ?`, homeID, noteID)
-	return scanHomeNote(row)
-}
-
 func (s *Store) UpsertHomeNote(ctx context.Context, note domain.HomeNote) error {
 	_, err := s.exec(ctx, `INSERT INTO home_notes (home_id, note_id, title, content, page_type, board_json, revision, checksum, deleted_at, updated_at, updated_by)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -289,36 +256,6 @@ func (s *Store) UpsertHomeNote(ctx context.Context, note domain.HomeNote) error 
 		note.UpdatedBy,
 	)
 	return err
-}
-
-func (s *Store) RenameHomeNote(ctx context.Context, homeID string, fromNoteID string, toNoteID string, title string, updatedAt time.Time, updatedBy string) error {
-	tx, err := s.beginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	note, err := scanHomeNote(tx.QueryRowContext(ctx, `SELECT home_id, note_id, title, content, page_type, board_json, revision, checksum, deleted_at, updated_at, updated_by
-		FROM home_notes
-		WHERE home_id = ? AND note_id = ?`, homeID, fromNoteID))
-	if err != nil {
-		return err
-	}
-
-	note.NoteID = toNoteID
-	note.Title = title
-	note.UpdatedAt = updatedAt
-	note.UpdatedBy = updatedBy
-	note.DeletedAt = nil
-	if _, err := tx.ExecContext(ctx, `DELETE FROM home_notes WHERE home_id = ? AND note_id = ?`, homeID, fromNoteID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO home_notes (home_id, note_id, title, content, page_type, board_json, revision, checksum, deleted_at, updated_at, updated_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		note.HomeID, note.NoteID, note.Title, note.Content, note.PageType, note.BoardJSON, note.Revision, note.Checksum, note.DeletedAt, note.UpdatedAt, note.UpdatedBy); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func (s *Store) GetLatestHomeNoteUpdate(ctx context.Context, homeID string) (*time.Time, error) {
@@ -512,22 +449,6 @@ func scanHomeMemberPermissions(scanner interface{ Scan(dest ...any) error }) (do
 		permissions.NotesEnabled = &notes.Bool
 	}
 	return permissions, nil
-}
-
-func scanHomeNote(scanner interface{ Scan(dest ...any) error }) (domain.HomeNote, error) {
-	var note domain.HomeNote
-	var deletedAt sql.NullTime
-	err := scanner.Scan(&note.HomeID, &note.NoteID, &note.Title, &note.Content, &note.PageType, &note.BoardJSON, &note.Revision, &note.Checksum, &deletedAt, &note.UpdatedAt, &note.UpdatedBy)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.HomeNote{}, ErrNotFound
-	}
-	if err != nil {
-		return domain.HomeNote{}, err
-	}
-	if deletedAt.Valid {
-		note.DeletedAt = &deletedAt.Time
-	}
-	return note, nil
 }
 
 func scanHomeNoteSyncState(scanner interface{ Scan(dest ...any) error }) (domain.HomeNoteSyncState, error) {

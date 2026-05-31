@@ -19,6 +19,12 @@ Private server files in the repo root:
 - `.env.cloud`
 - `.env.agent`
 
+Protect them after every edit:
+
+```bash
+chmod 600 .env.cloud .env.agent
+```
+
 Compose file:
 
 - `docker-compose.yml`
@@ -62,7 +68,7 @@ Public registration is disabled after the first Home exists. Add more users thro
 ```bash
 curl http://127.0.0.1:18080/healthz
 curl http://127.0.0.1:18080/readyz
-curl http://127.0.0.1:18080/metrics | head
+curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" http://127.0.0.1:18080/metrics | head
 docker compose --env-file .env.cloud --profile agent ps
 ```
 

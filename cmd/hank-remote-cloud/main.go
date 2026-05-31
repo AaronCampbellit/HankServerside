@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -21,8 +23,19 @@ func main() {
 		logger.Error("failed to load cloud config", "error", err)
 		os.Exit(1)
 	}
+	for _, warning := range config.RuntimeEnvFileWarnings(".env.cloud") {
+		logger.Warn("runtime env file is group/world-readable; run chmod 600", "path", warning.Path, "mode", warning.Mode.String())
+	}
 
 	ctx := context.Background()
+	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
+		if err := runMigrateCommand(ctx, cfg, os.Args[2:]); err != nil {
+			logger.Error("migration command failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("failed to open cloud storage", "error", err)
@@ -62,6 +75,11 @@ func main() {
 	})
 	server.ConfigureStorageOps(cfg.DBOpsStateDir, cfg.DBOpsLogDir, cfg.DBOpsIntentSecret)
 	server.ConfigureNoteAttachmentStorage(cfg.NoteAttachmentDir)
+	if err := server.StartRuntime(ctx, "dev"); err != nil {
+		logger.Error("failed to start runtime coordination", "error", err)
+		os.Exit(1)
+	}
+	server.StartMaintenance(time.Hour, 30*24*time.Hour)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -87,5 +105,40 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("cloud shutdown failed", "error", err)
 		os.Exit(1)
+	}
+}
+
+func runMigrateCommand(ctx context.Context, cfg config.Cloud, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: hank-remote-cloud migrate [up|status|baseline]")
+	}
+
+	switch args[0] {
+	case "up", "baseline":
+		db, err := store.OpenMigrating(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		return db.CheckMigrations(ctx)
+	case "status":
+		db, err := store.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		statuses, err := db.MigrationStatuses(ctx)
+		if err != nil {
+			return err
+		}
+		for _, status := range statuses {
+			fmt.Printf("%06d %s checksum=%s applied_at=%s duration_ms=%d\n", status.Version, status.Name, status.Checksum, status.AppliedAt.Format(time.RFC3339), status.DurationMS)
+		}
+		if len(args) > 1 && args[1] == "--strict" {
+			return db.CheckMigrations(ctx)
+		}
+		return nil
+	default:
+		return errors.New("unknown migrate command")
 	}
 }

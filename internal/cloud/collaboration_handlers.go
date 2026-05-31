@@ -17,15 +17,7 @@ var errAdminRoleRequired = errors.New("admin role required")
 var errFeaturePermissionDenied = errors.New("feature permission denied")
 
 func (s *Server) requireSingletonHomeMembership(ctx context.Context, userID string) (domain.Home, domain.HomeMembership, error) {
-	home, err := s.store.GetSingletonHomeForUser(ctx, userID)
-	if err != nil {
-		return domain.Home{}, domain.HomeMembership{}, err
-	}
-	membership, err := s.store.GetHomeMembership(ctx, home.ID, userID)
-	if err != nil {
-		return domain.Home{}, domain.HomeMembership{}, err
-	}
-	return home, membership, nil
+	return NewDeploymentHomeResolver(s.store).ResolveForUser(ctx, userID)
 }
 
 func (s *Server) requireSingletonHomeAdmin(ctx context.Context, userID string) (domain.Home, domain.HomeMembership, error) {
@@ -46,7 +38,15 @@ func (s *Server) homeFeatureAllowed(ctx context.Context, home domain.Home, membe
 
 	defaults, err := s.store.GetHomePermissions(ctx, home.ID)
 	if err != nil {
-		return false, err
+		if !errors.Is(err, store.ErrNotFound) {
+			return false, err
+		}
+		defaults = domain.HomePermissions{
+			HomeID:               home.ID,
+			HomeAssistantEnabled: true,
+			FilesEnabled:         true,
+			NotesEnabled:         true,
+		}
 	}
 	override, err := s.store.GetHomeMemberPermissions(ctx, home.ID, userID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -996,6 +996,7 @@ func (s *Server) handleHomePermissions(w http.ResponseWriter, r *http.Request, h
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.audit(r.Context(), "permission.changed", auditSeverityInfo, membership.UserID, "", home.ID, requestIDFromContext(r.Context()), "home_permissions", home.ID, nil)
 		s.emitPermissionsChanged(r.Context(), map[string]any{"home_id": home.ID})
 		writeJSON(w, http.StatusOK, current)
 		return true
@@ -1052,6 +1053,7 @@ func (s *Server) handleHomeMemberPermissions(w http.ResponseWriter, r *http.Requ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.audit(r.Context(), "permission.changed", auditSeverityInfo, membership.UserID, "", home.ID, requestIDFromContext(r.Context()), "home_member_permissions", targetUserID, nil)
 		s.emitPermissionsChanged(r.Context(), map[string]any{"home_id": home.ID, "user_id": targetUserID})
 		writeJSON(w, http.StatusOK, permissions)
 		return true

@@ -10,9 +10,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgres
+    shm_size: "1gb"
     logging: *default-logging
     env_file:
-      - path: ./.env.cloud
+      - path: ${HANK_REMOTE_CLOUD_ENV_FILE:-./.env.cloud}
         required: true
     environment:
       POSTGRES_INITDB_ARGS: "--data-checksums"
@@ -35,6 +36,12 @@ services:
       - "-c"
       - "wal_level=replica"
       - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
+      - "log_min_duration_statement=250ms"
+      - "-c"
       - "max_wal_senders=3"
       - "-c"
       - "unix_socket_directories=/var/run/postgresql,/var/lib/postgresql/data"
@@ -49,7 +56,7 @@ services:
       dockerfile: Dockerfile.server
     logging: *default-logging
     env_file:
-      - path: ./.env.cloud
+      - path: ${HANK_REMOTE_CLOUD_ENV_FILE:-./.env.cloud}
         required: true
     depends_on:
       postgres:
@@ -59,6 +66,7 @@ services:
     volumes:
       - hank_db_ops_state:/var/lib/hank/db-ops/state
       - hank_db_ops_logs:/var/log/hank/db-ops
+      - hank_note_attachments:/var/lib/hank/note-attachments
     command: ["/usr/local/bin/hank-remote-cloud"]
     restart: unless-stopped
     networks:
@@ -72,22 +80,28 @@ services:
       dockerfile: Dockerfile.dbops
     logging: *default-logging
     env_file:
-      - path: ./.env.cloud
+      - path: ${HANK_REMOTE_CLOUD_ENV_FILE:-./.env.cloud}
         required: true
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-hankserverside}
+      HANK_REMOTE_CLOUD_ENV_FILE: /run/hank/db-ops-compose.env
+      HANK_REMOTE_DB_OPS_COMPOSE_ENV_FILE: /run/hank/db-ops-compose.env
       HANK_REMOTE_CLOUD_HOST_BIND: ${HANK_REMOTE_CLOUD_HOST_BIND}
       HANK_REMOTE_CLOUD_HOST_PORT: ${HANK_REMOTE_CLOUD_HOST_PORT}
       PGBACKREST_REPO1_CIPHER_PASS: ${HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS}
+    group_add:
+      - "${HANK_REMOTE_DB_OPS_DOCKER_GID:-0}"
     volumes:
       - hank_postgres_data:/var/lib/postgresql/data
       - hank_postgres_restore_data:/var/lib/postgresql/restore
       - hank_pgbackrest_repo:/var/lib/pgbackrest
       - hank_db_ops_state:/var/lib/hank/db-ops/state
       - hank_db_ops_logs:/var/log/hank/db-ops
+      - hank_note_attachments:/var/lib/hank/note-attachments:ro
+      - hank_note_attachments_restore:/var/lib/hank/note-attachments-restore
       - hank_pgbackrest_logs:/var/log/pgbackrest
       - ${HANK_REMOTE_DB_OPS_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - ./:/workspace:ro
@@ -102,11 +116,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgres
+    shm_size: "1gb"
     logging: *default-logging
     profiles:
       - restore
     env_file:
-      - path: ./.env.cloud
+      - path: ${HANK_REMOTE_CLOUD_ENV_FILE:-./.env.cloud}
         required: true
     environment:
       PGDATA: /var/lib/postgresql/restore
@@ -156,6 +171,8 @@ volumes:
   hank_pgbackrest_logs:
   hank_db_ops_state:
   hank_db_ops_logs:
+  hank_note_attachments:
+  hank_note_attachments_restore:
   hank_agent_files:
   hank_agent_notes:
 

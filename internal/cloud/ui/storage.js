@@ -1,6 +1,9 @@
 const state = {
   user: null,
   status: null,
+  auditEvents: [],
+  queryTelemetry: [],
+  queryTelemetryError: "",
   refreshTimer: null,
 };
 
@@ -45,6 +48,15 @@ const els = {
   logCount: document.getElementById("log-count"),
   logOutput: document.getElementById("log-output"),
   clearLogsButton: document.getElementById("clear-logs-button"),
+  auditEventType: document.getElementById("audit-event-type"),
+  auditSeverity: document.getElementById("audit-severity"),
+  auditTargetType: document.getElementById("audit-target-type"),
+  auditRefreshButton: document.getElementById("audit-refresh-button"),
+  auditCount: document.getElementById("audit-count"),
+  auditOutput: document.getElementById("audit-output"),
+  queryRefreshButton: document.getElementById("query-refresh-button"),
+  queryCount: document.getElementById("query-count"),
+  queryOutput: document.getElementById("query-output"),
   toast: document.getElementById("toast"),
 };
 
@@ -382,6 +394,80 @@ function renderEventDetails(event) {
   `;
 }
 
+function renderAuditEvents() {
+  const events = state.auditEvents || [];
+  els.auditCount.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+  if (!events.length) {
+    els.auditOutput.className = "card-list empty-state";
+    els.auditOutput.textContent = "No audit events reported.";
+    return;
+  }
+  els.auditOutput.className = "card-list";
+  els.auditOutput.innerHTML = events.map((event) => `
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">${escapeHTML(event.event_type || "audit event")}</div>
+          <div class="meta">${escapeHTML(event.target_type || "target")} · ${escapeHTML(formatDate(event.occurred_at))}</div>
+        </div>
+        <span class="status-chip ${event.severity === "critical" || event.severity === "warning" ? "offline" : ""}">${escapeHTML(event.severity || "info")}</span>
+      </div>
+      <div class="kv-grid">
+        <div class="kv-row"><div class="kv-label">Actor</div><div>${escapeHTML(event.actor_user_id || event.actor_agent_id || "system")}</div></div>
+        <div class="kv-row"><div class="kv-label">Target ID</div><div>${escapeHTML(event.target_id || "")}</div></div>
+        ${renderAuditMetadata(event.metadata || {})}
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderAuditMetadata(metadata) {
+  const entries = Object.entries(metadata || {});
+  if (!entries.length) return "";
+  return entries.map(([key, value]) => `
+    <div class="kv-row">
+      <div class="kv-label">${escapeHTML(key)}</div>
+      <code class="mono-block">${escapeHTML(typeof value === "string" ? value : JSON.stringify(value))}</code>
+    </div>
+  `).join("");
+}
+
+function queryValue(row, snakeKey, goKey) {
+  return row?.[snakeKey] ?? row?.[goKey] ?? "";
+}
+
+function renderQueryTelemetry() {
+  const queries = state.queryTelemetry || [];
+  els.queryCount.textContent = state.queryTelemetryError ? "Unavailable" : `${queries.length} quer${queries.length === 1 ? "y" : "ies"}`;
+  if (state.queryTelemetryError) {
+    els.queryOutput.className = "card-list empty-state";
+    els.queryOutput.textContent = state.queryTelemetryError;
+    return;
+  }
+  if (!queries.length) {
+    els.queryOutput.className = "card-list empty-state";
+    els.queryOutput.textContent = "No query telemetry reported.";
+    return;
+  }
+  els.queryOutput.className = "card-list";
+  els.queryOutput.innerHTML = queries.map((row) => {
+    const totalMS = Number(queryValue(row, "total_exec_ms", "TotalExecMS") || 0);
+    const meanMS = Number(queryValue(row, "mean_exec_ms", "MeanExecMS") || 0);
+    return `
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">${escapeHTML(Number(queryValue(row, "calls", "Calls") || 0).toLocaleString())} calls</div>
+            <div class="meta">${escapeHTML(totalMS.toFixed(1))} ms total · ${escapeHTML(meanMS.toFixed(2))} ms mean</div>
+          </div>
+          <span class="pill">${escapeHTML(Number(queryValue(row, "rows", "Rows") || 0).toLocaleString())} rows</span>
+        </div>
+        <code class="mono-block">${escapeHTML(queryValue(row, "query", "Query"))}</code>
+      </article>
+    `;
+  }).join("");
+}
+
 async function loadStatus() {
   state.status = await api("/v1/home/storage/status");
   renderStatus();
@@ -398,6 +484,28 @@ function scheduleStatusRefresh() {
   state.refreshTimer = window.setTimeout(() => {
     loadStatus().catch((error) => showToast(error.message, true));
   }, 3000);
+}
+
+async function loadAuditEvents() {
+  const params = new URLSearchParams({ limit: "25" });
+  if (els.auditEventType.value) params.set("event_type", els.auditEventType.value);
+  if (els.auditSeverity.value) params.set("severity", els.auditSeverity.value);
+  if (els.auditTargetType.value) params.set("target_type", els.auditTargetType.value);
+  const payload = await api(`/v1/home/audit-events?${params.toString()}`);
+  state.auditEvents = payload.events || [];
+  renderAuditEvents();
+}
+
+async function loadQueryTelemetry() {
+  state.queryTelemetryError = "";
+  try {
+    const payload = await api("/v1/home/query-telemetry?limit=20");
+    state.queryTelemetry = payload.queries || [];
+  } catch (error) {
+    state.queryTelemetry = [];
+    state.queryTelemetryError = error.message || "Query telemetry is unavailable.";
+  }
+  renderQueryTelemetry();
 }
 
 async function saveConfig(event) {
@@ -499,7 +607,7 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
-    await loadStatus();
+    await Promise.all([loadStatus(), loadAuditEvents(), loadQueryTelemetry()]);
   } catch (_) {
     window.location.replace("/");
   }
@@ -518,5 +626,7 @@ els.backupFullButton.addEventListener("click", () => requestBackup("full"));
 els.restoreTestButton.addEventListener("click", requestRestoreTest);
 els.restoreForm.addEventListener("submit", requestPrimaryRestore);
 els.clearLogsButton.addEventListener("click", clearLogs);
+els.auditRefreshButton.addEventListener("click", () => loadAuditEvents().then(() => showToast("Audit filters applied.")).catch((error) => showToast(error.message, true)));
+els.queryRefreshButton.addEventListener("click", () => loadQueryTelemetry().then(() => showToast("Query telemetry refreshed.")).catch((error) => showToast(error.message, true)));
 
 hydrate();

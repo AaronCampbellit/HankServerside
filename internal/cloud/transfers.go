@@ -24,6 +24,7 @@ type transferSession struct {
 	ID        string
 	HomeID    string
 	AgentID   string
+	JobID     string
 	Operation string
 	SourceID  string
 	Path      string
@@ -73,7 +74,7 @@ func newTransferRegistry() *transferRegistry {
 	}
 }
 
-func (r *transferRegistry) Create(homeID string, agentID string, operation string, sourceID string, path string, ttl time.Duration) (*transferSession, string) {
+func (r *transferRegistry) Create(homeID string, agentID string, jobID string, operation string, sourceID string, path string, ttl time.Duration) (*transferSession, string) {
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
@@ -84,6 +85,7 @@ func (r *transferRegistry) Create(homeID string, agentID string, operation strin
 		ID:        id,
 		HomeID:    homeID,
 		AgentID:   agentID,
+		JobID:     jobID,
 		Operation: operation,
 		SourceID:  sourceID,
 		Path:      path,
@@ -112,6 +114,15 @@ func (r *transferRegistry) Get(id string) (*transferSession, bool) {
 		return nil, false
 	}
 	return session, true
+}
+
+func (r *transferRegistry) Restore(session *transferSession) {
+	if session == nil || session.ID == "" {
+		return
+	}
+	r.mu.Lock()
+	r.transfers[session.ID] = session
+	r.mu.Unlock()
 }
 
 func (r *transferRegistry) Delete(id string) {
@@ -170,6 +181,7 @@ func (s *transferSession) Snapshot() map[string]any {
 
 	payload := map[string]any{
 		"transfer_id":  s.ID,
+		"job_id":       s.JobID,
 		"source_id":    s.SourceID,
 		"path":         s.Path,
 		"operation":    s.Operation,
@@ -280,4 +292,16 @@ func (s *transferSession) NextOffset() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.nextOffset
+}
+
+func (s *transferSession) Progress() (int64, int64, *time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.size, s.nextOffset, s.completedAt
+}
+
+func (s *transferSession) LastError() *protocol.ErrorPayload {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastError
 }

@@ -7,6 +7,14 @@ const (
 	FileTransferOperationUpload   = "upload"
 )
 
+const (
+	FileOperationMove     = "move"
+	FileOperationCopy     = "copy"
+	FileOperationDelete   = "delete"
+	FileOperationUpload   = "upload"
+	FileOperationDownload = "download"
+)
+
 type FileItem struct {
 	Path        string    `json:"path"`
 	Name        string    `json:"name"`
@@ -57,9 +65,20 @@ type FilesRenameRequest struct {
 type FilesMoveRequest struct {
 	SourceID            string `json:"source_id,omitempty"`
 	DestinationSourceID string `json:"destination_source_id,omitempty"`
+	JobID               string `json:"job_id,omitempty"`
 	From                string `json:"from"`
 	To                  string `json:"to"`
 	IsDirectory         bool   `json:"is_directory"`
+}
+
+type FileOperationJobResponse struct {
+	OK         bool   `json:"ok"`
+	JobID      string `json:"job_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	BytesTotal int64  `json:"bytes_total,omitempty"`
+	BytesDone  int64  `json:"bytes_done,omitempty"`
+	FilesTotal int64  `json:"files_total,omitempty"`
+	FilesDone  int64  `json:"files_done,omitempty"`
 }
 
 type FilesDeleteRequest struct {

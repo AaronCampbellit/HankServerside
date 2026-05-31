@@ -6,7 +6,7 @@ This is the short implementation list from the current HankServerside security r
 
 Status: implemented. `/metrics` now requires an authenticated admin; `/healthz` and `/readyz` remain public for deployment checks.
 
-Current risk: `/metrics` is unauthenticated if the service is exposed directly.
+Current risk: operators can still misconfigure a reverse proxy to expose an unauthenticated scrape path.
 
 Fix:
 
@@ -29,16 +29,16 @@ Fix:
 
 ## 3. Remove Agent Tokens From URLs
 
-Status: implemented with migration fallback. The agent now sends `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID`; query-token support remains temporarily for older deployed agents.
+Status: implemented. The agent now sends `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID`; query-token support has been removed.
 
-Current risk: `/ws/agent` uses `agent_id` and `token` query parameters, which can leak in logs.
+Current risk: old deployed agents that still send URL query credentials will be rejected.
 
 Fix:
 
 - Move agent auth to `Authorization: Bearer <agent-token>` plus an agent ID header, or add a short-lived agent ticket endpoint.
 - Keep token hashes in storage.
 - Update `.env.agent` generation and agent connection code.
-- Remove query-token support after the agent is migrated.
+- Query-token support has been removed after the agent migration.
 
 ## 4. Encrypt Stored Secrets At Rest
 

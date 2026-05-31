@@ -23,6 +23,9 @@ func mediaAvailabilityQuery(prompt string) (string, bool) {
 	lowered := strings.ToLower(trimmed)
 	hasDownloadIntent := mediaPromptHasDownloadIntent(lowered)
 	hasTypedSearchIntent := hasSearchVerb(lowered) && mediaPromptHasTypeHint(trimmed)
+	if !hasDownloadIntent && mediaPromptLooksLikeFileRequest(lowered) {
+		return "", false
+	}
 	if !hasDownloadIntent && !hasTypedSearchIntent {
 		return "", false
 	}

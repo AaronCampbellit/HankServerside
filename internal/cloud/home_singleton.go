@@ -110,7 +110,16 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeStorage(w, r, home, auth, membership, parts) {
 		return
 	}
-	if s.handleHomeAgent(w, r, home, membership, parts) {
+	if s.handleHomeAuditEvents(w, r, home, auth, membership, parts) {
+		return
+	}
+	if s.handleHomeQueryTelemetry(w, r, home, auth, membership, parts) {
+		return
+	}
+	if s.handleHomeFileJobs(w, r, home, auth, membership, parts) {
+		return
+	}
+	if s.handleHomeAgent(w, r, home, auth, membership, parts) {
 		return
 	}
 
@@ -123,7 +132,7 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.handleFileTransferSetup(w, r, home, protocol.FileTransferOperationDownload)
+		s.handleFileTransferSetup(w, r, home, auth, protocol.FileTransferOperationDownload)
 		return
 	}
 	if len(parts) == 2 && parts[0] == "files" && parts[1] == "uploads" && r.Method == http.MethodPost {
@@ -135,14 +144,14 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.handleFileTransferSetup(w, r, home, protocol.FileTransferOperationUpload)
+		s.handleFileTransferSetup(w, r, home, auth, protocol.FileTransferOperationUpload)
 		return
 	}
 
 	http.NotFound(w, r)
 }
 
-func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, parts []string) bool {
+func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {
 	if len(parts) == 1 && parts[0] == "agent" && r.Method == http.MethodGet {
 		agent, err := s.store.GetAgentByHomeID(r.Context(), home.ID)
 		if errors.Is(err, store.ErrNotFound) {
@@ -247,6 +256,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.audit(r.Context(), "agent_token.created", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "agent_token", token.ID, map[string]any{"agent_id": agent.ID})
 
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"token_id":     token.ID,
@@ -280,6 +290,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.audit(r.Context(), "agent_token.revoked", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "agent_token", parts[2], map[string]any{"purged": r.URL.Query().Get("purge") == "1"})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return true
 	}

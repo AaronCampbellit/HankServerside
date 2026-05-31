@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/migrations"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -28,6 +29,14 @@ type AgentTokenRecord struct {
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
+	return open(ctx, databaseURL, false)
+}
+
+func OpenMigrating(ctx context.Context, databaseURL string) (*Store, error) {
+	return open(ctx, databaseURL, true)
+}
+
+func open(ctx context.Context, databaseURL string, migrate bool) (*Store, error) {
 	db, err := sql.Open(driverName, databaseURL)
 	if err != nil {
 		return nil, err
@@ -38,9 +47,17 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	store.vectorAvailable = store.enableVectorExtension(ctx)
+	if migrate {
+		store.vectorAvailable = store.enableVectorExtension(ctx)
+		if err := store.migrate(ctx); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		return store, nil
+	}
 
-	if err := store.migrate(ctx); err != nil {
+	store.vectorAvailable = store.detectVectorExtension(ctx)
+	if err := store.validateExisting(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -64,12 +81,35 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
+func (s *Store) MigrationStatuses(ctx context.Context) ([]migrations.Status, error) {
+	return migrations.AppliedReadOnly(ctx, s.db)
+}
+
+func (s *Store) CheckMigrations(ctx context.Context) error {
+	return migrations.CheckReadOnly(ctx, s.db)
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
 func (s *Store) VectorAvailable() bool {
 	return s != nil && s.vectorAvailable
+}
+
+func (s *Store) detectVectorExtension(ctx context.Context) bool {
+	var installed bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')`).Scan(&installed); err != nil {
+		return false
+	}
+	return installed
 }
 
 func (s *Store) enableVectorExtension(ctx context.Context) bool {
@@ -81,6 +121,16 @@ func (s *Store) enableVectorExtension(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Store) validateExisting(ctx context.Context) error {
+	if err := migrations.CheckReadOnly(ctx, s.db); err != nil {
+		return fmt.Errorf("check schema migrations: %w", err)
+	}
+	if err := s.validateSingletonHome(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -253,7 +303,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			note_id TEXT NOT NULL,
 			op_id TEXT NOT NULL,
 			actor_user_id TEXT NOT NULL,
-			session_id TEXT NOT NULL,
+			session_id TEXT NULL,
 			base_version INTEGER NOT NULL,
 			applied_version INTEGER NOT NULL,
 			op_json TEXT NOT NULL,
@@ -543,6 +593,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		`UPDATE user_notes SET body_markdown = content WHERE body_markdown = '';`,
 		`UPDATE user_notes SET body_format = 'markdown' WHERE body_format = '';`,
 		`CREATE INDEX IF NOT EXISTS idx_user_notes_owner_parent_order ON user_notes(owner_user_id, parent_id, sort_order);`,
+		`CREATE INDEX IF NOT EXISTS idx_user_notes_owner_root_order ON user_notes(owner_user_id, sort_order) WHERE parent_id IS NULL;`,
 		`CREATE INDEX IF NOT EXISTS idx_user_notes_home_parent_order ON user_notes(home_id, parent_id, sort_order) WHERE home_id IS NOT NULL;`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_notes_owner_note_id ON user_notes(owner_user_id, note_id);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_notes_home_note_id ON user_notes(home_id, note_id) WHERE home_id IS NOT NULL;`,
@@ -559,6 +610,187 @@ func (s *Store) migrate(ctx context.Context) error {
 		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS project_docs_enabled BOOLEAN NOT NULL DEFAULT TRUE;`,
 		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS conversations_enabled BOOLEAN NOT NULL DEFAULT TRUE;`,
 		`ALTER TABLE assistant_settings ADD COLUMN IF NOT EXISTS chat_model TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE note_shares ADD COLUMN IF NOT EXISTS permission TEXT NOT NULL DEFAULT 'write';`,
+		`ALTER TABLE note_operations ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'collab';`,
+		`ALTER TABLE note_operations ALTER COLUMN session_id DROP NOT NULL;`,
+		`ALTER TABLE note_attachments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ready';`,
+		`ALTER TABLE home_note_sync_state ALTER COLUMN agent_id DROP NOT NULL;`,
+		`ALTER TABLE home_note_sync_state DROP CONSTRAINT IF EXISTS home_note_sync_state_agent_id_fkey;`,
+		`DO $$ BEGIN
+			ALTER TABLE note_operations ADD CONSTRAINT note_operations_session_id_fkey FOREIGN KEY (session_id) REFERENCES app_sessions(id) ON DELETE SET NULL NOT VALID;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE home_note_sync_state ADD CONSTRAINT home_note_sync_state_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL NOT VALID;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`ALTER TABLE assistant_file_index DROP CONSTRAINT IF EXISTS assistant_file_index_home_id_path_key;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_file_index_home_source_path ON assistant_file_index(home_id, service_profile_id, path);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_file_index_home_source_updated ON assistant_file_index(home_id, service_profile_id, updated_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_documents_search_fts ON assistant_documents USING GIN (to_tsvector('simple', search_text));`,
+		`CREATE INDEX IF NOT EXISTS idx_assistant_file_index_search_fts ON assistant_file_index USING GIN (to_tsvector('simple', search_text || ' ' || name || ' ' || path));`,
+		`CREATE TABLE IF NOT EXISTS schema_migrations (
+			version BIGINT PRIMARY KEY,
+			name TEXT NOT NULL,
+			checksum TEXT NOT NULL,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			duration_ms INTEGER NOT NULL
+		);`,
+		`CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`,
+		`CREATE EXTENSION IF NOT EXISTS amcheck WITH SCHEMA pg_catalog;`,
+		`CREATE TABLE IF NOT EXISTS cloud_runtime (
+			deployment_id TEXT PRIMARY KEY CHECK (deployment_id = 'singleton'),
+			runtime_id TEXT NOT NULL,
+			version TEXT NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL,
+			heartbeat_at TIMESTAMPTZ NOT NULL,
+			shutdown_at TIMESTAMPTZ NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS agent_connections (
+			connection_id TEXT PRIMARY KEY,
+			runtime_id TEXT NOT NULL,
+			home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE CASCADE,
+			agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			capabilities_json TEXT NOT NULL DEFAULT '[]',
+			connected_at TIMESTAMPTZ NOT NULL,
+			heartbeat_at TIMESTAMPTZ NOT NULL,
+			disconnected_at TIMESTAMPTZ NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS app_connections (
+			connection_id TEXT PRIMARY KEY,
+			runtime_id TEXT NOT NULL,
+			session_id TEXT NOT NULL REFERENCES app_sessions(id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			connected_at TIMESTAMPTZ NOT NULL,
+			heartbeat_at TIMESTAMPTZ NOT NULL,
+			disconnected_at TIMESTAMPTZ NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS relay_requests (
+			request_id TEXT PRIMARY KEY,
+			home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE CASCADE,
+			app_connection_id TEXT NOT NULL,
+			agent_connection_id TEXT NULL,
+			command TEXT NOT NULL,
+			request_payload JSONB NOT NULL,
+			response_payload JSONB NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'completed', 'failed', 'timed_out', 'cancelled')),
+			error_code TEXT NOT NULL DEFAULT '',
+			error_message TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			sent_at TIMESTAMPTZ NULL,
+			completed_at TIMESTAMPTZ NULL,
+			expires_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS app_ws_tickets (
+			token_hash TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES app_sessions(id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			consumed_at TIMESTAMPTZ NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS file_transfers (
+			id TEXT PRIMARY KEY,
+			token_hash TEXT NOT NULL UNIQUE,
+			home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			agent_id TEXT NOT NULL DEFAULT '',
+			operation TEXT NOT NULL CHECK (operation IN ('download', 'upload')),
+			source_id TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'completed', 'failed', 'expired')),
+			bytes_total BIGINT NULL,
+			bytes_done BIGINT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			completed_at TIMESTAMPTZ NULL
+		);`,
+		`ALTER TABLE file_transfers ADD COLUMN IF NOT EXISTS file_job_id TEXT NOT NULL DEFAULT '';`,
+		`CREATE TABLE IF NOT EXISTS rate_limit_events (
+			bucket TEXT NOT NULL,
+			key_hash TEXT NOT NULL,
+			occurred_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_rate_limit_events_bucket_key_time ON rate_limit_events(bucket, key_hash, occurred_at DESC);`,
+		`CREATE TABLE IF NOT EXISTS login_backoff (
+			email_hash TEXT PRIMARY KEY,
+			failures INTEGER NOT NULL,
+			blocked_until TIMESTAMPTZ NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS file_operation_jobs (
+			id TEXT PRIMARY KEY,
+			home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE CASCADE,
+			user_id TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+			operation TEXT NOT NULL CHECK (operation IN ('move', 'copy', 'delete', 'upload', 'download')),
+			source_id TEXT NOT NULL,
+			destination_source_id TEXT NOT NULL DEFAULT '',
+			from_path TEXT NOT NULL,
+			to_path TEXT NOT NULL DEFAULT '',
+			is_directory BOOLEAN NOT NULL DEFAULT false,
+			status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'rollback_required', 'rolled_back')),
+			bytes_total BIGINT NOT NULL DEFAULT 0,
+			bytes_done BIGINT NOT NULL DEFAULT 0,
+			files_total BIGINT NOT NULL DEFAULT 0,
+			files_done BIGINT NOT NULL DEFAULT 0,
+			error_message TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			completed_at TIMESTAMPTZ NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS audit_events (
+			id TEXT PRIMARY KEY,
+			occurred_at TIMESTAMPTZ NOT NULL,
+			actor_user_id TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+			actor_agent_id TEXT NULL REFERENCES agents(id) ON DELETE SET NULL,
+			home_id TEXT NULL REFERENCES homes(id) ON DELETE SET NULL,
+			event_type TEXT NOT NULL,
+			severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+			request_id TEXT NOT NULL DEFAULT '',
+			ip_hash TEXT NOT NULL DEFAULT '',
+			target_type TEXT NOT NULL DEFAULT '',
+			target_id TEXT NOT NULL DEFAULT '',
+			metadata_json JSONB NOT NULL DEFAULT '{}'
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_home_time ON audit_events(home_id, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_type_time ON audit_events(event_type, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_relay_requests_home_status_expires ON relay_requests(home_id, status, expires_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_connections_runtime ON agent_connections(runtime_id, disconnected_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_app_connections_runtime ON app_connections(runtime_id, disconnected_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_file_transfers_status_expires ON file_transfers(status, expires_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_file_transfers_job_id ON file_transfers(file_job_id) WHERE file_job_id <> '';`,
+		`CREATE INDEX IF NOT EXISTS idx_file_operation_jobs_home_status ON file_operation_jobs(home_id, status, updated_at DESC);`,
+		`DO $$ BEGIN
+			ALTER TABLE home_memberships ADD CONSTRAINT home_memberships_role_check CHECK (role IN ('admin', 'member'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE home_invitations ADD CONSTRAINT home_invitations_role_check CHECK (role IN ('admin', 'member'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE agents ADD CONSTRAINT agents_status_check CHECK (status IN ('online', 'offline'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE home_service_profiles ADD CONSTRAINT home_service_profiles_service_type_check CHECK (service_type IN ('homeassistant', 'smb'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE user_notes ADD CONSTRAINT user_notes_page_type_check CHECK (page_type IN ('text', 'board'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE note_shares ADD CONSTRAINT note_shares_permission_check CHECK (permission IN ('read', 'write'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE note_operations ADD CONSTRAINT note_operations_operation_type_check CHECK (operation_type IN ('save', 'rename', 'delete', 'collab'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE note_attachments ADD CONSTRAINT note_attachments_status_check CHECK (status IN ('pending', 'ready', 'deleted'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE assistant_messages ADD CONSTRAINT assistant_messages_role_check CHECK (role IN ('user', 'assistant'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE assistant_runs ADD CONSTRAINT assistant_runs_state_check CHECK (state IN ('completed', 'waiting_client_tool', 'waiting_confirmation'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`DO $$ BEGIN
+			ALTER TABLE openai_accounts ADD CONSTRAINT openai_accounts_auth_provider_check CHECK (auth_provider IN ('', 'openai', 'chatgpt', 'chatgpt_codex'));
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
 		`UPDATE home_memberships SET role = 'admin' WHERE role = 'owner';`,
 	}
 
@@ -575,16 +807,16 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 
-	if err := s.migrateLegacyHomeNotes(ctx); err != nil {
-		return fmt.Errorf("migrate legacy home notes: %w", err)
-	}
-
 	if err := s.validateSingletonHome(ctx); err != nil {
 		return err
 	}
 
 	if err := s.seedDefaultHomePermissions(ctx); err != nil {
 		return fmt.Errorf("seed default home permissions: %w", err)
+	}
+
+	if err := migrations.BaselineExisting(ctx, s.db, 0); err != nil {
+		return fmt.Errorf("record schema migration baseline: %w", err)
 	}
 
 	return nil

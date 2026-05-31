@@ -19,6 +19,7 @@ The full current setup and onboarding flow is here:
 ```bash
 cd /srv/hank-remote/HankServerside
 nano .env.cloud
+chmod 600 .env.cloud
 ```
 
 It must include real values for:
@@ -62,6 +63,7 @@ The first registration creates the singleton Home and admin membership. Public r
 ```bash
 cd /srv/hank-remote/HankServerside
 nano .env.agent
+chmod 600 .env.agent
 ```
 
 7. Start the agent:
@@ -77,6 +79,8 @@ docker compose --env-file .env.cloud --profile agent up -d agent
 
 - cloud secrets: `/srv/hank-remote/HankServerside/.env.cloud`
 - agent token and local connector settings: `/srv/hank-remote/HankServerside/.env.agent`
+
+`.env.agent` can contain SMB passwords and Home Assistant tokens. Keep both env files mode `0600`.
 
 Do not create host `data/` folders for Postgres, files, or notes. Docker named volumes are used by default.
 

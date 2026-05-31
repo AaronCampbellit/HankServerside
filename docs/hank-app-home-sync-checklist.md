@@ -315,9 +315,9 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
   - `next_offset`
   - `resumable`
 - Use the returned `url` for the actual transfer:
-  - download: `GET /v1/file-transfers/{transferID}?token={transferToken}`
-  - upload: `PUT /v1/file-transfers/{transferID}?token={transferToken}`
-- Treat transfer URLs and tokens as short-lived bearer secrets.
+  - download: `GET /v1/file-transfers/{transferID}` with `Authorization: Bearer {transferToken}`
+  - upload: `PUT /v1/file-transfers/{transferID}` with `Authorization: Bearer {transferToken}`
+- Treat transfer tokens as short-lived bearer secrets. The returned `url` does not include the token.
 - For resumable uploads/downloads, resume from `next_offset` when the server reports an interrupted transfer.
 - Handle `target home agent is offline` as a user-visible offline state, not an auth failure.
 

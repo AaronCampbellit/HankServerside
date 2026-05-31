@@ -1,15 +1,18 @@
 package storageops
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,30 +40,34 @@ func (r ExecRunner) Run(ctx context.Context, name string, args ...string) (strin
 }
 
 type WorkerOptions struct {
-	StateDir           string
-	LogDir             string
-	IntentSecret       string
-	RepoCipherPass     string
-	DatabaseURL        string
-	Stanza             string
-	PGDataPath         string
-	RestoreDataPath    string
-	RestoreDatabaseURL string
-	ComposeFile        string
-	Runner             Runner
+	StateDir             string
+	LogDir               string
+	IntentSecret         string
+	RepoCipherPass       string
+	DatabaseURL          string
+	Stanza               string
+	PGDataPath           string
+	RestoreDataPath      string
+	RestoreDatabaseURL   string
+	NoteAttachmentDir    string
+	AttachmentRestoreDir string
+	ComposeFile          string
+	Runner               Runner
 }
 
 type Worker struct {
-	service            *Service
-	runner             Runner
-	repoCipherPass     string
-	databaseURL        string
-	stanza             string
-	pgDataPath         string
-	restoreDataPath    string
-	restoreDatabaseURL string
-	composeFile        string
-	lastCronRuns       map[string]string
+	service              *Service
+	runner               Runner
+	repoCipherPass       string
+	databaseURL          string
+	stanza               string
+	pgDataPath           string
+	restoreDataPath      string
+	restoreDatabaseURL   string
+	noteAttachmentDir    string
+	attachmentRestoreDir string
+	composeFile          string
+	lastCronRuns         map[string]string
 }
 
 func NewWorker(options WorkerOptions) *Worker {
@@ -85,21 +92,31 @@ func NewWorker(options WorkerOptions) *Worker {
 	if restoreDatabaseURL == "" {
 		restoreDatabaseURL = "postgres://hankremote:hankremote@postgres-restore:5432/hankremote?sslmode=disable"
 	}
+	noteAttachmentDir := strings.TrimSpace(options.NoteAttachmentDir)
+	if noteAttachmentDir == "" {
+		noteAttachmentDir = "/var/lib/hank/note-attachments"
+	}
+	attachmentRestoreDir := strings.TrimSpace(options.AttachmentRestoreDir)
+	if attachmentRestoreDir == "" {
+		attachmentRestoreDir = "/var/lib/hank/note-attachments-restore"
+	}
 	composeFile := strings.TrimSpace(options.ComposeFile)
 	if composeFile == "" {
 		composeFile = "/workspace/docker-compose.yml"
 	}
 	return &Worker{
-		service:            NewService(options.StateDir, options.LogDir, options.IntentSecret),
-		runner:             runner,
-		repoCipherPass:     repoCipherPass,
-		databaseURL:        strings.TrimSpace(options.DatabaseURL),
-		stanza:             stanza,
-		pgDataPath:         pgDataPath,
-		restoreDataPath:    restoreDataPath,
-		restoreDatabaseURL: restoreDatabaseURL,
-		composeFile:        composeFile,
-		lastCronRuns:       make(map[string]string),
+		service:              NewService(options.StateDir, options.LogDir, options.IntentSecret),
+		runner:               runner,
+		repoCipherPass:       repoCipherPass,
+		databaseURL:          strings.TrimSpace(options.DatabaseURL),
+		stanza:               stanza,
+		pgDataPath:           pgDataPath,
+		restoreDataPath:      restoreDataPath,
+		restoreDatabaseURL:   restoreDatabaseURL,
+		noteAttachmentDir:    noteAttachmentDir,
+		attachmentRestoreDir: attachmentRestoreDir,
+		composeFile:          composeFile,
+		lastCronRuns:         make(map[string]string),
 	}
 }
 
@@ -310,10 +327,18 @@ func (w *Worker) runBackup(ctx context.Context, backupType string, taskID string
 	backups := w.loadBackupInfo(ctx)
 	_ = SaveBackupSets(w.service.StateDir, backups)
 	label := latestBackupLabel(backups)
+	attachmentDetails := map[string]any{"enabled": false}
+	if label != "" {
+		if details, err := w.runAttachmentBackup(ctx, cfg, label); err != nil {
+			return fail("Attachment backup failed.", "", err)
+		} else {
+			attachmentDetails = details
+		}
+	}
 	task.BackupLabel = label
 	event := NewEvent(EventOperationBackup, EventStatusSuccess, EventSeverityInfo, "pgBackRest backup completed.")
 	event.BackupLabel = label
-	event.Details = map[string]any{"backup_type": backupType, "output_redacted": strings.TrimSpace(output) != ""}
+	event.Details = map[string]any{"backup_type": backupType, "output_redacted": strings.TrimSpace(output) != "", "attachment_backup": attachmentDetails}
 	_, appendErr := AppendEvent(w.service.LogDir, event)
 	w.finishTask(&task, TaskStatusSuccess, taskMessage(EventOperationBackup, backupType, TaskStatusSuccess))
 	return appendErr
@@ -430,9 +455,14 @@ func (w *Worker) runRestoreTest(ctx context.Context, backupLabel string, taskID 
 	if err := w.validateRestoredDatabase(ctx); err != nil {
 		return fail("Restore verification database validation failed.", err)
 	}
+	w.updateTask(&task, taskMessage(EventOperationRestoreTest, "", TaskStatusRunning), "Validating restored attachments")
+	attachmentDetails, err := w.validateAttachmentBackupRestore(ctx, backupLabel)
+	if err != nil {
+		return fail("Restore verification attachment validation failed.", err)
+	}
 	event := NewEvent(EventOperationRestoreTest, EventStatusSuccess, EventSeverityInfo, "Restore verification completed.")
 	event.BackupLabel = backupLabel
-	event.Details = map[string]any{"output_redacted": strings.TrimSpace(output) != "", "table_check": "hank_core_tables", "role_check": "matched"}
+	event.Details = map[string]any{"output_redacted": strings.TrimSpace(output) != "", "table_check": "hank_core_tables", "sample_check": "matched", "role_check": "matched", "attachment_check": attachmentDetails}
 	_, appendErr := AppendEvent(w.service.LogDir, event)
 	w.finishTask(&task, TaskStatusSuccess, taskMessage(EventOperationRestoreTest, "", TaskStatusSuccess))
 	return appendErr
@@ -644,6 +674,28 @@ func (w *Worker) validateRestoredDatabase(ctx context.Context) error {
 	if mainRoles != restoreRoles {
 		return fmt.Errorf("restored database login roles differ from main database")
 	}
+	mainCounts, err := w.tableCounts(ctx, w.databaseURL)
+	if err != nil {
+		return fmt.Errorf("main database count check: %w", err)
+	}
+	restoreCounts, err := w.tableCounts(ctx, w.restoreDatabaseURL)
+	if err != nil {
+		return fmt.Errorf("restore database count check: %w", err)
+	}
+	if mainCounts != restoreCounts {
+		return fmt.Errorf("restored database table counts differ from main database: main=%s restore=%s", mainCounts, restoreCounts)
+	}
+	mainSamples, err := w.sampleRecordFingerprints(ctx, w.databaseURL)
+	if err != nil {
+		return fmt.Errorf("main database sample check: %w", err)
+	}
+	restoreSamples, err := w.sampleRecordFingerprints(ctx, w.restoreDatabaseURL)
+	if err != nil {
+		return fmt.Errorf("restore database sample check: %w", err)
+	}
+	if mainSamples != restoreSamples {
+		return fmt.Errorf("restored database sample records differ from main database")
+	}
 	return nil
 }
 
@@ -668,7 +720,182 @@ func (w *Worker) loginRoles(ctx context.Context, databaseURL string) (string, er
 	return strings.TrimSpace(output), nil
 }
 
+func (w *Worker) tableCounts(ctx context.Context, databaseURL string) (string, error) {
+	if strings.TrimSpace(databaseURL) == "" {
+		return "", errors.New("database URL is required for table count validation")
+	}
+	const query = `WITH table_counts(name, count_value) AS (
+		VALUES
+			('users', (SELECT count(*) FROM users)),
+			('homes', (SELECT count(*) FROM homes)),
+			('agents', (SELECT count(*) FROM agents)),
+			('user_notes', (SELECT count(*) FROM user_notes)),
+			('note_attachments', (SELECT count(*) FROM note_attachments)),
+			('assistant_file_index', (SELECT count(*) FROM assistant_file_index)),
+			('file_transfers', (SELECT count(*) FROM file_transfers)),
+			('file_operation_jobs', (SELECT count(*) FROM file_operation_jobs))
+	)
+	SELECT string_agg(name || '=' || count_value::text, ',' ORDER BY name) FROM table_counts`
+	output, err := w.runner.Run(ctx, "psql", databaseURL, "-Atc", query)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, redactAndTruncate(output))
+	}
+	return strings.TrimSpace(output), nil
+}
+
+func (w *Worker) sampleRecordFingerprints(ctx context.Context, databaseURL string) (string, error) {
+	if strings.TrimSpace(databaseURL) == "" {
+		return "", errors.New("database URL is required for sample record validation")
+	}
+	const query = `WITH sample_records(label, value) AS (
+		VALUES
+			('users', coalesce((SELECT string_agg(concat_ws('|', id, email), ',' ORDER BY id) FROM (SELECT id, email FROM users ORDER BY id LIMIT 10) sample), '')),
+			('homes', coalesce((SELECT string_agg(concat_ws('|', id, user_id, name), ',' ORDER BY id) FROM (SELECT id, user_id, name FROM homes ORDER BY id LIMIT 10) sample), '')),
+			('agents', coalesce((SELECT string_agg(concat_ws('|', id, home_id, name, status), ',' ORDER BY id) FROM (SELECT id, home_id, name, status FROM agents ORDER BY id LIMIT 10) sample), '')),
+			('user_notes', coalesce((SELECT string_agg(concat_ws('|', id, note_id, title, revision::text, checksum), ',' ORDER BY id) FROM (SELECT id, note_id, title, revision, checksum FROM user_notes ORDER BY id LIMIT 10) sample), '')),
+			('note_attachments', coalesce((SELECT string_agg(concat_ws('|', id, note_id, filename, size_bytes::text, storage_key), ',' ORDER BY id) FROM (SELECT id, note_id, filename, size_bytes, storage_key FROM note_attachments ORDER BY id LIMIT 10) sample), '')),
+			('assistant_file_index', coalesce((SELECT string_agg(concat_ws('|', id, path, name, size_bytes::text), ',' ORDER BY id) FROM (SELECT id, path, name, size_bytes FROM assistant_file_index ORDER BY id LIMIT 10) sample), '')),
+			('file_transfers', coalesce((SELECT string_agg(concat_ws('|', id, operation, status, bytes_total::text, bytes_done::text, file_job_id), ',' ORDER BY id) FROM (SELECT id, operation, status, bytes_total, bytes_done, file_job_id FROM file_transfers ORDER BY id LIMIT 10) sample), '')),
+			('file_operation_jobs', coalesce((SELECT string_agg(concat_ws('|', id, operation, status, bytes_total::text, bytes_done::text), ',' ORDER BY id) FROM (SELECT id, operation, status, bytes_total, bytes_done FROM file_operation_jobs ORDER BY id LIMIT 10) sample), ''))
+	)
+	SELECT string_agg(label || '=' || md5(value), ',' ORDER BY label) FROM sample_records`
+	output, err := w.runner.Run(ctx, "psql", databaseURL, "-Atc", query)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, redactAndTruncate(output))
+	}
+	return strings.TrimSpace(output), nil
+}
+
+func (w *Worker) runAttachmentBackup(ctx context.Context, cfg Config, backupLabel string) (map[string]any, error) {
+	if strings.TrimSpace(backupLabel) == "" {
+		return map[string]any{"enabled": false, "reason": "missing_backup_label"}, nil
+	}
+	if _, err := os.Stat(w.noteAttachmentDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]any{"enabled": false, "reason": "attachment_dir_missing"}, nil
+		}
+		return nil, err
+	}
+	archive := w.attachmentBackupPath(cfg, backupLabel)
+	if _, err := w.runner.Run(ctx, "mkdir", "-p", filepath.Dir(archive)); err != nil {
+		return nil, err
+	}
+	output, err := w.runner.Run(ctx, "tar", "--sparse", "-C", w.noteAttachmentDir, "-czf", archive, ".")
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, redactAndTruncate(output))
+	}
+	info, statErr := os.Stat(archive)
+	size := int64(0)
+	if statErr == nil {
+		size = info.Size()
+	}
+	return map[string]any{"enabled": true, "archive": archive, "size_bytes": size}, nil
+}
+
+func (w *Worker) validateAttachmentBackupRestore(ctx context.Context, backupLabel string) (map[string]any, error) {
+	rowCount, err := w.restoreAttachmentRowCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rowCount == 0 {
+		return map[string]any{"rows": 0, "checked_files": 0, "status": "skipped_empty"}, nil
+	}
+	cfg, _ := w.service.Config()
+	label := strings.TrimSpace(backupLabel)
+	if label == "" {
+		backups, _ := LoadBackupSets(w.service.StateDir)
+		label = latestBackupLabel(backups)
+	}
+	if label == "" {
+		return nil, errors.New("attachment restore validation requires a backup label")
+	}
+	archive := w.attachmentBackupPath(cfg, label)
+	if _, err := os.Stat(archive); err != nil {
+		return nil, fmt.Errorf("attachment backup archive is missing for %s: %w", label, err)
+	}
+	if err := clearDirectoryContents(w.attachmentRestoreDir); err != nil {
+		return nil, err
+	}
+	output, err := w.runner.Run(ctx, "tar", "-xzf", archive, "-C", w.attachmentRestoreDir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, redactAndTruncate(output))
+	}
+	checked, err := w.validateRestoredAttachmentFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"rows": rowCount, "checked_files": checked, "archive": archive, "status": "matched"}, nil
+}
+
+func (w *Worker) restoreAttachmentRowCount(ctx context.Context) (int, error) {
+	const query = `SELECT count(*) FROM note_attachments WHERE deleted_at IS NULL AND status <> 'deleted'`
+	output, err := w.runner.Run(ctx, "psql", w.restoreDatabaseURL, "-Atc", query)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", err, redactAndTruncate(output))
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return 0, nil
+	}
+	count, err := strconv.Atoi(output)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (w *Worker) validateRestoredAttachmentFiles(ctx context.Context) (int, error) {
+	const query = `SELECT storage_key || E'\t' || size_bytes::text FROM note_attachments WHERE deleted_at IS NULL AND status <> 'deleted' ORDER BY id`
+	output, err := w.runner.Run(ctx, "psql", w.restoreDatabaseURL, "-Atc", query)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", err, redactAndTruncate(output))
+	}
+	reader := bufio.NewReader(strings.NewReader(output))
+	checked := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return checked, err
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			key, sizeText, ok := strings.Cut(line, "\t")
+			if !ok {
+				return checked, fmt.Errorf("invalid attachment validation row")
+			}
+			wantSize, parseErr := strconv.ParseInt(sizeText, 10, 64)
+			if parseErr != nil {
+				return checked, parseErr
+			}
+			path, pathErr := safeJoin(w.attachmentRestoreDir, key)
+			if pathErr != nil {
+				return checked, pathErr
+			}
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				return checked, fmt.Errorf("restored attachment %q missing: %w", key, statErr)
+			}
+			if info.Size() != wantSize {
+				return checked, fmt.Errorf("restored attachment %q size=%d want=%d", key, info.Size(), wantSize)
+			}
+			checked++
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+	return checked, nil
+}
+
+func (w *Worker) attachmentBackupPath(cfg Config, backupLabel string) string {
+	cfg = cfg.Normalized()
+	return filepath.Join(cfg.Target.Path, "hank-attachments", strings.TrimSpace(backupLabel)+".tar.gz")
+}
+
 func (w *Worker) runPgBackRest(ctx context.Context, args ...string) (string, error) {
+	if os.Geteuid() != 0 {
+		return w.runner.Run(ctx, "pgbackrest", args...)
+	}
 	return w.runner.Run(ctx, "gosu", append([]string{"postgres", "pgbackrest"}, args...)...)
 }
 
@@ -681,6 +908,9 @@ func (w *Worker) requireRepoCipherPass() error {
 
 func (w *Worker) preparePgBackRestPaths(ctx context.Context, cfg Config) error {
 	cfg = cfg.Normalized()
+	if os.Geteuid() != 0 {
+		return nil
+	}
 	if cfg.Target.Type == TargetTypePosix && strings.TrimSpace(cfg.Target.Path) != "" {
 		if _, err := w.runner.Run(ctx, "chown", "-R", "postgres:postgres", cfg.Target.Path); err != nil {
 			return err
@@ -701,7 +931,7 @@ func (w *Worker) writeSafetyMarker(backupLabel string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o666)
+	return writePrivateFile(path, data)
 }
 
 func clearDirectoryContents(path string) error {
@@ -721,6 +951,19 @@ func clearDirectoryContents(path string) error {
 		}
 	}
 	return nil
+}
+
+func safeJoin(root string, key string) (string, error) {
+	cleanRoot := filepath.Clean(root)
+	cleanKey := filepath.Clean(strings.TrimSpace(key))
+	if cleanKey == "." || filepath.IsAbs(cleanKey) || cleanKey == ".." || strings.HasPrefix(cleanKey, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes root")
+	}
+	joined := filepath.Join(cleanRoot, cleanKey)
+	if joined != cleanRoot && !strings.HasPrefix(joined, cleanRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes root")
+	}
+	return joined, nil
 }
 
 func latestBackupLabel(backups []BackupSet) string {

@@ -3756,7 +3756,7 @@ func fileQuery(prompt string) string {
 	query := stripAssistantSearchPrefix(prompt)
 	query = strings.TrimSuffix(strings.TrimSpace(query), ".")
 	query = removeQueryWords(query, map[string]bool{
-		"a": true, "an": true, "the": true,
+		"a": true, "an": true, "the": true, "all": true, "any": true, "every": true, "me": true,
 		"file": true, "files": true,
 		"folder": true, "folders": true,
 		"directory": true, "directories": true,
@@ -4143,7 +4143,7 @@ func parseCalendarCreateIntent(prompt string, timezone string) (assistantCalenda
 		return assistantCalendarIntent{}, false
 	}
 
-	title := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(pieces[0], "Add "), "Create "), "Schedule "))
+	title := cleanCalendarCreateTitle(pieces[0])
 	dateText := strings.TrimSpace(strings.TrimSuffix(pieces[1], "."))
 	if title == "" || dateText == "" {
 		return assistantCalendarIntent{}, false
@@ -4175,4 +4175,15 @@ func parseCalendarCreateIntent(prompt string, timezone string) (assistantCalenda
 		}, true
 	}
 	return assistantCalendarIntent{}, false
+}
+
+func cleanCalendarCreateTitle(value string) string {
+	value = strings.TrimSpace(value)
+	lowered := strings.ToLower(value)
+	for _, prefix := range []string{"add ", "create ", "schedule "} {
+		if strings.HasPrefix(lowered, prefix) {
+			return strings.TrimSpace(value[len(prefix):])
+		}
+	}
+	return value
 }

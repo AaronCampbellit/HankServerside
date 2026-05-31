@@ -3,10 +3,12 @@ package cloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
@@ -41,6 +43,14 @@ func scopedNoteCollabTopic(scope string, noteID string) string {
 		return noteCollabTopic(noteID)
 	}
 	return "notes.collab:" + scope + ":" + strings.TrimSpace(noteID)
+}
+
+func scopedHomeTopic(homeID string, topic string) string {
+	return topic + "@home:" + strings.TrimSpace(homeID)
+}
+
+func scopedUserTopic(userID string, topic string) string {
+	return topic + "@user:" + strings.TrimSpace(userID)
 }
 
 func (s *Server) forwardStoreNotifications(ctx context.Context) {
@@ -85,13 +95,13 @@ func (s *Server) forwardNoteNotification(ctx context.Context, payload json.RawMe
 		"updated_by":       event.UpdatedBy,
 		"collab_version":   event.CollabVersion,
 	}
-	s.broadcastAppEvent(ctx, topicNotesProfile, event.Event, body)
+	s.broadcastAppEventOnKey(ctx, scopedUserTopic(event.OwnerUserID, topicNotesProfile), topicNotesProfile, event.Event, body)
 	if event.HomeID != "" {
-		s.broadcastAppEvent(ctx, topicNotesHome, event.Event, body)
-		s.broadcastAppEvent(ctx, scopedNoteCollabTopic("home", event.NoteID), event.Event, body)
+		s.broadcastAppEventOnKey(ctx, scopedHomeTopic(event.HomeID, topicNotesHome), topicNotesHome, event.Event, body)
+		s.broadcastAppEventOnKey(ctx, scopedHomeTopic(event.HomeID, scopedNoteCollabTopic("home", event.NoteID)), scopedNoteCollabTopic("home", event.NoteID), event.Event, body)
 	}
-	s.broadcastAppEvent(ctx, noteCollabTopic(event.NoteID), event.Event, body)
-	s.broadcastAppEvent(ctx, scopedNoteCollabTopic("profile", event.NoteID), event.Event, body)
+	s.broadcastAppEventOnKey(ctx, scopedUserTopic(event.OwnerUserID, noteCollabTopic(event.NoteID)), noteCollabTopic(event.NoteID), event.Event, body)
+	s.broadcastAppEventOnKey(ctx, scopedUserTopic(event.OwnerUserID, scopedNoteCollabTopic("profile", event.NoteID)), scopedNoteCollabTopic("profile", event.NoteID), event.Event, body)
 	if event.Event == "notes.changed" || event.Event == "notes.collab.ops" {
 		s.notifyNoteChanged(ctx, event.NoteInternalID, event.NoteID, event.UpdatedBy)
 	}
@@ -114,13 +124,13 @@ func (s *Server) forwardProfileNotification(ctx context.Context, payload json.Ra
 	if event.Event == "profile.secret_vault_changed" {
 		topic = "profile.secret_vault"
 	}
-	s.broadcastAppEvent(ctx, topic, event.Event, map[string]any{
+	s.broadcastAppEventOnKey(ctx, scopedUserTopic(event.UserID, topic), topic, event.Event, map[string]any{
 		"user_id":  event.UserID,
 		"revision": event.Revision,
 	})
 }
 
-func (s *Server) handleRealtimeCommand(ctx context.Context, app *appConnection, peer *wsPeer, envelope protocol.Envelope, command protocol.RoutedCommand) bool {
+func (s *Server) handleRealtimeCommand(ctx context.Context, app *appConnection, peer *wsPeer, envelope protocol.Envelope, auth authContext, command protocol.RoutedCommand) bool {
 	switch command.Command {
 	case "app.subscribe", "app.unsubscribe":
 		var request protocol.AppSubscribeRequest
@@ -131,11 +141,16 @@ func (s *Server) handleRealtimeCommand(ctx context.Context, app *appConnection, 
 			}
 		}
 		topics := cleanTopics(request.Topics)
+		authorizedTopics, err := s.authorizeRealtimeTopics(ctx, auth, topics)
+		if err != nil {
+			_ = s.writeAppCommandError(ctx, peer, envelope, "permission_denied", err.Error(), nil)
+			return true
+		}
 		var current []string
 		if command.Command == "app.subscribe" {
-			current = app.subscribe(topics)
+			current = app.subscribe(authorizedTopics)
 		} else {
-			current = app.unsubscribe(topics)
+			current = app.unsubscribe(authorizedTopics)
 		}
 		s.logger.Info("app realtime subscription changed", "session_id", app.sessionID, "user_id", app.userID, "command", command.Command, "topics", strings.Join(topics, ","), "current_topics", strings.Join(current, ","))
 		_ = writeAppResponse(ctx, peer, envelope, protocol.AppSubscribeResponse{Topics: current})
@@ -143,6 +158,97 @@ func (s *Server) handleRealtimeCommand(ctx context.Context, app *appConnection, 
 	default:
 		return false
 	}
+}
+
+func (s *Server) authorizeRealtimeTopics(ctx context.Context, auth authContext, topics []string) ([]string, error) {
+	authorized := make([]string, 0, len(topics))
+	var home domain.Home
+	var membership domain.HomeMembership
+	var resolved bool
+	resolveHome := func() error {
+		if resolved {
+			return nil
+		}
+		var err error
+		home, membership, err = s.requireSingletonHomeMembership(ctx, auth.User.ID)
+		if err != nil {
+			return err
+		}
+		resolved = true
+		return nil
+	}
+	for _, topic := range topics {
+		switch {
+		case topic == "profile.settings" || topic == "profile.secret_vault" || topic == topicNotesProfile:
+			authorized = append(authorized, scopedUserTopic(auth.User.ID, topic))
+		case topic == topicHomeAssistantStates:
+			if err := resolveHome(); err != nil {
+				return nil, err
+			}
+			if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureHomeAssistant); err != nil {
+				return nil, err
+			}
+			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
+		case strings.HasPrefix(topic, "notes.collab:"):
+			scope, noteID := parseRealtimeNoteCollabTopic(topic)
+			if noteID == "" {
+				return nil, errors.New("unsupported realtime topic")
+			}
+			if scope == "profile" {
+				if _, err := s.store.GetProfileNote(ctx, auth.User.ID, noteID); err != nil {
+					return nil, err
+				}
+				authorized = append(authorized, scopedUserTopic(auth.User.ID, topic))
+				continue
+			}
+			if err := resolveHome(); err != nil {
+				return nil, err
+			}
+			if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
+				return nil, err
+			}
+			if _, err := s.store.GetHomeNoteVisibleToUser(ctx, home.ID, auth.User.ID, noteID); err != nil {
+				return nil, err
+			}
+			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
+		case topic == topicNotesHome:
+			if err := resolveHome(); err != nil {
+				return nil, err
+			}
+			if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
+				return nil, err
+			}
+			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
+		case strings.HasPrefix(topic, "files.directory:"):
+			if err := resolveHome(); err != nil {
+				return nil, err
+			}
+			if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
+				return nil, err
+			}
+			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
+		case topic == topicHomeStatus || topic == topicHomeSettings || topic == topicHomeMembers || topic == topicHomePermissions || topic == topicStorage || topic == topicMediaDownloads:
+			if err := resolveHome(); err != nil {
+				return nil, err
+			}
+			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
+			if topic == topicStorage {
+				authorized = append(authorized, topic)
+			}
+		default:
+			return nil, errors.New("unsupported realtime topic")
+		}
+	}
+	return authorized, nil
+}
+
+func parseRealtimeNoteCollabTopic(topic string) (string, string) {
+	rest := strings.TrimPrefix(topic, "notes.collab:")
+	parts := strings.SplitN(rest, ":", 2)
+	if len(parts) == 2 && (parts[0] == "home" || parts[0] == "profile") {
+		return parts[0], strings.TrimSpace(parts[1])
+	}
+	return "home", strings.TrimSpace(rest)
 }
 
 func cleanTopics(topics []string) []string {
@@ -163,12 +269,16 @@ func cleanTopics(topics []string) []string {
 }
 
 func (s *Server) broadcastAppEvent(ctx context.Context, topic string, event string, payload any) {
-	apps := s.router.AppsForTopic(topic)
-	if strings.HasPrefix(topic, "notes.") {
-		s.logger.Info("broadcasting notes realtime event", "topic", topic, "event", event, "subscriber_count", len(apps))
+	s.broadcastAppEventOnKey(ctx, topic, topic, event, payload)
+}
+
+func (s *Server) broadcastAppEventOnKey(ctx context.Context, subscriptionKey string, publicTopic string, event string, payload any) {
+	apps := s.router.AppsForTopic(subscriptionKey)
+	if strings.HasPrefix(publicTopic, "notes.") {
+		s.logger.Info("broadcasting notes realtime event", "topic", publicTopic, "event", event, "subscriber_count", len(apps))
 	}
 	for _, app := range apps {
-		_ = writeAppEvent(ctx, app.peer, event, topic, payload)
+		_ = writeAppEvent(ctx, app.peer, event, publicTopic, payload)
 	}
 }
 
@@ -189,43 +299,81 @@ func writeAppResponse(ctx context.Context, peer *wsPeer, envelope protocol.Envel
 }
 
 func (s *Server) emitHomeStatus(ctx context.Context, homeID string, payload any) {
-	s.broadcastAppEvent(ctx, topicHomeStatus, "home.status_changed", payload)
+	s.broadcastAppEventOnKey(ctx, scopedHomeTopic(homeID, topicHomeStatus), topicHomeStatus, "home.status_changed", payload)
 }
 
 func (s *Server) emitSyncStatus(ctx context.Context, homeID string) {
-	s.broadcastAppEvent(ctx, topicHomeStatus, "sync.status_changed", map[string]any{"home_id": homeID})
+	s.broadcastAppEventOnKey(ctx, scopedHomeTopic(homeID, topicHomeStatus), topicHomeStatus, "sync.status_changed", map[string]any{"home_id": homeID})
 }
 
 func (s *Server) emitSettingsChanged(ctx context.Context, event string, payload any) {
-	s.broadcastAppEvent(ctx, topicHomeSettings, event, payload)
+	s.broadcastHomeScopedEvent(ctx, topicHomeSettings, event, payload)
 }
 
 func (s *Server) emitMembersChanged(ctx context.Context, payload any) {
-	s.broadcastAppEvent(ctx, topicHomeMembers, "members.changed", payload)
+	s.broadcastHomeScopedEvent(ctx, topicHomeMembers, "members.changed", payload)
 }
 
 func (s *Server) emitPermissionsChanged(ctx context.Context, payload any) {
-	s.broadcastAppEvent(ctx, topicHomePermissions, "permissions.changed", payload)
+	s.broadcastHomeScopedEvent(ctx, topicHomePermissions, "permissions.changed", payload)
 }
 
 func (s *Server) emitHomeNotesChanged(ctx context.Context, event string, payload any) {
-	s.broadcastAppEvent(ctx, topicNotesHome, event, payload)
+	s.broadcastHomeScopedEvent(ctx, topicNotesHome, event, payload)
 }
 
 func (s *Server) emitProfileNotesChanged(ctx context.Context, payload any) {
-	s.broadcastAppEvent(ctx, topicNotesProfile, "notes.changed", payload)
+	userID := userIDFromPayload(payload)
+	if userID == "" {
+		s.broadcastAppEvent(ctx, topicNotesProfile, "notes.changed", payload)
+		return
+	}
+	s.broadcastAppEventOnKey(ctx, scopedUserTopic(userID, topicNotesProfile), topicNotesProfile, "notes.changed", payload)
 }
 
 func (s *Server) emitFileDirectoryChanged(ctx context.Context, path string, payload any) {
-	s.broadcastAppEvent(ctx, fileDirectoryTopic(path), "files.directory_changed", payload)
+	topic := fileDirectoryTopic(path)
+	homeID := homeIDFromPayload(payload)
+	if homeID == "" {
+		s.broadcastAppEvent(ctx, topic, "files.directory_changed", payload)
+		return
+	}
+	s.broadcastAppEventOnKey(ctx, scopedHomeTopic(homeID, topic), topic, "files.directory_changed", payload)
 }
 
 func (s *Server) emitHomeAssistantStateChanged(ctx context.Context, payload any) {
-	s.broadcastAppEvent(ctx, topicHomeAssistantStates, "homeassistant.state_changed", payload)
+	s.broadcastHomeScopedEvent(ctx, topicHomeAssistantStates, "homeassistant.state_changed", payload)
 }
 
 func (s *Server) emitStorageEvent(ctx context.Context, event string, payload any) {
-	s.broadcastAppEvent(ctx, topicStorage, event, payload)
+	s.broadcastHomeScopedEvent(ctx, topicStorage, event, payload)
+}
+
+func (s *Server) broadcastHomeScopedEvent(ctx context.Context, topic string, event string, payload any) {
+	homeID := homeIDFromPayload(payload)
+	if homeID == "" {
+		s.broadcastAppEvent(ctx, topic, event, payload)
+		return
+	}
+	s.broadcastAppEventOnKey(ctx, scopedHomeTopic(homeID, topic), topic, event, payload)
+}
+
+func homeIDFromPayload(payload any) string {
+	if values, ok := payload.(map[string]any); ok {
+		if value, ok := values["home_id"].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func userIDFromPayload(payload any) string {
+	if values, ok := payload.(map[string]any); ok {
+		if value, ok := values["user_id"].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (s *Server) emitCommandSideEffect(ctx context.Context, command string, payload json.RawMessage) {
@@ -246,16 +394,16 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 
 	switch event.Event {
 	case "homeassistant.state_changed":
-		s.broadcastRawAppEvent(ctx, topicHomeAssistantStates, event.Event, event.Body)
+		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topicHomeAssistantStates), topicHomeAssistantStates, event.Event, event.Body)
 		s.notifyDashboardEntityChanged(ctx, homeID, event.Body)
 	case "files.directory_changed":
 		topic := event.Topic
 		if !strings.HasPrefix(topic, "files.directory:") {
 			topic = fileDirectoryTopic("/")
 		}
-		s.broadcastRawAppEvent(ctx, topic, event.Event, event.Body)
+		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topic), topic, event.Event, event.Body)
 	case "sync.status_changed":
-		s.broadcastRawAppEvent(ctx, topicHomeStatus, event.Event, event.Body)
+		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topicHomeStatus), topicHomeStatus, event.Event, event.Body)
 	case "media.download_progress", "media.download_completed":
 		topic := event.Topic
 		if !strings.HasPrefix(topic, "media.downloads") {
@@ -276,19 +424,23 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 			HomeID:  homeID,
 			Details: traceEventDetailsFromJSON(event.Body),
 		})
-		s.broadcastRawAppEvent(ctx, topic, event.Event, event.Body)
+		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topic), topic, event.Event, event.Body)
 	default:
 		s.logger.Debug("ignored agent event", "home_id", homeID, "event", event.Event)
 	}
 }
 
 func (s *Server) broadcastRawAppEvent(ctx context.Context, topic string, event string, body json.RawMessage) {
-	for _, app := range s.router.AppsForTopic(topic) {
+	s.broadcastRawAppEventOnKey(ctx, topic, topic, event, body)
+}
+
+func (s *Server) broadcastRawAppEventOnKey(ctx context.Context, subscriptionKey string, publicTopic string, event string, body json.RawMessage) {
+	for _, app := range s.router.AppsForTopic(subscriptionKey) {
 		_ = app.peer.Write(ctx, protocol.Envelope{
 			Version:   protocol.Version,
 			Type:      protocol.TypeAppEvent,
 			Timestamp: time.Now().UTC(),
-			Payload:   mustEventBody(event, topic, body),
+			Payload:   mustEventBody(event, publicTopic, body),
 		})
 	}
 }

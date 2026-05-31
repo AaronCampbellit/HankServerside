@@ -54,16 +54,18 @@ type APNS struct {
 }
 
 type DBOps struct {
-	StateDir           string
-	LogDir             string
-	IntentSecret       string
-	RepoCipherPass     string
-	DatabaseURL        string
-	Stanza             string
-	PGDataPath         string
-	RestoreDataPath    string
-	RestoreDatabaseURL string
-	ComposeFile        string
+	StateDir             string
+	LogDir               string
+	IntentSecret         string
+	RepoCipherPass       string
+	DatabaseURL          string
+	Stanza               string
+	PGDataPath           string
+	RestoreDataPath      string
+	RestoreDatabaseURL   string
+	NoteAttachmentDir    string
+	AttachmentRestoreDir string
+	ComposeFile          string
 }
 
 type Agent struct {
@@ -87,13 +89,23 @@ type HomeAssistant struct {
 }
 
 type SMB struct {
-	ID       string `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Host     string `json:"host"`
-	Share    string `json:"share"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	Domain   string `json:"domain,omitempty"`
+	ID       string           `json:"id,omitempty"`
+	Name     string           `json:"name,omitempty"`
+	Host     string           `json:"host"`
+	Share    string           `json:"share"`
+	Username string           `json:"username,omitempty"`
+	Password string           `json:"password,omitempty"`
+	Domain   string           `json:"domain,omitempty"`
+	Policy   FileAccessPolicy `json:"policy,omitempty"`
+}
+
+type FileAccessPolicy struct {
+	Read            *bool    `json:"read,omitempty"`
+	Write           *bool    `json:"write,omitempty"`
+	Delete          *bool    `json:"delete,omitempty"`
+	AllowedPrefixes []string `json:"allowed_prefixes,omitempty"`
+	BlockedPrefixes []string `json:"blocked_prefixes,omitempty"`
+	MaxUploadBytes  int64    `json:"max_upload_bytes,omitempty"`
 }
 
 type Media struct {
@@ -122,6 +134,9 @@ func LoadCloud() (Cloud, error) {
 	embeddingDimensionValue, err := strconv.Atoi(embeddingDimension)
 	if err != nil || embeddingDimensionValue <= 0 {
 		return Cloud{}, fmt.Errorf("HANK_REMOTE_AI_EMBEDDING_DIMENSION must be a positive integer")
+	}
+	if embeddingDimensionValue != 768 {
+		return Cloud{}, fmt.Errorf("HANK_REMOTE_AI_EMBEDDING_DIMENSION must be 768 for production schema compatibility")
 	}
 
 	dbOpsIntentSecret := strings.TrimSpace(os.Getenv("HANK_REMOTE_DB_OPS_INTENT_SECRET"))
@@ -182,16 +197,18 @@ func LoadDBOps() (DBOps, error) {
 	}
 
 	return DBOps{
-		StateDir:           envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
-		LogDir:             envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
-		IntentSecret:       intentSecret,
-		RepoCipherPass:     repoCipherPass,
-		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
-		Stanza:             envOrDefault("HANK_REMOTE_DB_OPS_STANZA", "hank"),
-		PGDataPath:         envOrDefault("HANK_REMOTE_DB_OPS_PGDATA", "/var/lib/postgresql/data"),
-		RestoreDataPath:    envOrDefault("HANK_REMOTE_DB_OPS_RESTORE_PGDATA", "/var/lib/postgresql/restore"),
-		RestoreDatabaseURL: envOrDefault("HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL", "postgres://hankremote:hankremote@postgres-restore:5432/hankremote?sslmode=disable"),
-		ComposeFile:        envOrDefault("HANK_REMOTE_DB_OPS_COMPOSE_FILE", "/workspace/docker-compose.yml"),
+		StateDir:             envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
+		LogDir:               envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
+		IntentSecret:         intentSecret,
+		RepoCipherPass:       repoCipherPass,
+		DatabaseURL:          envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
+		Stanza:               envOrDefault("HANK_REMOTE_DB_OPS_STANZA", "hank"),
+		PGDataPath:           envOrDefault("HANK_REMOTE_DB_OPS_PGDATA", "/var/lib/postgresql/data"),
+		RestoreDataPath:      envOrDefault("HANK_REMOTE_DB_OPS_RESTORE_PGDATA", "/var/lib/postgresql/restore"),
+		RestoreDatabaseURL:   envOrDefault("HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL", "postgres://hankremote:hankremote@postgres-restore:5432/hankremote?sslmode=disable"),
+		NoteAttachmentDir:    envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
+		AttachmentRestoreDir: envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_RESTORE_DIR", "/var/lib/hank/note-attachments-restore"),
+		ComposeFile:          envOrDefault("HANK_REMOTE_DB_OPS_COMPOSE_FILE", "/workspace/docker-compose.yml"),
 	}, nil
 }
 

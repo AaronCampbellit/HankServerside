@@ -2,6 +2,8 @@ package storageops
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +80,65 @@ func TestEventRedaction(t *testing.T) {
 	for _, leaked := range []string{"db-secret", "cipher-secret", "session-token", "db-password", "raw-token"} {
 		if contains := strings.Contains(encoded, leaked); contains {
 			t.Fatalf("event leaked %q: %+v", leaked, events[0])
+		}
+	}
+}
+
+func TestStorageOpsFilesUsePrivatePermissions(t *testing.T) {
+	stateDir := t.TempDir()
+	logDir := t.TempDir()
+
+	if _, err := SaveConfig(stateDir, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendEvent(logDir, NewEvent(EventOperationBackup, EventStatusStarted, EventSeverityInfo, "backup started")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateIntent(stateDir, "secret", Intent{Type: IntentTypeBackup}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBackupSets(stateDir, []BackupSet{{Label: "backup_1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveActiveTask(stateDir, TaskStatus{ID: "task_1", Operation: EventOperationBackup, Status: TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{stateDir, logDir, IntentDir(stateDir)} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != privateDirMode {
+			t.Fatalf("%s mode = %v, want %v", path, got, privateDirMode)
+		}
+		if info.Mode()&os.ModeSetgid == 0 {
+			t.Fatalf("%s mode missing setgid bit: %v", path, info.Mode())
+		}
+	}
+	for _, path := range []string{
+		ConfigPath(stateDir),
+		EventLogPath(logDir),
+		BackupInfoPath(stateDir),
+		ActiveTaskPath(stateDir),
+		filepath.Join(IntentDir(stateDir), "sto_"),
+	} {
+		if strings.HasSuffix(path, "sto_") {
+			entries, err := os.ReadDir(IntentDir(stateDir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("intent entries = %d, want 1", len(entries))
+			}
+			path = filepath.Join(IntentDir(stateDir), entries[0].Name())
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != privateFileMode {
+			t.Fatalf("%s mode = %v, want %v", path, got, privateFileMode)
 		}
 	}
 }

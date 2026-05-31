@@ -135,7 +135,8 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		if err := d.files.MoveBetweenSources(ctx, request.SourceID, request.DestinationSourceID, request.From, request.To, request.IsDirectory); err != nil {
 			return nil, mapError(err)
 		}
-		return protocol.EmptyResponse{OK: true}, nil
+		filesDone := int64(1)
+		return protocol.FileOperationJobResponse{OK: true, JobID: request.JobID, Status: "completed", FilesDone: filesDone}, nil
 
 	case "files.delete":
 		request, err := decodeBody[protocol.FilesDeleteRequest](command.Body)

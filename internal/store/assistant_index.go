@@ -26,11 +26,12 @@ func (s *Store) UpsertAssistantDocumentWithChunks(ctx context.Context, document 
 			id, home_id, user_id, source_type, source_id, source_key, title, path,
 			canonical_uri, metadata_json, search_text, embedding_model, embedding_version, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(source_key) DO UPDATE SET
+		ON CONFLICT(id) DO UPDATE SET
 			home_id = excluded.home_id,
 			user_id = excluded.user_id,
 			source_type = excluded.source_type,
 			source_id = excluded.source_id,
+			source_key = excluded.source_key,
 			title = excluded.title,
 			path = excluded.path,
 			canonical_uri = excluded.canonical_uri,
@@ -84,7 +85,7 @@ func (s *Store) UpsertAssistantFileIndex(ctx context.Context, item domain.Assist
 				id, home_id, service_profile_id, path, name, is_directory, size_bytes, modified_at,
 				search_text, metadata_json, embedding_json, embedding_model, embedding_version, updated_at, embedding
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::vector)
-			ON CONFLICT(home_id, path) DO UPDATE SET
+			ON CONFLICT(home_id, service_profile_id, path) DO UPDATE SET
 				service_profile_id = excluded.service_profile_id,
 				name = excluded.name,
 				is_directory = excluded.is_directory,
@@ -107,7 +108,7 @@ func (s *Store) UpsertAssistantFileIndex(ctx context.Context, item domain.Assist
 			id, home_id, service_profile_id, path, name, is_directory, size_bytes, modified_at,
 			search_text, metadata_json, embedding_json, embedding_model, embedding_version, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(home_id, path) DO UPDATE SET
+		ON CONFLICT(home_id, service_profile_id, path) DO UPDATE SET
 			service_profile_id = excluded.service_profile_id,
 			name = excluded.name,
 			is_directory = excluded.is_directory,

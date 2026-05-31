@@ -398,7 +398,10 @@ async function uploadFileServerAttachment(targetPath, attachment, filename) {
   const response = await fetch(setup.url, {
     method: "PUT",
     credentials: "same-origin",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: {
+      "Authorization": `Bearer ${setup.transfer_token}`,
+      "Content-Type": "application/octet-stream",
+    },
     body: attachment.file,
   });
   const payload = await parseFetchPayload(response);

@@ -15,6 +15,9 @@ Use this when `/readyz` reports storage failure, `/dashboard/storage` reports ba
 7. confirm `.env.cloud` has the same `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS` used when the encrypted backup was created
 8. confirm Postgres is not exposed on the host:
    `docker compose --env-file .env.cloud ps postgres postgres-restore`
+9. confirm db-ops can reach the Docker socket for restore orchestration:
+   `docker compose --env-file .env.cloud exec db-ops docker version`
+   If this fails with permission denied, set `HANK_REMOTE_DB_OPS_DOCKER_GID` in `.env.cloud` to `stat -c '%g' /var/run/docker.sock`, then recreate `db-ops`.
 
 ## Recovery
 

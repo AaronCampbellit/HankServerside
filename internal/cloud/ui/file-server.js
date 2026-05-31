@@ -23,6 +23,7 @@ const state = {
   sortDirection: "asc",
   viewMode: "list",
   lastTransfer: null,
+  fileJobs: [],
   dragDepth: 0,
   previewObjectURL: "",
   previewRequestID: 0,
@@ -48,6 +49,8 @@ const els = {
   sourceStatus: document.getElementById("source-status"),
   sourceSummary: document.getElementById("source-summary"),
   transferOutput: document.getElementById("transfer-output"),
+  fileJobsOutput: document.getElementById("file-jobs-output"),
+  fileJobsRefreshButton: document.getElementById("file-jobs-refresh-button"),
   pathStatus: document.getElementById("path-status"),
   filesSearch: document.getElementById("files-search"),
   filesSearchButton: document.getElementById("files-search-button"),
@@ -1449,15 +1452,20 @@ async function moveItemsToDestination(items, destination, options = {}) {
 
   try {
     for (const move of moves) {
-      await sendFileCommandForSource(sourceID, "files.move", {
+      const job = await sendFileCommandForSource(sourceID, "files.move", {
         destination_source_id: destinationSourceID,
         from: rawItemPath(move.item),
         to: move.to,
         is_directory: Boolean(move.item.is_directory),
       });
+      if (job?.job_id) {
+        state.fileJobs = [{ ...job, id: job.job_id }, ...state.fileJobs.filter((entry) => entry.id !== job.job_id)];
+        renderFileJobs();
+      }
     }
     closeDialog(els.moveDialog);
     clearSelection();
+    await loadFileJobs();
     await refreshCurrentView();
     showToast(moves.length === 1 ? "Item moved." : `${moves.length} items moved.`);
   } catch (error) {
@@ -1586,7 +1594,9 @@ async function fetchFileBlob(path, resultLabel) {
     method: "POST",
     body: JSON.stringify(withSourceID({ path })),
   });
-  const response = await fetch(setup.url);
+  const response = await fetch(setup.url, {
+    headers: { "Authorization": `Bearer ${setup.transfer_token}` },
+  });
   if (!response.ok) throw new Error(await response.text());
   const blob = await response.blob();
   state.lastTransfer = {
@@ -1770,11 +1780,14 @@ async function loadTextPreview(item, requestID) {
 async function uploadOneFile(file, targetPath) {
   const setup = await api("/v1/home/files/uploads", {
     method: "POST",
-    body: JSON.stringify(withSourceID({ path: targetPath })),
+    body: JSON.stringify(withSourceID({ path: targetPath, size: file.size || 0 })),
   });
   const response = await fetch(setup.url, {
     method: "PUT",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: {
+      "Authorization": `Bearer ${setup.transfer_token}`,
+      "Content-Type": "application/octet-stream",
+    },
     body: file,
   });
   const contentType = response.headers.get("Content-Type") || "";
@@ -1818,6 +1831,7 @@ async function uploadFiles(files, targetFolder = state.currentFilesPath) {
     }
     els.filesUpload.value = "";
     renderLastTransfer();
+    await loadFileJobs();
     await browseFiles(state.currentFilesPath, { keepSelection: true });
     showToast(selectedFiles.length === 1 ? `Uploaded ${selectedFiles[0].name}.` : `Uploaded ${selectedFiles.length} files.`);
   } catch (error) {
@@ -1864,6 +1878,70 @@ function renderLastTransfer() {
       </div>
     </article>
   `;
+}
+
+async function loadFileJobs() {
+  if (!selectedHome()) {
+    state.fileJobs = [];
+    renderFileJobs();
+    return;
+  }
+  try {
+    const payload = await api("/v1/home/file-jobs?limit=10");
+    state.fileJobs = payload.jobs || [];
+  } catch (_) {
+    state.fileJobs = [];
+  }
+  renderFileJobs();
+}
+
+function renderFileJobs() {
+  if (!state.fileJobs.length) {
+    els.fileJobsOutput.className = "card-list empty-state";
+    els.fileJobsOutput.textContent = "No managed file jobs yet.";
+    return;
+  }
+  els.fileJobsOutput.className = "card-list";
+  els.fileJobsOutput.innerHTML = state.fileJobs.map((job) => {
+    const progress = job.files_total > 0
+      ? `${job.files_done || 0}/${job.files_total} files`
+      : job.bytes_total > 0
+        ? `${formatBytes(job.bytes_done)} / ${formatBytes(job.bytes_total)}`
+        : job.status;
+    const canRetry = ["failed", "rollback_required", "cancelled"].includes(job.status);
+    const canCancel = ["queued", "running"].includes(job.status);
+    return `
+      <article class="card split-card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">${escapeHTML(job.operation)} - ${escapeHTML(job.from_path || job.to_path || job.id)}</div>
+            <div class="meta">${escapeHTML(job.id)}</div>
+          </div>
+          <span class="pill">${escapeHTML(job.status)}</span>
+        </div>
+        <div class="kv-grid">
+          <div class="kv-row"><div class="kv-label">To</div><div>${escapeHTML(job.to_path || "")}</div></div>
+          <div class="kv-row"><div class="kv-label">Progress</div><div>${escapeHTML(progress)}</div></div>
+          <div class="kv-row"><div class="kv-label">Updated</div><div>${escapeHTML(formatDate(job.updated_at))}</div></div>
+          ${job.error_message ? `<div class="kv-row"><div class="kv-label">Error</div><div>${escapeHTML(job.error_message)}</div></div>` : ""}
+        </div>
+        <div class="actions wrap compact">
+          ${canRetry ? `<button type="button" class="secondary" data-file-job-action="retry" data-file-job-id="${escapeHTML(job.id)}">Retry</button>` : ""}
+          ${canCancel ? `<button type="button" class="ghost" data-file-job-action="cancel" data-file-job-id="${escapeHTML(job.id)}">Cancel</button>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function runFileJobAction(jobID, action) {
+  if (!jobID || !action) return;
+  try {
+    await api(`/v1/home/file-jobs/${encodeURIComponent(jobID)}/${action}`, { method: "POST" });
+    await loadFileJobs();
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 function defaultSortDirection(key) {
@@ -1922,6 +2000,7 @@ async function hydrate() {
     await loadHomes();
     await loadProfiles();
     renderLastTransfer();
+    await loadFileJobs();
     renderPathStatus();
     renderBreadcrumbs();
     renderPreview();
@@ -1941,6 +2020,7 @@ els.homeSelect.addEventListener("change", async () => {
   resetSearch();
   clearSelection();
   await loadProfiles();
+  await loadFileJobs();
   await browseFiles("/");
 });
 els.sourceSelect?.addEventListener("change", () => switchSource(selectedSourceID()));
@@ -1962,6 +2042,12 @@ els.filesPath.addEventListener("keydown", (event) => {
 els.filesNewFolderButton.addEventListener("click", openNewFolderDialog);
 els.filesUploadButton.addEventListener("click", () => els.filesUpload.click());
 els.filesUpload.addEventListener("change", () => uploadFiles(els.filesUpload.files, state.currentFilesPath));
+els.fileJobsRefreshButton?.addEventListener("click", loadFileJobs);
+els.fileJobsOutput?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-file-job-action]");
+  if (!button) return;
+  runFileJobAction(button.dataset.fileJobId, button.dataset.fileJobAction);
+});
 els.filesSort.addEventListener("change", setSortFromControl);
 els.filesSelectAll.addEventListener("change", () => selectAllVisible(els.filesSelectAll.checked));
 els.filesListViewButton.addEventListener("click", () => setViewMode("list"));

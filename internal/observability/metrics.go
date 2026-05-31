@@ -2,6 +2,7 @@ package observability
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,13 @@ type Metrics struct {
 	commandFailures map[string]int64
 	commandLatency  map[string]time.Duration
 	routeFailures   map[string]int64
+	httpCounts      map[string]int64
+	httpLatency     map[string]time.Duration
+	assistantCounts map[string]int64
+	assistantErrors map[string]int64
+	relayLatency    time.Duration
+	relayCount      int64
+	relayFailures   int64
 }
 
 func NewMetrics() *Metrics {
@@ -26,6 +34,10 @@ func NewMetrics() *Metrics {
 		commandFailures: make(map[string]int64),
 		commandLatency:  make(map[string]time.Duration),
 		routeFailures:   make(map[string]int64),
+		httpCounts:      make(map[string]int64),
+		httpLatency:     make(map[string]time.Duration),
+		assistantCounts: make(map[string]int64),
+		assistantErrors: make(map[string]int64),
 	}
 }
 
@@ -63,6 +75,36 @@ func (m *Metrics) IncRouteFailure(code string) {
 	m.routeFailures[code]++
 }
 
+func (m *Metrics) RecordHTTP(route string, method string, status int, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := fmt.Sprintf("%s %s %d", method, route, status)
+	m.httpCounts[key]++
+	m.httpLatency[key] += duration
+}
+
+func (m *Metrics) RecordRelay(duration time.Duration, failed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.relayCount++
+	m.relayLatency += duration
+	if failed {
+		m.relayFailures++
+	}
+}
+
+func (m *Metrics) RecordAssistantProvider(provider string, failed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if provider == "" {
+		provider = "unknown"
+	}
+	m.assistantCounts[provider]++
+	if failed {
+		m.assistantErrors[provider]++
+	}
+}
+
 func (m *Metrics) RenderPrometheus() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -75,6 +117,9 @@ func (m *Metrics) RenderPrometheus() string {
 	writeLabelledCounter(&b, "hank_remote_command_total", "command", m.commandCounts)
 	writeLabelledCounter(&b, "hank_remote_command_failures_total", "command", m.commandFailures)
 	writeLabelledCounter(&b, "hank_remote_route_failures_total", "code", m.routeFailures)
+	writeLabelledCounter(&b, "hank_remote_http_requests_total", "route", m.httpCounts)
+	writeLabelledCounter(&b, "hank_remote_assistant_provider_requests_total", "provider", m.assistantCounts)
+	writeLabelledCounter(&b, "hank_remote_assistant_provider_errors_total", "provider", m.assistantErrors)
 
 	keys := make([]string, 0, len(m.commandLatency))
 	for key := range m.commandLatency {
@@ -86,6 +131,22 @@ func (m *Metrics) RenderPrometheus() string {
 		fmt.Fprintf(&b, "hank_remote_command_latency_seconds_sum{command=%q} %.6f\n", key, total)
 		fmt.Fprintf(&b, "hank_remote_command_latency_seconds_count{command=%q} %d\n", key, m.commandCounts[key])
 	}
+	keys = keys[:0]
+	for key := range m.httpLatency {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(&b, "hank_remote_http_latency_seconds_sum{route=%q} %.6f\n", key, m.httpLatency[key].Seconds())
+		fmt.Fprintf(&b, "hank_remote_http_latency_seconds_count{route=%q} %d\n", key, m.httpCounts[key])
+	}
+	fmt.Fprintf(&b, "hank_remote_relay_latency_seconds_sum %.6f\n", m.relayLatency.Seconds())
+	fmt.Fprintf(&b, "hank_remote_relay_latency_seconds_count %d\n", m.relayCount)
+	fmt.Fprintf(&b, "hank_remote_relay_failures_total %d\n", m.relayFailures)
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	fmt.Fprintf(&b, "hank_remote_go_alloc_bytes %d\n", mem.Alloc)
+	fmt.Fprintf(&b, "hank_remote_go_goroutines %d\n", runtime.NumGoroutine())
 
 	return b.String()
 }
