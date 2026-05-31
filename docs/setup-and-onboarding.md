@@ -347,6 +347,7 @@ Default schedule:
 Back up these volumes and files:
 
 - `hank_pgbackrest_repo`
+- `hank_note_attachments`
 - `hank_db_ops_state`
 - `hank_agent_files`
 - `hank_agent_notes`
@@ -354,6 +355,7 @@ Back up these volumes and files:
 - `/srv/hank-remote/HankServerside/.env.agent`
 
 `hank_postgres_data` is the live database volume. Once pgBackRest is running, `hank_pgbackrest_repo` is the database restore source.
+`hank_note_attachments` stores note attachment files outside Postgres and must be retained with the database backups.
 
 ## 11. Normal Updates
 

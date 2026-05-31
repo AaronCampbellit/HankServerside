@@ -92,6 +92,7 @@ scripts/doctor.sh
 `.env.agent` can contain SMB passwords and Home Assistant tokens. Keep both env files mode `0600`.
 
 Do not create host `data/` folders for Postgres, files, or notes. Docker named volumes are used by default.
+Include `hank_pgbackrest_repo`, `hank_note_attachments`, `hank_db_ops_state`, `hank_agent_files`, `hank_agent_notes`, `.env.cloud`, and `.env.agent` in server backups.
 
 ## Normal Updates
 

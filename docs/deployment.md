@@ -131,6 +131,7 @@ Admin flow:
 Back up:
 
 - `hank_pgbackrest_repo`
+- `hank_note_attachments`
 - `hank_db_ops_state`
 - `hank_agent_files`
 - `hank_agent_notes`
@@ -138,6 +139,7 @@ Back up:
 - `.env.agent`
 
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`; backups cannot be restored without that passphrase.
+Keep `hank_note_attachments` with the pgBackRest repository because note attachment files live outside Postgres.
 
 ## Verification
 
