@@ -453,9 +453,8 @@ async function issueToken(event) {
     <button type="button" class="secondary" data-copy-agent-env>Copy .env.agent</button>
     <pre>${escapeHTML(envFile)}</pre>
     <div class="token-meta">Then start the home connector:</div>
-    <code>install -m 600 /dev/null .env.agent</code>
-    <code>nano .env.agent</code>
-    <code>docker compose --env-file .env.cloud --profile agent up -d agent</code>`;
+    <code>pbpaste | ssh &lt;server-user&gt;@&lt;server-host&gt; 'cd /srv/hank-remote/HankServerside &amp;&amp; scripts/install-agent-env.sh'</code>
+    <code>ssh &lt;server-user&gt;@&lt;server-host&gt; 'cd /srv/hank-remote/HankServerside &amp;&amp; scripts/doctor.sh'</code>`;
   await Promise.all([loadAgents(), loadTokens(homeID)]);
   showToast("Setup file created.");
 }

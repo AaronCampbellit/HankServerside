@@ -8,10 +8,14 @@ The full current setup and onboarding flow is here:
 
 ## Fresh Install Summary
 
-1. Clone the repo into:
+1. Clone the repo into `/srv/hank-remote/HankServerside`:
 
 ```bash
-/srv/hank-remote/HankServerside
+sudo mkdir -p /srv/hank-remote
+sudo chown "$USER":"$USER" /srv/hank-remote
+cd /srv/hank-remote
+git clone <your-hankserverside-repo-url> HankServerside
+cd /srv/hank-remote/HankServerside
 ```
 
 2. Bootstrap the cloud stack:
@@ -60,24 +64,26 @@ Use the configured `HANK_REMOTE_CLOUD_HOST_PORT` if it is not `18080`.
 
 The first registration creates the singleton Home and admin membership. Public registration is disabled after that first setup.
 
-6. In the dashboard, create the agent setup token and paste the generated block into:
+6. In the dashboard, create the agent setup token, copy the generated `.env.agent` block, then install it on the server.
+
+From your Mac, with the copied block in your clipboard:
+
+```bash
+pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside && scripts/install-agent-env.sh'
+```
+
+Or paste it manually inside an SSH session:
 
 ```bash
 cd /srv/hank-remote/HankServerside
 nano .env.agent
 chmod 600 .env.agent
-```
-
-7. Start the agent:
-
-```bash
-cd /srv/hank-remote/HankServerside
 docker compose --env-file .env.cloud --profile agent up -d agent
 ```
 
-8. Open `/dashboard/storage`, run the first manual backup, and then run a restore test after the backup exists.
+7. Open `/dashboard/storage`, run the first manual backup, and then run a restore test after the backup exists.
 
-9. Run a final doctor check:
+8. Run a final doctor check:
 
 ```bash
 cd /srv/hank-remote/HankServerside

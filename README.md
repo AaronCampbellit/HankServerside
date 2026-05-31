@@ -144,12 +144,16 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
 For a production-style first install on one server, use the guided Compose bootstrap:
 
 ```bash
+sudo mkdir -p /srv/hank-remote
+sudo chown "$USER":"$USER" /srv/hank-remote
+cd /srv/hank-remote
+git clone <your-hankserverside-repo-url> HankServerside
 cd /srv/hank-remote/HankServerside
 scripts/bootstrap-first-run.sh
 scripts/doctor.sh
 ```
 
-That creates `.env.cloud`, runs migrations, starts `postgres`, `cloud`, and `db-ops`, and verifies health/readiness. The default host bind is `127.0.0.1:18080` for Cloudflare Tunnel or a local reverse proxy. After the first admin registers, create the connector setup file in the dashboard, save it as `.env.agent`, start the agent profile, and run `scripts/doctor.sh` again.
+That creates `.env.cloud`, runs migrations, starts `postgres`, `cloud`, and `db-ops`, and verifies health/readiness. The default host bind is `127.0.0.1:18080` for Cloudflare Tunnel or a local reverse proxy. After the first admin registers, create the connector setup file in the dashboard and run `scripts/install-agent-env.sh` with the generated `.env.agent` block.
 
 For local development without Compose:
 
@@ -271,10 +275,10 @@ scripts/doctor.sh
 
 4. Point Cloudflare Tunnel or your reverse proxy at your chosen host bind, for example `http://127.0.0.1:18080` or `http://<server-ip>:18080`.
 5. Open the public URL, register the first admin account, and issue an agent token. Public registration is disabled after this first setup.
-6. Copy the generated `.env.agent` block from the dashboard into `.env.agent`, adjust Home Assistant or SMB values if needed, then start the agent profile:
+6. Copy the generated `.env.agent` block from the dashboard, then install it and start the agent profile:
 
 ```bash
-docker compose --env-file .env.cloud --profile agent up -d agent
+pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside && scripts/install-agent-env.sh'
 ```
 
 ## Current Notes

@@ -252,7 +252,15 @@ Registration is disabled after this first setup. Additional users should be adde
 
 In the dashboard, create an agent setup token from the Home agent section. The token is shown once as a full `.env.agent` block.
 
-Paste that block into:
+Copy that block, then install it on the server. From your Mac, with the copied block in your clipboard:
+
+```bash
+pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside && scripts/install-agent-env.sh'
+```
+
+The helper writes `.env.agent` with mode `0600` and starts the Compose `agent` profile.
+
+Or paste it manually inside an SSH session:
 
 ```bash
 cd /srv/hank-remote/HankServerside
