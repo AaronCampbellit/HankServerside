@@ -19,6 +19,8 @@ These files are production-safe and should be committed with the backend repair 
 - `scripts/restore-proof.sh`: restore proof report against `postgres-restore`.
 - `scripts/query-telemetry-report.sh`: top query report from `pg_stat_statements`.
 - `scripts/metrics-assert.sh`: authenticated metrics coverage assertion.
+- `scripts/bootstrap-first-run.sh`: fresh-server first boot for demo and production-like installs.
+- `scripts/doctor.sh`: post-bootstrap and post-update health check.
 
 ## Demo-Only Private Inputs
 
@@ -63,6 +65,14 @@ export HANK_REMOTE_CLOUD_ENV_FILE=".env.cloud"
 ## Future Demo Run Order
 
 Run this sequence after the demo stack is up, the agent is online, Home Assistant is reachable, and two file sources are configured with synthetic test data only:
+
+```bash
+HANK_REMOTE_BOOTSTRAP_NONINTERACTIVE=true \
+HANK_REMOTE_BOOTSTRAP_HOST_BIND=127.0.0.1 \
+HANK_REMOTE_BOOTSTRAP_HOST_PORT=18080 \
+scripts/bootstrap-first-run.sh
+scripts/doctor.sh
+```
 
 ```bash
 make fmt

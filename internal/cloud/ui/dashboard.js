@@ -18,6 +18,8 @@ const els = {
   homeCount: document.getElementById("home-count"),
   agentList: document.getElementById("agent-list"),
   agentCount: document.getElementById("agent-count"),
+  setupStatus: document.getElementById("setup-status"),
+  setupChecklist: document.getElementById("setup-checklist"),
   tokenForm: document.getElementById("token-form"),
   tokenHome: document.getElementById("token-home"),
   tokenAgentID: document.getElementById("token-agent-id"),
@@ -103,9 +105,9 @@ function agentEnvFile(payload, home) {
     `HANK_REMOTE_AGENT_HOME_NAME=${dotenvValue(home?.name || "Home")}`,
     "HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent",
     "",
-    "# Optional Home Assistant connection.",
-    "HANK_REMOTE_HA_BASE_URL=http://homeassistant:8123",
-    "HANK_REMOTE_HA_TOKEN=replace-with-home-assistant-token",
+    "# Optional Home Assistant connection. Configure later from Settings > Connections.",
+    "HANK_REMOTE_HA_BASE_URL=",
+    "HANK_REMOTE_HA_TOKEN=",
     "HANK_REMOTE_HA_TIMEOUT_SECONDS=10",
     "",
     "# Optional SMB connection. Leave blank to use the Docker files volume.",
@@ -125,6 +127,7 @@ function agentEnvFile(payload, home) {
     "HANK_REMOTE_MEDIA_GRAMATON_USERNAME=",
     "HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=",
     "HANK_REMOTE_MEDIA_DESTINATION_PATH=",
+    "HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION=true",
   ].join("\n");
 }
 
@@ -132,6 +135,7 @@ function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
   els.sessionMeta.textContent = "Hank Remote account is active.";
+  renderSetupChecklist();
 }
 
 function renderHomes() {
@@ -144,6 +148,7 @@ function renderHomes() {
     option.textContent = "No home yet";
     option.value = "";
     els.tokenHome.appendChild(option);
+    renderSetupChecklist();
     return;
   }
 
@@ -174,6 +179,7 @@ function renderHomes() {
     els.tokenHome.appendChild(option);
   });
   syncTokenDefaults();
+  renderSetupChecklist();
 }
 
 function renderAgents() {
@@ -182,6 +188,7 @@ function renderAgents() {
   if (!state.agents.length) {
     els.agentList.className = "card-list empty-state";
     els.agentList.textContent = "The home connector has not been set up yet.";
+    renderSetupChecklist();
     return;
   }
   els.agentList.className = "card-list";
@@ -203,6 +210,7 @@ function renderAgents() {
     `;
     els.agentList.appendChild(card);
   });
+  renderSetupChecklist();
 }
 
 function renderTokens(homeID) {
@@ -210,11 +218,13 @@ function renderTokens(homeID) {
   if (!homeID) {
     els.tokenList.className = "card-list empty-state";
     els.tokenList.textContent = "Choose a home to see setup files.";
+    renderSetupChecklist();
     return;
   }
   if (!tokens.length) {
     els.tokenList.className = "card-list empty-state";
     els.tokenList.textContent = "No setup files have been created for this home yet.";
+    renderSetupChecklist();
     return;
   }
   els.tokenList.className = "card-list";
@@ -252,6 +262,7 @@ function renderTokens(homeID) {
     }
     els.tokenList.appendChild(wrapper);
   });
+  renderSetupChecklist();
 }
 
 function renderSync() {
@@ -272,6 +283,82 @@ function renderSync() {
       <div>${escapeHTML(value)}</div>
     </div>
   `).join("");
+  renderSetupChecklist();
+}
+
+function renderSetupChecklist() {
+  if (!els.setupChecklist || !els.setupStatus) {
+    return;
+  }
+  const home = state.homes[0] || null;
+  const tokens = home ? (state.tokensByHome.get(home.id) || []) : [];
+  const hasActiveToken = tokens.some((token) => !token.revoked_at);
+  const agentOnline = state.agents.some((agent) => String(agent.status || "").toLowerCase() === "online");
+  const profiles = state.sync?.profiles || {};
+  const hasConnectionProfile = Object.values(profiles).some((profile) => Boolean(profile?.updated_at || profile?.last_backup_at || profile?.status));
+  const items = [
+    {
+      title: "Cloud",
+      detail: state.user ? "Admin account active" : "Register the first admin",
+      done: Boolean(state.user),
+      href: "/",
+      action: "Open",
+    },
+    {
+      title: "Setup File",
+      detail: hasActiveToken ? "Connector file issued" : "Create the connector file",
+      done: hasActiveToken,
+      href: "#",
+      action: "Create",
+      onClick: () => document.querySelector(".setup-file-panel")?.setAttribute("open", ""),
+    },
+    {
+      title: "Connector",
+      detail: agentOnline ? "Home connector online" : "Start the agent container",
+      done: agentOnline,
+      href: "#",
+      action: "Check",
+      onClick: () => document.getElementById("agent-list")?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    },
+    {
+      title: "Connections",
+      detail: hasConnectionProfile ? "Saved connection profile present" : "Add Home Assistant or SMB",
+      done: hasConnectionProfile,
+      href: "/dashboard/settings#connections",
+      action: "Open",
+    },
+    {
+      title: "Backups",
+      detail: "Run the first backup and restore test",
+      done: false,
+      href: "/dashboard/settings#backups",
+      action: "Open",
+    },
+  ];
+  const doneCount = items.filter((item) => item.done).length;
+  const nextIndex = items.findIndex((item) => !item.done);
+  els.setupStatus.textContent = `${doneCount}/${items.length} done`;
+  els.setupStatus.className = doneCount >= 4 ? "pill" : "pill offline";
+  els.setupChecklist.innerHTML = items.map((item, index) => `
+    <div class="setup-checklist-item">
+      <span class="status-chip ${item.done ? "" : "offline"}">${item.done ? "Done" : index === nextIndex ? "Next" : "Open"}</span>
+      <div>
+        <div class="setup-checklist-title">${escapeHTML(item.title)}</div>
+        <div class="meta">${escapeHTML(item.detail)}</div>
+      </div>
+      <a class="ops-card manage-link" href="${escapeHTML(item.href)}" data-setup-index="${index}">${escapeHTML(item.action)}</a>
+    </div>
+  `).join("");
+  els.setupChecklist.querySelectorAll("[data-setup-index]").forEach((link) => {
+    const item = items[Number.parseInt(link.dataset.setupIndex || "0", 10)];
+    if (!item?.onClick) {
+      return;
+    }
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      item.onClick();
+    });
+  });
 }
 
 function syncTokenDefaults() {
@@ -366,6 +453,8 @@ async function issueToken(event) {
     <button type="button" class="secondary" data-copy-agent-env>Copy .env.agent</button>
     <pre>${escapeHTML(envFile)}</pre>
     <div class="token-meta">Then start the home connector:</div>
+    <code>install -m 600 /dev/null .env.agent</code>
+    <code>nano .env.agent</code>
     <code>docker compose --env-file .env.cloud --profile agent up -d agent</code>`;
   await Promise.all([loadAgents(), loadTokens(homeID)]);
   showToast("Setup file created.");

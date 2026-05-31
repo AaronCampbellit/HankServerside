@@ -41,9 +41,37 @@ They are ignored by git. Keep real passwords, tokens, and backup encryption pass
 
 Docker Compose uses those repo-root env files directly. The only file left under `configs/` is `configs/pgbackrest.conf`, which is a real pgBackRest config asset, not an env template.
 
-## 3. Create `.env.cloud`
+## 3. Recommended Bootstrap
 
-Create this file before first boot:
+On a fresh server, use the bootstrap script. It creates `.env.cloud`, builds the first-boot images, starts Postgres, runs migrations, starts `cloud` and `db-ops`, and checks `/healthz` plus `/readyz`.
+
+```bash
+cd /srv/hank-remote/HankServerside
+scripts/bootstrap-first-run.sh
+```
+
+For an unattended install, set values before running the script:
+
+```bash
+cd /srv/hank-remote/HankServerside
+HANK_REMOTE_BOOTSTRAP_NONINTERACTIVE=true \
+HANK_REMOTE_BOOTSTRAP_HOST_BIND=127.0.0.1 \
+HANK_REMOTE_BOOTSTRAP_HOST_PORT=18080 \
+scripts/bootstrap-first-run.sh
+```
+
+The bootstrap default bind is `127.0.0.1`, which is the safe setting for Cloudflare Tunnel or a local reverse proxy on the same server. Use `HANK_REMOTE_BOOTSTRAP_HOST_BIND=0.0.0.0` only when the cloud HTTP port must be reachable directly on the server network.
+
+Run the doctor after bootstrap and after later updates:
+
+```bash
+cd /srv/hank-remote/HankServerside
+scripts/doctor.sh
+```
+
+## 4. Manual `.env.cloud` Reference
+
+Use this only when you are not using `scripts/bootstrap-first-run.sh`. Create this file before first boot:
 
 ```bash
 cd /srv/hank-remote/HankServerside
@@ -55,7 +83,7 @@ Use this shape:
 
 ```env
 HANK_REMOTE_CLOUD_ADDR=:8080
-HANK_REMOTE_CLOUD_HOST_BIND=0.0.0.0
+HANK_REMOTE_CLOUD_HOST_BIND=127.0.0.1
 HANK_REMOTE_CLOUD_HOST_PORT=18080
 
 POSTGRES_DB=hankremote
@@ -144,13 +172,17 @@ HANK_REMOTE_CLOUD_HOST_PORT=18081
 
 Important: run Compose with `--env-file .env.cloud`. The stack requires `.env.cloud`, and Compose needs that flag for host bind and port interpolation.
 
-## 4. First Boot
+## 5. Manual First Boot
 
-Start only the first-boot services:
+If you created `.env.cloud` manually, build and start only the first-boot services:
 
 ```bash
 cd /srv/hank-remote/HankServerside
-docker compose --env-file .env.cloud up --build -d
+docker compose --env-file .env.cloud build postgres cloud db-ops
+docker compose --env-file .env.cloud up -d postgres
+docker compose --env-file .env.cloud run --rm cloud /usr/local/bin/hank-remote-cloud migrate up
+docker compose --env-file .env.cloud run --rm cloud /usr/local/bin/hank-remote-cloud migrate status --strict
+docker compose --env-file .env.cloud up -d cloud db-ops
 docker compose --env-file .env.cloud ps
 ```
 
@@ -180,7 +212,7 @@ curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" \
 
 Do not expose unauthenticated `/metrics` to the public internet. `/healthz` and `/readyz` stay unauthenticated for deployment checks.
 
-## 5. Public URL
+## 6. Public URL
 
 Point Cloudflare Tunnel or your reverse proxy at the cloud service:
 
@@ -203,7 +235,7 @@ The agent authenticates to `/ws/agent` with `Authorization: Bearer <agent-token>
 
 Postgres is not published to the host. It stays on private Docker networks.
 
-## 6. First Admin
+## 7. First Admin
 
 Open the public Hank Remote URL.
 
@@ -216,7 +248,7 @@ On a fresh database:
 
 Registration is disabled after this first setup. Additional users should be added from the dashboard invitation flow.
 
-## 7. Create `.env.agent`
+## 8. Create `.env.agent`
 
 In the dashboard, create an agent setup token from the Home agent section. The token is shown once as a full `.env.agent` block.
 
@@ -239,8 +271,8 @@ HANK_REMOTE_AGENT_TOKEN=replace-with-issued-token
 HANK_REMOTE_AGENT_HOME_NAME=Home
 HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent
 
-HANK_REMOTE_HA_BASE_URL=http://homeassistant:8123
-HANK_REMOTE_HA_TOKEN=replace-with-home-assistant-token
+HANK_REMOTE_HA_BASE_URL=
+HANK_REMOTE_HA_TOKEN=
 HANK_REMOTE_HA_TIMEOUT_SECONDS=10
 
 HANK_REMOTE_SMB_HOST=
@@ -267,9 +299,11 @@ Keep this value unchanged for the single-server Compose deployment:
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-Leave the SMB values blank unless you are using SMB. When SMB is blank, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For multiple SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
+Leave Home Assistant and SMB values blank during first start if you want to enter them from the dashboard. After the agent is online, use Settings > Connections to save Home Assistant and SMB credentials; the agent persists those values back into `.env.agent`.
 
-## 8. Start The Agent
+When SMB is blank, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For multiple SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
+
+## 9. Start The Agent
 
 After `.env.agent` exists:
 
@@ -287,7 +321,7 @@ docker compose --env-file .env.cloud --profile agent logs -f agent
 
 The dashboard should show the Home agent as online.
 
-## 9. Storage And Backups
+## 10. Storage And Backups
 
 Open `/dashboard/storage` as an admin.
 
@@ -319,7 +353,7 @@ Back up these volumes and files:
 
 `hank_postgres_data` is the live database volume. Once pgBackRest is running, `hank_pgbackrest_repo` is the database restore source.
 
-## 10. Normal Updates
+## 11. Normal Updates
 
 After the agent is active, update the stack with the agent profile:
 
@@ -334,6 +368,7 @@ Check status:
 ```bash
 docker compose --env-file .env.cloud --profile agent ps
 curl http://127.0.0.1:18080/readyz
+scripts/doctor.sh
 ```
 
 Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.

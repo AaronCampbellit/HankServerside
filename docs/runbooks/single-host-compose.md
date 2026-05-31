@@ -35,8 +35,9 @@ Use `docker compose --env-file .env.cloud ...` for deployment commands so Compos
 
 ```bash
 cd /srv/hank-remote/HankServerside
-docker compose --env-file .env.cloud up --build -d
+scripts/bootstrap-first-run.sh
 docker compose --env-file .env.cloud ps
+scripts/doctor.sh
 ```
 
 Expected services:
@@ -46,6 +47,16 @@ Expected services:
 - `cloud`
 
 The `agent` is profile-gated and should stay stopped until `.env.agent` exists.
+
+Manual first boot without the bootstrap script must run migrations before starting `cloud` normally:
+
+```bash
+docker compose --env-file .env.cloud build postgres cloud db-ops
+docker compose --env-file .env.cloud up -d postgres
+docker compose --env-file .env.cloud run --rm cloud /usr/local/bin/hank-remote-cloud migrate up
+docker compose --env-file .env.cloud run --rm cloud /usr/local/bin/hank-remote-cloud migrate status --strict
+docker compose --env-file .env.cloud up -d cloud db-ops
+```
 
 ## Bootstrap
 
@@ -70,6 +81,7 @@ curl http://127.0.0.1:18080/healthz
 curl http://127.0.0.1:18080/readyz
 curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" http://127.0.0.1:18080/metrics | head
 docker compose --env-file .env.cloud --profile agent ps
+scripts/doctor.sh
 ```
 
 Use the configured `HANK_REMOTE_CLOUD_HOST_PORT` if it is not `18080`.
@@ -103,6 +115,7 @@ Rebuild after pulling changes:
 cd /srv/hank-remote/HankServerside
 git pull
 docker compose --env-file .env.cloud --profile agent up --build -d
+scripts/doctor.sh
 ```
 
 ## Storage Notes

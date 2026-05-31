@@ -1053,6 +1053,28 @@ button.button-link {
   padding: 10px 12px;
 }
 
+.setup-checklist {
+  display: grid;
+  gap: 8px;
+}
+
+.setup-checklist-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.setup-checklist-title {
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
 .card-head {
   display: flex;
   justify-content: space-between;
@@ -2961,6 +2983,7 @@ button:disabled {
 
   .tool-grid,
   .tableish-row,
+  .setup-checklist-item,
   .file-server-grid,
   .file-command-bar,
   .file-location-row,

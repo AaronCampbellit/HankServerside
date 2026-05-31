@@ -141,6 +141,18 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
 
 ## Quick Start
 
+For a production-style first install on one server, use the guided Compose bootstrap:
+
+```bash
+cd /srv/hank-remote/HankServerside
+scripts/bootstrap-first-run.sh
+scripts/doctor.sh
+```
+
+That creates `.env.cloud`, runs migrations, starts `postgres`, `cloud`, and `db-ops`, and verifies health/readiness. The default host bind is `127.0.0.1:18080` for Cloudflare Tunnel or a local reverse proxy. After the first admin registers, create the connector setup file in the dashboard, save it as `.env.agent`, start the agent profile, and run `scripts/doctor.sh` again.
+
+For local development without Compose:
+
 1. Install dependencies:
 
 ```bash
@@ -222,7 +234,7 @@ After that, repo-local commands like `docker compose up --build` will prefer the
 
 ## Docker Compose
 
-This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The cloud publishes on `0.0.0.0:18080` by default so the server IP can reach it directly; put a firewall, reverse proxy, or Cloudflare Tunnel in front of it for external access.
+This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The bootstrap path publishes the cloud on `127.0.0.1:18080` by default for Cloudflare Tunnel or a same-host reverse proxy. Use `0.0.0.0` only when the server network must reach the cloud port directly.
 
 Full setup and onboarding docs live in `docs/setup-and-onboarding.md`.
 
@@ -250,10 +262,11 @@ HANK_REMOTE_CLOUD_HOST_PORT=18081
 
 The agent service is behind the `agent` Compose profile, so it does not start until you issue a real token.
 
-3. Build and start the first-boot services:
+3. Build, migrate, and start the first-boot services:
 
 ```bash
-docker compose --env-file .env.cloud up --build -d
+scripts/bootstrap-first-run.sh
+scripts/doctor.sh
 ```
 
 4. Point Cloudflare Tunnel or your reverse proxy at your chosen host bind, for example `http://127.0.0.1:18080` or `http://<server-ip>:18080`.

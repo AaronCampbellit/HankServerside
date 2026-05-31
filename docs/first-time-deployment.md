@@ -14,28 +14,30 @@ The full current setup and onboarding flow is here:
 /srv/hank-remote/HankServerside
 ```
 
-2. Create the private cloud env file:
+2. Bootstrap the cloud stack:
 
 ```bash
 cd /srv/hank-remote/HankServerside
-nano .env.cloud
-chmod 600 .env.cloud
+scripts/bootstrap-first-run.sh
 ```
 
-It must include real values for:
+For Cloudflare Tunnel or a local reverse proxy, the default bind is `127.0.0.1:18080`. For unattended setup:
 
-- `POSTGRES_PASSWORD`
-- `HANK_REMOTE_CLOUD_DATABASE_URL`
-- `HANK_REMOTE_DB_OPS_INTENT_SECRET`
-- `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`
-- `HANK_REMOTE_DB_OPS_RESTORE_DATABASE_URL`
+```bash
+HANK_REMOTE_BOOTSTRAP_NONINTERACTIVE=true \
+HANK_REMOTE_BOOTSTRAP_HOST_BIND=127.0.0.1 \
+HANK_REMOTE_BOOTSTRAP_HOST_PORT=18080 \
+scripts/bootstrap-first-run.sh
+```
 
-3. Start first boot:
+The script creates `.env.cloud`, builds `postgres`, `cloud`, and `db-ops`, runs migrations, starts the first-boot services, and checks health/readiness.
+
+3. Check the stack:
 
 ```bash
 cd /srv/hank-remote/HankServerside
-docker compose --env-file .env.cloud up --build -d
 docker compose --env-file .env.cloud ps
+scripts/doctor.sh
 ```
 
 Expected services:
@@ -75,6 +77,13 @@ docker compose --env-file .env.cloud --profile agent up -d agent
 
 8. Open `/dashboard/storage`, run the first manual backup, and then run a restore test after the backup exists.
 
+9. Run a final doctor check:
+
+```bash
+cd /srv/hank-remote/HankServerside
+scripts/doctor.sh
+```
+
 ## Env File Locations
 
 - cloud secrets: `/srv/hank-remote/HankServerside/.env.cloud`
@@ -92,4 +101,5 @@ After the agent is active:
 cd /srv/hank-remote/HankServerside
 git pull
 docker compose --env-file .env.cloud --profile agent up --build -d
+scripts/doctor.sh
 ```

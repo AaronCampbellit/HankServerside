@@ -26,11 +26,13 @@ This is a singleton deployment:
 
 ## Network
 
-Default public-facing host bind:
+Bootstrap default host bind for Cloudflare Tunnel or a local reverse proxy:
 
 ```text
-0.0.0.0:18080
+127.0.0.1:18080
 ```
+
+Use `0.0.0.0:18080` only when the cloud HTTP port must be reachable directly on the server network.
 
 Default container listener:
 
@@ -74,12 +76,23 @@ docker compose --env-file .env.cloud ...
 
 That matters because the stack requires `.env.cloud`, and Compose host-port interpolation also needs it as the Compose env file.
 
+For manual first boot without the bootstrap script, run migrations before starting `cloud` normally:
+
+```bash
+docker compose --env-file .env.cloud build postgres cloud db-ops
+docker compose --env-file .env.cloud up -d postgres
+docker compose --env-file .env.cloud run --rm cloud /usr/local/bin/hank-remote-cloud migrate up
+docker compose --env-file .env.cloud run --rm cloud /usr/local/bin/hank-remote-cloud migrate status --strict
+docker compose --env-file .env.cloud up -d cloud db-ops
+```
+
 ## First Boot
 
 ```bash
 cd /srv/hank-remote/HankServerside
-docker compose --env-file .env.cloud up --build -d
+scripts/bootstrap-first-run.sh
 docker compose --env-file .env.cloud ps
+scripts/doctor.sh
 ```
 
 Expected first-boot services:
@@ -133,6 +146,7 @@ curl http://127.0.0.1:18080/healthz
 curl http://127.0.0.1:18080/readyz
 curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" http://127.0.0.1:18080/metrics | head
 docker compose --env-file .env.cloud --profile agent ps
+scripts/doctor.sh
 ```
 
 Use the configured `HANK_REMOTE_CLOUD_HOST_PORT` if it is not `18080`.
@@ -143,4 +157,5 @@ Use the configured `HANK_REMOTE_CLOUD_HOST_PORT` if it is not `18080`.
 cd /srv/hank-remote/HankServerside
 git pull
 docker compose --env-file .env.cloud --profile agent up --build -d
+scripts/doctor.sh
 ```
