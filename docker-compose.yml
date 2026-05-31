@@ -149,6 +149,7 @@ services:
     image: hankserverside
     profiles:
       - agent
+    user: "${HANK_REMOTE_AGENT_CONTAINER_USER:-0:0}"
     logging: *default-logging
     env_file:
       - path: ./.env.agent

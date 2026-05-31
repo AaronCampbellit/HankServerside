@@ -262,6 +262,8 @@ chmod 600 .env.agent
 
 `.env.agent` can contain Home Assistant tokens, SMB usernames/passwords, media-service credentials, and the Hank Remote agent token. Treat it as a secret file and keep mode `0600`.
 
+The Compose agent container is allowed to update the bind-mounted `.env.agent` file so Settings > Connections can persist Home Assistant and SMB credentials after first start. Keep the host file `0600`; only set `HANK_REMOTE_AGENT_CONTAINER_USER` if you also manage `.env.agent` and agent volume ownership for that custom container user.
+
 The generated file should look like this:
 
 ```env

@@ -25,6 +25,8 @@ Protect them after every edit:
 chmod 600 .env.cloud .env.agent
 ```
 
+The agent service can update `.env.agent` from inside the container so dashboard connection changes persist. If you override `HANK_REMOTE_AGENT_CONTAINER_USER`, make sure that custom user can write `.env.agent` and the agent volumes.
+
 Compose file:
 
 - `docker-compose.yml`
