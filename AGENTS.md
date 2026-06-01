@@ -1,4 +1,4 @@
-# Hank Remote Codex Guide
+# Hank Remote Agent Guide
 
 ## Project Intent
 
@@ -10,7 +10,7 @@ The target architecture is:
 - `Hank Remote Cloud`
 - `Hank Remote Agent` running inside the home network
 
-The app should talk only to the Hank cloud service over normal HTTPS/WebSocket connections. The home agent should maintain an outbound connection to the cloud and perform local work against Home Assistant and the NAS.
+The app should talk only to the Hank cloud service over normal HTTPS/WebSocket connections. The home agent maintains an outbound connection to the cloud and performs local work against Home Assistant, files, notes, and media sources.
 
 ## Repo Boundaries
 
@@ -31,16 +31,14 @@ Do not:
 - design around a VPN requirement
 - make the iPhone app speak SMB remotely once a higher-level file API exists
 
-## Current Layout
+## Current System Shape
 
-- `cmd/hank-remote-cloud`: public cloud entrypoint
-- `cmd/hank-remote-agent`: home agent entrypoint
-- `internal/cloud`: cloud runtime and agent registry
-- `internal/agent`: agent runtime and reconnect loop
-- `internal/protocol`: shared envelope and message types
-- `internal/config`: env-based config loading
-- `docs/architecture.md`: architecture notes
-- `README.md`: quick start and current scope
+- The first production target is a single-home self-hosted deployment, not multi-home SaaS or multi-node cloud clustering.
+- The cloud serves app/dashboard auth, home management, routing, relay, management UI, readiness, metrics, and storage operations.
+- The agent connects outbound to the cloud and owns local Home Assistant, file, notes, and media access.
+- PostgreSQL is the durable store for users, homes, agents, sessions, notes, assistant state, tokens, and operational metadata.
+- Schema work must use the repo's migration/status/drift-check path instead of hidden startup mutations.
+- The dashboard is an operator surface for setup, tokens, settings, storage, assistant controls, and troubleshooting.
 
 ## Product Direction
 
@@ -53,16 +51,15 @@ The desired user experience is:
 
 This should replace app-side protocol hacks with the cloud-and-agent remote-access path.
 
-## Near-Term Priorities
+## Current Priorities
 
-Work in this order unless the user says otherwise:
+Use the current task docs and repair plan rather than the old initial-build order.
 
-1. App auth and cloud-side user/home routing
-2. Agent registration persistence and token lifecycle
-3. Home Assistant proxy operations
-4. File API replacing direct remote SMB from the app
-5. Notes sync on top of the same relay
-6. Observability, retries, and integration tests
+1. Preserve the single-home cloud-and-agent model.
+2. Keep auth, authorization, database safety, and secret handling ahead of feature convenience.
+3. Continue the production-readiness work in `docs/backend-production-repair-plan.md`.
+4. Strengthen Home Assistant, file, notes, media, assistant, backup, and restore flows with tests.
+5. Keep operator setup and deployment docs aligned with real scripts and current behavior.
 
 ## Technical Principles
 
@@ -73,22 +70,26 @@ Work in this order unless the user says otherwise:
 - Prefer outbound-only home connectivity.
 - Keep protocol messages versioned from day one.
 - Start with simple JSON over HTTPS/WebSocket unless there is a strong reason to add more complexity.
+- Do not add multi-home, multi-cloud-node, or SaaS assumptions unless the user explicitly changes product scope.
 
-## Suggested Initial API Shape
+## Agent Change Guardrails
 
-When building the next layers, prefer commands at the level of user intent:
+For non-trivial features, bug fixes, cleanup, database work, security changes, or deployment changes, read `docs/agent-change-guardrails.md` before editing and use its security, database, cleanup, and validation checklist before finishing.
 
-- `homeassistant.fetch_states`
-- `homeassistant.call_service`
-- `files.list`
-- `files.download`
-- `files.upload`
-- `files.create_directory`
-- `files.rename`
-- `files.delete`
-- `notes.sync`
+## Project Layout
 
-Avoid remote APIs that simply tunnel raw SMB semantics into the phone app unless there is no reasonable abstraction.
+- `cmd/hank-remote-cloud`: public cloud service
+- `cmd/hank-remote-agent`: local home agent service
+- `cmd/hank-db-ops`: backup, restore-test, and storage operation worker
+- `internal/cloud`: auth, routing, relay, dashboard, readiness, metrics, and cloud handlers
+- `internal/agent`: reconnect loop, command dispatch, and local capability adapters
+- `internal/protocol`: shared wire contract, envelopes, command names, and payloads
+- `internal/store`: PostgreSQL persistence
+- `internal/migrations`: migration status and checksum checks
+- `internal/storageops`: backup/restore operation coordination
+- `internal/observability`: metrics aggregation
+- `docs/architecture.md`: system design notes
+- `docs/project-knowledge-index.md`: markdown index used by HankAI
 
 ## Local Development Commands
 
@@ -100,6 +101,7 @@ make fmt
 make build
 make run-cloud
 make run-agent
+make run-db-ops
 ```
 
 Equivalent direct commands:
@@ -110,6 +112,15 @@ gofmt -w ./cmd ./internal
 go build ./...
 go run ./cmd/hank-remote-cloud
 go run ./cmd/hank-remote-agent
+go run ./cmd/hank-db-ops
+```
+
+Database and deployment checks:
+
+```bash
+make migrate-status
+make schema-drift-check
+scripts/doctor.sh
 ```
 
 ## Configuration
@@ -141,15 +152,19 @@ When making meaningful changes:
 
 - run `gofmt -w ./cmd ./internal`
 - run `go build ./...`
+- run `go test ./...`
 - add or update tests when behavior changes
 
-For connection-flow changes, prefer tests for:
+For connection, auth, storage, or database changes, prefer tests for:
 
 - registration
 - heartbeat handling
 - reconnect behavior
 - unauthorized agent rejection
 - protocol decoding/encoding
+- cookie, bearer, CSRF, and role authorization behavior
+- migration status, schema drift, and store read/write behavior
+- file traversal, symlink containment, transfer retry, and destructive operation safety
 
 ## Coding Expectations
 
@@ -157,17 +172,8 @@ For connection-flow changes, prefer tests for:
 - Prefer standard library primitives unless a dependency clearly earns its place.
 - Add logs around connection lifecycle, routing decisions, and external service calls.
 - Keep cloud and agent responsibilities separate.
-- Avoid premature persistence layers until the routing/auth model is clear.
-
-## Good Next Tasks For Codex
-
-If a future session needs a concrete starting point, pick one of these:
-
-1. Add cloud-side persistence for registered agents and homes.
-2. Add authenticated app WebSocket or HTTP sessions to the cloud service.
-3. Add a Home Assistant client package in the agent and expose `fetch_states`.
-4. Add protocol request/response correlation for app commands.
-5. Add table-driven tests for the cloud register and heartbeat flow.
+- Keep user-facing APIs stable when changing cloud/agent internals.
+- Update docs when env vars, setup steps, routes, migrations, or operator workflows change.
 
 ## Reference Files
 
@@ -175,6 +181,10 @@ Read these first when starting work:
 
 - `README.md`
 - `docs/architecture.md`
+- `docs/agent-change-guardrails.md`
+- `docs/backend-production-repair-plan.md`
 - `internal/protocol/messages.go`
 - `internal/cloud/server.go`
 - `internal/agent/client.go`
+- `internal/store/store.go`
+- `internal/migrations/migrations.go`
