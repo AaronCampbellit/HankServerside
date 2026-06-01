@@ -272,7 +272,14 @@ function renderQuickLinks() {
   els.quickLinkAdd.hidden = !state.quickLinksCanEdit;
   if (!state.quickLinks.length) {
     els.quickLinksList.className = "quick-links-grid empty-state";
-    els.quickLinksList.textContent = "No quick links saved.";
+    els.quickLinksList.innerHTML = `
+      <div class="quick-links-empty-copy">
+        <strong>No quick links saved.</strong>
+        <span>${state.quickLinksCanEdit ? "Add links for dashboards, admin tools, and service pages." : "Ask an admin to add shared home links."}</span>
+      </div>
+      ${state.quickLinksCanEdit ? `<button type="button" class="secondary" data-quick-link-empty-add>Add Link</button>` : ""}
+    `;
+    els.quickLinksList.querySelector("[data-quick-link-empty-add]")?.addEventListener("click", () => showQuickLinkForm());
     return;
   }
 
@@ -614,10 +621,19 @@ async function loadQuickLinks() {
 }
 
 async function refreshQuickLinks() {
-  const payload = await api("/v1/home/quick-links/checks", { method: "POST", body: JSON.stringify({}) });
-  state.quickLinks = payload.links || [];
-  state.quickLinksCanEdit = Boolean(payload.can_edit);
-  renderQuickLinks();
+  const previousText = els.quickLinksRefresh.textContent;
+  els.quickLinksRefresh.disabled = true;
+  els.quickLinksRefresh.textContent = "Refreshing";
+  try {
+    const payload = await api("/v1/home/quick-links/checks", { method: "POST", body: JSON.stringify({}) });
+    state.quickLinks = payload.links || [];
+    state.quickLinksCanEdit = Boolean(payload.can_edit);
+    renderQuickLinks();
+    return payload;
+  } finally {
+    els.quickLinksRefresh.disabled = false;
+    els.quickLinksRefresh.textContent = previousText;
+  }
 }
 
 async function loadTokens(homeID) {
@@ -803,7 +819,9 @@ async function hydrate() {
     await loadTokens(els.tokenHome.value || state.homes[0]?.id || "");
     syncAutoRefresh();
     syncQuickLinksRefresh();
-    refreshQuickLinks().catch(() => {});
+    refreshQuickLinks().catch((error) => loadQuickLinks().catch(() => {
+      showToast(error.message || "Quick link status checks could not be refreshed.", true);
+    }));
   } catch (_) {
     window.location.replace("/");
   }
@@ -811,7 +829,12 @@ async function hydrate() {
 
 els.logoutButton.addEventListener("click", logout);
 els.homeForm.addEventListener("submit", createHome);
-els.quickLinksRefresh.addEventListener("click", () => refreshQuickLinks().catch((error) => showToast(error.message, true)));
+els.quickLinksRefresh.addEventListener("click", () => refreshQuickLinks()
+  .then(() => showToast("Quick links refreshed."))
+  .catch((error) => {
+    loadQuickLinks().catch(() => {});
+    showToast(error.message || "Quick link status checks could not be refreshed.", true);
+  }));
 els.quickLinkAdd.addEventListener("click", () => showQuickLinkForm());
 els.quickLinkForm.addEventListener("submit", saveQuickLink);
 els.quickLinkCancel.addEventListener("click", hideQuickLinkForm);

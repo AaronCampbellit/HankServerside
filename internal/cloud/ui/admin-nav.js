@@ -51,6 +51,13 @@
       searchOnly: true,
     },
     {
+      href: "/dashboard/settings#quick-links",
+      label: "Quick Links",
+      detail: "Add, reorder, and refresh shared homepage links.",
+      keywords: ["quick links", "links", "homepage links", "home links", "add link", "refresh links", "settings"],
+      searchOnly: true,
+    },
+    {
       href: "/dashboard/settings#people",
       label: "People Settings",
       detail: "Invite people, review members, and manage access.",

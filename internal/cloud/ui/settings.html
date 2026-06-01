@@ -38,6 +38,7 @@
         <section class="panel settings-index-panel" aria-label="Settings sections">
           <div class="settings-page-tabs" role="tablist" aria-label="Settings sections">
             <button type="button" class="settings-page-tab active" role="tab" aria-selected="true" data-settings-page-tab="home">Home</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="quick-links">Quick Links</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="people">People</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="connections">Connections</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="ai">AI</button>
@@ -48,6 +49,9 @@
 
         <section class="settings-frame-panel" data-settings-page-panel="home">
           <iframe class="settings-pane-frame" title="Home settings" data-src="/dashboard?pane=1&amp;embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="quick-links" hidden>
+          <iframe class="settings-pane-frame" title="Quick link settings" data-src="/dashboard?pane=1&amp;embedded=1#quick-links-panel"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="people" hidden>
           <iframe class="settings-pane-frame" title="People settings" data-src="/dashboard/home-users?pane=1&amp;embedded=1"></iframe>

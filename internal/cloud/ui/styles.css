@@ -1168,6 +1168,19 @@ button.button-link {
   font-size: 0.76rem;
 }
 
+.quick-links-grid.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quick-links-empty-copy {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
 .quick-link-form {
   display: grid;
   grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1.3fr) minmax(160px, 1fr) auto;

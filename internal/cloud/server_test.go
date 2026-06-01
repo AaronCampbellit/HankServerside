@@ -614,7 +614,7 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("dashboard.html read: %v", err)
 	}
 	body := string(dashboard)
-	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-link-form"`, `id="quick-link-add" type="button" class="secondary" hidden`, `id="quick-links-list"`} {
+	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-link-form"`, `id="quick-link-add" type="button" class="secondary" hidden`, `id="quick-links-list"`, `Add Link`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("dashboard quick links markup missing %q", expected)
 		}
@@ -630,9 +630,20 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("dashboard.js read: %v", err)
 	}
 	scriptBody := string(script)
-	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "refreshQuickLinks", "data-quick-link-edit"} {
+	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "refreshQuickLinks", "data-quick-link-edit", "data-quick-link-empty-add"} {
 		if !strings.Contains(scriptBody, expected) {
 			t.Fatalf("dashboard quick links script missing %q", expected)
+		}
+	}
+
+	settings, err := fs.ReadFile(uiAssets, "ui/settings.html")
+	if err != nil {
+		t.Fatalf("settings.html read: %v", err)
+	}
+	settingsBody := string(settings)
+	for _, expected := range []string{`data-settings-page-tab="quick-links"`, `data-settings-page-panel="quick-links"`, `#quick-links-panel`} {
+		if !strings.Contains(settingsBody, expected) {
+			t.Fatalf("settings quick links target missing %q", expected)
 		}
 	}
 }

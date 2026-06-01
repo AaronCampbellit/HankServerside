@@ -14,6 +14,8 @@ const els = {
 };
 
 const tabAliases = {
+  links: "quick-links",
+  quicklinks: "quick-links",
   backup: "backups",
   storage: "backups",
   openai: "ai",
