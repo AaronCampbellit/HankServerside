@@ -19,7 +19,6 @@
             <p class="eyebrow">Hank Remote</p>
           </div>
           <h1>Home Assistant</h1>
-          <p class="lede">Check devices and send Home Assistant commands through the home connector.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -53,7 +52,7 @@
             <span id="ha-dashboard-count" class="pill">0 Tiles</span>
           </div>
           <div class="tool-shell">
-            <div id="ha-dashboard" class="ha-dashboard-grid empty-state">Add entities from the list below.</div>
+            <div id="ha-dashboard" class="ha-dashboard-grid empty-state">Loading entities.</div>
           </div>
         </section>
 
@@ -63,47 +62,11 @@
             <span id="ha-entity-count" class="pill">Not Loaded</span>
           </div>
           <div class="tool-shell">
-            <div class="tool-actions">
-              <button type="button" id="ha-states-button">Refresh Entities</button>
-              <button type="button" id="ha-health-button" class="secondary">Check Health</button>
-            </div>
             <label>
               <span>Search Entities</span>
               <input id="ha-entity-search" type="search" placeholder="Kitchen light, temperature, garage" autocomplete="off">
             </label>
-            <div id="ha-entity-results" class="card-list empty-state">Refresh entities to search Home Assistant.</div>
-          </div>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Commands</h2>
-            <span class="pill">Advanced</span>
-          </div>
-          <div class="tool-shell">
-            <div class="three-up">
-              <label>
-                <span>Device ID</span>
-                <input id="ha-entity-id" type="text" placeholder="light.kitchen">
-              </label>
-              <label>
-                <span>Type</span>
-                <input id="ha-service-domain" type="text" placeholder="light">
-              </label>
-              <label>
-                <span>Service</span>
-                <input id="ha-service-name" type="text" placeholder="turn_on">
-              </label>
-            </div>
-            <div class="actions wrap">
-              <button type="button" id="ha-entity-button">Get Device</button>
-              <button type="button" id="ha-service-button">Send Command</button>
-            </div>
-            <label>
-              <span>Command Details</span>
-              <textarea id="ha-service-body" rows="5" placeholder='{"entity_id":"light.kitchen"}'></textarea>
-            </label>
-            <div id="ha-output" class="card-list empty-state" hidden></div>
+            <div id="ha-entity-results" class="card-list empty-state">Loading entities.</div>
           </div>
         </section>
       </main>

@@ -19,7 +19,6 @@
             <p class="eyebrow">Hank Remote</p>
           </div>
           <h1>File Server</h1>
-          <p class="lede">Browse, move, upload, and download home files through Hank Remote.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -77,6 +76,11 @@
           </div>
 
           <div class="file-command-bar" role="toolbar" aria-label="File tools">
+            <label class="file-command-source">
+              <span>SMB Share</span>
+              <select id="explorer-source-select"></select>
+            </label>
+            <span class="file-command-divider" aria-hidden="true"></span>
             <button type="button" id="files-upload-button">Add File</button>
             <button type="button" id="files-new-folder-button" class="secondary">Add Folder</button>
             <span class="file-command-divider" aria-hidden="true"></span>
@@ -240,7 +244,7 @@
       </dialog>
     </div>
 
-    <script src="/assets/file-server.js?v=20260601-cross-share-move" defer></script>
-    <script src="/assets/admin-nav.js?v=20260601-cross-share-move" defer></script>
+    <script src="/assets/file-server.js?v=20260601-file-loading-source" defer></script>
+    <script src="/assets/admin-nav.js?v=20260601-background-move-jobs" defer></script>
   </body>
 </html>

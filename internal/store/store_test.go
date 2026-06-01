@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -405,6 +406,117 @@ func TestBootstrapSingletonHomeCreatesAdminAndPermissions(t *testing.T) {
 	}
 	if !permissions.HomeAssistantEnabled || !permissions.FilesEnabled || !permissions.NotesEnabled {
 		t.Fatalf("expected all default permissions enabled, got %#v", permissions)
+	}
+}
+
+func TestHomeQuickLinksPersistAndReorder(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_quick_links", Email: "quick-links@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_quick_links", UserID: user.ID, Name: "Quick Links Home", CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := db.CreateHome(ctx, home); err != nil {
+		t.Fatalf("CreateHome: %v", err)
+	}
+
+	var tableName string
+	if err := db.queryRow(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'home_quick_links'`).Scan(&tableName); err != nil {
+		t.Fatalf("home_quick_links table missing: %v", err)
+	}
+
+	linkOne := domain.HomeQuickLink{
+		ID:                 "ql_one",
+		HomeID:             home.ID,
+		Title:              "Docker",
+		URL:                "http://docker.local:9000",
+		Description:        "Containers",
+		SortOrder:          10,
+		HealthCheckEnabled: true,
+		Status:             domain.QuickLinkStatusUnchecked,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		UpdatedBy:          user.ID,
+	}
+	linkTwo := domain.HomeQuickLink{
+		ID:                 "ql_two",
+		HomeID:             home.ID,
+		Title:              "GitHub",
+		URL:                "https://github.com",
+		SortOrder:          20,
+		HealthCheckEnabled: false,
+		Status:             domain.QuickLinkStatusDisabled,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		UpdatedBy:          user.ID,
+	}
+	if err := db.CreateHomeQuickLink(ctx, linkOne); err != nil {
+		t.Fatalf("CreateHomeQuickLink one: %v", err)
+	}
+	if err := db.CreateHomeQuickLink(ctx, linkTwo); err != nil {
+		t.Fatalf("CreateHomeQuickLink two: %v", err)
+	}
+
+	if count, err := db.CountHomeQuickLinks(ctx, home.ID); err != nil {
+		t.Fatalf("CountHomeQuickLinks: %v", err)
+	} else if count != 2 {
+		t.Fatalf("quick link count = %d, want 2", count)
+	}
+
+	links, err := db.ListHomeQuickLinks(ctx, home.ID)
+	if err != nil {
+		t.Fatalf("ListHomeQuickLinks: %v", err)
+	}
+	if len(links) != 2 || links[0].ID != linkOne.ID || links[1].ID != linkTwo.ID {
+		t.Fatalf("initial order = %#v", links)
+	}
+
+	checkedAt := now.Add(time.Minute)
+	updated, err := db.UpdateHomeQuickLinkStatus(ctx, home.ID, linkOne.ID, domain.QuickLinkStatusUp, http.StatusNoContent, &checkedAt, "")
+	if err != nil {
+		t.Fatalf("UpdateHomeQuickLinkStatus: %v", err)
+	}
+	if updated.Status != domain.QuickLinkStatusUp || updated.StatusCode != http.StatusNoContent || updated.LastCheckedAt == nil {
+		t.Fatalf("updated status = %#v", updated)
+	}
+
+	linkTwo.Title = "GitHub Main"
+	linkTwo.HealthCheckEnabled = true
+	linkTwo.Status = domain.QuickLinkStatusUnchecked
+	linkTwo.UpdatedAt = now.Add(2 * time.Minute)
+	linkTwo.UpdatedBy = user.ID
+	updated, err = db.UpdateHomeQuickLink(ctx, linkTwo)
+	if err != nil {
+		t.Fatalf("UpdateHomeQuickLink: %v", err)
+	}
+	if updated.Title != "GitHub Main" || !updated.HealthCheckEnabled {
+		t.Fatalf("updated link = %#v", updated)
+	}
+
+	if err := db.ReorderHomeQuickLinks(ctx, home.ID, []string{linkTwo.ID, linkOne.ID}); err != nil {
+		t.Fatalf("ReorderHomeQuickLinks: %v", err)
+	}
+	links, err = db.ListHomeQuickLinks(ctx, home.ID)
+	if err != nil {
+		t.Fatalf("ListHomeQuickLinks after reorder: %v", err)
+	}
+	if links[0].ID != linkTwo.ID || links[1].ID != linkOne.ID {
+		t.Fatalf("reordered links = %#v", links)
+	}
+
+	if err := db.DeleteHomeQuickLink(ctx, home.ID, linkTwo.ID); err != nil {
+		t.Fatalf("DeleteHomeQuickLink: %v", err)
+	}
+	if count, err := db.CountHomeQuickLinks(ctx, home.ID); err != nil {
+		t.Fatalf("CountHomeQuickLinks after delete: %v", err)
+	} else if count != 1 {
+		t.Fatalf("quick link count after delete = %d, want 1", count)
 	}
 }
 

@@ -81,6 +81,25 @@ type FileOperationJobResponse struct {
 	FilesDone  int64  `json:"files_done,omitempty"`
 }
 
+type FileOperationJobEvent struct {
+	JobID               string `json:"job_id"`
+	Status              string `json:"status"`
+	SourceID            string `json:"source_id,omitempty"`
+	DestinationSourceID string `json:"destination_source_id,omitempty"`
+	From                string `json:"from,omitempty"`
+	To                  string `json:"to,omitempty"`
+	IsDirectory         bool   `json:"is_directory,omitempty"`
+	BytesTotal          int64  `json:"bytes_total,omitempty"`
+	BytesDone           int64  `json:"bytes_done,omitempty"`
+	FilesTotal          int64  `json:"files_total,omitempty"`
+	FilesDone           int64  `json:"files_done,omitempty"`
+	ErrorMessage        string `json:"error_message,omitempty"`
+}
+
+type FilesMoveCancelRequest struct {
+	JobID string `json:"job_id"`
+}
+
 type FilesDeleteRequest struct {
 	SourceID    string `json:"source_id,omitempty"`
 	Path        string `json:"path"`

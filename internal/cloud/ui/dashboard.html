@@ -19,7 +19,6 @@
             <p class="eyebrow">Hank Remote</p>
           </div>
           <h1>Home</h1>
-          <p class="lede">Check the home connector, create setup files, and jump into the right tool or setting.</p>
         </div>
         <div class="hero-card">
           <div class="panel-head">
@@ -56,7 +55,42 @@
           <div id="agent-list" class="card-list empty-state">Connector status appears here.</div>
         </section>
 
-        <section class="panel wide-panel setup-checklist-panel">
+        <section id="quick-links-panel" class="panel wide-panel quick-links-panel">
+          <div class="panel-head">
+            <h2>Quick Links</h2>
+            <span class="quick-links-actions">
+              <span id="quick-links-count" class="pill">0 links</span>
+              <button id="quick-links-refresh" type="button" class="secondary">Refresh</button>
+              <button id="quick-link-add" type="button" class="secondary" hidden>Add</button>
+            </span>
+          </div>
+          <form id="quick-link-form" class="quick-link-form" hidden>
+            <input id="quick-link-id" type="hidden">
+            <label>
+              <span>Name</span>
+              <input id="quick-link-title" type="text" maxlength="80" placeholder="GitHub">
+            </label>
+            <label>
+              <span>URL</span>
+              <input id="quick-link-url" type="url" maxlength="2048" placeholder="https://github.com" required>
+            </label>
+            <label>
+              <span>Description</span>
+              <input id="quick-link-description" type="text" maxlength="180" placeholder="Code">
+            </label>
+            <label class="toggle-field">
+              <input id="quick-link-health" type="checkbox" checked>
+              <span>Status checks</span>
+            </label>
+            <div class="actions wrap">
+              <button type="submit">Save</button>
+              <button id="quick-link-cancel" type="button" class="secondary">Cancel</button>
+            </div>
+          </form>
+          <div id="quick-links-list" class="quick-links-grid empty-state">Loading links.</div>
+        </section>
+
+        <section id="setup-checklist-panel" class="panel wide-panel setup-checklist-panel">
           <div class="panel-head">
             <h2>First Setup</h2>
             <span id="setup-status" class="pill">Checking</span>
@@ -64,7 +98,7 @@
           <div id="setup-checklist" class="setup-checklist"></div>
         </section>
 
-        <details class="panel collapsible-panel setup-file-panel">
+        <details id="setup-file-panel" class="panel collapsible-panel setup-file-panel" hidden>
           <summary class="panel-head collapsible-panel-head">
             <h2>Setup File</h2>
             <span class="chevron" aria-hidden="true"></span>
@@ -94,7 +128,7 @@
           </div>
         </details>
 
-        <details id="health" class="panel collapsible-panel">
+        <details id="health" class="panel wide-panel collapsible-panel dashboard-health-panel" open>
           <summary class="panel-head collapsible-panel-head">
             <h2>Health</h2>
             <span class="collapsible-panel-actions">
@@ -103,41 +137,21 @@
             </span>
           </summary>
           <div class="collapsible-panel-body">
-            <div id="sync-summary" class="kv-grid"></div>
-            <div class="ops-grid compact-ops">
-              <a class="ops-card" href="/healthz" target="_blank" rel="noreferrer">Server</a>
-              <a class="ops-card" href="/readyz" target="_blank" rel="noreferrer">Database</a>
-              <a class="ops-card" href="/metrics" target="_blank" rel="noreferrer">Metrics</a>
-              <a class="ops-card" href="/docs/deployment" target="_blank" rel="noreferrer">Guide</a>
+            <div id="sync-summary" class="dashboard-health-grid"></div>
+            <div class="dashboard-health-actions">
+              <a class="ops-card manage-link" href="/dashboard/settings#connections">Connections</a>
+              <a class="ops-card manage-link" href="/dashboard/settings#backups" data-admin-only="true" hidden>Backups</a>
+              <a class="ops-card manage-link" href="/docs/deployment">Setup Guide</a>
             </div>
           </div>
         </details>
 
-        <details class="panel wide-panel collapsible-panel">
-          <summary class="panel-head collapsible-panel-head">
-            <h2>Settings</h2>
-            <span class="collapsible-panel-actions">
-              <span class="pill">Configure</span>
-              <span class="chevron" aria-hidden="true"></span>
-            </span>
-          </summary>
-          <div class="collapsible-panel-body">
-            <div class="ops-grid tool-link-grid">
-              <a class="ops-card" href="/dashboard/settings#home">Home</a>
-              <a class="ops-card" href="/dashboard/settings#people">People</a>
-              <a class="ops-card" href="/dashboard/settings#connections">Connections</a>
-              <a class="ops-card" href="/dashboard/settings#ai">AI</a>
-              <a class="ops-card" href="/dashboard/settings#backups" data-admin-only="true" hidden>Backups</a>
-              <a class="ops-card" href="/dashboard/settings#join-home">Join Home</a>
-            </div>
-          </div>
-        </details>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
-    <script src="/assets/dashboard.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/dashboard.js?v=20260601-health-panel" defer></script>
     <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
   </body>
 </html>

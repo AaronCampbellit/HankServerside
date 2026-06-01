@@ -190,10 +190,70 @@ func (s *Store) UpsertUserNote(ctx context.Context, note domain.UserNote) error 
 		note.UpdatedAt,
 		note.UpdatedBy,
 	)
+	if shouldRepairUserNotesPageTypeConstraint(note, err) {
+		if repairErr := s.repairUserNotesPageTypeConstraint(ctx); repairErr != nil {
+			return repairErr
+		}
+		_, err = s.exec(ctx, `INSERT INTO user_notes (
+			id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
+			revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			note_id = excluded.note_id,
+			owner_user_id = excluded.owner_user_id,
+			home_id = excluded.home_id,
+			parent_id = excluded.parent_id,
+			sort_order = excluded.sort_order,
+			title = excluded.title,
+			content = excluded.content,
+			body_markdown = excluded.body_markdown,
+			body_format = excluded.body_format,
+			page_type = excluded.page_type,
+			board_json = excluded.board_json,
+			revision = excluded.revision,
+			checksum = excluded.checksum,
+			crdt_state_json = excluded.crdt_state_json,
+			collab_version = excluded.collab_version,
+			deleted_at = excluded.deleted_at,
+			updated_at = excluded.updated_at,
+			updated_by = excluded.updated_by`,
+			note.ID,
+			note.NoteID,
+			note.OwnerUserID,
+			nullableText(note.HomeID),
+			nullableText(note.ParentID),
+			note.SortOrder,
+			note.Title,
+			noteBodyMarkdown(note),
+			noteBodyMarkdown(note),
+			noteBodyFormat(note),
+			note.PageType,
+			note.BoardJSON,
+			note.Revision,
+			note.Checksum,
+			note.CRDTStateJSON,
+			note.CollabVersion,
+			note.DeletedAt,
+			note.CreatedAt,
+			note.UpdatedAt,
+			note.UpdatedBy,
+		)
+	}
 	return err
 }
 
 func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.UserNote, operations []domain.NoteOperation) error {
+	err := s.saveUserNoteWithOperations(ctx, note, operations)
+	if shouldRepairUserNotesPageTypeConstraint(note, err) {
+		if repairErr := s.repairUserNotesPageTypeConstraint(ctx); repairErr != nil {
+			return repairErr
+		}
+		return s.saveUserNoteWithOperations(ctx, note, operations)
+	}
+	return err
+}
+
+func (s *Store) saveUserNoteWithOperations(ctx context.Context, note domain.UserNote, operations []domain.NoteOperation) error {
 	tx, err := s.beginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -274,6 +334,28 @@ func (s *Store) SaveUserNoteWithOperations(ctx context.Context, note domain.User
 	}
 
 	return tx.Commit()
+}
+
+func shouldRepairUserNotesPageTypeConstraint(note domain.UserNote, err error) bool {
+	if err == nil || note.PageType != "kanban" {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "user_notes_page_type_check") || strings.Contains(message, "violates check constraint")
+}
+
+func (s *Store) repairUserNotesPageTypeConstraint(ctx context.Context) error {
+	statements := []string{
+		`UPDATE user_notes SET page_type = 'kanban' WHERE page_type = 'board';`,
+		`ALTER TABLE user_notes DROP CONSTRAINT IF EXISTS user_notes_page_type_check;`,
+		`ALTER TABLE user_notes ADD CONSTRAINT user_notes_page_type_check CHECK (page_type IN ('text', 'kanban'));`,
+	}
+	for _, statement := range statements {
+		if _, err := s.exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func nullableExistingSessionID(ctx context.Context, tx *dbTx, sessionID string) (any, error) {

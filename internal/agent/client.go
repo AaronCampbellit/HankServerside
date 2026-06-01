@@ -32,6 +32,9 @@ type Client struct {
 	writeMu    sync.Mutex
 	uploadsMu  sync.Mutex
 	uploads    map[string]*uploadTransfer
+	movesMu    sync.Mutex
+	moves      map[string]context.CancelFunc
+	moveSlots  chan struct{}
 }
 
 func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, logger *slog.Logger) *Client {
@@ -65,7 +68,9 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 			notes:  notes,
 			config: newConfigManager(configPath, ha, files),
 		},
-		uploads: make(map[string]*uploadTransfer),
+		uploads:   make(map[string]*uploadTransfer),
+		moves:     make(map[string]context.CancelFunc),
+		moveSlots: make(chan struct{}, 1),
 	}
 }
 
@@ -253,6 +258,13 @@ func (c *Client) handleCommand(ctx context.Context, conn *websocket.Conn, envelo
 
 	c.logger.Info("handling cloud command", "agent_id", c.agentID, "home_id", envelope.HomeID, "command", command.Command, "request_id", envelope.RequestID)
 
+	switch command.Command {
+	case "files.move":
+		return c.startMoveJob(ctx, conn, envelope, command)
+	case "files.move_cancel":
+		return c.cancelMoveJob(ctx, conn, envelope, command)
+	}
+
 	body, commandErr := c.dispatcher.dispatch(ctx, command)
 	if commandErr != nil {
 		return c.writeError(ctx, conn, envelope.RequestID, envelope.HomeID, commandErr.Code, commandErr.Message, commandErr.Details)
@@ -300,6 +312,7 @@ func (c *Client) capabilities() []string {
 			"files.create_directory",
 			"files.rename",
 			"files.move",
+			"files.move_cancel",
 			"files.delete",
 		)
 	}

@@ -79,6 +79,7 @@ func (s *Server) handleHomeFileJobs(w http.ResponseWriter, r *http.Request, home
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		_, _ = s.sendAgentCommand(r.Context(), home.ID, "files.move_cancel", protocol.FilesMoveCancelRequest{JobID: job.ID})
 		s.audit(r.Context(), "file_operation.cancelled", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_operation_job", job.ID, map[string]any{"operation": job.Operation})
 		job, _ = s.store.GetFileOperationJob(r.Context(), job.ID)
 		writeJSON(w, http.StatusOK, fileOperationJobSnapshot(job))
@@ -186,8 +187,12 @@ func (s *Server) completePendingFileJob(ctx context.Context, pending *pendingReq
 	if response.JobID == "" {
 		response.JobID = jobID
 	}
-	now := time.Now().UTC()
-	if err := s.store.UpdateFileOperationJob(ctx, response.JobID, response.Status, response.BytesDone, response.FilesDone, "", &now); err != nil {
+	var completedAt *time.Time
+	if response.Status == "completed" || response.Status == "failed" || response.Status == "cancelled" || response.Status == "rollback_required" || response.Status == "rolled_back" {
+		now := time.Now().UTC()
+		completedAt = &now
+	}
+	if err := s.store.UpdateFileOperationJob(ctx, response.JobID, response.Status, response.BytesDone, response.FilesDone, "", completedAt); err != nil {
 		s.logger.Warn("failed to mark file job completed", "job_id", response.JobID, "status", response.Status, "error", err)
 	}
 	if response.BytesTotal > 0 || response.FilesTotal > 0 {
@@ -195,7 +200,76 @@ func (s *Server) completePendingFileJob(ctx context.Context, pending *pendingReq
 			s.logger.Warn("failed to update file job totals", "job_id", response.JobID, "error", err)
 		}
 	}
-	s.audit(ctx, "file_operation.completed", auditSeverityInfo, pending.app.userID, "", pending.homeID, pending.requestID, "file_operation_job", response.JobID, map[string]any{"status": response.Status})
+	s.broadcastFileJobChanged(ctx, pending.homeID, response.JobID)
+	if response.Status == "completed" {
+		s.audit(ctx, "file_operation.completed", auditSeverityInfo, pending.app.userID, "", pending.homeID, pending.requestID, "file_operation_job", response.JobID, map[string]any{"status": response.Status})
+	}
+}
+
+func (s *Server) handleFileMoveJobEvent(ctx context.Context, homeID string, event string, body json.RawMessage) {
+	payload := protocol.FileOperationJobEvent{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		s.logger.Warn("bad file move job event payload", "home_id", homeID, "event", event, "error", err)
+		return
+	}
+	if strings.TrimSpace(payload.JobID) == "" {
+		s.logger.Warn("file move job event missing job id", "home_id", homeID, "event", event)
+		return
+	}
+	job, err := s.store.GetFileOperationJob(ctx, payload.JobID)
+	if err != nil {
+		s.logger.Warn("file move job event for unknown job", "home_id", homeID, "job_id", payload.JobID, "event", event, "error", err)
+		return
+	}
+	if job.HomeID != homeID {
+		s.logger.Warn("file move job event home mismatch", "home_id", homeID, "job_id", payload.JobID, "job_home_id", job.HomeID)
+		return
+	}
+	if job.Status == "cancelled" && event != "files.move_failed" {
+		return
+	}
+
+	status := strings.TrimSpace(payload.Status)
+	if status == "" {
+		status = "running"
+	}
+	completed := (*time.Time)(nil)
+	if status == "completed" || status == "failed" || status == "cancelled" || status == "rollback_required" || status == "rolled_back" {
+		now := time.Now().UTC()
+		completed = &now
+	}
+	if err := s.store.UpdateFileOperationJob(ctx, payload.JobID, status, payload.BytesDone, payload.FilesDone, payload.ErrorMessage, completed); err != nil {
+		s.logger.Warn("failed to update file move job from event", "job_id", payload.JobID, "event", event, "error", err)
+		return
+	}
+	if payload.BytesTotal > 0 || payload.FilesTotal > 0 {
+		if err := s.store.UpdateFileOperationJobTotals(ctx, payload.JobID, payload.BytesTotal, payload.FilesTotal); err != nil {
+			s.logger.Warn("failed to update file move job totals from event", "job_id", payload.JobID, "event", event, "error", err)
+		}
+	}
+	s.broadcastFileJobChanged(ctx, homeID, payload.JobID)
+	if status == "completed" {
+		s.audit(ctx, "file_operation.completed", auditSeverityInfo, job.UserID, "", homeID, "", "file_operation_job", payload.JobID, map[string]any{"status": status})
+		s.emitFileDirectoryChanged(ctx, "/", map[string]any{"home_id": homeID, "path": "/"})
+	}
+	if status == "failed" || status == "rollback_required" {
+		s.audit(ctx, "file_operation.failed", auditSeverityWarning, job.UserID, "", homeID, "", "file_operation_job", payload.JobID, map[string]any{"status": status})
+	}
+}
+
+func (s *Server) broadcastFileJobChanged(ctx context.Context, homeID string, jobID string) {
+	job, err := s.store.GetFileOperationJob(ctx, jobID)
+	if err != nil {
+		return
+	}
+	body, err := json.Marshal(map[string]any{
+		"home_id": homeID,
+		"job":     fileOperationJobSnapshot(job),
+	})
+	if err != nil {
+		return
+	}
+	s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, "files.jobs"), "files.jobs", "files.job_changed", body)
 }
 
 func (s *Server) failFileJob(ctx context.Context, jobID string, status string, message string) {

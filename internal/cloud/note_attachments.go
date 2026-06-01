@@ -332,12 +332,47 @@ func (s *Server) resolveNoteAttachmentPath(storageKey string, forWrite bool) (st
 	parent := filepath.Dir(joined)
 	realParent, err := filepath.EvalSymlinks(parent)
 	if err != nil {
-		return "", err
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		realParent, err = nearestExistingAttachmentParent(root, parent)
+		if err != nil {
+			return "", err
+		}
 	}
 	if realParent != root && !strings.HasPrefix(realParent, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("attachment path escapes root")
 	}
+	if realParent != parent {
+		relative, err := filepath.Rel(realParent, joined)
+		if err != nil || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." {
+			return "", fmt.Errorf("attachment path escapes root")
+		}
+		return filepath.Join(realParent, relative), nil
+	}
 	return filepath.Join(realParent, filepath.Base(joined)), nil
+}
+
+func nearestExistingAttachmentParent(root string, path string) (string, error) {
+	current := filepath.Clean(path)
+	for {
+		if current == root || strings.HasPrefix(current, root+string(filepath.Separator)) {
+			resolved, err := filepath.EvalSymlinks(current)
+			if err == nil {
+				return resolved, nil
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return "", err
+			}
+		} else {
+			return "", fmt.Errorf("attachment path escapes root")
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("attachment path escapes root")
+		}
+		current = parent
+	}
 }
 
 func (s *Server) emitNoteAttachmentChanged(ctx context.Context, note domain.UserNote, scope string, userID string) {

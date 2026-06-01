@@ -256,10 +256,7 @@
     const searchShell = document.createElement("div");
     searchShell.className = "sidebar-search-shell";
     searchShell.innerHTML = `
-      <label for="dashboard-settings-search">
-        <span>Search Settings</span>
-        <input id="dashboard-settings-search" type="search" placeholder="Search settings" autocomplete="off">
-      </label>
+      <input id="dashboard-settings-search" type="search" placeholder="Search" autocomplete="off" aria-label="Search">
       <div id="dashboard-settings-results" class="sidebar-search-results" hidden></div>
     `;
     nav.appendChild(searchShell);
@@ -269,10 +266,6 @@
     ["Home", "Tools", "Settings", "Support"].forEach((group) => {
       const pages = visibleNavPages().filter((page) => (page.group || "Tools") === group);
       if (!pages.length) return;
-      const groupLabel = document.createElement("div");
-      groupLabel.className = "sidebar-nav-group";
-      groupLabel.textContent = group;
-      list.appendChild(groupLabel);
       pages.forEach((page) => {
         const link = document.createElement("a");
         link.className = `tab-link${isActivePage(page) ? " active" : ""}`;

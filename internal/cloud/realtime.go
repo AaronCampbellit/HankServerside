@@ -219,7 +219,7 @@ func (s *Server) authorizeRealtimeTopics(ctx context.Context, auth authContext, 
 				return nil, err
 			}
 			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
-		case strings.HasPrefix(topic, "files.directory:"):
+		case strings.HasPrefix(topic, "files.directory:") || topic == "files.jobs":
 			if err := resolveHome(); err != nil {
 				return nil, err
 			}
@@ -402,6 +402,8 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 			topic = fileDirectoryTopic("/")
 		}
 		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topic), topic, event.Event, event.Body)
+	case "files.move_progress", "files.move_completed", "files.move_failed":
+		s.handleFileMoveJobEvent(ctx, homeID, event.Event, event.Body)
 	case "sync.status_changed":
 		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topicHomeStatus), topicHomeStatus, event.Event, event.Body)
 	case "media.download_progress", "media.download_completed":

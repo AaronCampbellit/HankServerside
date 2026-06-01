@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,25 @@ func TestImageAttachmentReferenceUsesMarkdownImage(t *testing.T) {
 	reference := noteAttachmentMarkdownReference(note, "profile", attachment)
 	if !strings.HasPrefix(reference, "![receipt.png](hank-note-attachment://natt_image?") {
 		t.Fatalf("reference = %q, want markdown image attachment", reference)
+	}
+}
+
+func TestNoteAttachmentPathForWriteAllowsMissingNoteDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	server := &Server{noteAttachmentRoot: root}
+	path, err := server.noteAttachmentPathForWrite(filepath.Join("note_123", "natt_456-receipt.png"))
+	if err != nil {
+		t.Fatalf("noteAttachmentPathForWrite: %v", err)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks root: %v", err)
+	}
+	wantPrefix := filepath.Join(realRoot, "note_123") + string(filepath.Separator)
+	if !strings.HasPrefix(path, wantPrefix) {
+		t.Fatalf("path = %q, want under %q", path, wantPrefix)
 	}
 }
 

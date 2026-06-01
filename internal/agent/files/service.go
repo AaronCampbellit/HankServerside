@@ -605,32 +605,8 @@ func (s *Service) RenameSource(ctx context.Context, sourceID string, from string
 }
 
 func (s *Service) MoveBetweenSources(ctx context.Context, sourceID string, destinationSourceID string, from string, to string, isDirectory bool) error {
-	source, err := s.sourceForID(sourceID)
-	if err != nil {
-		return err
-	}
-	destination, err := s.sourceForID(destinationSourceID)
-	if err != nil {
-		return err
-	}
-	if err := source.authorize("delete", from, 0); err != nil {
-		return err
-	}
-	if err := destination.authorize("write", to, 0); err != nil {
-		return err
-	}
-	if source.ID == destination.ID && source.Type == destination.Type {
-		return s.RenameSource(ctx, source.ID, from, to)
-	}
-	if err := s.copyBetweenSources(ctx, source.ID, destination.ID, from, to, isDirectory); err != nil {
-		return err
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	return s.DeleteSource(ctx, source.ID, from, isDirectory)
+	_, err := s.MoveBetweenSourcesWithProgress(ctx, sourceID, destinationSourceID, from, to, isDirectory, nil)
+	return err
 }
 
 func (s *Service) copyBetweenSources(ctx context.Context, sourceID string, destinationSourceID string, from string, to string, isDirectory bool) error {

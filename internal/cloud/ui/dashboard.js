@@ -4,10 +4,18 @@ const state = {
   agents: [],
   sync: null,
   storage: null,
+  storageError: "",
+  setup: null,
+  quickLinks: [],
+  quickLinksCanEdit: false,
   tokensByHome: new Map(),
   refreshTimer: 0,
+  quickLinksRefreshTimer: 0,
   lastAgentEnvFile: "",
 };
+
+const pageParams = new URLSearchParams(window.location.search);
+const isSettingsHomePane = pageParams.get("pane") === "1";
 
 const els = {
   logoutButton: document.getElementById("logout-button"),
@@ -19,8 +27,21 @@ const els = {
   homeCount: document.getElementById("home-count"),
   agentList: document.getElementById("agent-list"),
   agentCount: document.getElementById("agent-count"),
+  quickLinksCount: document.getElementById("quick-links-count"),
+  quickLinksRefresh: document.getElementById("quick-links-refresh"),
+  quickLinkAdd: document.getElementById("quick-link-add"),
+  quickLinkForm: document.getElementById("quick-link-form"),
+  quickLinkID: document.getElementById("quick-link-id"),
+  quickLinkTitle: document.getElementById("quick-link-title"),
+  quickLinkURL: document.getElementById("quick-link-url"),
+  quickLinkDescription: document.getElementById("quick-link-description"),
+  quickLinkHealth: document.getElementById("quick-link-health"),
+  quickLinkCancel: document.getElementById("quick-link-cancel"),
+  quickLinksList: document.getElementById("quick-links-list"),
   setupStatus: document.getElementById("setup-status"),
   setupChecklist: document.getElementById("setup-checklist"),
+  setupPanel: document.getElementById("setup-checklist-panel"),
+  setupFilePanel: document.getElementById("setup-file-panel"),
   tokenForm: document.getElementById("token-form"),
   tokenHome: document.getElementById("token-home"),
   tokenAgentID: document.getElementById("token-agent-id"),
@@ -32,6 +53,13 @@ const els = {
   syncSummary: document.getElementById("sync-summary"),
   toast: document.getElementById("toast"),
 };
+
+if (isSettingsHomePane) {
+  document.body.classList.add("settings-home-pane");
+  if (els.setupFilePanel) {
+    els.setupFilePanel.hidden = false;
+  }
+}
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -214,6 +242,103 @@ function renderAgents() {
   renderSetupChecklist();
 }
 
+function quickLinkHost(value) {
+  try {
+    return new URL(value).host;
+  } catch (_) {
+    return value || "";
+  }
+}
+
+function quickLinkStatusInfo(link) {
+  const status = String(link.status || "unchecked").toLowerCase();
+  if (!link.health_check_enabled || status === "disabled") {
+    return { className: "disabled", label: "Not checked", detail: "Status checks off" };
+  }
+  if (status === "up") {
+    const code = link.status_code ? ` · ${link.status_code}` : "";
+    return { className: "up", label: "Up", detail: `Up${code} · ${formatDate(link.last_checked_at)}` };
+  }
+  if (status === "down") {
+    const code = link.status_code ? ` · ${link.status_code}` : "";
+    const detail = link.last_error || `Review${code}`;
+    return { className: "down", label: "Review", detail: `${detail} · ${formatDate(link.last_checked_at)}` };
+  }
+  return { className: "unchecked", label: "Unchecked", detail: "Waiting for first check" };
+}
+
+function renderQuickLinks() {
+  els.quickLinksCount.textContent = `${state.quickLinks.length} link${state.quickLinks.length === 1 ? "" : "s"}`;
+  els.quickLinkAdd.hidden = !state.quickLinksCanEdit;
+  if (!state.quickLinks.length) {
+    els.quickLinksList.className = "quick-links-grid empty-state";
+    els.quickLinksList.textContent = "No quick links saved.";
+    return;
+  }
+
+  els.quickLinksList.className = "quick-links-grid";
+  els.quickLinksList.innerHTML = state.quickLinks.map((link, index) => {
+    const status = quickLinkStatusInfo(link);
+    const description = link.description || quickLinkHost(link.url);
+    const adminActions = state.quickLinksCanEdit ? `
+      <div class="quick-link-card-actions">
+        <button type="button" class="ghost" data-quick-link-move="${index}" data-direction="-1" ${index === 0 ? "disabled" : ""}>Up</button>
+        <button type="button" class="ghost" data-quick-link-move="${index}" data-direction="1" ${index === state.quickLinks.length - 1 ? "disabled" : ""}>Down</button>
+        <button type="button" class="secondary" data-quick-link-edit="${escapeHTML(link.id)}">Edit</button>
+        <button type="button" class="danger-link" data-quick-link-delete="${escapeHTML(link.id)}">Delete</button>
+      </div>
+    ` : "";
+    return `
+      <article class="quick-link-card ${escapeHTML(status.className)}">
+        <a class="quick-link-main" href="${escapeHTML(link.url)}" target="_blank" rel="noreferrer">
+          <span class="quick-link-status-dot" title="${escapeHTML(status.label)}"></span>
+          <span class="quick-link-copy">
+            <span class="quick-link-title">${escapeHTML(link.title || quickLinkHost(link.url))}</span>
+            <span class="meta">${escapeHTML(description)}</span>
+            <span class="quick-link-status-text">${escapeHTML(status.detail)}</span>
+          </span>
+        </a>
+        ${adminActions}
+      </article>
+    `;
+  }).join("");
+
+  els.quickLinksList.querySelectorAll("[data-quick-link-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const link = state.quickLinks.find((item) => item.id === button.dataset.quickLinkEdit);
+      if (link) {
+        showQuickLinkForm(link);
+      }
+    });
+  });
+  els.quickLinksList.querySelectorAll("[data-quick-link-delete]").forEach((button) => {
+    button.addEventListener("click", () => deleteQuickLink(button.dataset.quickLinkDelete));
+  });
+  els.quickLinksList.querySelectorAll("[data-quick-link-move]").forEach((button) => {
+    button.addEventListener("click", () => moveQuickLink(Number.parseInt(button.dataset.quickLinkMove || "0", 10), Number.parseInt(button.dataset.direction || "0", 10)));
+  });
+}
+
+function showQuickLinkForm(link = null) {
+  if (!state.quickLinksCanEdit) {
+    return;
+  }
+  els.quickLinkID.value = link?.id || "";
+  els.quickLinkTitle.value = link?.title || "";
+  els.quickLinkURL.value = link?.url || "";
+  els.quickLinkDescription.value = link?.description || "";
+  els.quickLinkHealth.checked = link ? Boolean(link.health_check_enabled) : true;
+  els.quickLinkForm.hidden = false;
+  els.quickLinkTitle.focus();
+}
+
+function hideQuickLinkForm() {
+  els.quickLinkForm.reset();
+  els.quickLinkID.value = "";
+  els.quickLinkHealth.checked = true;
+  els.quickLinkForm.hidden = true;
+}
+
 function renderTokens(homeID) {
   const tokens = state.tokensByHome.get(homeID) || [];
   if (!homeID) {
@@ -269,20 +394,78 @@ function renderTokens(homeID) {
 function renderSync() {
   const notes = state.sync?.notes || {};
   const profiles = state.sync?.profiles || {};
-  const hasError = notes.last_error || Object.values(profiles).some((profile) => profile.last_error);
-  els.syncHealthPill.textContent = hasError ? "Needs Review" : "Ready";
-  els.syncHealthPill.className = hasError ? "status-chip offline" : "status-chip";
-  const profileCount = Object.keys(profiles).length;
-  els.syncSummary.innerHTML = [
-    ["Notes", notes.status || "unknown"],
-    ["Last Successful Sync", formatDate(notes.last_successful_sync_at)],
-    ["Saved Connections", profileCount],
-    ["Last Error", notes.last_error || "None"],
-  ].map(([label, value]) => `
-    <div class="kv-row">
-      <div class="kv-label">${escapeHTML(label)}</div>
-      <div>${escapeHTML(value)}</div>
-    </div>
+  const profileValues = Object.values(profiles);
+  const agentOnline = state.agents.some((agent) => String(agent.status || "").toLowerCase() === "online");
+  const backup = state.storage?.backup || {};
+  const restore = state.storage?.restore || {};
+  const checksum = state.storage?.checksum || {};
+  const failures = state.storage?.failures || [];
+  const activeTasks = (state.storage?.tasks || []).filter((task) => ["queued", "running"].includes(String(task.status || "").toLowerCase()));
+  const hasStorageFailure = Boolean(state.storageError || backup.failure_count || restore.last_failed_at || checksum.corruption_detected || checksum.failure_count || failures.length);
+  const notesHealthy = String(notes.status || "").toLowerCase() === "healthy" && !notes.last_error;
+  const connectionErrors = profileValues.filter((profile) => profile.last_error);
+  const profileCount = profileValues.length;
+  const backupsVerified = Boolean(backup.last_successful_at && restore.last_test_at);
+  const healthItems = [
+    {
+      title: "Cloud",
+      status: state.user ? "healthy" : "needs_attention",
+      value: state.user ? "Signed in" : "Sign in required",
+      detail: state.user ? "Admin account session is active." : "The dashboard could not confirm an active Hank Remote account.",
+      issue: state.user ? "" : "Sign in again, then reload the dashboard.",
+    },
+    {
+      title: "Connector",
+      status: agentOnline ? "healthy" : "needs_attention",
+      value: agentOnline ? "Online" : "Offline",
+      detail: agentOnline ? "The home connector is connected to Hank Remote." : "The home connector is not currently online.",
+      issue: agentOnline ? "" : "Start or restart the agent container, then check the connector logs if it stays offline.",
+    },
+    {
+      title: "Notes",
+      status: notesHealthy ? "healthy" : notes.last_error ? "needs_attention" : "warning",
+      value: notes.status || "Unknown",
+      detail: notes.last_successful_sync_at ? `Last successful sync: ${formatDate(notes.last_successful_sync_at)}.` : "No successful notes sync has been recorded yet.",
+      issue: notes.last_error || (!notes.last_successful_sync_at ? "Open Notes or check the agent if sync does not start." : ""),
+    },
+    {
+      title: "Connections",
+      status: connectionErrors.length ? "needs_attention" : profileCount ? "healthy" : "warning",
+      value: `${profileCount} saved`,
+      detail: profileCount ? "Saved connection profiles are available for the connector." : "No Home Assistant or file server connection profile is saved yet.",
+      issue: connectionErrors.length ? connectionErrors.map((profile) => `${profile.service_type || "Connection"}: ${profile.last_error}`).join(" ") : (!profileCount ? "Add Home Assistant or file server settings in Settings > Connections." : ""),
+    },
+    {
+      title: "Backups",
+      status: hasStorageFailure ? "needs_attention" : backupsVerified ? "healthy" : "warning",
+      value: backupsVerified ? "Verified" : "Not verified",
+      detail: backup.last_successful_at ? `Last backup: ${formatDate(backup.last_successful_at)}. Restore test: ${formatDate(restore.last_test_at)}.` : "No successful database backup has been recorded yet.",
+      issue: hasStorageFailure ? (state.storageError || failures[0]?.message || "Backup, restore, or checksum failures need review.") : (!backupsVerified ? "Run a backup and restore test from Settings > Backups." : ""),
+    },
+    {
+      title: "Database",
+      status: state.storageError ? "needs_attention" : activeTasks.length ? "warning" : "healthy",
+      value: state.storageError ? "Unavailable" : activeTasks.length ? "Working" : "Ready",
+      detail: activeTasks.length ? activeTasks.map((task) => task.step || task.message || task.operation).join(" ") : "Storage operations are reachable.",
+      issue: state.storageError || "",
+    },
+  ];
+  const hasIssue = healthItems.some((item) => item.status === "needs_attention");
+  const hasWarning = healthItems.some((item) => item.status === "warning");
+  els.syncHealthPill.textContent = hasIssue ? "Needs Review" : hasWarning ? "Watch" : "Healthy";
+  els.syncHealthPill.className = hasIssue ? "status-chip offline" : hasWarning ? "status-chip warning" : "status-chip";
+  els.syncSummary.innerHTML = healthItems.map((item) => `
+    <details class="health-check ${item.status}">
+      <summary>
+        <span class="health-check-title">${escapeHTML(item.title)}</span>
+        <span class="health-check-value">${escapeHTML(item.value)}</span>
+        <span class="status-chip ${item.status === "needs_attention" ? "offline" : item.status === "warning" ? "warning" : ""}">${item.status === "healthy" ? "Healthy" : item.status === "warning" ? "Watch" : "Review"}</span>
+      </summary>
+      <div class="health-check-detail">
+        <p>${escapeHTML(item.detail)}</p>
+        ${item.issue ? `<p class="health-check-issue">${escapeHTML(item.issue)}</p>` : `<p>No issue found.</p>`}
+      </div>
+    </details>
   `).join("");
   renderSetupChecklist();
 }
@@ -290,6 +473,9 @@ function renderSync() {
 function renderSetupChecklist() {
   if (!els.setupChecklist || !els.setupStatus) {
     return;
+  }
+  if (els.setupPanel) {
+    els.setupPanel.hidden = state.setup?.first_setup_visible === false;
   }
   const home = state.homes[0] || null;
   const tokens = home ? (state.tokensByHome.get(home.id) || []) : [];
@@ -312,9 +498,13 @@ function renderSetupChecklist() {
       title: "Setup File",
       detail: hasActiveToken ? "Connector file issued" : "Create the connector file",
       done: hasActiveToken,
-      href: "#",
+      href: isSettingsHomePane ? "#setup-file-panel" : "/dashboard/settings#home",
       action: "Create",
-      onClick: () => document.querySelector(".setup-file-panel")?.setAttribute("open", ""),
+      onClick: isSettingsHomePane ? () => {
+        els.setupFilePanel?.removeAttribute("hidden");
+        els.setupFilePanel?.setAttribute("open", "");
+        els.setupFilePanel?.scrollIntoView({ behavior: "smooth", block: "center" });
+      } : null,
     },
     {
       title: "Connector",
@@ -385,6 +575,16 @@ function syncAutoRefresh() {
   }, 5000);
 }
 
+function syncQuickLinksRefresh() {
+  if (state.quickLinksRefreshTimer) {
+    window.clearInterval(state.quickLinksRefreshTimer);
+    state.quickLinksRefreshTimer = 0;
+  }
+  state.quickLinksRefreshTimer = window.setInterval(() => {
+    refreshQuickLinks().catch(() => {});
+  }, 60000);
+}
+
 async function loadHomes() {
   try {
     const home = await api("/v1/home");
@@ -399,6 +599,25 @@ async function loadAgents() {
   const payload = await api("/v1/home/agent");
   state.agents = payload.agent ? [payload.agent] : [];
   renderAgents();
+}
+
+async function loadQuickLinks() {
+  try {
+    const payload = await api("/v1/home/quick-links");
+    state.quickLinks = payload.links || [];
+    state.quickLinksCanEdit = Boolean(payload.can_edit);
+  } catch (_) {
+    state.quickLinks = [];
+    state.quickLinksCanEdit = false;
+  }
+  renderQuickLinks();
+}
+
+async function refreshQuickLinks() {
+  const payload = await api("/v1/home/quick-links/checks", { method: "POST", body: JSON.stringify({}) });
+  state.quickLinks = payload.links || [];
+  state.quickLinksCanEdit = Boolean(payload.can_edit);
+  renderQuickLinks();
 }
 
 async function loadTokens(homeID) {
@@ -422,10 +641,85 @@ async function loadSync() {
 async function loadStorageStatus() {
   try {
     state.storage = await api("/v1/home/storage/status");
-  } catch (_) {
+    state.storageError = "";
+  } catch (error) {
     state.storage = null;
+    state.storageError = error.message || "Storage status could not be loaded.";
+  }
+  renderSync();
+  renderSetupChecklist();
+}
+
+async function loadSetupStatus() {
+  try {
+    state.setup = await api("/v1/home/setup-status");
+  } catch (_) {
+    state.setup = null;
   }
   renderSetupChecklist();
+}
+
+async function saveQuickLink(event) {
+  event.preventDefault();
+  if (!state.quickLinksCanEdit) {
+    showToast("Only admins can change quick links.", true);
+    return;
+  }
+  const linkID = els.quickLinkID.value.trim();
+  const body = {
+    title: els.quickLinkTitle.value.trim(),
+    url: els.quickLinkURL.value.trim(),
+    description: els.quickLinkDescription.value.trim(),
+    health_check_enabled: els.quickLinkHealth.checked,
+  };
+  try {
+    const path = linkID ? `/v1/home/quick-links/${encodeURIComponent(linkID)}` : "/v1/home/quick-links";
+    await api(path, { method: linkID ? "PUT" : "POST", body: JSON.stringify(body) });
+    hideQuickLinkForm();
+    await loadQuickLinks();
+    showToast("Quick link saved.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function deleteQuickLink(linkID) {
+  if (!state.quickLinksCanEdit || !linkID) {
+    return;
+  }
+  if (!window.confirm("Delete this quick link?")) {
+    return;
+  }
+  try {
+    await api(`/v1/home/quick-links/${encodeURIComponent(linkID)}`, { method: "DELETE" });
+    await loadQuickLinks();
+    showToast("Quick link deleted.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function moveQuickLink(index, direction) {
+  if (!state.quickLinksCanEdit || !direction) {
+    return;
+  }
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || index >= state.quickLinks.length || nextIndex >= state.quickLinks.length) {
+    return;
+  }
+  const links = [...state.quickLinks];
+  [links[index], links[nextIndex]] = [links[nextIndex], links[index]];
+  try {
+    const payload = await api("/v1/home/quick-links/order", {
+      method: "PUT",
+      body: JSON.stringify({ ids: links.map((link) => link.id) }),
+    });
+    state.quickLinks = payload.links || links;
+    state.quickLinksCanEdit = Boolean(payload.can_edit);
+    renderQuickLinks();
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 async function createHome(event) {
@@ -505,9 +799,11 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
-    await Promise.all([loadHomes(), loadAgents(), loadSync(), loadStorageStatus()]);
+    await Promise.all([loadHomes(), loadAgents(), loadQuickLinks(), loadSync(), loadStorageStatus(), loadSetupStatus()]);
     await loadTokens(els.tokenHome.value || state.homes[0]?.id || "");
     syncAutoRefresh();
+    syncQuickLinksRefresh();
+    refreshQuickLinks().catch(() => {});
   } catch (_) {
     window.location.replace("/");
   }
@@ -515,6 +811,10 @@ async function hydrate() {
 
 els.logoutButton.addEventListener("click", logout);
 els.homeForm.addEventListener("submit", createHome);
+els.quickLinksRefresh.addEventListener("click", () => refreshQuickLinks().catch((error) => showToast(error.message, true)));
+els.quickLinkAdd.addEventListener("click", () => showQuickLinkForm());
+els.quickLinkForm.addEventListener("submit", saveQuickLink);
+els.quickLinkCancel.addEventListener("click", hideQuickLinkForm);
 els.tokenForm.addEventListener("submit", (event) => issueToken(event).catch((error) => showToast(error.message, true)));
 els.tokenCreated.addEventListener("click", async (event) => {
   if (!event.target.closest("[data-copy-agent-env]") || !state.lastAgentEnvFile) {

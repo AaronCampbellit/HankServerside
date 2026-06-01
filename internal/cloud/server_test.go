@@ -514,6 +514,9 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 		if strings.Contains(body, `>Overview<`) || strings.Contains(body, `>Status<`) {
 			t.Fatalf("%s still exposes old overview/status navigation", page)
 		}
+		if strings.Contains(body, `class="lede"`) {
+			t.Fatalf("%s should not render a hero subtitle", page)
+		}
 		if strings.Contains(body, `href="/dashboard/settings#backups"`) && !strings.Contains(body, `href="/dashboard/settings#backups" data-admin-only="true" hidden`) {
 			t.Fatalf("%s backup settings links must be admin-only", page)
 		}
@@ -541,6 +544,12 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	if !strings.Contains(navBody, `href: "/dashboard/settings#backups"`) || !strings.Contains(navBody, `adminOnly: true`) {
 		t.Fatal("admin nav must expose backup settings as an admin-only search result")
 	}
+	if strings.Contains(navBody, `<span>Search Settings</span>`) || strings.Contains(navBody, `placeholder="Search settings"`) || !strings.Contains(navBody, `aria-label="Search"`) {
+		t.Fatal("admin nav search should use a short placeholder and aria label without a visible title")
+	}
+	if strings.Contains(navBody, `sidebar-nav-group`) {
+		t.Fatal("admin nav should not render visible group labels")
+	}
 	request := httptest.NewRequest(http.MethodGet, "/assets/admin-nav.js", nil)
 	response := httptest.NewRecorder()
 	serveUIAsset(response, request)
@@ -549,6 +558,111 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	}
 	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
 		t.Fatalf("admin-nav.js content-type = %q", contentType)
+	}
+}
+
+func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
+	t.Parallel()
+
+	entries, err := fs.ReadDir(uiAssets, "ui")
+	if err != nil {
+		t.Fatalf("read ui assets: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			continue
+		}
+		data, err := fs.ReadFile(uiAssets, "ui/"+entry.Name())
+		if err != nil {
+			t.Fatalf("%s read: %v", entry.Name(), err)
+		}
+		if strings.Contains(string(data), `class="lede"`) {
+			t.Fatalf("%s should not render a hero subtitle", entry.Name())
+		}
+	}
+}
+
+func TestDashboardSetupFilePanelStaysInSettingsHomePane(t *testing.T) {
+	t.Parallel()
+
+	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
+	if err != nil {
+		t.Fatalf("dashboard.html read: %v", err)
+	}
+	body := string(dashboard)
+	if !strings.Contains(body, `id="setup-file-panel"`) || !strings.Contains(body, `class="panel collapsible-panel setup-file-panel" hidden`) {
+		t.Fatal("dashboard setup file panel should be hidden by default")
+	}
+	if !strings.Contains(body, `id="quick-links-panel"`) {
+		t.Fatal("dashboard home should include quick links")
+	}
+
+	settings, err := fs.ReadFile(uiAssets, "ui/settings.html")
+	if err != nil {
+		t.Fatalf("settings.html read: %v", err)
+	}
+	if !strings.Contains(string(settings), `data-src="/dashboard?pane=1&amp;embedded=1"`) {
+		t.Fatal("settings home pane should continue to load the dashboard with pane=1")
+	}
+}
+
+func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
+	t.Parallel()
+
+	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
+	if err != nil {
+		t.Fatalf("dashboard.html read: %v", err)
+	}
+	body := string(dashboard)
+	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-link-form"`, `id="quick-link-add" type="button" class="secondary" hidden`, `id="quick-links-list"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("dashboard quick links markup missing %q", expected)
+		}
+	}
+	for _, adminMarker := range []string{`data-quick-link-edit`, `data-quick-link-delete`, `data-quick-link-move`} {
+		if strings.Contains(body, adminMarker) {
+			t.Fatalf("dashboard html should not statically expose quick link admin controls: %s", adminMarker)
+		}
+	}
+
+	script, err := fs.ReadFile(uiAssets, "ui/dashboard.js")
+	if err != nil {
+		t.Fatalf("dashboard.js read: %v", err)
+	}
+	scriptBody := string(script)
+	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "refreshQuickLinks", "data-quick-link-edit"} {
+		if !strings.Contains(scriptBody, expected) {
+			t.Fatalf("dashboard quick links script missing %q", expected)
+		}
+	}
+}
+
+func TestDashboardHealthPanelIsOperatorFriendly(t *testing.T) {
+	t.Parallel()
+
+	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
+	if err != nil {
+		t.Fatalf("dashboard.html read: %v", err)
+	}
+	body := string(dashboard)
+	if !strings.Contains(body, `id="health" class="panel wide-panel collapsible-panel dashboard-health-panel" open`) {
+		t.Fatal("dashboard health panel should be a large open home-page panel")
+	}
+	for _, rawEndpoint := range []string{`href="/healthz"`, `href="/readyz"`, `href="/metrics"`} {
+		if strings.Contains(body, rawEndpoint) {
+			t.Fatalf("dashboard health panel should not use raw endpoint link %s as its primary UI", rawEndpoint)
+		}
+	}
+
+	script, err := fs.ReadFile(uiAssets, "ui/dashboard.js")
+	if err != nil {
+		t.Fatalf("dashboard.js read: %v", err)
+	}
+	scriptBody := string(script)
+	for _, expected := range []string{"Cloud", "Connector", "Notes", "Connections", "Backups", "Database", "health-check"} {
+		if !strings.Contains(scriptBody, expected) {
+			t.Fatalf("dashboard health renderer missing %q", expected)
+		}
 	}
 }
 
@@ -917,6 +1031,248 @@ func TestListAgentTokensForHome(t *testing.T) {
 	}
 	if payload.Tokens[0].TokenHash != "" {
 		t.Fatalf("token hash should be omitted from JSON response")
+	}
+}
+
+func TestHomeQuickLinksRequireAdminForMutations(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	admin := domain.User{ID: "usr_quick_admin", Email: "quick-admin@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_quick_member", Email: "quick-member@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	outsider := domain.User{ID: "usr_quick_outsider", Email: "quick-outsider@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_quick_links", UserID: admin.ID, Name: "Quick Links Home", CreatedAt: now, UpdatedAt: now}
+	adminToken := "quick-admin-token"
+	memberToken := "quick-member-token"
+	outsiderToken := "quick-outsider-token"
+
+	must(t, db.CreateUser(ctx, admin))
+	must(t, db.CreateUser(ctx, member))
+	must(t, db.CreateUser(ctx, outsider))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.AddHomeMembership(ctx, domain.HomeMembership{HomeID: home.ID, UserID: member.ID, Role: domain.HomeRoleMember, CreatedAt: now, UpdatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_quick_admin", UserID: admin.ID, TokenHash: hashToken(adminToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_quick_member", UserID: member.ID, TokenHash: hashToken(memberToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_quick_outsider", UserID: outsider.ID, TokenHash: hashToken(outsiderToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var created struct {
+		Link domain.HomeQuickLink `json:"link"`
+	}
+	requestJSON(t, testServer, adminToken, http.MethodPost, "/v1/home/quick-links", map[string]any{
+		"title":                "Docker",
+		"url":                  "http://docker.local:9000",
+		"description":          "Containers",
+		"health_check_enabled": true,
+	}, &created)
+	if created.Link.ID == "" || created.Link.Status != domain.QuickLinkStatusUnchecked {
+		t.Fatalf("created link = %#v", created.Link)
+	}
+
+	var memberList struct {
+		Links   []domain.HomeQuickLink `json:"links"`
+		CanEdit bool                   `json:"can_edit"`
+	}
+	requestJSON(t, testServer, memberToken, http.MethodGet, "/v1/home/quick-links", nil, &memberList)
+	if memberList.CanEdit || len(memberList.Links) != 1 {
+		t.Fatalf("member list = %#v", memberList)
+	}
+
+	memberCreate := doJSONRequest(t, testServer, memberToken, http.MethodPost, "/v1/home/quick-links", map[string]any{
+		"title": "GitHub",
+		"url":   "https://github.com",
+	})
+	if memberCreate.StatusCode != http.StatusForbidden {
+		t.Fatalf("member create status = %d, want %d", memberCreate.StatusCode, http.StatusForbidden)
+	}
+
+	invalidURL := doJSONRequest(t, testServer, adminToken, http.MethodPost, "/v1/home/quick-links", map[string]any{
+		"title": "Credentials",
+		"url":   "https://user:pass@example.com",
+	})
+	if invalidURL.StatusCode != http.StatusBadRequest {
+		t.Fatalf("credential URL status = %d, want %d", invalidURL.StatusCode, http.StatusBadRequest)
+	}
+
+	outsiderList := doJSONRequest(t, testServer, outsiderToken, http.MethodGet, "/v1/home/quick-links", nil)
+	if outsiderList.StatusCode != http.StatusNotFound {
+		t.Fatalf("outsider list status = %d, want %d", outsiderList.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestHomeQuickLinkChecksClassifyReachability(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok":
+			w.WriteHeader(http.StatusOK)
+		case "/forbidden":
+			w.WriteHeader(http.StatusForbidden)
+		case "/error":
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/slow":
+			time.Sleep(200 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer target.Close()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	admin := domain.User{ID: "usr_quick_check_admin", Email: "quick-check-admin@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_quick_check_member", Email: "quick-check-member@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_quick_check", UserID: admin.ID, Name: "Quick Check Home", CreatedAt: now, UpdatedAt: now}
+	memberToken := "quick-check-member-token"
+
+	must(t, db.CreateUser(ctx, admin))
+	must(t, db.CreateUser(ctx, member))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.AddHomeMembership(ctx, domain.HomeMembership{HomeID: home.ID, UserID: member.ID, Role: domain.HomeRoleMember, CreatedAt: now, UpdatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_quick_check_member", UserID: member.ID, TokenHash: hashToken(memberToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	for index, item := range []struct {
+		id    string
+		title string
+		path  string
+	}{
+		{id: "ql_ok", title: "OK", path: "/ok"},
+		{id: "ql_forbidden", title: "Forbidden", path: "/forbidden"},
+		{id: "ql_error", title: "Error", path: "/error"},
+		{id: "ql_slow", title: "Slow", path: "/slow"},
+	} {
+		must(t, db.CreateHomeQuickLink(ctx, domain.HomeQuickLink{
+			ID:                 item.id,
+			HomeID:             home.ID,
+			Title:              item.title,
+			URL:                target.URL + item.path,
+			SortOrder:          index * 10,
+			HealthCheckEnabled: true,
+			Status:             domain.QuickLinkStatusUnchecked,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+			UpdatedBy:          admin.ID,
+		}))
+	}
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	server.quickLinkCheckTimeout = 35 * time.Millisecond
+	server.quickLinkHTTPClient = &http.Client{}
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var payload struct {
+		Links   []domain.HomeQuickLink `json:"links"`
+		CanEdit bool                   `json:"can_edit"`
+	}
+	requestJSON(t, testServer, memberToken, http.MethodPost, "/v1/home/quick-links/checks", nil, &payload)
+	if payload.CanEdit {
+		t.Fatal("member status check response should not grant edit access")
+	}
+	byTitle := make(map[string]domain.HomeQuickLink)
+	for _, link := range payload.Links {
+		byTitle[link.Title] = link
+	}
+	if byTitle["OK"].Status != domain.QuickLinkStatusUp || byTitle["OK"].StatusCode != http.StatusOK {
+		t.Fatalf("OK link = %#v", byTitle["OK"])
+	}
+	if byTitle["Forbidden"].Status != domain.QuickLinkStatusUp || byTitle["Forbidden"].StatusCode != http.StatusForbidden {
+		t.Fatalf("Forbidden link = %#v", byTitle["Forbidden"])
+	}
+	if byTitle["Error"].Status != domain.QuickLinkStatusDown || byTitle["Error"].StatusCode != http.StatusInternalServerError {
+		t.Fatalf("Error link = %#v", byTitle["Error"])
+	}
+	if byTitle["Slow"].Status != domain.QuickLinkStatusDown || byTitle["Slow"].StatusCode != 0 || byTitle["Slow"].LastError == "" {
+		t.Fatalf("Slow link = %#v", byTitle["Slow"])
+	}
+	for title, link := range byTitle {
+		if link.LastCheckedAt == nil {
+			t.Fatalf("%s missing last_checked_at: %#v", title, link)
+		}
+	}
+}
+
+func TestHomeSetupStatusHidesAfterCloudRestart(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_setup_status", Email: "setup-status@example.com", PasswordHash: "hash", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour)}
+	home := domain.Home{ID: "home_setup_status", UserID: user.ID, Name: "Test Home", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
+	sessionRawToken := "setup-status-session-token"
+	session := domain.AppSession{ID: "sess_setup_status", UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, session))
+	must(t, db.UpsertCloudRuntime(ctx, "runtime_after_home", "test"))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var payload struct {
+		FirstSetupVisible bool `json:"first_setup_visible"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/home/setup-status", nil, &payload)
+
+	if payload.FirstSetupVisible {
+		t.Fatal("first setup panel should be hidden after the cloud runtime starts later than the home was created")
+	}
+}
+
+func TestHomeSetupStatusShowsDuringInitialRuntime(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_setup_status_initial", Email: "setup-status-initial@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_setup_status_initial", UserID: user.ID, Name: "Test Home", CreatedAt: now.Add(time.Hour), UpdatedAt: now.Add(time.Hour)}
+	sessionRawToken := "setup-status-initial-session-token"
+	session := domain.AppSession{ID: "sess_setup_status_initial", UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(2 * time.Hour), CreatedAt: now}
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, session))
+	must(t, db.UpsertCloudRuntime(ctx, "runtime_before_home", "test"))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var payload struct {
+		FirstSetupVisible bool `json:"first_setup_visible"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/home/setup-status", nil, &payload)
+
+	if !payload.FirstSetupVisible {
+		t.Fatal("first setup panel should remain visible during the initial cloud runtime")
 	}
 }
 
@@ -1556,6 +1912,44 @@ func requestJSON(t *testing.T, server *httptest.Server, sessionToken string, met
 			t.Fatal(err)
 		}
 	}
+}
+
+type testJSONResponse struct {
+	StatusCode int
+	Body       string
+}
+
+func doJSONRequest(t *testing.T, server *httptest.Server, sessionToken string, method string, path string, body any) testJSONResponse {
+	t.Helper()
+
+	var reader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(data)
+	}
+
+	request, err := http.NewRequest(method, server.URL+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+sessionToken)
+	request.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(response.Body)
+	return testJSONResponse{StatusCode: response.StatusCode, Body: string(data)}
 }
 
 func requestDashboardPage(t *testing.T, server *httptest.Server, path string, sessionToken string) *http.Response {

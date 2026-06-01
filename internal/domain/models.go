@@ -27,6 +27,13 @@ const (
 	HomePermissionFeatureNotes         = "notes"
 )
 
+const (
+	QuickLinkStatusUnchecked = "unchecked"
+	QuickLinkStatusUp        = "up"
+	QuickLinkStatusDown      = "down"
+	QuickLinkStatusDisabled  = "disabled"
+)
+
 type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
@@ -181,6 +188,23 @@ type HomeServiceProfile struct {
 	UpdatedBy        string     `json:"updated_by"`
 	LastBackupAt     *time.Time `json:"last_backup_at,omitempty"`
 	LastError        string     `json:"last_error,omitempty"`
+}
+
+type HomeQuickLink struct {
+	ID                 string     `json:"id"`
+	HomeID             string     `json:"home_id"`
+	Title              string     `json:"title"`
+	URL                string     `json:"url"`
+	Description        string     `json:"description,omitempty"`
+	SortOrder          int        `json:"sort_order"`
+	HealthCheckEnabled bool       `json:"health_check_enabled"`
+	Status             string     `json:"status"`
+	StatusCode         int        `json:"status_code"`
+	LastCheckedAt      *time.Time `json:"last_checked_at,omitempty"`
+	LastError          string     `json:"last_error,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	UpdatedBy          string     `json:"updated_by"`
 }
 
 type HomePermissions struct {

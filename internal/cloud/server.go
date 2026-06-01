@@ -32,43 +32,45 @@ const maxHTTPBodyBytes = 1 << 20
 const maxWSMessageBytes = 2 << 20
 
 type Server struct {
-	addr                 string
-	store                *store.Store
-	router               *Router
-	logger               *slog.Logger
-	http                 *http.Server
-	metrics              *observability.Metrics
-	limiter              *rateLimiter
-	transfers            *transferRegistry
-	appTickets           *appWebSocketTicketRegistry
-	notes                *cloudNotesService
-	collaboration        *noteCollaborationHub
-	agentRequests        *agentRequestRegistry
-	syncs                *homeSyncController
-	storage              *storageops.Service
-	storageEvents        map[string]struct{}
-	storageEventsMu      sync.Mutex
-	notificationEvents   map[string]time.Time
-	notificationEventsMu sync.Mutex
-	pushSender           PushSender
-	realtimeCancel       context.CancelFunc
-	sessionTTL           time.Duration
-	requestTimeout       time.Duration
-	openAIClientID       string
-	openAIClientSecret   string
-	openAIRedirectURI    string
-	openAIScopes         string
-	assistantAI          AssistantAIConfig
-	chatGPTDeviceAuths   *chatGPTDeviceAuthRegistry
-	noteAttachmentRoot   string
-	assistantTrace       *assistantTraceLog
-	loginBackoff         *loginBackoffRegistry
-	adminActionTokens    *adminActionTokenRegistry
-	runtimeID            string
-	runtimeVersion       string
-	runtimeCancel        context.CancelFunc
-	maintenanceCancel    context.CancelFunc
-	httpBaseCancel       context.CancelFunc
+	addr                  string
+	store                 *store.Store
+	router                *Router
+	logger                *slog.Logger
+	http                  *http.Server
+	metrics               *observability.Metrics
+	limiter               *rateLimiter
+	transfers             *transferRegistry
+	appTickets            *appWebSocketTicketRegistry
+	notes                 *cloudNotesService
+	collaboration         *noteCollaborationHub
+	agentRequests         *agentRequestRegistry
+	syncs                 *homeSyncController
+	storage               *storageops.Service
+	storageEvents         map[string]struct{}
+	storageEventsMu       sync.Mutex
+	notificationEvents    map[string]time.Time
+	notificationEventsMu  sync.Mutex
+	pushSender            PushSender
+	realtimeCancel        context.CancelFunc
+	sessionTTL            time.Duration
+	requestTimeout        time.Duration
+	openAIClientID        string
+	openAIClientSecret    string
+	openAIRedirectURI     string
+	openAIScopes          string
+	assistantAI           AssistantAIConfig
+	chatGPTDeviceAuths    *chatGPTDeviceAuthRegistry
+	noteAttachmentRoot    string
+	assistantTrace        *assistantTraceLog
+	loginBackoff          *loginBackoffRegistry
+	adminActionTokens     *adminActionTokenRegistry
+	quickLinkHTTPClient   *http.Client
+	quickLinkCheckTimeout time.Duration
+	runtimeID             string
+	runtimeVersion        string
+	runtimeCancel         context.CancelFunc
+	maintenanceCancel     context.CancelFunc
+	httpBaseCancel        context.CancelFunc
 }
 
 type authContext struct {
@@ -90,33 +92,35 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	realtimeCtx, realtimeCancel := context.WithCancel(context.Background())
 	httpBaseCtx, httpBaseCancel := context.WithCancel(context.Background())
 	server := &Server{
-		addr:               addr,
-		store:              db,
-		router:             NewRouter(),
-		logger:             logger,
-		metrics:            observability.NewMetrics(),
-		limiter:            newRateLimiter(),
-		transfers:          newTransferRegistry(),
-		appTickets:         newAppWebSocketTicketRegistry(),
-		notes:              newCloudNotesService(db),
-		collaboration:      newNoteCollaborationHub(db),
-		agentRequests:      newAgentRequestRegistry(),
-		syncs:              newHomeSyncController(),
-		storage:            storageops.NewService("", "", ""),
-		storageEvents:      make(map[string]struct{}),
-		notificationEvents: make(map[string]time.Time),
-		pushSender:         noopPushSender{},
-		realtimeCancel:     realtimeCancel,
-		sessionTTL:         sessionTTL,
-		requestTimeout:     requestTimeout,
-		chatGPTDeviceAuths: newChatGPTDeviceAuthRegistry(),
-		noteAttachmentRoot: filepath.Join("/tmp", "hank-note-attachments"),
-		assistantTrace:     newAssistantTraceLog(maxAssistantTraceLimit),
-		loginBackoff:       newLoginBackoffRegistry(),
-		adminActionTokens:  newAdminActionTokenRegistry(),
-		runtimeID:          newID("run"),
-		runtimeVersion:     "dev",
-		httpBaseCancel:     httpBaseCancel,
+		addr:                  addr,
+		store:                 db,
+		router:                NewRouter(),
+		logger:                logger,
+		metrics:               observability.NewMetrics(),
+		limiter:               newRateLimiter(),
+		transfers:             newTransferRegistry(),
+		appTickets:            newAppWebSocketTicketRegistry(),
+		notes:                 newCloudNotesService(db),
+		collaboration:         newNoteCollaborationHub(db),
+		agentRequests:         newAgentRequestRegistry(),
+		syncs:                 newHomeSyncController(),
+		storage:               storageops.NewService("", "", ""),
+		storageEvents:         make(map[string]struct{}),
+		notificationEvents:    make(map[string]time.Time),
+		pushSender:            noopPushSender{},
+		realtimeCancel:        realtimeCancel,
+		sessionTTL:            sessionTTL,
+		requestTimeout:        requestTimeout,
+		chatGPTDeviceAuths:    newChatGPTDeviceAuthRegistry(),
+		noteAttachmentRoot:    filepath.Join("/tmp", "hank-note-attachments"),
+		assistantTrace:        newAssistantTraceLog(maxAssistantTraceLimit),
+		loginBackoff:          newLoginBackoffRegistry(),
+		adminActionTokens:     newAdminActionTokenRegistry(),
+		quickLinkHTTPClient:   &http.Client{Timeout: 5 * time.Second},
+		quickLinkCheckTimeout: 5 * time.Second,
+		runtimeID:             newID("run"),
+		runtimeVersion:        "dev",
+		httpBaseCancel:        httpBaseCancel,
 	}
 
 	mux := http.NewServeMux()

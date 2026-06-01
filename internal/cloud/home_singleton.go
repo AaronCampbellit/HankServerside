@@ -94,7 +94,14 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.syncResponse(r.Context(), home))
 		return
 	}
+	if len(parts) == 1 && parts[0] == "setup-status" && r.Method == http.MethodGet {
+		s.handleHomeSetupStatus(w, r, home)
+		return
+	}
 
+	if s.handleHomeQuickLinks(w, r, home, auth, membership, parts) {
+		return
+	}
 	if s.handleHomeMembers(w, r, home, membership, parts) {
 		return
 	}
@@ -149,6 +156,16 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+func (s *Server) handleHomeSetupStatus(w http.ResponseWriter, r *http.Request, home domain.Home) {
+	firstSetupVisible := true
+	if runtime, err := s.store.GetCloudRuntime(r.Context()); err == nil && runtime.StartedAt.After(home.CreatedAt) {
+		firstSetupVisible = false
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"first_setup_visible": firstSetupVisible,
+	})
 }
 
 func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {

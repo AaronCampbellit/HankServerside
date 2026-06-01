@@ -15,20 +15,11 @@ const els = {
   sessionMeta: document.getElementById("session-meta"),
   agentPill: document.getElementById("homeassistant-agent-pill"),
   agentOutput: document.getElementById("homeassistant-agent-output"),
-  haHealthButton: document.getElementById("ha-health-button"),
-  haStatesButton: document.getElementById("ha-states-button"),
-  haEntityID: document.getElementById("ha-entity-id"),
   haEntitySearch: document.getElementById("ha-entity-search"),
   haEntityResults: document.getElementById("ha-entity-results"),
   haEntityCount: document.getElementById("ha-entity-count"),
   haDashboard: document.getElementById("ha-dashboard"),
   haDashboardCount: document.getElementById("ha-dashboard-count"),
-  haEntityButton: document.getElementById("ha-entity-button"),
-  haServiceDomain: document.getElementById("ha-service-domain"),
-  haServiceName: document.getElementById("ha-service-name"),
-  haServiceBody: document.getElementById("ha-service-body"),
-  haServiceButton: document.getElementById("ha-service-button"),
-  haOutput: document.getElementById("ha-output"),
   toast: document.getElementById("toast"),
 };
 
@@ -73,14 +64,6 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function safeJSONString(value) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function entityName(item) {
@@ -148,6 +131,17 @@ function stateByEntityID(entityID) {
   return state.states.find((item) => item.entity_id === entityID) || null;
 }
 
+function upsertEntityState(nextState) {
+  if (!nextState?.entity_id) return;
+  const index = state.states.findIndex((item) => item.entity_id === nextState.entity_id);
+  if (index === -1) {
+    state.states.push(nextState);
+  } else {
+    state.states[index] = { ...state.states[index], ...nextState };
+  }
+  state.states.sort((left, right) => entityName(left).localeCompare(entityName(right), undefined, { sensitivity: "base" }));
+}
+
 function renderEntityCard(item, options = {}) {
   const name = entityName(item);
   const domain = entityDomain(item.entity_id);
@@ -164,7 +158,6 @@ function renderEntityCard(item, options = {}) {
       </div>
       <div class="meta">${escapeHTML(domain)}${item.attributes?.unit_of_measurement ? ` / ${escapeHTML(item.attributes.unit_of_measurement)}` : ""}</div>
       <div class="item-actions">
-        <button type="button" class="secondary" data-ha-fill="${escapeHTML(item.entity_id)}">Use</button>
         ${canToggle ? `<button type="button" data-ha-toggle="${escapeHTML(item.entity_id)}">${item.state === "on" ? "Turn Off" : "Turn On"}</button>` : ""}
         <button type="button" class="${isDashboard ? "ghost" : "secondary"}" data-ha-dashboard="${escapeHTML(item.entity_id)}">${options.dashboardTile ? "Remove" : isDashboard ? "Saved" : "Add Tile"}</button>
       </div>
@@ -173,12 +166,6 @@ function renderEntityCard(item, options = {}) {
 }
 
 function wireEntityActions(root) {
-  root.querySelectorAll("[data-ha-fill]").forEach((button) => {
-    button.addEventListener("click", () => {
-      els.haEntityID.value = button.dataset.haFill;
-      runHAFetchEntity();
-    });
-  });
   root.querySelectorAll("[data-ha-dashboard]").forEach((button) => {
     button.addEventListener("click", () => toggleDashboardEntity(button.dataset.haDashboard));
   });
@@ -220,6 +207,10 @@ function handleSocketMessage(event) {
   } catch (_) {
     return;
   }
+  if (envelope.type === "app.event") {
+    handleAppEvent(envelope);
+    return;
+  }
   const pending = state.pendingRequests.get(envelope.request_id);
   if (!pending) return;
   state.pendingRequests.delete(envelope.request_id);
@@ -228,6 +219,31 @@ function handleSocketMessage(event) {
     return;
   }
   pending.resolve(envelope.payload ?? null);
+}
+
+function decodedAppEventBody(body) {
+  if (!body) return null;
+  if (typeof body === "string") {
+    try {
+      return JSON.parse(body);
+    } catch (_) {
+      return null;
+    }
+  }
+  return body;
+}
+
+function handleAppEvent(envelope) {
+  const payload = envelope.payload || {};
+  if (payload.topic !== "homeassistant.states" || payload.event !== "homeassistant.state_changed") {
+    return;
+  }
+  const body = decodedAppEventBody(payload.body);
+  const nextState = body?.state || body;
+  if (!nextState?.entity_id) return;
+  upsertEntityState(nextState);
+  renderDashboard();
+  renderEntityResults();
 }
 
 async function ensureAppSocket() {
@@ -315,18 +331,12 @@ function renderAgents() {
   `;
 }
 
-function renderHAOutput(html, empty = false) {
-  els.haOutput.className = empty ? "card-list empty-state" : "card-list";
-  els.haOutput.hidden = false;
-  els.haOutput.innerHTML = html;
-}
-
 function renderEntityResults() {
   const query = els.haEntitySearch.value.trim();
   if (!state.states.length) {
     els.haEntityResults.className = "card-list empty-state";
-    els.haEntityResults.textContent = "Refresh entities to search Home Assistant.";
-    els.haEntityCount.textContent = "Not Loaded";
+    els.haEntityResults.textContent = "Loading entities.";
+    els.haEntityCount.textContent = "Loading";
     return;
   }
   const matches = state.states
@@ -351,7 +361,7 @@ function renderDashboard() {
   els.haDashboardCount.textContent = `${tiles.length} ${tiles.length === 1 ? "Tile" : "Tiles"}`;
   if (!tiles.length) {
     els.haDashboard.className = "ha-dashboard-grid empty-state";
-    els.haDashboard.textContent = state.states.length ? "Add entities from the list below." : "Refresh entities to build a dashboard.";
+    els.haDashboard.textContent = state.states.length ? "Add entities from the list below." : "Loading entities.";
     return;
   }
   els.haDashboard.className = "ha-dashboard-grid";
@@ -362,6 +372,11 @@ function renderDashboard() {
 function toggleDashboardEntity(entityID) {
   if (!entityID) return;
   if (state.dashboardEntityIDs.includes(entityID)) {
+    const item = stateByEntityID(entityID);
+    const label = entityName(item) || entityID;
+    if (!window.confirm(`Remove ${label} from the dashboard?`)) {
+      return;
+    }
     state.dashboardEntityIDs = state.dashboardEntityIDs.filter((id) => id !== entityID);
   } else {
     state.dashboardEntityIDs = [...state.dashboardEntityIDs, entityID];
@@ -379,76 +394,29 @@ async function toggleEntity(entityID) {
   try {
     await sendCommand("homeassistant.call_service", { domain, service, body: { entity_id: entityID } });
     showToast(`${entityName(item)} ${service.replace("_", " ")} sent.`);
-    await runHAFetchStates(false);
+    await loadHAStates();
   } catch (error) {
     showToast(error.message, true);
   }
 }
 
-async function runHAHealth() {
-  try {
-    const payload = await sendCommand("homeassistant.health");
-    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">Home Assistant Check</div></div><span class="status-chip">${payload.ok ? "Working" : "Unknown"}</span></div><div class="meta">Checked at ${formatDate(payload.checked_at)}</div></article>`);
-  } catch (error) {
-    showToast(error.message, true);
-  }
+async function subscribeHomeAssistantEvents() {
+  await sendCommand("app.subscribe", { topics: ["homeassistant.states"] });
 }
 
-async function runHAFetchStates(showResults = true) {
+async function loadHAStates() {
   try {
     const payload = await sendCommand("homeassistant.fetch_states");
     const states = payload.states || [];
     state.states = states.slice().sort((left, right) => entityName(left).localeCompare(entityName(right), undefined, { sensitivity: "base" }));
     renderEntityResults();
     renderDashboard();
-    if (!states.length) {
-      if (showResults) renderHAOutput("No Home Assistant states returned.", true);
-      return;
-    }
-    if (showResults) {
-      renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">Entities Refreshed</div><div class="meta">Use search to filter the full list.</div></div><span class="status-chip">${states.length}</span></div></article>`);
-    }
   } catch (error) {
     showToast(error.message, true);
-  }
-}
-
-async function runHAFetchEntity() {
-  const entityID = els.haEntityID.value.trim();
-  if (!entityID) {
-    showToast("Enter a device ID first.", true);
-    return;
-  }
-  try {
-    const payload = await sendCommand("homeassistant.fetch_state", { entity_id: entityID });
-    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">${escapeHTML(payload.state?.entity_id || entityID)}</div><div class="meta">Last changed ${formatDate(payload.state?.last_changed)}</div></div><span class="pill">${escapeHTML(payload.state?.state || "")}</span></div><pre>${escapeHTML(safeJSONString(payload.state || {}))}</pre></article>`);
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function runHAServiceCall() {
-  const domain = els.haServiceDomain.value.trim();
-  const service = els.haServiceName.value.trim();
-  if (!domain || !service) {
-    showToast("Enter both type and service.", true);
-    return;
-  }
-  let body = null;
-  const raw = els.haServiceBody.value.trim();
-  if (raw) {
-    try {
-      body = JSON.parse(raw);
-    } catch (error) {
-      showToast(`Command details are not valid JSON: ${error.message}`, true);
-      return;
-    }
-  }
-  try {
-    const payload = await sendCommand("homeassistant.call_service", { domain, service, body });
-    renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">${escapeHTML(`${domain}.${service}`)}</div><div class="meta">Command completed</div></div><span class="status-chip">OK</span></div><pre>${escapeHTML(safeJSONString(payload.result || {}))}</pre></article>`);
-  } catch (error) {
-    showToast(error.message, true);
+    els.haEntityResults.className = "card-list empty-state";
+    els.haEntityResults.textContent = "Entities could not be loaded.";
+    els.haDashboard.className = "ha-dashboard-grid empty-state";
+    els.haDashboard.textContent = "Entities could not be loaded.";
   }
 }
 
@@ -477,14 +445,22 @@ async function hydrate() {
     renderDashboard();
   } catch (_) {
     window.location.replace("/");
+    return;
+  }
+  try {
+    await ensureAppSocket();
+    await subscribeHomeAssistantEvents();
+    await loadHAStates();
+  } catch (error) {
+    showToast(error.message, true);
+    els.haEntityResults.className = "card-list empty-state";
+    els.haEntityResults.textContent = "Entities could not be loaded.";
+    els.haDashboard.className = "ha-dashboard-grid empty-state";
+    els.haDashboard.textContent = "Entities could not be loaded.";
   }
 }
 
 els.logoutButton.addEventListener("click", logout);
-els.haHealthButton.addEventListener("click", runHAHealth);
-els.haStatesButton.addEventListener("click", runHAFetchStates);
-els.haEntityButton.addEventListener("click", runHAFetchEntity);
-els.haServiceButton.addEventListener("click", runHAServiceCall);
 els.haEntitySearch.addEventListener("input", renderEntityResults);
 
 hydrate();

@@ -38,6 +38,9 @@ const state = {
   appSocketPromise: null,
   pendingRequests: new Map(),
   requestCounter: 0,
+  browseRequestID: 0,
+  moveInProgress: false,
+  fileJobsPollID: 0,
 };
 
 const els = {
@@ -46,6 +49,7 @@ const els = {
   sessionMeta: document.getElementById("session-meta"),
   homeSelect: document.getElementById("home-select"),
   sourceSelect: document.getElementById("source-select"),
+  explorerSourceSelect: document.getElementById("explorer-source-select"),
   sourceStatus: document.getElementById("source-status"),
   sourceSummary: document.getElementById("source-summary"),
   transferOutput: document.getElementById("transfer-output"),
@@ -210,7 +214,7 @@ function fileTypeLabel(item) {
 }
 
 function iconLabel(item) {
-  if (item?.is_directory) return "DIR";
+  if (item?.is_directory) return "";
   const extension = extensionForItem(item);
   if (!extension) return "FILE";
   if (imageExtensions.has(extension)) return "IMG";
@@ -427,6 +431,10 @@ function handleSocketMessage(event) {
   } catch (_) {
     return;
   }
+  if (envelope.type === "app.event") {
+    handleAppEvent(envelope);
+    return;
+  }
   const pending = state.pendingRequests.get(envelope.request_id);
   if (!pending) return;
   state.pendingRequests.delete(envelope.request_id);
@@ -435,6 +443,33 @@ function handleSocketMessage(event) {
     return;
   }
   pending.resolve(envelope.payload ?? null);
+}
+
+function handleAppEvent(envelope) {
+  if (envelope.payload?.event !== "files.job_changed") return;
+  const job = envelope.payload?.body?.job;
+  if (!job?.id) {
+    loadFileJobs().catch(() => {});
+    return;
+  }
+  state.fileJobs = [job, ...state.fileJobs.filter((entry) => entry.id !== job.id)].slice(0, 10);
+  renderFileJobs();
+  if (job.status === "completed") {
+    refreshCurrentView().catch(() => {});
+  }
+}
+
+function commandTimeoutMS(command) {
+  switch (command) {
+    case "files.list":
+      return 30000;
+    case "files.stat":
+      return 10000;
+    case "files.search":
+      return 45000;
+    default:
+      return 0;
+  }
 }
 
 async function ensureAppSocket() {
@@ -463,6 +498,10 @@ async function ensureAppSocket() {
   return state.appSocketPromise;
 }
 
+async function subscribeFileJobEvents() {
+  await sendCommand("app.subscribe", { topics: ["files.jobs"] });
+}
+
 async function sendCommand(command, body = {}) {
   selectedHomeOrThrow();
   const socket = await ensureAppSocket();
@@ -475,11 +514,29 @@ async function sendCommand(command, body = {}) {
     payload: { command, body },
   };
   return new Promise((resolve, reject) => {
-    state.pendingRequests.set(requestID, { resolve, reject });
+    let timeoutID = null;
+    const timeoutMS = commandTimeoutMS(command);
+    if (timeoutMS > 0) {
+      timeoutID = window.setTimeout(() => {
+        state.pendingRequests.delete(requestID);
+        reject(new Error(`${command} timed out after ${Math.round(timeoutMS / 1000)} seconds.`));
+      }, timeoutMS);
+    }
+    state.pendingRequests.set(requestID, {
+      resolve: (value) => {
+        if (timeoutID) window.clearTimeout(timeoutID);
+        resolve(value);
+      },
+      reject: (error) => {
+        if (timeoutID) window.clearTimeout(timeoutID);
+        reject(error);
+      },
+    });
     try {
       socket.send(JSON.stringify(envelope));
     } catch (error) {
       state.pendingRequests.delete(requestID);
+      if (timeoutID) window.clearTimeout(timeoutID);
       reject(error);
     }
   });
@@ -599,25 +656,32 @@ function renderSourceSummary() {
 }
 
 function renderSourceSelect(sources) {
-  if (!els.sourceSelect) return;
-  els.sourceSelect.innerHTML = "";
+  const selects = [els.sourceSelect, els.explorerSourceSelect].filter(Boolean);
+  if (!selects.length) return;
+  selects.forEach((select) => {
+    select.innerHTML = "";
+  });
   if (!sources.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No shares";
-    els.sourceSelect.appendChild(option);
-    els.sourceSelect.disabled = true;
+    selects.forEach((select) => {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No shares";
+      select.appendChild(option);
+      select.disabled = true;
+    });
     return;
   }
-  sources.forEach((source) => {
-    const option = document.createElement("option");
-    option.value = source.id;
-    option.textContent = sourceLabel(source);
-    option.selected = source.id === state.activeSourceID;
-    els.sourceSelect.appendChild(option);
+  selects.forEach((select) => {
+    sources.forEach((source) => {
+      const option = document.createElement("option");
+      option.value = source.id;
+      option.textContent = sourceLabel(source);
+      option.selected = source.id === state.activeSourceID;
+      select.appendChild(option);
+    });
+    select.disabled = false;
+    select.value = state.activeSourceID || sources[0].id;
   });
-  els.sourceSelect.disabled = false;
-  els.sourceSelect.value = state.activeSourceID || sources[0].id;
 }
 
 function sourceEnabled(source) {
@@ -637,7 +701,7 @@ async function switchSource(sourceID) {
   resetSearch();
   clearSelection();
   renderSourceSummary();
-  await browseFiles("/");
+  await browseFiles("/", { sourceID });
 }
 
 function renderBreadcrumbs() {
@@ -713,7 +777,7 @@ function folderTreeButton(label, path, isActive, depth) {
   button.dataset.filePath = normalizePath(path);
   button.innerHTML = `
     <span class="file-tree-caret" aria-hidden="true">${normalizePath(path) === "/" ? "" : ">"}</span>
-    <span class="file-tree-icon" aria-hidden="true">DIR</span>
+    <span class="file-tree-icon" aria-hidden="true"></span>
     <span class="file-tree-label">${escapeHTML(label)}</span>
   `;
   button.addEventListener("click", () => browseFiles(path));
@@ -879,7 +943,7 @@ function actionButton(label, onClick, className = "") {
   if (className) button.className = className;
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    onClick();
+    Promise.resolve(onClick()).catch((error) => showToast(error.message || String(error), true));
   });
   return button;
 }
@@ -1011,9 +1075,21 @@ function openItem(item) {
   selectOnlyItem(item);
 }
 
-function setFilesLoading(message) {
+function loadingMarkup(message, detail = "") {
+  return `
+    <div class="file-loading-state" role="status" aria-live="polite">
+      <div class="file-loading-copy">
+        <strong>${escapeHTML(message)}</strong>
+        ${detail ? `<span>${escapeHTML(detail)}</span>` : ""}
+      </div>
+      <div class="file-loading-bar" aria-hidden="true"><span></span></div>
+    </div>
+  `;
+}
+
+function setFilesLoading(message, detail = "") {
   els.filesOutput.className = "file-list empty-state";
-  els.filesOutput.textContent = message;
+  els.filesOutput.innerHTML = loadingMarkup(message, detail);
 }
 
 async function loadHomes() {
@@ -1044,6 +1120,8 @@ function resetSearch() {
 }
 
 async function browseFiles(path = state.currentFilesPath, options = {}) {
+  const requestID = ++state.browseRequestID;
+  const sourceID = options.sourceID || selectedSourceID();
   try {
     if (!fileConfig().active) {
       state.currentItems = [];
@@ -1058,8 +1136,9 @@ async function browseFiles(path = state.currentFilesPath, options = {}) {
     }
     const normalized = normalizePath(path);
     if (!options.keepSearch) resetSearch();
-    setFilesLoading("Loading folder.");
-    const payload = await sendFileCommand("files.list", { path: normalized });
+    setFilesLoading("Loading folder.", "First launch can take a minute while the home connector warms the SMB cache.");
+    const payload = await sendFileCommandForSource(sourceID, "files.list", { path: normalized });
+    if (requestID !== state.browseRequestID || sourceID !== selectedSourceID()) return;
     state.currentFilesPath = normalized;
     state.currentItems = payload.items || [];
     state.visibleItems = [];
@@ -1070,6 +1149,7 @@ async function browseFiles(path = state.currentFilesPath, options = {}) {
     selectRequestedTargetIfPresent();
     applySortAndRender();
   } catch (error) {
+    if (requestID !== state.browseRequestID || sourceID !== selectedSourceID()) return;
     renderPathStatus();
     renderBreadcrumbs();
     setFilesLoading("Could not load this folder.");
@@ -1094,7 +1174,7 @@ async function searchFiles(query = els.filesSearch.value) {
     return;
   }
   try {
-    setFilesLoading("Searching files.");
+    setFilesLoading("Searching files.", "Large SMB shares can take a little longer on the first search.");
     const payload = await sendFileCommand("files.search", { query: trimmed, limit: 100 });
     state.searchMode = true;
     state.searchQuery = trimmed;
@@ -1334,8 +1414,11 @@ function renderMoveTarget() {
   const config = fileConfig();
   const destinationSource = config.sources.find((source) => source.id === destinationSourceID);
   const shareName = destinationSource ? sourceLabel(destinationSource) : "selected share";
-  els.moveTargetLabel.textContent = reason || `Move ${count === 1 ? itemName(state.moveItems[0]) : `${count} items`} to ${shareName}:${state.moveDialogPath}`;
-  els.moveConfirmButton.disabled = Boolean(reason);
+  els.moveTargetLabel.textContent = state.moveInProgress
+    ? `Moving ${count === 1 ? itemName(state.moveItems[0]) : `${count} items`} to ${shareName}:${state.moveDialogPath}`
+    : reason || `Move ${count === 1 ? itemName(state.moveItems[0]) : `${count} items`} to ${shareName}:${state.moveDialogPath}`;
+  els.moveConfirmButton.disabled = Boolean(reason) || state.moveInProgress;
+  els.moveConfirmButton.textContent = state.moveInProgress ? "Moving..." : "Move Here";
 }
 
 function renderMoveBreadcrumbs() {
@@ -1375,7 +1458,7 @@ function renderMoveFolders(folders) {
     row.className = "file-row directory compact-row";
     row.innerHTML = `
       <button type="button" class="file-main">
-        <span class="file-icon" aria-hidden="true">DIR</span>
+        <span class="file-icon" aria-hidden="true"></span>
         <span>
           <strong>${escapeHTML(itemName(folder))}</strong>
           <span class="meta">${escapeHTML(itemPath(folder))}</span>
@@ -1407,6 +1490,7 @@ function invalidMoveDestinationReason(items, destination, destinationSourceID = 
 }
 
 async function moveItemsToDestination(items, destination, options = {}) {
+  if (state.moveInProgress) return;
   const targets = items.filter(Boolean);
   if (!targets.length) {
     showToast("Select an item first.", true);
@@ -1452,6 +1536,9 @@ async function moveItemsToDestination(items, destination, options = {}) {
   }
 
   try {
+    state.moveInProgress = true;
+    renderMoveTarget();
+    showToast(moves.length === 1 ? "Move started." : `Moving ${moves.length} items.`);
     for (const move of moves) {
       const job = await sendFileCommandForSource(sourceID, "files.move", {
         destination_source_id: destinationSourceID,
@@ -1467,10 +1554,12 @@ async function moveItemsToDestination(items, destination, options = {}) {
     closeDialog(els.moveDialog);
     clearSelection();
     await loadFileJobs();
-    await refreshCurrentView();
-    showToast(moves.length === 1 ? "Item moved." : `${moves.length} items moved.`);
+    showToast(moves.length === 1 ? "Move queued." : `${moves.length} moves queued.`);
   } catch (error) {
     showToast(error.message, true);
+  } finally {
+    state.moveInProgress = false;
+    renderMoveTarget();
   }
 }
 
@@ -1896,10 +1985,26 @@ async function loadFileJobs() {
   renderFileJobs();
 }
 
+function fileJobsNeedPolling() {
+  return state.fileJobs.some((job) => job.status === "queued" || job.status === "running");
+}
+
+function syncFileJobsPolling() {
+  if (fileJobsNeedPolling() && !state.fileJobsPollID) {
+    state.fileJobsPollID = window.setInterval(() => loadFileJobs().catch(() => {}), 2500);
+    return;
+  }
+  if (!fileJobsNeedPolling() && state.fileJobsPollID) {
+    window.clearInterval(state.fileJobsPollID);
+    state.fileJobsPollID = 0;
+  }
+}
+
 function renderFileJobs() {
   if (!state.fileJobs.length) {
     els.fileJobsOutput.className = "card-list empty-state";
     els.fileJobsOutput.textContent = "No managed file jobs yet.";
+    syncFileJobsPolling();
     return;
   }
   els.fileJobsOutput.className = "card-list";
@@ -1933,6 +2038,7 @@ function renderFileJobs() {
       </article>
     `;
   }).join("");
+  syncFileJobsPolling();
 }
 
 async function runFileJobAction(jobID, action) {
@@ -2006,6 +2112,7 @@ async function hydrate() {
     renderBreadcrumbs();
     renderPreview();
     if (selectedHome()) {
+      subscribeFileJobEvents().catch(() => {});
       await browseRequestedPath();
     }
   } catch (_) {
@@ -2022,9 +2129,11 @@ els.homeSelect.addEventListener("change", async () => {
   clearSelection();
   await loadProfiles();
   await loadFileJobs();
+  subscribeFileJobEvents().catch(() => {});
   await browseFiles("/");
 });
 els.sourceSelect?.addEventListener("change", () => switchSource(selectedSourceID()));
+els.explorerSourceSelect?.addEventListener("change", () => switchSource(els.explorerSourceSelect.value));
 els.filesSearchButton.addEventListener("click", () => searchFiles());
 els.filesSearchClearButton.addEventListener("click", () => browseFiles(state.currentFilesPath));
 els.filesSearch.addEventListener("keydown", (event) => {

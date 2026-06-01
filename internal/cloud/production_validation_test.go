@@ -51,12 +51,19 @@ func TestManagedFileMoveCreatesAndCompletesJob(t *testing.T) {
 				return
 			}
 			response, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.FileOperationJobResponse{
-				OK:        true,
-				JobID:     request.JobID,
-				Status:    "completed",
-				FilesDone: 1,
+				OK:     true,
+				JobID:  request.JobID,
+				Status: "running",
 			})
 			_ = wsjson.Write(ctx, agentConn, response)
+			body, _ := protocol.EncodeBody(protocol.FileOperationJobEvent{
+				JobID:      request.JobID,
+				Status:     "completed",
+				FilesTotal: 1,
+				FilesDone:  1,
+			})
+			event, _ := protocol.NewEnvelope(protocol.TypeAgentEvent, "", agentID, homeID, protocol.AgentEvent{Event: "files.move_completed", Topic: "files.jobs", Body: body})
+			_ = wsjson.Write(ctx, agentConn, event)
 		}
 	}()
 
@@ -88,6 +95,11 @@ func TestManagedFileMoveCreatesAndCompletesJob(t *testing.T) {
 
 	var job map[string]any
 	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/file-jobs/"+payload.JobID, nil, &job)
+	deadline := time.Now().Add(2 * time.Second)
+	for job["status"] != "completed" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/file-jobs/"+payload.JobID, nil, &job)
+	}
 	if job["status"] != "completed" {
 		t.Fatalf("job status = %#v, want completed", job["status"])
 	}
@@ -106,7 +118,6 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 	firstJobID := make(chan string, 1)
 	retrySeen := make(chan protocol.FilesMoveRequest, 1)
 	cancelJobID := make(chan string, 1)
-	releaseCancelResponse := make(chan struct{})
 	go func() {
 		failedOnce := false
 		for {
@@ -118,8 +129,16 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 				continue
 			}
 			command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
-			if err != nil || command.Command != "files.move" {
+			if err != nil {
 				return
+			}
+			if command.Command == "files.move_cancel" {
+				response, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.EmptyResponse{OK: true})
+				_ = wsjson.Write(ctx, agentConn, response)
+				continue
+			}
+			if command.Command != "files.move" {
+				continue
 			}
 			request, err := decodeBody[protocol.FilesMoveRequest](command.Body)
 			if err != nil {
@@ -130,27 +149,29 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 				if !failedOnce {
 					failedOnce = true
 					firstJobID <- request.JobID
-					response := protocol.NewErrorEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, "checksum_mismatch", "copy verification failed: checksum mismatch", nil)
+					response, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.FileOperationJobResponse{OK: true, JobID: request.JobID, Status: "running"})
 					_ = wsjson.Write(ctx, agentConn, response)
+					body, _ := protocol.EncodeBody(protocol.FileOperationJobEvent{JobID: request.JobID, Status: "failed", ErrorMessage: "copy verification failed: checksum mismatch"})
+					event, _ := protocol.NewEnvelope(protocol.TypeAgentEvent, "", agentID, homeID, protocol.AgentEvent{Event: "files.move_failed", Topic: "files.jobs", Body: body})
+					_ = wsjson.Write(ctx, agentConn, event)
 					continue
 				}
 				retrySeen <- request
 				response, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.FileOperationJobResponse{
-					OK:         true,
-					JobID:      request.JobID,
-					Status:     "completed",
-					FilesTotal: 3,
-					FilesDone:  3,
+					OK:     true,
+					JobID:  request.JobID,
+					Status: "running",
 				})
 				_ = wsjson.Write(ctx, agentConn, response)
+				body, _ := protocol.EncodeBody(protocol.FileOperationJobEvent{JobID: request.JobID, Status: "completed", FilesTotal: 3, FilesDone: 3})
+				event, _ := protocol.NewEnvelope(protocol.TypeAgentEvent, "", agentID, homeID, protocol.AgentEvent{Event: "files.move_completed", Topic: "files.jobs", Body: body})
+				_ = wsjson.Write(ctx, agentConn, event)
 			case "/cancel-source":
 				cancelJobID <- request.JobID
-				<-releaseCancelResponse
 				response, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.FileOperationJobResponse{
-					OK:        true,
-					JobID:     request.JobID,
-					Status:    "completed",
-					FilesDone: 1,
+					OK:     true,
+					JobID:  request.JobID,
+					Status: "running",
 				})
 				_ = wsjson.Write(ctx, agentConn, response)
 			}
@@ -168,12 +189,12 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 	if err := wsjson.Write(ctx, appConn, command); err != nil {
 		t.Fatalf("write failing move command: %v", err)
 	}
-	var failed protocol.Envelope
-	if err := wsjson.Read(ctx, appConn, &failed); err != nil {
-		t.Fatalf("read failing move response: %v", err)
+	var started protocol.Envelope
+	if err := wsjson.Read(ctx, appConn, &started); err != nil {
+		t.Fatalf("read failing move start response: %v", err)
 	}
-	if failed.Type != protocol.TypeAppError || failed.Error == nil || failed.Error.Code != "checksum_mismatch" {
-		t.Fatalf("failing move response = %#v, want checksum_mismatch", failed)
+	if started.Type != protocol.TypeAppResponse {
+		t.Fatalf("failing move start response = %#v, want app response", started)
 	}
 	var failedJobID string
 	select {
@@ -181,9 +202,17 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for failed job id")
 	}
-	job, err := db.GetFileOperationJob(ctx, failedJobID)
-	if err != nil {
-		t.Fatalf("GetFileOperationJob failed: %v", err)
+	var job store.FileOperationJob
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err = db.GetFileOperationJob(ctx, failedJobID)
+		if err != nil {
+			t.Fatalf("GetFileOperationJob failed: %v", err)
+		}
+		if job.Status == "failed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if job.Status != "failed" || !strings.Contains(job.ErrorMessage, "checksum mismatch") {
 		t.Fatalf("failed job = %#v, want failed checksum mismatch", job)
@@ -191,6 +220,11 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 
 	var retried map[string]any
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/file-jobs/"+failedJobID+"/retry", nil, &retried)
+	deadline = time.Now().Add(2 * time.Second)
+	for retried["status"] != "completed" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/file-jobs/"+failedJobID, nil, &retried)
+	}
 	if retried["status"] != "completed" {
 		t.Fatalf("retry job status = %#v, want completed", retried["status"])
 	}
@@ -218,11 +252,6 @@ func TestManagedFileMoveFailureRetryAndCancelLifecycle(t *testing.T) {
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/file-jobs/"+cancelledJobID+"/cancel", nil, &cancelled)
 	if cancelled["status"] != "cancelled" {
 		t.Fatalf("cancel job status = %#v, want cancelled", cancelled["status"])
-	}
-	close(releaseCancelResponse)
-	var cancelResponse protocol.Envelope
-	if err := wsjson.Read(ctx, appConn, &cancelResponse); err != nil {
-		t.Fatalf("read cancelled move app response: %v", err)
 	}
 	job, err = db.GetFileOperationJob(ctx, cancelledJobID)
 	if err != nil {
