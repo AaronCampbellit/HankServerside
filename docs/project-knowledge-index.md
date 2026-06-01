@@ -13,9 +13,7 @@ These documents stay in the repo root because common tooling expects them there.
 ## Architecture And Setup
 
 - [architecture.md](architecture.md)
-- [setup-and-onboarding.md](setup-and-onboarding.md)
 - [deployment.md](deployment.md)
-- [first-time-deployment.md](first-time-deployment.md)
 - [roadmap.md](roadmap.md)
 
 ## Feature Phases

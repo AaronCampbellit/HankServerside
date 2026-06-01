@@ -204,7 +204,7 @@ curl -s http://127.0.0.1:8080/v1/home/agent/tokens \
 4. Start the home agent:
 
 ```bash
-# Create .env.agent from the dashboard-generated block or the example shape in docs/setup-and-onboarding.md.
+# Create .env.agent from the dashboard-generated block or the example shape in docs/deployment.md.
 export $(grep -v '^#' .env.agent | xargs)
 make run-agent
 ```
@@ -240,7 +240,7 @@ After that, repo-local commands like `docker compose up --build` will prefer the
 
 This project is deployed as one Docker Compose stack on one machine. That same machine should already have network access to Home Assistant, SMB, local files, and notes. The bootstrap path publishes the cloud on `127.0.0.1:18080` by default for Cloudflare Tunnel or a same-host reverse proxy. Use `0.0.0.0` only when the server network must reach the cloud port directly.
 
-Full setup and onboarding docs live in `docs/setup-and-onboarding.md`.
+Full setup and deployment docs live in `docs/deployment.md`.
 
 1. The Compose stack uses private repo-root env files:
 
@@ -293,8 +293,8 @@ pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside &&
 
 ## Operations Docs
 
-- deployment guide: `docs/deployment.md`
-- first-time deployment: `docs/first-time-deployment.md`
+- deployment and setup guide: `docs/deployment.md`
+- single-host runbook: `docs/runbooks/single-host-compose.md`
 - runbooks:
   - `docs/runbooks/agent-offline.md`
   - `docs/runbooks/auth-failures.md`

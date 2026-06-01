@@ -113,7 +113,7 @@ Files:
 - `cmd/hank-remote-cloud/main.go`
 - `cmd/hank-remote-agent/main.go`
 - `internal/config`
-- `docs/setup-and-onboarding.md`
+- `docs/deployment.md`
 - `docs/runbooks/single-host-compose.md`
 
 Acceptance:
@@ -139,7 +139,7 @@ Files:
 - `internal/agent/client.go`
 - `internal/cloud/ui/file-server.js`
 - `internal/cloud/ui/hank.js`
-- `docs/setup-and-onboarding.md`
+- `docs/deployment.md`
 
 Acceptance:
 
@@ -185,7 +185,7 @@ Files:
 
 - `docs/deployment.md`
 - `docs/runbooks/single-host-compose.md`
-- `docs/setup-and-onboarding.md`
+- `docs/deployment.md`
 
 Acceptance:
 

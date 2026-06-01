@@ -10,7 +10,7 @@ Use this runbook for the supported live deployment shape:
 
 The complete current setup flow is:
 
-- `docs/setup-and-onboarding.md`
+- `docs/deployment.md`
 
 ## Files
 
@@ -66,13 +66,14 @@ docker compose --env-file .env.cloud up -d cloud db-ops
 2. Register the first account.
 3. Let the first account become the admin automatically.
 4. Create the agent setup token in the dashboard.
-5. Paste the generated setup block into `.env.agent`.
-6. Start the agent:
+5. Copy the generated `.env.agent` block.
+6. Install it from your Mac clipboard:
 
 ```bash
-cd /srv/hank-remote/HankServerside
-docker compose --env-file .env.cloud --profile agent up -d agent
+pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside && scripts/install-agent-env.sh'
 ```
+
+If you are already in an SSH session, paste the block into `.env.agent`, run `chmod 600 .env.agent`, then run `docker compose --env-file .env.cloud --profile agent up -d agent`.
 
 Public registration is disabled after the first Home exists. Add more users through dashboard invitations.
 
@@ -127,6 +128,7 @@ Postgres is private to Docker networks. It is not published to the host.
 Back up:
 
 - `hank_pgbackrest_repo`
+- `hank_note_attachments`
 - `hank_db_ops_state`
 - `hank_agent_files`
 - `hank_agent_notes`
@@ -134,6 +136,7 @@ Back up:
 - `.env.agent`
 
 Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`; encrypted pgBackRest backups cannot be restored without it.
+Keep `hank_note_attachments` with the pgBackRest repository because note attachment files live outside Postgres.
 
 If an existing database has checksums disabled, schedule downtime and run:
 
