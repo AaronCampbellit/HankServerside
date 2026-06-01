@@ -770,9 +770,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		`DO $$ BEGIN
 			ALTER TABLE home_service_profiles ADD CONSTRAINT home_service_profiles_service_type_check CHECK (service_type IN ('homeassistant', 'smb'));
 		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-		`DO $$ BEGIN
-			ALTER TABLE user_notes ADD CONSTRAINT user_notes_page_type_check CHECK (page_type IN ('text', 'board'));
-		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		`UPDATE user_notes SET page_type = 'kanban' WHERE page_type = 'board';`,
+		`ALTER TABLE user_notes DROP CONSTRAINT IF EXISTS user_notes_page_type_check;`,
+		`ALTER TABLE user_notes ADD CONSTRAINT user_notes_page_type_check CHECK (page_type IN ('text', 'kanban'));`,
 		`DO $$ BEGIN
 			ALTER TABLE note_shares ADD CONSTRAINT note_shares_permission_check CHECK (permission IN ('read', 'write'));
 		EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,

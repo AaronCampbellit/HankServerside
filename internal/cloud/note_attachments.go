@@ -234,7 +234,7 @@ func noteWithAttachmentReference(note domain.UserNote, scope string, userID stri
 func noteWithoutAttachmentReference(note domain.UserNote, userID string, attachment domain.NoteAttachment) (domain.UserNote, error) {
 	body := noteBodyText(note)
 	escapedID := regexp.QuoteMeta(url.PathEscape(attachment.ID))
-	pattern, err := regexp.Compile(`(?m)\n{0,2}\[[^\]]+\]\(hank-note-attachment://` + escapedID + `[^)]*\)`)
+	pattern, err := regexp.Compile(`(?m)\n{0,2}!?\[[^\]]+\]\(hank-note-attachment://` + escapedID + `[^)]*\)`)
 	if err != nil {
 		return domain.UserNote{}, err
 	}
@@ -285,7 +285,11 @@ func (s *Server) serveNoteAttachment(w http.ResponseWriter, r *http.Request, att
 	defer file.Close()
 	w.Header().Set("Content-Type", attachment.ContentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", attachment.SizeBytes))
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": attachment.Filename}))
+	disposition := "attachment"
+	if isInlineNoteImageContentType(attachment.ContentType) {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Filename}))
 	http.ServeContent(w, r, attachment.Filename, attachment.UpdatedAt, file)
 }
 
@@ -359,7 +363,20 @@ func noteAttachmentMarkdownReference(note domain.UserNote, scope string, attachm
 	values.Set("note_id", note.NoteID)
 	values.Set("scope", scope)
 	values.Set("filename", attachment.Filename)
-	return fmt.Sprintf("[%s](hank-note-attachment://%s?%s)", attachment.Filename, url.PathEscape(attachment.ID), values.Encode())
+	prefix := ""
+	if isInlineNoteImageContentType(attachment.ContentType) {
+		prefix = "!"
+	}
+	return fmt.Sprintf("%s[%s](hank-note-attachment://%s?%s)", prefix, attachment.Filename, url.PathEscape(attachment.ID), values.Encode())
+}
+
+func isInlineNoteImageContentType(contentType string) bool {
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif":
+		return true
+	default:
+		return false
+	}
 }
 
 func noteAttachmentsToProtocol(attachments []domain.NoteAttachment, note domain.UserNote, scope string) []protocol.NoteAttachment {

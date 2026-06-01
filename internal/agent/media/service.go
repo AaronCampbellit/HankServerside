@@ -79,6 +79,7 @@ type Config struct {
 	BaseURL                       string
 	Username                      string
 	Password                      string
+	SourceID                      string
 	DestinationPath               string
 	MovieDestinationPath          string
 	TVDestinationPath             string
@@ -136,6 +137,7 @@ func New(cfg Config, files *agentfiles.Service, logger *slog.Logger) *Service {
 			BaseURL:                       strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
 			Username:                      strings.TrimSpace(cfg.Username),
 			Password:                      cfg.Password,
+			SourceID:                      strings.TrimSpace(cfg.SourceID),
 			DestinationPath:               cleanSharePath(cfg.DestinationPath),
 			MovieDestinationPath:          cleanSharePath(firstNonBlank(cfg.MovieDestinationPath, cfg.DestinationPath)),
 			TVDestinationPath:             cleanSharePath(firstNonBlank(cfg.TVDestinationPath, cfg.DestinationPath)),
@@ -174,13 +176,15 @@ func (s *Service) Settings(ctx context.Context) protocol.MediaSettingsStatusResp
 	}
 }
 
-func (s *Service) ApplySettings(_ context.Context, request protocol.MediaSettingsApplyRequest) (protocol.MediaSettingsApplyResponse, error) {
+func (s *Service) ApplySettings(ctx context.Context, request protocol.MediaSettingsApplyRequest) (protocol.MediaSettingsApplyResponse, error) {
 	settings := request.Settings
 	s.mu.Lock()
+	previous := s.cfg
 	cfg := s.cfg
 	cfg.Enabled = settings.Enabled
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(firstNonBlank(settings.BaseURL, cfg.BaseURL)), "/")
 	cfg.Username = strings.TrimSpace(settings.Username)
+	cfg.SourceID = strings.TrimSpace(settings.SourceID)
 	cfg.DestinationPath = cleanSharePath(settings.DestinationPath)
 	cfg.MovieDestinationPath = cleanSharePath(firstNonBlank(settings.MovieDestinationPath, settings.DestinationPath))
 	cfg.TVDestinationPath = cleanSharePath(firstNonBlank(settings.TVDestinationPath, settings.DestinationPath))
@@ -193,12 +197,34 @@ func (s *Service) ApplySettings(_ context.Context, request protocol.MediaSetting
 	s.authenticated = false
 	s.mu.Unlock()
 
+	if cfg.Enabled {
+		if err := s.validateSettings(ctx); err != nil {
+			s.mu.Lock()
+			s.cfg = previous
+			s.authenticated = false
+			s.mu.Unlock()
+			return protocol.MediaSettingsApplyResponse{}, err
+		}
+	}
 	if request.Persist {
 		if err := s.persistSettings(cfg); err != nil {
 			return protocol.MediaSettingsApplyResponse{}, err
 		}
 	}
 	return protocol.MediaSettingsApplyResponse{Settings: s.settingsSnapshot()}, nil
+}
+
+func (s *Service) validateSettings(ctx context.Context) error {
+	if err := s.ensureAuthenticated(ctx); err != nil {
+		return err
+	}
+	if s.files == nil {
+		return fmt.Errorf("file backend is not configured")
+	}
+	if _, err := s.files.ListSource(ctx, s.configSnapshot().SourceID, ""); err != nil {
+		return fmt.Errorf("media destination source validation failed: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) Jobs(_ context.Context) protocol.MediaDownloadJobsResponse {
@@ -241,6 +267,7 @@ func (s *Service) settingsSnapshot() protocol.MediaSettings {
 		BaseURL:              cfg.BaseURL,
 		Username:             cfg.Username,
 		HasPassword:          cfg.Password != "",
+		SourceID:             cfg.SourceID,
 		DestinationPath:      cfg.DestinationPath,
 		MovieDestinationPath: cfg.MovieDestinationPath,
 		TVDestinationPath:    cfg.TVDestinationPath,
@@ -251,22 +278,44 @@ func (s *Service) settingsSnapshot() protocol.MediaSettings {
 
 func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestinationOption {
 	cfg := s.configSnapshot()
-	options := []protocol.MediaDestinationOption{{Value: "", Label: "SMB share root"}}
-	seen := map[string]struct{}{"": {}}
+	sourceID := strings.TrimSpace(cfg.SourceID)
+	options := []protocol.MediaDestinationOption{{Value: "", Label: mediaDestinationOptionLabel(sourceID, ""), SourceID: sourceID}}
+	seen := map[string]struct{}{sourcePathKey(sourceID, ""): {}}
 
 	if s.files != nil && s.files.Enabled() {
-		type queueItem struct {
-			path  string
-			depth int
+		rootSourceIDs := []string{sourceID}
+		queueSourceIDs := []string{sourceID}
+		if sourceID == "" {
+			rootSourceIDs = mediaSMBSourceIDs(s.files.SMBConfigs())
+			queueSourceIDs = []string{""}
 		}
-		queue := []queueItem{{path: "", depth: 0}}
+		type queueItem struct {
+			sourceID string
+			path     string
+			depth    int
+		}
+		queue := make([]queueItem, 0, len(queueSourceIDs))
+		for _, id := range rootSourceIDs {
+			key := sourcePathKey(id, "")
+			if _, ok := seen[key]; !ok {
+				seen[key] = struct{}{}
+				options = append(options, protocol.MediaDestinationOption{
+					Value:    "",
+					Label:    mediaDestinationOptionLabel(id, ""),
+					SourceID: id,
+				})
+			}
+		}
+		for _, id := range queueSourceIDs {
+			queue = append(queue, queueItem{sourceID: id, path: "", depth: 0})
+		}
 		for len(queue) > 0 && len(options) < maxMediaDestinationOptionItemCount {
 			current := queue[0]
 			queue = queue[1:]
 			if current.depth >= maxMediaDestinationOptionDepth {
 				continue
 			}
-			items, err := s.files.List(ctx, current.path)
+			items, err := s.files.ListSource(ctx, current.sourceID, current.path)
 			if err != nil {
 				continue
 			}
@@ -281,15 +330,17 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 				if value == "" {
 					continue
 				}
-				if _, ok := seen[value]; ok {
+				key := sourcePathKey(current.sourceID, value)
+				if _, ok := seen[key]; ok {
 					continue
 				}
-				seen[value] = struct{}{}
+				seen[key] = struct{}{}
 				options = append(options, protocol.MediaDestinationOption{
-					Value: value,
-					Label: mediaDestinationOptionLabel(value),
+					Value:    value,
+					Label:    mediaDestinationOptionLabel(current.sourceID, value),
+					SourceID: current.sourceID,
 				})
-				queue = append(queue, queueItem{path: value, depth: current.depth + 1})
+				queue = append(queue, queueItem{sourceID: current.sourceID, path: value, depth: current.depth + 1})
 			}
 		}
 	}
@@ -299,11 +350,13 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 		cleanSharePath(cfg.MovieDestinationPath),
 		cleanSharePath(cfg.TVDestinationPath),
 	} {
-		if _, ok := seen[current]; current != "" && !ok {
-			seen[current] = struct{}{}
+		key := sourcePathKey(sourceID, current)
+		if _, ok := seen[key]; current != "" && !ok {
+			seen[key] = struct{}{}
 			options = append(options, protocol.MediaDestinationOption{
-				Value: current,
-				Label: mediaDestinationOptionLabel(current),
+				Value:    current,
+				Label:    mediaDestinationOptionLabel(sourceID, current),
+				SourceID: sourceID,
 			})
 		}
 	}
@@ -318,12 +371,31 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 	return options
 }
 
-func mediaDestinationOptionLabel(value string) string {
-	value = cleanSharePath(value)
-	if value == "" {
-		return "SMB share root"
+func mediaSMBSourceIDs(configs []agentfiles.SMBConfig) []string {
+	ids := make([]string, 0, len(configs))
+	for _, cfg := range configs {
+		if cfg.Enabled() {
+			ids = append(ids, cfg.ID)
+		}
 	}
-	return "SMB share/" + value
+	return ids
+}
+
+func sourcePathKey(sourceID string, value string) string {
+	return strings.TrimSpace(sourceID) + "\x00" + cleanSharePath(value)
+}
+
+func mediaDestinationOptionLabel(sourceID string, value string) string {
+	value = cleanSharePath(value)
+	sourceID = strings.TrimSpace(sourceID)
+	prefix := "SMB share"
+	if sourceID != "" {
+		prefix = "SMB share " + sourceID
+	}
+	if value == "" {
+		return prefix + " root"
+	}
+	return prefix + "/" + value
 }
 
 func (s *Service) jobSnapshots() []protocol.MediaDownloadJobStatus {
@@ -1026,7 +1098,7 @@ func (s *Service) fileExists(ctx context.Context, mediaType string, title string
 	if name == "" {
 		return false
 	}
-	item, err := s.files.Stat(ctx, name)
+	item, err := s.files.StatSource(ctx, s.configSnapshot().SourceID, name)
 	return err == nil && !item.IsDirectory && item.Size > 0
 }
 
@@ -1144,8 +1216,9 @@ func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download pl
 
 	err := s.downloadOneRanged(ctx, job, download, partPath)
 	if err == nil {
-		if err := s.files.Rename(ctx, partPath, finalPath); err != nil {
-			_ = s.files.Delete(context.Background(), partPath, false)
+		sourceID := s.configSnapshot().SourceID
+		if err := s.files.RenameSource(ctx, sourceID, partPath, finalPath); err != nil {
+			_ = s.files.DeleteSource(context.Background(), sourceID, partPath, false)
 			return err
 		}
 		return nil
@@ -1162,7 +1235,7 @@ func (s *Service) downloadOne(ctx context.Context, job *downloadJob, download pl
 			status.Verification = "fallback"
 		})
 	}
-	_ = s.files.Delete(context.Background(), partPath, false)
+	_ = s.files.DeleteSource(context.Background(), s.configSnapshot().SourceID, partPath, false)
 	return s.downloadOneSingle(ctx, job, download, finalPath, partPath, fallbackUsed)
 }
 
@@ -1192,7 +1265,7 @@ func (s *Service) downloadOneSingle(ctx context.Context, job *downloadJob, downl
 		return err
 	}
 
-	writer, _, err := s.files.OpenWriter(ctx, partPath, 0)
+	writer, _, err := s.files.OpenWriterSource(ctx, s.configSnapshot().SourceID, partPath, 0)
 	if err != nil {
 		return err
 	}
@@ -1208,15 +1281,16 @@ func (s *Service) downloadOneSingle(ctx context.Context, job *downloadJob, downl
 	})
 	closeErr := writer.Close()
 	if copyErr != nil {
-		_ = s.files.Delete(context.Background(), partPath, false)
+		_ = s.files.DeleteSource(context.Background(), s.configSnapshot().SourceID, partPath, false)
 		return copyErr
 	}
 	if closeErr != nil {
-		_ = s.files.Delete(context.Background(), partPath, false)
+		_ = s.files.DeleteSource(context.Background(), s.configSnapshot().SourceID, partPath, false)
 		return closeErr
 	}
-	if err := s.files.Rename(ctx, partPath, finalPath); err != nil {
-		_ = s.files.Delete(context.Background(), partPath, false)
+	sourceID := s.configSnapshot().SourceID
+	if err := s.files.RenameSource(ctx, sourceID, partPath, finalPath); err != nil {
+		_ = s.files.DeleteSource(context.Background(), sourceID, partPath, false)
 		return err
 	}
 	return nil
@@ -1604,9 +1678,9 @@ func (s *Service) destinationLabel() string {
 		return "SMB share root"
 	}
 	if moviePath == tvPath {
-		return "SMB share/" + moviePath
+		return mediaDestinationOptionLabel(cfg.SourceID, moviePath)
 	}
-	return "Movies: " + mediaDestinationOptionLabel(moviePath) + "; TV: " + mediaDestinationOptionLabel(tvPath)
+	return "Movies: " + mediaDestinationOptionLabel(cfg.SourceID, moviePath) + "; TV: " + mediaDestinationOptionLabel(cfg.SourceID, tvPath)
 }
 
 func (s *Service) persistSettings(cfg Config) error {
@@ -1622,6 +1696,7 @@ func (s *Service) persistSettings(cfg Config) error {
 	env["HANK_REMOTE_MEDIA_GRAMATON_BASE_URL"] = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	env["HANK_REMOTE_MEDIA_GRAMATON_USERNAME"] = strings.TrimSpace(cfg.Username)
 	env["HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"] = cfg.Password
+	env["HANK_REMOTE_MEDIA_SOURCE_ID"] = strings.TrimSpace(cfg.SourceID)
 	env["HANK_REMOTE_MEDIA_DESTINATION_PATH"] = cleanSharePath(cfg.DestinationPath)
 	env["HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH"] = cleanSharePath(cfg.MovieDestinationPath)
 	env["HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION"] = strconv.FormatBool(cfg.RequireConfirmation)

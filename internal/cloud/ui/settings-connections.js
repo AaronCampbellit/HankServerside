@@ -16,8 +16,9 @@ const els = {
   homeMeta: document.getElementById("home-meta"),
   profilesSummary: document.getElementById("profiles-summary"),
   haForm: document.getElementById("ha-form"),
-  haPublicConfig: document.getElementById("ha-public-config"),
-  haSecrets: document.getElementById("ha-secrets"),
+  haBaseURL: document.getElementById("ha-base-url"),
+  haTimeoutSeconds: document.getElementById("ha-timeout-seconds"),
+  haToken: document.getElementById("ha-token"),
   haPersist: document.getElementById("ha-persist"),
   settingsRole: document.getElementById("settings-role"),
   smbForm: document.getElementById("smb-form"),
@@ -77,32 +78,6 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
-function prettyJSON(value) {
-  if (value === null || value === undefined || value === "") {
-    return "";
-  }
-  if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
-    }
-  }
-  return JSON.stringify(value, null, 2);
-}
-
-function parseOptionalJSON(value, fieldName) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return null;
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    throw new Error(`${fieldName} must be valid JSON.`);
-  }
-}
-
 function normalizeSMBHostInput(value) {
   let host = String(value || "").trim();
   host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
@@ -152,6 +127,18 @@ function profileConfig(profile) {
     }
   }
   return config || {};
+}
+
+function normalizeHomeAssistantURL(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function homeAssistantConfig(profile) {
+  const config = profileConfig(profile);
+  return {
+    base_url: config.base_url || config.url || "",
+    timeout_seconds: Number(config.timeout_seconds || 10) || 10,
+  };
 }
 
 function cleanSourceID(value) {
@@ -324,8 +311,10 @@ function renderForms() {
   const homeAssistant = profileByType("homeassistant");
   const smb = profileByType("smb");
   const smbConfig = profileConfig(smb);
-  els.haPublicConfig.value = prettyJSON(homeAssistant?.public_config_json);
-  els.haSecrets.value = "";
+  const haConfig = homeAssistantConfig(homeAssistant);
+  els.haBaseURL.value = haConfig.base_url;
+  els.haTimeoutSeconds.value = haConfig.timeout_seconds;
+  els.haToken.value = "";
   state.smbShares = sharesFromConfig(smbConfig);
   if (!state.smbShares.some((share) => share.id === state.editingSMBShareID)) {
     state.editingSMBShareID = state.smbShares[0]?.id || "";
@@ -436,19 +425,27 @@ async function saveHomeAssistant(event) {
     return;
   }
   try {
+    const baseURL = normalizeHomeAssistantURL(els.haBaseURL.value);
+    const timeoutSeconds = Number.parseInt(els.haTimeoutSeconds.value, 10) || 10;
+    if (!baseURL) {
+      showToast("Home Assistant address is required.", true);
+      return;
+    }
     const payload = {
-      public_config: parseOptionalJSON(els.haPublicConfig.value, "Home Assistant address") ?? {},
+      public_config: {
+        base_url: baseURL,
+        timeout_seconds: timeoutSeconds,
+      },
       persist: els.haPersist.checked,
     };
-    const secrets = parseOptionalJSON(els.haSecrets.value, "Home Assistant token");
-    if (secrets !== null) {
-      payload.secrets = secrets;
+    if (els.haToken.value.trim()) {
+      payload.secrets = { token: els.haToken.value.trim() };
     }
     await api("/v1/home/service-profiles/homeassistant", {
       method: "PUT",
       body: JSON.stringify(payload),
     });
-    els.haSecrets.value = "";
+    els.haToken.value = "";
     await loadProfiles();
     showToast("Home Assistant settings saved.");
   } catch (error) {

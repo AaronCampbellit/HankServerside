@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,42 @@ func TestNoteSummariesSortByMostRecentFirst(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("note order = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestNormalizePageTypeAcceptsLegacyBoardAsKanban(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizePageType("board"); got != protocol.NotePageTypeKanban {
+		t.Fatalf("normalizePageType(board) = %q, want %q", got, protocol.NotePageTypeKanban)
+	}
+}
+
+func TestTitleFromContentUsesFirstWords(t *testing.T) {
+	t.Parallel()
+
+	got := titleFromContent("Store list needs milk eggs bread and coffee")
+	want := "Store list needs milk eggs"
+	if got != want {
+		t.Fatalf("titleFromContent = %q, want %q", got, want)
+	}
+}
+
+func TestImageAttachmentReferenceUsesMarkdownImage(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	note := domain.UserNote{NoteID: "store.md"}
+	attachment := domain.NoteAttachment{
+		ID:          "natt_image",
+		Filename:    "receipt.png",
+		ContentType: "image/png",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	reference := noteAttachmentMarkdownReference(note, "profile", attachment)
+	if !strings.HasPrefix(reference, "![receipt.png](hank-note-attachment://natt_image?") {
+		t.Fatalf("reference = %q, want markdown image attachment", reference)
 	}
 }
 

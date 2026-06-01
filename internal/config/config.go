@@ -113,6 +113,7 @@ type Media struct {
 	GramatonBaseURL      string
 	Username             string
 	Password             string
+	SourceID             string
 	DestinationPath      string
 	MovieDestinationPath string
 	TVDestinationPath    string
@@ -242,6 +243,7 @@ func LoadAgent() (Agent, error) {
 			GramatonBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL", "https://gramaton.io"), "/"),
 			Username:             strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME")),
 			Password:             os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"),
+			SourceID:             strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_SOURCE_ID")),
 			DestinationPath:      strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_DESTINATION_PATH")),
 			MovieDestinationPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH")),
 			TVDestinationPath:    strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_TV_DESTINATION_PATH")),

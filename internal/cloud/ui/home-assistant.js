@@ -5,6 +5,8 @@ const state = {
   appSocketPromise: null,
   pendingRequests: new Map(),
   requestCounter: 0,
+  states: [],
+  dashboardEntityIDs: [],
 };
 
 const els = {
@@ -16,6 +18,11 @@ const els = {
   haHealthButton: document.getElementById("ha-health-button"),
   haStatesButton: document.getElementById("ha-states-button"),
   haEntityID: document.getElementById("ha-entity-id"),
+  haEntitySearch: document.getElementById("ha-entity-search"),
+  haEntityResults: document.getElementById("ha-entity-results"),
+  haEntityCount: document.getElementById("ha-entity-count"),
+  haDashboard: document.getElementById("ha-dashboard"),
+  haDashboardCount: document.getElementById("ha-dashboard-count"),
   haEntityButton: document.getElementById("ha-entity-button"),
   haServiceDomain: document.getElementById("ha-service-domain"),
   haServiceName: document.getElementById("ha-service-name"),
@@ -74,6 +81,110 @@ function safeJSONString(value) {
   } catch {
     return String(value);
   }
+}
+
+function entityName(item) {
+  return item?.attributes?.friendly_name || item?.entity_id || "";
+}
+
+function entityDomain(entityID) {
+  return String(entityID || "").split(".")[0] || "entity";
+}
+
+function entitySearchText(item) {
+  const attrs = item.attributes || {};
+  return [
+    item.entity_id,
+    attrs.friendly_name,
+    attrs.device_class,
+    attrs.area_id,
+    attrs.unit_of_measurement,
+    item.state,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function fuzzyScore(query, text) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return 1;
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  let score = 0;
+  for (const token of tokens) {
+    if (text.includes(token)) {
+      score += 20 + token.length;
+      continue;
+    }
+    let cursor = 0;
+    let matched = 0;
+    for (const char of token) {
+      const index = text.indexOf(char, cursor);
+      if (index === -1) break;
+      matched += 1;
+      cursor = index + 1;
+    }
+    if (matched < Math.ceil(token.length * 0.65)) return 0;
+    score += matched;
+  }
+  return score;
+}
+
+function dashboardStorageKey() {
+  return `hank-homeassistant-dashboard:${state.user?.id || "anonymous"}`;
+}
+
+function loadDashboard() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(dashboardStorageKey()) || "[]");
+    state.dashboardEntityIDs = Array.isArray(stored) ? stored.filter(Boolean) : [];
+  } catch {
+    state.dashboardEntityIDs = [];
+  }
+}
+
+function saveDashboard() {
+  window.localStorage.setItem(dashboardStorageKey(), JSON.stringify(state.dashboardEntityIDs));
+}
+
+function stateByEntityID(entityID) {
+  return state.states.find((item) => item.entity_id === entityID) || null;
+}
+
+function renderEntityCard(item, options = {}) {
+  const name = entityName(item);
+  const domain = entityDomain(item.entity_id);
+  const canToggle = ["light", "switch", "fan", "input_boolean"].includes(domain);
+  const isDashboard = state.dashboardEntityIDs.includes(item.entity_id);
+  return `
+    <article class="tool-result-card ha-entity-card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">${escapeHTML(name)}</div>
+          <div class="meta">${escapeHTML(item.entity_id)}</div>
+        </div>
+        <span class="pill">${escapeHTML(item.state)}</span>
+      </div>
+      <div class="meta">${escapeHTML(domain)}${item.attributes?.unit_of_measurement ? ` / ${escapeHTML(item.attributes.unit_of_measurement)}` : ""}</div>
+      <div class="item-actions">
+        <button type="button" class="secondary" data-ha-fill="${escapeHTML(item.entity_id)}">Use</button>
+        ${canToggle ? `<button type="button" data-ha-toggle="${escapeHTML(item.entity_id)}">${item.state === "on" ? "Turn Off" : "Turn On"}</button>` : ""}
+        <button type="button" class="${isDashboard ? "ghost" : "secondary"}" data-ha-dashboard="${escapeHTML(item.entity_id)}">${options.dashboardTile ? "Remove" : isDashboard ? "Saved" : "Add Tile"}</button>
+      </div>
+    </article>
+  `;
+}
+
+function wireEntityActions(root) {
+  root.querySelectorAll("[data-ha-fill]").forEach((button) => {
+    button.addEventListener("click", () => {
+      els.haEntityID.value = button.dataset.haFill;
+      runHAFetchEntity();
+    });
+  });
+  root.querySelectorAll("[data-ha-dashboard]").forEach((button) => {
+    button.addEventListener("click", () => toggleDashboardEntity(button.dataset.haDashboard));
+  });
+  root.querySelectorAll("[data-ha-toggle]").forEach((button) => {
+    button.addEventListener("click", () => toggleEntity(button.dataset.haToggle));
+  });
 }
 
 function preferredAppSocketURL() {
@@ -210,6 +321,70 @@ function renderHAOutput(html, empty = false) {
   els.haOutput.innerHTML = html;
 }
 
+function renderEntityResults() {
+  const query = els.haEntitySearch.value.trim();
+  if (!state.states.length) {
+    els.haEntityResults.className = "card-list empty-state";
+    els.haEntityResults.textContent = "Refresh entities to search Home Assistant.";
+    els.haEntityCount.textContent = "Not Loaded";
+    return;
+  }
+  const matches = state.states
+    .map((item) => ({ item, score: fuzzyScore(query, entitySearchText(item)) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || entityName(left.item).localeCompare(entityName(right.item)))
+    .slice(0, 80)
+    .map((entry) => entry.item);
+  els.haEntityCount.textContent = `${matches.length} / ${state.states.length}`;
+  if (!matches.length) {
+    els.haEntityResults.className = "card-list empty-state";
+    els.haEntityResults.textContent = "No matching entities.";
+    return;
+  }
+  els.haEntityResults.className = "card-list";
+  els.haEntityResults.innerHTML = matches.map((item) => renderEntityCard(item)).join("");
+  wireEntityActions(els.haEntityResults);
+}
+
+function renderDashboard() {
+  const tiles = state.dashboardEntityIDs.map(stateByEntityID).filter(Boolean);
+  els.haDashboardCount.textContent = `${tiles.length} ${tiles.length === 1 ? "Tile" : "Tiles"}`;
+  if (!tiles.length) {
+    els.haDashboard.className = "ha-dashboard-grid empty-state";
+    els.haDashboard.textContent = state.states.length ? "Add entities from the list below." : "Refresh entities to build a dashboard.";
+    return;
+  }
+  els.haDashboard.className = "ha-dashboard-grid";
+  els.haDashboard.innerHTML = tiles.map((item) => renderEntityCard(item, { dashboardTile: true })).join("");
+  wireEntityActions(els.haDashboard);
+}
+
+function toggleDashboardEntity(entityID) {
+  if (!entityID) return;
+  if (state.dashboardEntityIDs.includes(entityID)) {
+    state.dashboardEntityIDs = state.dashboardEntityIDs.filter((id) => id !== entityID);
+  } else {
+    state.dashboardEntityIDs = [...state.dashboardEntityIDs, entityID];
+  }
+  saveDashboard();
+  renderDashboard();
+  renderEntityResults();
+}
+
+async function toggleEntity(entityID) {
+  const item = stateByEntityID(entityID);
+  if (!item) return;
+  const domain = entityDomain(entityID);
+  const service = item.state === "on" ? "turn_off" : "turn_on";
+  try {
+    await sendCommand("homeassistant.call_service", { domain, service, body: { entity_id: entityID } });
+    showToast(`${entityName(item)} ${service.replace("_", " ")} sent.`);
+    await runHAFetchStates(false);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 async function runHAHealth() {
   try {
     const payload = await sendCommand("homeassistant.health");
@@ -219,16 +394,20 @@ async function runHAHealth() {
   }
 }
 
-async function runHAFetchStates() {
+async function runHAFetchStates(showResults = true) {
   try {
     const payload = await sendCommand("homeassistant.fetch_states");
     const states = payload.states || [];
+    state.states = states.slice().sort((left, right) => entityName(left).localeCompare(entityName(right), undefined, { sensitivity: "base" }));
+    renderEntityResults();
+    renderDashboard();
     if (!states.length) {
-      renderHAOutput("No Home Assistant states returned.", true);
+      if (showResults) renderHAOutput("No Home Assistant states returned.", true);
       return;
     }
-    renderHAOutput(states.slice(0, 100).map((item) => `<article class="tool-result-card"><div class="card-head"><div><div class="card-title">${escapeHTML(item.entity_id)}</div><div class="meta">Updated ${formatDate(item.last_updated)}</div></div><span class="pill">${escapeHTML(item.state)}</span></div><pre>${escapeHTML(safeJSONString(item.attributes || {}))}</pre></article>`).join(""));
-    if (states.length > 100) showToast(`Showing first 100 of ${states.length} states.`);
+    if (showResults) {
+      renderHAOutput(`<article class="tool-result-card"><div class="card-head"><div><div class="card-title">Entities Refreshed</div><div class="meta">Use search to filter the full list.</div></div><span class="status-chip">${states.length}</span></div></article>`);
+    }
   } catch (error) {
     showToast(error.message, true);
   }
@@ -292,8 +471,10 @@ async function hydrate() {
   try {
     const me = await api("/v1/me");
     state.user = me.user;
+    loadDashboard();
     renderSession();
     await loadAgents();
+    renderDashboard();
   } catch (_) {
     window.location.replace("/");
   }
@@ -304,5 +485,6 @@ els.haHealthButton.addEventListener("click", runHAHealth);
 els.haStatesButton.addEventListener("click", runHAFetchStates);
 els.haEntityButton.addEventListener("click", runHAFetchEntity);
 els.haServiceButton.addEventListener("click", runHAServiceCall);
+els.haEntitySearch.addEventListener("input", renderEntityResults);
 
 hydrate();

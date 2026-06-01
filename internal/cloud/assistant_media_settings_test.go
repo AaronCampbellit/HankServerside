@@ -47,6 +47,7 @@ func TestAssistantMediaSettingsEndpointAppliesThroughAgent(t *testing.T) {
 			"enabled":                true,
 			"base_url":               "https://gramaton.io",
 			"username":               "media@example.com",
+			"source_id":              "archive",
 			"destination_path":       "Media",
 			"movie_destination_path": "Movies",
 			"tv_destination_path":    "Shows",
@@ -57,7 +58,7 @@ func TestAssistantMediaSettingsEndpointAppliesThroughAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := <-requestCh
-	if !request.Persist || request.Password != "test-password" || request.Settings.Username != "media@example.com" || request.Settings.MovieDestinationPath != "Movies" || request.Settings.TVDestinationPath != "Shows" {
+	if !request.Persist || request.Password != "test-password" || request.Settings.Username != "media@example.com" || request.Settings.SourceID != "archive" || request.Settings.MovieDestinationPath != "Movies" || request.Settings.TVDestinationPath != "Shows" {
 		t.Fatalf("settings apply request = %#v", request)
 	}
 	if !response.Online || !response.Settings.Enabled || !response.Settings.HasPassword {

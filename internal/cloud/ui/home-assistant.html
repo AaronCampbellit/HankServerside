@@ -49,14 +49,38 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>Commands</h2>
-            <span class="pill">Tools</span>
+            <h2>Dashboard</h2>
+            <span id="ha-dashboard-count" class="pill">0 Tiles</span>
+          </div>
+          <div class="tool-shell">
+            <div id="ha-dashboard" class="ha-dashboard-grid empty-state">Add entities from the list below.</div>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Entities</h2>
+            <span id="ha-entity-count" class="pill">Not Loaded</span>
           </div>
           <div class="tool-shell">
             <div class="tool-actions">
+              <button type="button" id="ha-states-button">Refresh Entities</button>
               <button type="button" id="ha-health-button" class="secondary">Check Health</button>
-              <button type="button" id="ha-states-button">Fetch States</button>
             </div>
+            <label>
+              <span>Search Entities</span>
+              <input id="ha-entity-search" type="search" placeholder="Kitchen light, temperature, garage" autocomplete="off">
+            </label>
+            <div id="ha-entity-results" class="card-list empty-state">Refresh entities to search Home Assistant.</div>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Commands</h2>
+            <span class="pill">Advanced</span>
+          </div>
+          <div class="tool-shell">
             <div class="three-up">
               <label>
                 <span>Device ID</span>

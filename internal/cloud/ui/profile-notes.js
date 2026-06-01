@@ -276,12 +276,33 @@ function renderSession() {
   els.sessionMeta.textContent = "Hank Remote account is active.";
 }
 
-function normalizedTitle() {
-  return els.noteTitle.value.trim() || "Untitled";
-}
-
 function currentMarkdown() {
   return els.noteContent.value.replace(/\r\n/g, "\n");
+}
+
+function titleFromContent(value) {
+  return String(value || "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[○●]\s+/gm, "")
+    .replace(/^\s*[-*]\s+\[[ xX]\]\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 5)
+    .join(" ")
+    .slice(0, 80)
+    .trim();
+}
+
+function normalizedTitle() {
+  const explicit = els.noteTitle.value.trim();
+  if (explicit && explicit.toLowerCase() !== "untitled") {
+    return explicit;
+  }
+  return titleFromContent(currentMarkdown()) || explicit || "Untitled";
 }
 
 function isKanbanMode() {
@@ -720,8 +741,6 @@ async function saveNote(options = {}) {
     page_type: state.currentPageType || "text",
   };
   if (payload.page_type === "kanban") {
-    payload.content = "";
-    payload.body_markdown = "";
     payload.board = currentBoard();
   }
 
@@ -774,11 +793,60 @@ async function createNote() {
     await saveNote({ force: true });
   }
   clearEditor();
-  els.noteTitle.value = "Untitled";
-  state.isDirty = true;
-  await saveNote({ force: true });
-  els.noteTitle.focus();
-  els.noteTitle.select();
+  els.noteContent.focus();
+}
+
+async function uploadPastedImage(file) {
+  if (!file?.type?.startsWith("image/") || file.type === "image/svg+xml") {
+    return false;
+  }
+  if (isKanbanMode()) {
+    showToast("Convert this Kanban note to text before adding images.", true);
+    return true;
+  }
+  if (!state.selectedNoteID && !state.isDirty && !els.noteTitle.value.trim() && !els.noteContent.value.trim()) {
+    els.noteTitle.value = "Pasted image";
+    state.isDirty = true;
+  }
+  if (state.isDirty || !state.selectedNoteID) {
+    const saved = await saveNote({ force: true });
+    if (!saved || !state.selectedNoteID) {
+      return true;
+    }
+  }
+  const extension = file.type.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+  const filename = file.name || `clipboard-image-${Date.now()}.${extension}`;
+  setSaveState("Uploading", "saving");
+  const attachment = await api(`/v1/me/notes/${encodeURIComponent(state.selectedNoteID)}/attachments`, {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-Hank-Filename": filename,
+    },
+    body: file,
+  });
+  await loadNote(state.selectedNoteID);
+  showToast(`Added ${attachment.filename || filename}.`);
+  return true;
+}
+
+async function handlePaste(event) {
+  const items = Array.from(event.clipboardData?.items || []);
+  const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
+  if (!imageItem) {
+    return;
+  }
+  const file = imageItem.getAsFile();
+  if (!file) {
+    return;
+  }
+  event.preventDefault();
+  try {
+    await uploadPastedImage(file);
+  } catch (error) {
+    setSaveState("Not saved", "error");
+    showToast(error.message, true);
+  }
 }
 
 async function deleteNote() {
@@ -993,12 +1061,33 @@ function cleanLinkToken(value) {
     .replace(/[>"'`)\]},.;!?]+$/g, "");
 }
 
-function inlineLinkHTML(label, rawURL) {
+function noteAttachmentURL(rawURL) {
+  const value = String(rawURL || "").trim();
+  if (!value.startsWith("hank-note-attachment://")) {
+    return "";
+  }
+  try {
+    const parsed = new URL(value);
+    const attachmentID = parsed.hostname || parsed.pathname.replace(/^\/+/, "");
+    if (!attachmentID || !state.selectedNoteID) {
+      return "";
+    }
+    return `/v1/me/notes/${encodeURIComponent(state.selectedNoteID)}/attachments/${encodeURIComponent(attachmentID)}`;
+  } catch (_) {
+    return "";
+  }
+}
+
+function inlineLinkHTML(label, rawURL, image = false) {
   const cleaned = cleanLinkToken(rawURL);
-  if (!cleaned || !isLikelyURL(cleaned)) {
+  const attachmentURL = noteAttachmentURL(cleaned);
+  if (image && attachmentURL) {
+    return `<img class="note-inline-image" src="${escapeHTML(attachmentURL)}" alt="${escapeHTML(label || "Note image")}" loading="lazy">`;
+  }
+  if (!cleaned || (!isLikelyURL(cleaned) && !attachmentURL)) {
     return escapeHTML(label || rawURL);
   }
-  const href = normalizeURL(cleaned);
+  const href = attachmentURL || normalizeURL(cleaned);
   const text = String(label || cleaned).trim() || href;
   return `<a class="note-inline-link" href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(text)}</a>`;
 }
@@ -1021,13 +1110,13 @@ function renderBareLinks(text) {
 
 function renderInlineText(text) {
   const source = String(text || "");
-  const markdownLinkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  const markdownLinkPattern = /(!?)\[([^\]\n]+)\]\(([^)\s]+)\)/g;
   let html = "";
   let lastIndex = 0;
   for (const match of source.matchAll(markdownLinkPattern)) {
     const index = match.index || 0;
     html += renderBareLinks(source.slice(lastIndex, index));
-    html += inlineLinkHTML(match[1], match[2]);
+    html += inlineLinkHTML(match[2], match[3], match[1] === "!");
     lastIndex = index + match[0].length;
   }
   html += renderBareLinks(source.slice(lastIndex));
@@ -1269,6 +1358,7 @@ function handleEditorInput() {
 }
 els.noteTitle.addEventListener("input", handleEditorInput);
 els.noteContent.addEventListener("input", handleEditorInput);
+els.noteContent.addEventListener("paste", handlePaste);
 els.noteContent.addEventListener("scroll", syncEditorScroll);
 els.noteContent.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {

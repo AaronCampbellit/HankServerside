@@ -374,10 +374,10 @@ func TestNormalizeSMBHostAcceptsWebAndSMBInputs(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"192.0.2.10":             "192.0.2.10",
-		"https://192.0.2.10":     "192.0.2.10",
-		"https://192.0.2.10/ui":  "192.0.2.10",
-		"https://192.0.2.10:443": "192.0.2.10",
+		"192.0.2.10":                 "192.0.2.10",
+		"https://192.0.2.10":         "192.0.2.10",
+		"https://192.0.2.10/ui":      "192.0.2.10",
+		"https://192.0.2.10:443":     "192.0.2.10",
 		"smb://truenas.local/media":  "truenas.local",
 		"smb://truenas.local:1445/x": "truenas.local:1445",
 		"//truenas.local/media":      "truenas.local",

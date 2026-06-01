@@ -1421,9 +1421,10 @@ async function moveItemsToDestination(items, destination, options = {}) {
     return;
   }
 
+  const sameSource = destinationSourceID === sourceID;
   const moves = targets
     .map((item) => ({ item, to: joinPath(normalizedDestination, itemName(item)) }))
-    .filter((move) => normalizePath(move.to) !== itemPath(move.item));
+    .filter((move) => !sameSource || normalizePath(move.to) !== itemPath(move.item));
   if (!moves.length) {
     showToast("These items are already in this folder.", true);
     return;

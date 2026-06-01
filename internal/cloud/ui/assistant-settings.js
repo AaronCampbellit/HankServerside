@@ -31,6 +31,7 @@ const els = {
   mediaGramatonBaseURL: document.getElementById("media-gramaton-base-url"),
   mediaGramatonUsername: document.getElementById("media-gramaton-username"),
   mediaGramatonPassword: document.getElementById("media-gramaton-password"),
+  mediaSourceID: document.getElementById("media-source-id"),
   mediaDestinationPath: document.getElementById("media-destination-path"),
   mediaMovieDestinationPath: document.getElementById("media-movie-destination-path"),
   mediaTVDestinationPath: document.getElementById("media-tv-destination-path"),
@@ -102,10 +103,11 @@ function normalizeMediaDestinationPath(value) {
     .replace(/\/{2,}/g, "/");
 }
 
-function mediaDestinationLabel(value, fallback = "") {
+function mediaDestinationLabel(value, fallback = "", sourceID = "") {
   const cleaned = normalizeMediaDestinationPath(value);
   if (fallback) return fallback;
-  return cleaned ? `SMB share/${cleaned}` : "SMB share root";
+  const prefix = sourceID ? `SMB share ${sourceID}` : "SMB share";
+  return cleaned ? `${prefix}/${cleaned}` : `${prefix} root`;
 }
 
 function mediaPathBaseName(value) {
@@ -127,9 +129,10 @@ function mediaPathIsSameOrChild(value, base) {
   return !root || cleaned === root || cleaned.startsWith(`${root}/`);
 }
 
-function mediaDestinationValues(payload) {
+function mediaDestinationValues(payload, sourceID = "") {
   const values = new Set([""]);
   (payload.destination_options || []).forEach((option) => {
+    if (String(option.source_id || "") !== String(sourceID || "")) return;
     values.add(normalizeMediaDestinationPath(option.value));
   });
   return values;
@@ -142,8 +145,8 @@ function mediaDestinationChildren(values, parent) {
     .sort((left, right) => mediaPathBaseName(left).localeCompare(mediaPathBaseName(right)));
 }
 
-function renderMediaDestinationSelect(select, payload, currentValue, baseValue = "") {
-  const values = mediaDestinationValues(payload);
+function renderMediaDestinationSelect(select, payload, currentValue, baseValue = "", sourceID = "") {
+  const values = mediaDestinationValues(payload, sourceID);
   const base = normalizeMediaDestinationPath(baseValue);
   let current = normalizeMediaDestinationPath(currentValue || base);
   if (!mediaPathIsSameOrChild(current, base)) {
@@ -159,10 +162,10 @@ function renderMediaDestinationSelect(select, payload, currentValue, baseValue =
     options.push({ value: cleaned, label });
   };
 
-  addOption(current, mediaDestinationLabel(current));
+  addOption(current, mediaDestinationLabel(current, "", sourceID));
   const parent = mediaPathParent(current);
   if (current !== base && mediaPathIsSameOrChild(parent, base)) {
-    addOption(parent, `Up to ${mediaDestinationLabel(parent)}`);
+    addOption(parent, `Up to ${mediaDestinationLabel(parent, "", sourceID)}`);
   }
   mediaDestinationChildren(values, current).forEach((child) => {
     addOption(child, mediaPathBaseName(child));
@@ -174,11 +177,30 @@ function renderMediaDestinationSelect(select, payload, currentValue, baseValue =
   select.value = current;
 }
 
+function renderMediaSourceOptions(payload, settings) {
+  const selected = String(settings.source_id || "").trim();
+  const sources = new Map([["", "Default SMB share"]]);
+  (payload.destination_options || []).forEach((option) => {
+    const sourceID = String(option.source_id || "").trim();
+    if (!sourceID || sources.has(sourceID)) return;
+    sources.set(sourceID, `SMB share ${sourceID}`);
+  });
+  if (selected && !sources.has(selected)) {
+    sources.set(selected, `SMB share ${selected}`);
+  }
+  els.mediaSourceID.innerHTML = Array.from(sources.entries()).map(([value, label]) => (
+    `<option value="${escapeHTML(value)}">${escapeHTML(label)}</option>`
+  )).join("");
+  els.mediaSourceID.value = selected;
+}
+
 function renderMediaDestinationOptions(payload, settings) {
+  renderMediaSourceOptions(payload, settings);
+  const sourceID = String(settings.source_id || "").trim();
   const destination = normalizeMediaDestinationPath(settings.destination_path || "");
-  renderMediaDestinationSelect(els.mediaDestinationPath, payload, destination);
-  renderMediaDestinationSelect(els.mediaMovieDestinationPath, payload, settings.movie_destination_path || destination, destination);
-  renderMediaDestinationSelect(els.mediaTVDestinationPath, payload, settings.tv_destination_path || destination, destination);
+  renderMediaDestinationSelect(els.mediaDestinationPath, payload, destination, "", sourceID);
+  renderMediaDestinationSelect(els.mediaMovieDestinationPath, payload, settings.movie_destination_path || destination, destination, sourceID);
+  renderMediaDestinationSelect(els.mediaTVDestinationPath, payload, settings.tv_destination_path || destination, destination, sourceID);
 }
 
 function refreshScopedMediaDestinationOptions(overrides = {}) {
@@ -186,6 +208,7 @@ function refreshScopedMediaDestinationOptions(overrides = {}) {
   const settings = media.settings || {};
   renderMediaDestinationOptions(media, {
     ...settings,
+    source_id: els.mediaSourceID.value,
     destination_path: els.mediaDestinationPath.value,
     movie_destination_path: els.mediaMovieDestinationPath.value,
     tv_destination_path: els.mediaTVDestinationPath.value,
@@ -477,6 +500,7 @@ function renderMediaWorkflowSettings() {
       els.mediaGramatonBaseURL,
       els.mediaGramatonUsername,
       els.mediaGramatonPassword,
+      els.mediaSourceID,
       els.mediaDestinationPath,
       els.mediaMovieDestinationPath,
       els.mediaTVDestinationPath,
@@ -509,7 +533,7 @@ function renderMediaWorkflowSettings() {
   } else if (!online) {
     els.mediaWorkflowMeta.textContent = `${payload.error || "The home agent is offline."} You can prepare these fields, but saving requires the updated home agent to be online.`;
   } else {
-    els.mediaWorkflowMeta.textContent = `Movies save to ${mediaDestinationLabel(settings.movie_destination_path || settings.destination_path)}. TV shows save to ${mediaDestinationLabel(settings.tv_destination_path || settings.destination_path)} under a show-title folder.`;
+    els.mediaWorkflowMeta.textContent = `Movies save to ${mediaDestinationLabel(settings.movie_destination_path || settings.destination_path, "", settings.source_id)}. TV shows save to ${mediaDestinationLabel(settings.tv_destination_path || settings.destination_path, "", settings.source_id)} under a show-title folder.`;
   }
 
   [
@@ -517,6 +541,7 @@ function renderMediaWorkflowSettings() {
     els.mediaGramatonBaseURL,
     els.mediaGramatonUsername,
     els.mediaGramatonPassword,
+    els.mediaSourceID,
     els.mediaDestinationPath,
     els.mediaMovieDestinationPath,
     els.mediaTVDestinationPath,
@@ -703,6 +728,7 @@ async function saveMediaSettings() {
           enabled: els.mediaWorkflowEnabled.checked,
           base_url: els.mediaGramatonBaseURL.value,
           username: els.mediaGramatonUsername.value,
+          source_id: els.mediaSourceID.value,
           destination_path: normalizeMediaDestinationPath(els.mediaDestinationPath.value),
           movie_destination_path: normalizeMediaDestinationPath(els.mediaMovieDestinationPath.value),
           tv_destination_path: normalizeMediaDestinationPath(els.mediaTVDestinationPath.value),
@@ -787,6 +813,14 @@ els.mediaDestinationPath.addEventListener("change", () => {
     destination_path: destination,
     movie_destination_path: destination,
     tv_destination_path: destination,
+  });
+});
+els.mediaSourceID.addEventListener("change", () => {
+  refreshScopedMediaDestinationOptions({
+    source_id: els.mediaSourceID.value,
+    destination_path: "",
+    movie_destination_path: "",
+    tv_destination_path: "",
   });
 });
 els.mediaMovieDestinationPath.addEventListener("change", refreshScopedMediaDestinationOptions);

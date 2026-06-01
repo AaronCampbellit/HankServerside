@@ -385,7 +385,9 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 
 	title := strings.TrimSpace(request.Title)
 	if title == "" {
-		if existing.Title != "" {
+		if derived := titleFromContent(content); derived != "" {
+			title = derived
+		} else if existing.Title != "" {
 			title = existing.Title
 		} else {
 			title = titleFromNoteID(existing.NoteID)
@@ -695,11 +697,31 @@ func normalizePageType(pageType string) string {
 	switch pageType {
 	case "", protocol.NotePageTypeText:
 		return protocol.NotePageTypeText
-	case protocol.NotePageTypeKanban:
+	case protocol.NotePageTypeKanban, "board":
 		return protocol.NotePageTypeKanban
 	default:
 		return protocol.NotePageTypeText
 	}
+}
+
+func titleFromContent(content string) string {
+	plain := strings.TrimSpace(content)
+	if plain == "" {
+		return ""
+	}
+	plain = strings.TrimSpace(strings.TrimLeft(plain, "#>*-+0123456789.[] xX\t "))
+	if plain == "" {
+		return ""
+	}
+	words := strings.Fields(plain)
+	if len(words) > 5 {
+		words = words[:5]
+	}
+	title := strings.Join(words, " ")
+	if len(title) > 80 {
+		title = strings.TrimSpace(title[:80])
+	}
+	return title
 }
 
 func titleFromNoteID(noteID string) string {

@@ -1221,6 +1221,26 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 	if err := os.WriteFile(envPath, []byte("HANK_REMOTE_AGENT_ID=agent_1\n"), 0o600); err != nil {
 		t.Fatalf("write env: %v", err)
 	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<form action="/session/login"><input name="email"><input name="password"></form>`)
+	})
+	mux.HandleFunc("/session/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			fmt.Fprint(w, `<form action="/session/login"><input name="email"><input name="password"></form>`)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if r.FormValue("email") != "media@example.com" || r.FormValue("password") != "test-password" {
+			http.Error(w, "bad login", http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	source := httptest.NewServer(mux)
+	defer source.Close()
 	service := New(Config{
 		EnvPath: envPath,
 	}, agentfiles.New(root), nil)
@@ -1228,8 +1248,9 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 	response, err := service.ApplySettings(ctx, protocol.MediaSettingsApplyRequest{
 		Settings: protocol.MediaSettings{
 			Enabled:              true,
-			BaseURL:              "https://gramaton.io/",
+			BaseURL:              source.URL + "/",
 			Username:             "media@example.com",
+			SourceID:             agentfiles.LocalSourceID,
 			DestinationPath:      "Media",
 			MovieDestinationPath: "Movies",
 			TVDestinationPath:    "Shows/Fixture",
@@ -1252,9 +1273,10 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 	for _, want := range []string{
 		"HANK_REMOTE_AGENT_ID=agent_1",
 		"HANK_REMOTE_MEDIA_GRAMATON_ENABLED=true",
-		"HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=https://gramaton.io",
+		"HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=" + source.URL,
 		"HANK_REMOTE_MEDIA_GRAMATON_USERNAME=media@example.com",
 		"HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=test-password",
+		"HANK_REMOTE_MEDIA_SOURCE_ID=local",
 		"HANK_REMOTE_MEDIA_DESTINATION_PATH=Media",
 		"HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH=Movies",
 		"HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION=false",
@@ -1263,6 +1285,47 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Fatalf("env file missing %q:\n%s", want, env)
 		}
+	}
+}
+
+func TestApplySettingsValidatesMediaLoginBeforePersisting(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	root := t.TempDir()
+	envPath := filepath.Join(root, ".env.agent")
+	if err := os.WriteFile(envPath, []byte("HANK_REMOTE_MEDIA_GRAMATON_ENABLED=false\n"), 0o600); err != nil {
+		t.Fatalf("write env: %v", err)
+	}
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/session/login" && r.Method == http.MethodPost {
+			http.Error(w, "bad login", http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `<form action="/session/login"><input name="email"><input name="password"></form>`)
+	}))
+	defer source.Close()
+
+	service := New(Config{EnvPath: envPath}, agentfiles.New(root), nil)
+	_, err := service.ApplySettings(ctx, protocol.MediaSettingsApplyRequest{
+		Settings: protocol.MediaSettings{
+			Enabled:  true,
+			BaseURL:  source.URL,
+			Username: "media@example.com",
+			SourceID: agentfiles.LocalSourceID,
+		},
+		Password: "wrong-password",
+		Persist:  true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "media source login failed") {
+		t.Fatalf("ApplySettings error = %v, want login failure", err)
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read env: %v", err)
+	}
+	if strings.Contains(string(data), "media@example.com") {
+		t.Fatalf("env was persisted after failed validation:\n%s", string(data))
 	}
 }
 
@@ -1281,6 +1344,7 @@ func TestSettingsIncludesMediaDestinationOptions(t *testing.T) {
 		}
 	}
 	service := New(Config{
+		SourceID:             agentfiles.LocalSourceID,
 		DestinationPath:      "Custom/Archive",
 		MovieDestinationPath: "Movies",
 		TVDestinationPath:    "Shows",
@@ -1292,15 +1356,37 @@ func TestSettingsIncludesMediaDestinationOptions(t *testing.T) {
 		values[option.Value] = option.Label
 	}
 	for value, label := range map[string]string{
-		"":               "SMB share root",
-		"Movies":         "SMB share/Movies",
-		"Shows":          "SMB share/Shows",
-		"Shows/Comedy":   "SMB share/Shows/Comedy",
-		"Custom/Archive": "SMB share/Custom/Archive",
+		"":               "SMB share local root",
+		"Movies":         "SMB share local/Movies",
+		"Shows":          "SMB share local/Shows",
+		"Shows/Comedy":   "SMB share local/Shows/Comedy",
+		"Custom/Archive": "SMB share local/Custom/Archive",
 	} {
 		if values[value] != label {
 			t.Fatalf("destination option %q = %q, want %q in %#v", value, values[value], label, response.DestinationOptions)
 		}
+	}
+}
+
+func TestSettingsIncludesSMBShareRootOptions(t *testing.T) {
+	t.Parallel()
+
+	service := New(Config{}, agentfiles.NewWithConfig(agentfiles.Config{
+		Shares: []agentfiles.SMBConfig{
+			{ID: "media", Name: "Media", Host: "nas.local", Share: "media"},
+			{ID: "archive", Name: "Archive", Host: "nas.local", Share: "archive"},
+		},
+	}), nil)
+
+	response := service.Settings(context.Background())
+	roots := map[string]string{}
+	for _, option := range response.DestinationOptions {
+		if option.Value == "" {
+			roots[option.SourceID] = option.Label
+		}
+	}
+	if roots["media"] != "SMB share media root" || roots["archive"] != "SMB share archive root" {
+		t.Fatalf("share root options = %#v in %#v", roots, response.DestinationOptions)
 	}
 }
 

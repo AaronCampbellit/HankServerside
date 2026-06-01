@@ -55,6 +55,7 @@ func main() {
 		BaseURL:                       cfg.Media.GramatonBaseURL,
 		Username:                      cfg.Media.Username,
 		Password:                      cfg.Media.Password,
+		SourceID:                      cfg.Media.SourceID,
 		DestinationPath:               cfg.Media.DestinationPath,
 		MovieDestinationPath:          cfg.Media.MovieDestinationPath,
 		TVDestinationPath:             cfg.Media.TVDestinationPath,

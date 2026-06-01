@@ -195,6 +195,25 @@ function updateScheduleSummaries() {
   els.healthScheduleSummary.textContent = `Every ${els.checksumMinutes.value || 15} minutes / ${describeSchedule(els.restoreVerificationDay, els.restoreVerificationTime, els.restoreVerificationCron)}`;
 }
 
+function backupConfigSnapshot(config) {
+  const schedule = config?.schedule || {};
+  const target = config?.target || {};
+  return {
+    target_path: String(target.path || "").trim(),
+    full_backup_cron: String(schedule.full_backup_cron || "").trim(),
+    differential_backup_cron: String(schedule.differential_backup_cron || "").trim(),
+    checksum_interval_seconds: Number(schedule.checksum_interval_seconds || 0),
+    retention_full: Number(schedule.retention_full || 0),
+    amcheck_cron: String(schedule.amcheck_cron || "").trim(),
+    restore_verification_cron: String(schedule.restore_verification_cron || "").trim(),
+    restore_verification_enabled: Boolean(schedule.restore_verification_enabled),
+  };
+}
+
+function sameBackupConfig(left, right) {
+  return JSON.stringify(backupConfigSnapshot(left)) === JSON.stringify(backupConfigSnapshot(right));
+}
+
 function bindScheduleControl(select, timeInput, rawInput) {
   const sync = () => {
     syncRawScheduleField(select, timeInput, rawInput);
@@ -528,10 +547,20 @@ async function saveConfig(event) {
       restore_verification_enabled: true,
     },
   };
+  if (sameBackupConfig(current, payload)) {
+    showToast("No backup settings changed.", true);
+    return;
+  }
   try {
-    await api("/v1/home/storage/config", { method: "PUT", body: JSON.stringify(payload) });
+    const saved = await api("/v1/home/storage/config", { method: "PUT", body: JSON.stringify(payload) });
+    if (!sameBackupConfig(payload, saved.config)) {
+      throw new Error("Backup settings save did not persist the requested values.");
+    }
     await loadStatus();
-    showToast("Backup settings saved.");
+    if (!sameBackupConfig(payload, state.status?.config)) {
+      throw new Error("Backup settings status did not refresh with the saved values.");
+    }
+    showToast("Backup settings saved and verified.");
   } catch (error) {
     showToast(error.message, true);
   }

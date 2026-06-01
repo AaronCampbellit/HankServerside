@@ -59,13 +59,19 @@
             <span class="pill">Lights and Sensors</span>
           </div>
           <form id="ha-form" class="stack">
-            <label>
+            <div class="settings-grid">
+            <label class="setting-field">
               <span>Home Assistant Address</span>
-              <textarea id="ha-public-config" rows="6" placeholder='{"base_url":"http://homeassistant.local:8123"}'></textarea>
+              <input id="ha-base-url" type="url" placeholder="http://homeassistant.local:8123" autocomplete="url">
             </label>
+            <label class="setting-field">
+              <span>Request Timeout</span>
+              <input id="ha-timeout-seconds" type="number" min="1" max="120" step="1" placeholder="10">
+            </label>
+            </div>
             <label>
               <span>Home Assistant Token</span>
-              <textarea id="ha-secrets" rows="6" placeholder='{"token":"replace-with-home-assistant-token"}'></textarea>
+              <input id="ha-token" type="password" autocomplete="new-password" placeholder="Paste a long-lived access token">
             </label>
             <label class="toggle-field">
               <input id="ha-persist" type="checkbox" checked>

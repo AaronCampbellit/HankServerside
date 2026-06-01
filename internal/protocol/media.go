@@ -36,6 +36,7 @@ type MediaSettings struct {
 	BaseURL              string `json:"base_url"`
 	Username             string `json:"username,omitempty"`
 	HasPassword          bool   `json:"has_password"`
+	SourceID             string `json:"source_id,omitempty"`
 	DestinationPath      string `json:"destination_path,omitempty"`
 	MovieDestinationPath string `json:"movie_destination_path,omitempty"`
 	TVDestinationPath    string `json:"tv_destination_path,omitempty"`
@@ -44,8 +45,9 @@ type MediaSettings struct {
 }
 
 type MediaDestinationOption struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
+	Value    string `json:"value"`
+	Label    string `json:"label"`
+	SourceID string `json:"source_id,omitempty"`
 }
 
 type MediaSettingsStatusRequest struct{}

@@ -1485,6 +1485,18 @@ button.button-link {
   background: rgba(107, 189, 255, 0.14);
 }
 
+.note-inline-image {
+  display: block;
+  max-width: min(100%, 720px);
+  max-height: 420px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  object-fit: contain;
+  background: var(--surface);
+  pointer-events: auto;
+}
+
 .note-check-toggle.inline {
   display: inline-flex;
   align-items: center;
@@ -1635,6 +1647,25 @@ body.kanban-note .kanban-board {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.ha-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.ha-dashboard-grid.empty-state {
+  display: block;
+}
+
+.ha-entity-card {
+  min-width: 0;
+}
+
+.ha-entity-card .card-title,
+.ha-entity-card .meta {
+  overflow-wrap: anywhere;
 }
 
 .tool-result-card pre,

@@ -208,7 +208,8 @@ func defaultAssistantMediaSettings() protocol.MediaSettings {
 }
 
 func defaultAssistantMediaDestinationOptions(settings protocol.MediaSettings) []protocol.MediaDestinationOption {
-	options := []protocol.MediaDestinationOption{{Value: "", Label: "SMB share root"}}
+	sourceID := strings.TrimSpace(settings.SourceID)
+	options := []protocol.MediaDestinationOption{{Value: "", Label: defaultAssistantMediaDestinationLabel(sourceID, ""), SourceID: sourceID}}
 	seen := map[string]struct{}{"": {}}
 	for _, current := range []string{settings.DestinationPath, settings.MovieDestinationPath, settings.TVDestinationPath} {
 		if current == "" {
@@ -219,9 +220,21 @@ func defaultAssistantMediaDestinationOptions(settings protocol.MediaSettings) []
 		}
 		seen[current] = struct{}{}
 		options = append(options, protocol.MediaDestinationOption{
-			Value: current,
-			Label: "SMB share/" + current,
+			Value:    current,
+			Label:    defaultAssistantMediaDestinationLabel(sourceID, current),
+			SourceID: sourceID,
 		})
 	}
 	return options
+}
+
+func defaultAssistantMediaDestinationLabel(sourceID string, value string) string {
+	prefix := "SMB share"
+	if sourceID != "" {
+		prefix += " " + sourceID
+	}
+	if value == "" {
+		return prefix + " root"
+	}
+	return prefix + "/" + value
 }

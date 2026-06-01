@@ -14,8 +14,9 @@ const els = {
   homeMeta: document.getElementById("home-meta"),
   profilesSummary: document.getElementById("profiles-summary"),
   haForm: document.getElementById("ha-form"),
-  haPublicConfig: document.getElementById("ha-public-config"),
-  haSecrets: document.getElementById("ha-secrets"),
+  haBaseURL: document.getElementById("ha-base-url"),
+  haTimeoutSeconds: document.getElementById("ha-timeout-seconds"),
+  haToken: document.getElementById("ha-token"),
   haPersist: document.getElementById("ha-persist"),
   toast: document.getElementById("toast"),
 };
@@ -63,32 +64,6 @@ function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
-function prettyJSON(value) {
-  if (value === null || value === undefined || value === "") {
-    return "";
-  }
-  if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
-    }
-  }
-  return JSON.stringify(value, null, 2);
-}
-
-function parseOptionalJSON(value, fieldName) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return null;
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    throw new Error(`${fieldName} must be valid JSON.`);
-  }
-}
-
 function selectedHomeID() {
   return els.homeSelect.value;
 }
@@ -117,6 +92,30 @@ function syncURL(homeID) {
 
 function profileByType(serviceType) {
   return state.profiles.find((profile) => profile.service_type === serviceType) || null;
+}
+
+function profileConfig(profile) {
+  const config = profile?.public_config_json || profile?.public_config || {};
+  if (typeof config === "string") {
+    try {
+      return JSON.parse(config);
+    } catch {
+      return {};
+    }
+  }
+  return config || {};
+}
+
+function normalizeHomeAssistantURL(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function homeAssistantConfig(profile) {
+  const config = profileConfig(profile);
+  return {
+    base_url: config.base_url || config.url || "",
+    timeout_seconds: Number(config.timeout_seconds || 10) || 10,
+  };
 }
 
 function renderSession() {
@@ -201,7 +200,10 @@ function renderSummary() {
 
 function renderForms() {
   const homeAssistant = profileByType("homeassistant");
-  els.haPublicConfig.value = prettyJSON(homeAssistant?.public_config_json);
+  const haConfig = homeAssistantConfig(homeAssistant);
+  els.haBaseURL.value = haConfig.base_url;
+  els.haTimeoutSeconds.value = haConfig.timeout_seconds;
+  els.haToken.value = "";
 }
 
 async function loadHomes() {
@@ -246,13 +248,21 @@ async function saveProfile(serviceType) {
   }
 
   try {
+    const baseURL = normalizeHomeAssistantURL(els.haBaseURL.value);
+    const timeoutSeconds = Number.parseInt(els.haTimeoutSeconds.value, 10) || 10;
+    if (!baseURL) {
+      showToast("Home Assistant address is required.", true);
+      return;
+    }
     const payload = {
-      public_config: parseOptionalJSON(els.haPublicConfig.value, "Home Assistant public config") ?? {},
+      public_config: {
+        base_url: baseURL,
+        timeout_seconds: timeoutSeconds,
+      },
       persist: els.haPersist.checked,
     };
-    const secrets = parseOptionalJSON(els.haSecrets.value, "Home Assistant secrets");
-    if (secrets !== null) {
-      payload.secrets = secrets;
+    if (els.haToken.value.trim()) {
+      payload.secrets = { token: els.haToken.value.trim() };
     }
 
     await api(`/v1/home/service-profiles/${encodeURIComponent(serviceType)}`, {
@@ -260,7 +270,7 @@ async function saveProfile(serviceType) {
       body: JSON.stringify(payload),
     });
 
-    els.haSecrets.value = "";
+    els.haToken.value = "";
     await loadProfiles();
     showToast(`${serviceType} connection saved.`);
   } catch (error) {

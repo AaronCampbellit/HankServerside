@@ -3,6 +3,7 @@ const state = {
   homes: [],
   agents: [],
   sync: null,
+  storage: null,
   tokensByHome: new Map(),
   refreshTimer: 0,
   lastAgentEnvFile: "",
@@ -296,6 +297,9 @@ function renderSetupChecklist() {
   const agentOnline = state.agents.some((agent) => String(agent.status || "").toLowerCase() === "online");
   const profiles = state.sync?.profiles || {};
   const hasConnectionProfile = Object.values(profiles).some((profile) => Boolean(profile?.updated_at || profile?.last_backup_at || profile?.status));
+  const backup = state.storage?.backup || {};
+  const restore = state.storage?.restore || {};
+  const backupsVerified = Boolean(backup.last_successful_at && restore.last_test_at);
   const items = [
     {
       title: "Cloud",
@@ -329,8 +333,8 @@ function renderSetupChecklist() {
     },
     {
       title: "Backups",
-      detail: "Run the first backup and restore test",
-      done: false,
+      detail: backupsVerified ? "Backup and restore test complete" : "Run the first backup and restore test",
+      done: backupsVerified,
       href: "/dashboard/settings#backups",
       action: "Open",
     },
@@ -415,6 +419,15 @@ async function loadSync() {
   renderSync();
 }
 
+async function loadStorageStatus() {
+  try {
+    state.storage = await api("/v1/home/storage/status");
+  } catch (_) {
+    state.storage = null;
+  }
+  renderSetupChecklist();
+}
+
 async function createHome(event) {
   event.preventDefault();
   try {
@@ -492,7 +505,7 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
-    await Promise.all([loadHomes(), loadAgents(), loadSync()]);
+    await Promise.all([loadHomes(), loadAgents(), loadSync(), loadStorageStatus()]);
     await loadTokens(els.tokenHome.value || state.homes[0]?.id || "");
     syncAutoRefresh();
   } catch (_) {
