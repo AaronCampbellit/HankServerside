@@ -63,6 +63,8 @@ services:
         condition: service_healthy
     ports:
       - "${HANK_REMOTE_CLOUD_HOST_BIND}:${HANK_REMOTE_CLOUD_HOST_PORT}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - hank_db_ops_state:/var/lib/hank/db-ops/state
       - hank_db_ops_logs:/var/log/hank/db-ops

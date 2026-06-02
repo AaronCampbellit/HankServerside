@@ -521,13 +521,27 @@ func postOllamaChat(ctx context.Context, baseURL string, model string, messages 
 		} `json:"message"`
 		Error string `json:"error"`
 	}
-	if err := postJSON(ctx, baseURL+"/api/chat", "", body, &response); err != nil {
-		return "", err
+	var lastErr error
+	for _, endpointBase := range ollamaBaseURLCandidates(baseURL) {
+		response = struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			Error string `json:"error"`
+		}{}
+		if err := postJSON(ctx, endpointBase+"/api/chat", "", body, &response); err != nil {
+			lastErr = err
+			continue
+		}
+		if response.Error != "" {
+			return "", errors.New(response.Error)
+		}
+		return strings.TrimSpace(response.Message.Content), nil
 	}
-	if response.Error != "" {
-		return "", errors.New(response.Error)
+	if lastErr != nil {
+		return "", lastErr
 	}
-	return strings.TrimSpace(response.Message.Content), nil
+	return "", errors.New("Ollama is not configured")
 }
 
 func postOllamaEmbedding(ctx context.Context, baseURL string, model string, text string) ([]float64, error) {
@@ -536,13 +550,25 @@ func postOllamaEmbedding(ctx context.Context, baseURL string, model string, text
 		Embedding []float64 `json:"embedding"`
 		Error     string    `json:"error"`
 	}
-	if err := postJSON(ctx, baseURL+"/api/embeddings", "", body, &response); err != nil {
-		return nil, err
+	var lastErr error
+	for _, endpointBase := range ollamaBaseURLCandidates(baseURL) {
+		response = struct {
+			Embedding []float64 `json:"embedding"`
+			Error     string    `json:"error"`
+		}{}
+		if err := postJSON(ctx, endpointBase+"/api/embeddings", "", body, &response); err != nil {
+			lastErr = err
+			continue
+		}
+		if response.Error != "" {
+			return nil, errors.New(response.Error)
+		}
+		return response.Embedding, nil
 	}
-	if response.Error != "" {
-		return nil, errors.New(response.Error)
+	if lastErr != nil {
+		return nil, lastErr
 	}
-	return response.Embedding, nil
+	return nil, errors.New("Ollama is not configured")
 }
 
 func postOpenAIChat(ctx context.Context, baseURL string, token string, model string, messages []assistantLLMMessage) (string, error) {
@@ -635,12 +661,43 @@ func fetchChatGPTCodexModels(ctx context.Context, baseURL string, token string, 
 }
 
 func fetchOllamaChatModels(ctx context.Context, baseURL string) ([]string, error) {
-	endpoint := strings.TrimRight(baseURL, "/") + "/api/tags"
-	data, err := getEndpointBody(ctx, endpoint, nil)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for _, endpointBase := range ollamaBaseURLCandidates(baseURL) {
+		endpoint := strings.TrimRight(endpointBase, "/") + "/api/tags"
+		data, err := getEndpointBody(ctx, endpoint, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return assistantModelIDsFromJSON(data, false), nil
 	}
-	return assistantModelIDsFromJSON(data, false), nil
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("Ollama is not configured")
+}
+
+func ollamaBaseURLCandidates(baseURL string) []string {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if trimmed == "" {
+		return nil
+	}
+	values := []string{trimmed}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return values
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "127.0.0.1" && host != "localhost" {
+		return values
+	}
+	port := parsed.Port()
+	parsed.Host = "host.docker.internal"
+	if port != "" {
+		parsed.Host += ":" + port
+	}
+	values = append(values, strings.TrimRight(parsed.String(), "/"))
+	return uniqueStrings(values)
 }
 
 func postChatGPTCodexResponse(ctx context.Context, baseURL string, token string, accountID string, model string, messages []assistantLLMMessage) (string, error) {

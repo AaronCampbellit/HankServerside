@@ -67,6 +67,18 @@ func TestAssistantProviderUsesConfiguredOllama(t *testing.T) {
 	}
 }
 
+func TestOllamaBaseURLCandidatesFallbackFromLocalhostToDockerHost(t *testing.T) {
+	t.Parallel()
+
+	candidates := ollamaBaseURLCandidates("http://127.0.0.1:11434/")
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+	if candidates[0] != "http://127.0.0.1:11434" || candidates[1] != "http://host.docker.internal:11434" {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+}
+
 func TestAssistantStatusUsesLinkedChatGPTCodexWhenConfigured(t *testing.T) {
 	t.Parallel()
 

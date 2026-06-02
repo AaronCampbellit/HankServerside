@@ -763,6 +763,8 @@ async function saveAssistantSettings(event) {
       body: JSON.stringify(assistantSettingsFormPayload()),
     });
     await loadStatus({ includeMedia: false });
+    state.models = null;
+    await loadModelOptions();
     showToast("HankAI settings saved.");
   } catch (error) {
     showToast(error.message, true);
