@@ -128,7 +128,7 @@ func (s *Server) indexAssistantNotes(ctx context.Context, home domain.Home, memb
 			if note.DeletedAt != nil {
 				continue
 			}
-			if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, "profile_note", note); err != nil {
+			if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, "profile_note", note, settings); err != nil {
 				return err
 			}
 		}
@@ -144,14 +144,14 @@ func (s *Server) indexAssistantNotes(ctx context.Context, home domain.Home, memb
 		if note.DeletedAt != nil {
 			continue
 		}
-		if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, "shared_note", note); err != nil {
+		if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, "shared_note", note, settings); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Server) indexAssistantNote(ctx context.Context, homeID string, userID string, sourceType string, note domain.UserNote) error {
+func (s *Server) indexAssistantNote(ctx context.Context, homeID string, userID string, sourceType string, note domain.UserNote, settingsOverride ...domain.AssistantSettings) error {
 	body := firstNonBlank(note.BodyMarkdown, note.Content)
 	metadata, _ := json.Marshal(map[string]any{
 		"page_type": note.PageType,
@@ -173,7 +173,7 @@ func (s *Server) indexAssistantNote(ctx context.Context, homeID string, userID s
 		SearchText:   strings.TrimSpace(note.Title + "\n" + note.NoteID + "\n" + body),
 		UpdatedAt:    note.UpdatedAt,
 	}
-	return s.store.UpsertAssistantDocumentWithChunks(ctx, document, s.assistantChunksForText(ctx, userID, document.ID, document.SearchText, note.UpdatedAt))
+	return s.store.UpsertAssistantDocumentWithChunks(ctx, document, s.assistantChunksForText(ctx, userID, document.ID, document.SearchText, note.UpdatedAt, settingsOverride...))
 }
 
 func (s *Server) indexAssistantCalendarSnapshot(ctx context.Context, homeID string, userID string) error {
@@ -269,7 +269,7 @@ func (s *Server) indexAssistantHomeAssistantStates(ctx context.Context, home dom
 	return nil
 }
 
-func (s *Server) indexAssistantFiles(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext) error {
+func (s *Server) indexAssistantFiles(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settingsOverride ...domain.AssistantSettings) error {
 	if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 		return nil
 	}
@@ -279,7 +279,7 @@ func (s *Server) indexAssistantFiles(ctx context.Context, home domain.Home, memb
 	}
 	now := time.Now().UTC()
 	for _, item := range items {
-		embedding, model, version := s.embedAssistantText(ctx, auth.User.ID, item.Path+" "+item.Name)
+		embedding, model, version := s.embedAssistantText(ctx, auth.User.ID, item.Path+" "+item.Name, settingsOverride...)
 		embeddingJSON, _ := json.Marshal(embedding)
 		metadata, _ := json.Marshal(map[string]any{"is_directory": item.IsDirectory})
 		modifiedAt := item.ModifiedAt
@@ -344,11 +344,11 @@ func (s *Server) crawlFilesForAssistantIndex(ctx context.Context, homeID string,
 	return items, nil
 }
 
-func (s *Server) assistantChunksForText(ctx context.Context, userID string, documentID string, text string, updatedAt time.Time) []domain.AssistantChunk {
+func (s *Server) assistantChunksForText(ctx context.Context, userID string, documentID string, text string, updatedAt time.Time, settingsOverride ...domain.AssistantSettings) []domain.AssistantChunk {
 	parts := chunkAssistantText(text, 1800)
 	chunks := make([]domain.AssistantChunk, 0, len(parts))
 	for index, part := range parts {
-		embedding, model, version := s.embedAssistantText(ctx, userID, part)
+		embedding, model, version := s.embedAssistantText(ctx, userID, part, settingsOverride...)
 		embeddingJSON, _ := json.Marshal(embedding)
 		chunks = append(chunks, domain.AssistantChunk{
 			ID:               stableAssistantID("achunk", fmt.Sprintf("%s:%d:%x", documentID, index, embeddingJSON[:min(len(embeddingJSON), 16)])),

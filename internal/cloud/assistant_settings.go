@@ -14,11 +14,15 @@ import (
 
 const (
 	legacyAssistantSystemPrompt  = "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened."
-	defaultAssistantSystemPrompt = "You are HankAI, the assistant inside Hank Remote. Prefer typed Hank tools over guessing whenever the user asks about Notes, File Server or SMB shares, Calendar, Home Assistant, Hank project docs, or prior Hank chat. Treat those source names as user concepts and keep them distinct in answers. Stay grounded in the supplied Hank context; if a target note, folder, event, entity, share, calendar, or source is ambiguous, ask one short clarification. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. For attachments, distinguish staged metadata from raw bytes that the app or home agent must commit. For Calendar, use device timezone context when present and ask for missing date, time, duration, calendar, or ambiguous event matches before writes. For project-doc answers, prefer current README, AGENTS, SERVER_SYNC, docs, deployment docs, and runbooks over archived phase documents unless the user asks for history; cite the doc path or title. Treat external provider access as a privacy boundary: only use context included in the request and do not ask for secrets, passwords, API keys, or private tokens. For destructive or high-impact actions, explain the intended target and require Hank confirmation before execution."
+	defaultAssistantSystemPrompt = chatGPTAssistantSystemPrompt
+	chatGPTAssistantSystemPrompt = "You are HankAI, the assistant inside Hank Remote. Prefer typed Hank tools over guessing whenever the user asks about Notes, File Server or SMB shares, Calendar, Home Assistant, Hank project docs, or prior Hank chat. Treat those source names as user concepts and keep them distinct in answers. Stay grounded in the supplied Hank context; if a target note, folder, event, entity, share, calendar, or source is ambiguous, ask one short clarification. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. For attachments, distinguish staged metadata from raw bytes that the app or home agent must commit. For Calendar, use device timezone context when present and ask for missing date, time, duration, calendar, or ambiguous event matches before writes. For project-doc answers, prefer current README, AGENTS, SERVER_SYNC, docs, deployment docs, and runbooks over archived phase documents unless the user asks for history; cite the doc path or title. Treat external provider access as a privacy boundary: only use context included in the request and do not ask for secrets, passwords, API keys, or private tokens. For destructive or high-impact actions, explain the intended target and require Hank confirmation before execution."
+	localAssistantSystemPrompt   = "You are HankAI running with a local model inside Hank Remote. Use the supplied Hank context aggressively, but keep every answer grounded in that context and in typed Hank tool results. You may reason about likely user intent, propose a short tool plan, and ask one focused clarification when a note, folder, event, entity, share, calendar, or source is ambiguous. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. Do not invent file contents, calendar entries, Home Assistant states, or note text that is not present in the provided context. For destructive or high-impact actions, identify the intended target and require Hank confirmation before execution. Prefer concise practical answers over generic assistant prose."
 
-	maxAssistantContextItems      = 20
-	maxAssistantSystemPromptBytes = 6000
-	maxAssistantChatModelBytes    = 120
+	maxAssistantContextItems       = 20
+	maxAssistantSystemPromptBytes  = 6000
+	maxAssistantChatModelBytes     = 120
+	maxAssistantProviderBytes      = 40
+	maxAssistantPromptProfileBytes = 40
 )
 
 type assistantSettingsSource struct {
@@ -53,7 +57,10 @@ type assistantSettingsUpdateRequest struct {
 	ProjectDocsEnabled   *bool   `json:"project_docs_enabled"`
 	ConversationsEnabled *bool   `json:"conversations_enabled"`
 	SystemPrompt         *string `json:"system_prompt"`
+	AIProvider           *string `json:"ai_provider"`
 	ChatModel            *string `json:"chat_model"`
+	EmbeddingModel       *string `json:"embedding_model"`
+	PromptProfile        *string `json:"prompt_profile"`
 }
 
 func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
@@ -125,7 +132,12 @@ func (s *Server) currentAssistantSettings(ctx context.Context, homeID string, us
 }
 
 func assistantSettingsNeedPersistence(current domain.AssistantSettings, normalized domain.AssistantSettings) bool {
-	return current.SystemPrompt != normalized.SystemPrompt || current.MaxContextItems != normalized.MaxContextItems || current.ChatModel != normalized.ChatModel
+	return current.SystemPrompt != normalized.SystemPrompt ||
+		current.MaxContextItems != normalized.MaxContextItems ||
+		current.AIProvider != normalized.AIProvider ||
+		current.ChatModel != normalized.ChatModel ||
+		current.EmbeddingModel != normalized.EmbeddingModel ||
+		current.PromptProfile != normalized.PromptProfile
 }
 
 func defaultAssistantSettings(homeID string, userID string) domain.AssistantSettings {
@@ -142,6 +154,7 @@ func defaultAssistantSettings(homeID string, userID string) domain.AssistantSett
 		ConversationsEnabled: true,
 		SystemPrompt:         defaultAssistantSystemPrompt,
 		MaxContextItems:      maxAssistantContextItems,
+		PromptProfile:        "chatgpt",
 		CreatedAt:            now,
 		UpdatedAt:            now,
 		UpdatedBy:            userID,
@@ -173,18 +186,48 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	if request.SystemPrompt != nil {
 		settings.SystemPrompt = strings.TrimSpace(*request.SystemPrompt)
 	}
+	if request.AIProvider != nil {
+		settings.AIProvider = strings.ToLower(strings.TrimSpace(*request.AIProvider))
+	}
 	if request.ChatModel != nil {
 		settings.ChatModel = strings.TrimSpace(*request.ChatModel)
+	}
+	if request.EmbeddingModel != nil {
+		settings.EmbeddingModel = strings.TrimSpace(*request.EmbeddingModel)
+	}
+	if request.PromptProfile != nil {
+		settings.PromptProfile = strings.ToLower(strings.TrimSpace(*request.PromptProfile))
+		if settings.PromptProfile != "custom" {
+			settings.SystemPrompt = assistantPromptForProfile(settings.PromptProfile)
+		}
 	}
 	settings = normalizeAssistantSettings(settings)
 	if len(settings.SystemPrompt) > maxAssistantSystemPromptBytes {
 		return domain.AssistantSettings{}, errors.New("system_prompt is too long")
 	}
+	if len(settings.AIProvider) > maxAssistantProviderBytes {
+		return domain.AssistantSettings{}, errors.New("ai_provider is too long")
+	}
 	if len(settings.ChatModel) > maxAssistantChatModelBytes {
 		return domain.AssistantSettings{}, errors.New("chat_model is too long")
 	}
+	if len(settings.EmbeddingModel) > maxAssistantChatModelBytes {
+		return domain.AssistantSettings{}, errors.New("embedding_model is too long")
+	}
+	if len(settings.PromptProfile) > maxAssistantPromptProfileBytes {
+		return domain.AssistantSettings{}, errors.New("prompt_profile is too long")
+	}
+	if !assistantProviderAllowed(settings.AIProvider) {
+		return domain.AssistantSettings{}, errors.New("ai_provider is not supported")
+	}
+	if !assistantPromptProfileAllowed(settings.PromptProfile) {
+		return domain.AssistantSettings{}, errors.New("prompt_profile is not supported")
+	}
 	if strings.ContainsAny(settings.ChatModel, " \t\r\n") {
 		return domain.AssistantSettings{}, errors.New("chat_model cannot contain whitespace")
+	}
+	if strings.ContainsAny(settings.EmbeddingModel, " \t\r\n") {
+		return domain.AssistantSettings{}, errors.New("embedding_model cannot contain whitespace")
 	}
 	return settings, nil
 }
@@ -196,9 +239,90 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 	} else {
 		settings.SystemPrompt = trimmedPrompt
 	}
+	settings.AIProvider = strings.ToLower(strings.TrimSpace(settings.AIProvider))
 	settings.ChatModel = strings.TrimSpace(settings.ChatModel)
+	settings.EmbeddingModel = strings.TrimSpace(settings.EmbeddingModel)
+	settings.PromptProfile = strings.ToLower(strings.TrimSpace(settings.PromptProfile))
+	if settings.PromptProfile == "" {
+		settings.PromptProfile = assistantPromptProfileForPrompt(settings.SystemPrompt)
+	}
 	settings.MaxContextItems = maxAssistantContextItems
 	return settings
+}
+
+func assistantProviderAllowed(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", "auto", "ollama", "openai", assistantProviderChatGPTCodex, "disabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func assistantPromptProfileAllowed(profile string) bool {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", "chatgpt", "local", "custom":
+		return true
+	default:
+		return false
+	}
+}
+
+func assistantPromptForProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "local":
+		return localAssistantSystemPrompt
+	case "chatgpt":
+		return chatGPTAssistantSystemPrompt
+	default:
+		return defaultAssistantSystemPrompt
+	}
+}
+
+func assistantPromptProfileForPrompt(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	switch trimmed {
+	case "", legacyAssistantSystemPrompt, chatGPTAssistantSystemPrompt:
+		return "chatgpt"
+	case localAssistantSystemPrompt:
+		return "local"
+	default:
+		return "custom"
+	}
+}
+
+func assistantPromptProfiles() []map[string]string {
+	return []map[string]string{
+		{
+			"key":         "chatgpt",
+			"label":       "ChatGPT/Codex",
+			"description": "Strict external-provider prompt that minimizes private context and keeps typed-tool boundaries explicit.",
+			"prompt":      chatGPTAssistantSystemPrompt,
+		},
+		{
+			"key":         "local",
+			"label":       "Local model",
+			"description": "Planner-friendly prompt for local models while preserving Hank validation and confirmation boundaries.",
+			"prompt":      localAssistantSystemPrompt,
+		},
+		{
+			"key":         "custom",
+			"label":       "Custom",
+			"description": "Use the edited prompt exactly as saved.",
+			"prompt":      "",
+		},
+	}
+}
+
+func assistantProviderOptions() []map[string]string {
+	return []map[string]string{
+		{"key": "", "label": "Configured default"},
+		{"key": "auto", "label": "Auto"},
+		{"key": "ollama", "label": "Local Ollama"},
+		{"key": "chatgpt_codex", "label": "Linked ChatGPT/Codex"},
+		{"key": "openai", "label": "OpenAI API key"},
+		{"key": "disabled", "label": "Local fallback only"},
+	}
 }
 
 func (s *Server) assistantSettingsPayload(homeID string, settings domain.AssistantSettings) assistantSettingsResponse {
@@ -209,10 +333,15 @@ func (s *Server) assistantSettingsPayload(homeID string, settings domain.Assista
 	return assistantSettingsResponse{
 		Settings: settings,
 		Defaults: map[string]any{
-			"system_prompt":      defaultAssistantSystemPrompt,
-			"max_context_items":  maxAssistantContextItems,
-			"chat_model":         "",
-			"chat_model_options": assistantChatModelOptions(cfg),
+			"system_prompt":           defaultAssistantSystemPrompt,
+			"prompt_profiles":         assistantPromptProfiles(),
+			"ai_provider":             "",
+			"provider_options":        assistantProviderOptions(),
+			"max_context_items":       maxAssistantContextItems,
+			"chat_model":              "",
+			"chat_model_options":      assistantChatModelOptions(cfg),
+			"embedding_model":         "",
+			"embedding_model_options": assistantEmbeddingModelOptions(cfg),
 		},
 		Sources: assistantSettingsSources(settings),
 		Tools:   assistantSettingsTools(settings, capabilities),

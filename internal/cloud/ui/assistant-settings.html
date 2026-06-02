@@ -64,7 +64,7 @@
             <button class="settings-section-button active" type="button" aria-controls="assistant-settings-sources" data-settings-section="sources">Sources</button>
             <button class="settings-section-button" type="button" aria-controls="assistant-settings-tools" data-settings-section="tools">Tools &amp; Workflows</button>
             <button class="settings-section-button" type="button" aria-controls="assistant-settings-information" data-settings-section="information">Information</button>
-            <button class="settings-section-button" type="button" aria-controls="assistant-settings-prompt" data-settings-section="prompt">Prompt</button>
+            <button class="settings-section-button" type="button" aria-controls="assistant-settings-prompt" data-settings-section="prompt">Models &amp; Prompt</button>
           </div>
           <form id="assistant-settings-form" class="settings-form">
             <div id="assistant-settings-sources" class="settings-tab-panel" data-settings-panel="sources">
@@ -196,13 +196,29 @@
             <div id="assistant-settings-prompt" class="settings-tab-panel" data-settings-panel="prompt">
               <div class="settings-block">
                 <div class="settings-block-head">
-                  <h3>Model</h3>
-                  <span class="mini-pill">Chat</span>
+                  <h3>Provider</h3>
+                  <span class="mini-pill">Runtime</span>
+                </div>
+                <label class="setting-field" for="harness-ai-provider">
+                  <span>AI provider</span>
+                  <select id="harness-ai-provider"></select>
+                  <small>Use Local Ollama for self-hosted models, or switch back to linked ChatGPT/Codex for external testing.</small>
+                </label>
+              </div>
+              <div class="settings-block">
+                <div class="settings-block-head">
+                  <h3>Models</h3>
+                  <span class="mini-pill">Chat &amp; embeddings</span>
                 </div>
                 <label class="setting-field" for="harness-chat-model">
                   <span>Chat model</span>
                   <select id="harness-chat-model"></select>
                   <span id="harness-model-meta" class="meta">Loading available models.</span>
+                </label>
+                <label class="setting-field" for="harness-embedding-model">
+                  <span>Embedding model</span>
+                  <select id="harness-embedding-model"></select>
+                  <small>Keep 768-dimension embeddings unless the schema is changed. `nomic-embed-text` is the current local-safe default.</small>
                 </label>
               </div>
               <div class="settings-block">
@@ -210,6 +226,11 @@
                   <h3>Prompt</h3>
                   <span class="mini-pill">System message</span>
                 </div>
+                <label class="setting-field" for="harness-prompt-profile">
+                  <span>Prompt profile</span>
+                  <select id="harness-prompt-profile"></select>
+                  <small>Switch between the stricter ChatGPT/Codex prompt and a local-model prompt tuned for planner-style use.</small>
+                </label>
                 <label class="setting-field" for="harness-system-prompt">
                   <span>System prompt</span>
                   <textarea id="harness-system-prompt" rows="7" spellcheck="true"></textarea>

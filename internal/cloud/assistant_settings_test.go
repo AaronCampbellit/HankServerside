@@ -54,6 +54,13 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if defaults.Settings.ChatModel != "" {
 		t.Fatalf("default chat model override = %q, want empty", defaults.Settings.ChatModel)
 	}
+	if defaults.Settings.AIProvider != "" || defaults.Settings.EmbeddingModel != "" || defaults.Settings.PromptProfile != "chatgpt" {
+		t.Fatalf("default model profile settings = %#v", defaults.Settings)
+	}
+	defaultsJSON, _ := json.Marshal(defaults.Defaults)
+	if !strings.Contains(string(defaultsJSON), "ChatGPT/Codex") || !strings.Contains(string(defaultsJSON), "Local model") {
+		t.Fatalf("prompt profiles missing: %#v", defaults.Defaults)
+	}
 	if !strings.Contains(defaults.Settings.SystemPrompt, "You are HankAI") || !strings.Contains(defaults.Settings.SystemPrompt, "privacy boundary") {
 		t.Fatalf("default prompt does not include harness guidance: %q", defaults.Settings.SystemPrompt)
 	}
@@ -73,7 +80,10 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 		"project_docs_enabled":  false,
 		"profile_notes_enabled": false,
 		"home_notes_enabled":    true,
+		"ai_provider":           "ollama",
 		"chat_model":            "gpt-codex-large",
+		"embedding_model":       "nomic-embed-text",
+		"prompt_profile":        "local",
 		"system_prompt":         "Use only the supplied Hank test context.",
 	}, &updated)
 	if updated.Settings.FilesEnabled || updated.Settings.CalendarEnabled || updated.Settings.ProjectDocsEnabled {
@@ -82,8 +92,11 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if updated.Settings.ProfileNotesEnabled || !updated.Settings.HomeNotesEnabled {
 		t.Fatalf("note toggles were not saved: %#v", updated.Settings)
 	}
-	if updated.Settings.SystemPrompt != "Use only the supplied Hank test context." || updated.Settings.MaxContextItems != maxAssistantContextItems || updated.Settings.ChatModel != "gpt-codex-large" {
+	if updated.Settings.SystemPrompt != localAssistantSystemPrompt || updated.Settings.MaxContextItems != maxAssistantContextItems || updated.Settings.ChatModel != "gpt-codex-large" {
 		t.Fatalf("prompt/context settings = %#v", updated.Settings)
+	}
+	if updated.Settings.AIProvider != "ollama" || updated.Settings.EmbeddingModel != "nomic-embed-text" || updated.Settings.PromptProfile != "local" {
+		t.Fatalf("provider/model profile settings = %#v", updated.Settings)
 	}
 	if toolStatus(updated.Tools, "media_download") != "Files off" {
 		t.Fatalf("media tool status after disabling files = %#v", updated.Tools)
@@ -91,7 +104,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 
 	var persisted assistantSettingsResponse
 	requestJSON(t, testServer, "harness-settings-token", http.MethodGet, "/v1/home/assistant/settings", nil, &persisted)
-	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems || persisted.Settings.ChatModel != "gpt-codex-large" {
+	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems || persisted.Settings.ChatModel != "gpt-codex-large" || persisted.Settings.AIProvider != "ollama" || persisted.Settings.EmbeddingModel != "nomic-embed-text" || persisted.Settings.PromptProfile != "local" {
 		t.Fatalf("persisted settings = %#v", persisted.Settings)
 	}
 }

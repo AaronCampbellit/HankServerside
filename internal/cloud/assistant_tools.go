@@ -196,7 +196,7 @@ var assistantToolRegistry = []assistantTool{
 		},
 		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
 			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
+				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
 					server.logger.Warn("assistant file indexing failed", "error", err)
 				}
 			}
@@ -214,7 +214,7 @@ var assistantToolRegistry = []assistantTool{
 		},
 		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
 			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
+				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
 					server.logger.Warn("assistant file indexing failed", "error", err)
 				}
 			}
@@ -232,7 +232,7 @@ var assistantToolRegistry = []assistantTool{
 		},
 		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
 			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
+				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
 					server.logger.Warn("assistant file indexing failed", "error", err)
 				}
 			}

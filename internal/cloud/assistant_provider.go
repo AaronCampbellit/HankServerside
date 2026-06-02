@@ -148,6 +148,29 @@ func assistantChatModelOptions(cfg AssistantAIConfig) []string {
 	})
 }
 
+func assistantEmbeddingModelOptions(cfg AssistantAIConfig) []string {
+	cfg.normalize()
+	return uniqueStrings([]string{
+		cfg.OllamaEmbeddingModel,
+		cfg.OpenAIEmbeddingModel,
+		"nomic-embed-text",
+		"qwen3-embedding:0.6b",
+	})
+}
+
+func assistantAIConfigWithSettings(cfg AssistantAIConfig, settings domain.AssistantSettings) AssistantAIConfig {
+	settings = normalizeAssistantSettings(settings)
+	if strings.TrimSpace(settings.AIProvider) != "" {
+		cfg.Provider = settings.AIProvider
+	}
+	if strings.TrimSpace(settings.EmbeddingModel) != "" {
+		cfg.OllamaEmbeddingModel = settings.EmbeddingModel
+		cfg.OpenAIEmbeddingModel = settings.EmbeddingModel
+	}
+	cfg.normalize()
+	return cfg
+}
+
 func (s *Server) assistantStatus(ctx context.Context, userID string, modelOverride ...string) assistantProviderStatus {
 	cfg := s.assistantAI
 	cfg.normalize()
@@ -190,6 +213,44 @@ func (s *Server) assistantStatus(ctx context.Context, userID string, modelOverri
 	return status
 }
 
+func (s *Server) assistantStatusWithSettings(ctx context.Context, userID string, settings domain.AssistantSettings) assistantProviderStatus {
+	cfg := assistantAIConfigWithSettings(s.assistantAI, settings)
+	provider, token := s.resolveAssistantProviderWithConfig(ctx, userID, cfg)
+	override := strings.TrimSpace(settings.ChatModel)
+	defaultChatModel := cfg.defaultChatModelForProvider(provider)
+	chatModel := defaultChatModel
+	if defaultChatModel != "local fallback" {
+		chatModel = defaultString(override, defaultChatModel)
+	}
+	status := assistantProviderStatus{
+		Provider:          provider,
+		VectorStore:       "postgres",
+		ChatModel:         chatModel,
+		DefaultChatModel:  defaultChatModel,
+		ChatModelOverride: override,
+		ChatModelOptions:  assistantChatModelOptions(cfg),
+		EmbeddingModel:    "local-hash",
+		ChatConfigured:    provider == "ollama" && cfg.OllamaBaseURL != "",
+	}
+	if cfg.OllamaBaseURL != "" {
+		status.EmbeddingConfigured = true
+		status.EmbeddingModel = cfg.OllamaEmbeddingModel
+	} else if strings.TrimSpace(cfg.OpenAIAPIKey) != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
+		status.EmbeddingConfigured = true
+		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
+	} else if provider == assistantProviderChatGPTCodex && token != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
+		status.EmbeddingConfigured = true
+		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
+	}
+	if provider == "openai" || provider == assistantProviderChatGPTCodex {
+		status.ChatConfigured = token != ""
+	}
+	if !s.store.VectorAvailable() {
+		status.VectorStore = "postgres_without_pgvector"
+	}
+	return status
+}
+
 func (s *Server) handleAssistantModels(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -200,11 +261,11 @@ func (s *Server) handleAssistantModels(w http.ResponseWriter, r *http.Request, h
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	status := s.assistantStatus(r.Context(), auth.User.ID, settings.ChatModel)
+	status := s.assistantStatusWithSettings(r.Context(), auth.User.ID, settings)
 	modelsCtx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 
-	models, source, err := s.fetchAssistantChatModels(modelsCtx, auth.User.ID, status.Provider)
+	models, source, err := s.fetchAssistantChatModelsWithConfig(modelsCtx, auth.User.ID, assistantAIConfigWithSettings(s.assistantAI, settings), status.Provider)
 	errorMessage := ""
 	if err != nil {
 		errorMessage = err.Error()
@@ -228,6 +289,11 @@ func (s *Server) handleAssistantModels(w http.ResponseWriter, r *http.Request, h
 
 func (s *Server) fetchAssistantChatModels(ctx context.Context, userID string, provider string) ([]string, string, error) {
 	cfg := s.assistantAI
+	cfg.normalize()
+	return s.fetchAssistantChatModelsWithConfig(ctx, userID, cfg, provider)
+}
+
+func (s *Server) fetchAssistantChatModelsWithConfig(ctx context.Context, userID string, cfg AssistantAIConfig, provider string) ([]string, string, error) {
 	cfg.normalize()
 	switch provider {
 	case "openai":
@@ -267,6 +333,11 @@ func assistantModelOptionsWithConfigured(models []string, defaultModel string, o
 
 func (s *Server) resolveAssistantProvider(ctx context.Context, userID string) (string, string) {
 	cfg := s.assistantAI
+	cfg.normalize()
+	return s.resolveAssistantProviderWithConfig(ctx, userID, cfg)
+}
+
+func (s *Server) resolveAssistantProviderWithConfig(ctx context.Context, userID string, cfg AssistantAIConfig) (string, string) {
 	cfg.normalize()
 	openAIToken := strings.TrimSpace(cfg.OpenAIAPIKey)
 	chatGPTLinked := s.hasLinkedChatGPTCodex(ctx, userID)
@@ -314,8 +385,18 @@ func (s *Server) hasLinkedChatGPTCodex(ctx context.Context, userID string) bool 
 func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string, messages []assistantLLMMessage, modelOverride ...string) (string, string, error) {
 	cfg := s.assistantAI
 	cfg.normalize()
-	provider, token := s.resolveAssistantProvider(ctx, userID)
-	chatModel := defaultString(assistantChatModelOverride(modelOverride...), cfg.defaultChatModelForProvider(provider))
+	return s.generateAssistantLLMResponseWithConfig(ctx, userID, cfg, messages, assistantChatModelOverride(modelOverride...))
+}
+
+func (s *Server) generateAssistantLLMResponseWithSettings(ctx context.Context, userID string, settings domain.AssistantSettings, messages []assistantLLMMessage) (string, string, error) {
+	cfg := assistantAIConfigWithSettings(s.assistantAI, settings)
+	return s.generateAssistantLLMResponseWithConfig(ctx, userID, cfg, messages, strings.TrimSpace(settings.ChatModel))
+}
+
+func (s *Server) generateAssistantLLMResponseWithConfig(ctx context.Context, userID string, cfg AssistantAIConfig, messages []assistantLLMMessage, modelOverride string) (string, string, error) {
+	cfg.normalize()
+	provider, token := s.resolveAssistantProviderWithConfig(ctx, userID, cfg)
+	chatModel := defaultString(strings.TrimSpace(modelOverride), cfg.defaultChatModelForProvider(provider))
 	record := func(err error) {
 		if s.metrics != nil {
 			s.metrics.RecordAssistantProvider(provider, err != nil)
@@ -371,8 +452,11 @@ func (s *Server) generateAssistantLLMResponse(ctx context.Context, userID string
 	}
 }
 
-func (s *Server) embedAssistantText(ctx context.Context, userID string, text string) ([]float64, string, string) {
+func (s *Server) embedAssistantText(ctx context.Context, userID string, text string, settingsOverride ...domain.AssistantSettings) ([]float64, string, string) {
 	cfg := s.assistantAI
+	if len(settingsOverride) > 0 {
+		cfg = assistantAIConfigWithSettings(cfg, settingsOverride[0])
+	}
 	cfg.normalize()
 	if cfg.OllamaBaseURL != "" {
 		if embedding, err := postOllamaEmbedding(ctx, cfg.OllamaBaseURL, cfg.OllamaEmbeddingModel, text); err == nil && len(embedding) > 0 {

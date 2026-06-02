@@ -307,7 +307,7 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	status := s.assistantStatus(r.Context(), auth.User.ID, settings.ChatModel)
+	status := s.assistantStatusWithSettings(r.Context(), auth.User.ID, settings)
 	indexStats, err := s.store.AssistantIndexStats(r.Context(), home.ID, auth.User.ID)
 	if err != nil {
 		s.logger.Warn("assistant index stats unavailable", "home_id", home.ID, "user_id", auth.User.ID, "error", err)
@@ -2179,7 +2179,7 @@ func (s *Server) answerHermesChatPrompt(ctx context.Context, home domain.Home, a
 
 func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
-	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt)
+	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt, settings)
 	contexts, err := s.store.SearchAssistantContext(ctx, home.ID, auth.User.ID, prompt, queryEmbedding, settings.MaxContextItems)
 	if err != nil {
 		return assistantMessageContent{}, err
@@ -2201,7 +2201,7 @@ func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, a
 	rankProjectDocContexts(projectContexts, prompt)
 
 	answer := fallbackRetrievedAnswer(prompt, projectContexts)
-	if providerAnswer, modelName, err := s.generateAssistantLLMResponse(ctx, auth.User.ID, []assistantLLMMessage{
+	if providerAnswer, modelName, err := s.generateAssistantLLMResponseWithSettings(ctx, auth.User.ID, settings, []assistantLLMMessage{
 		{
 			Role:    "system",
 			Content: settings.SystemPrompt,
@@ -2210,7 +2210,7 @@ func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, a
 			Role:    "user",
 			Content: assistantPromptWithContext(prompt, projectContexts),
 		},
-	}, settings.ChatModel); err == nil && strings.TrimSpace(providerAnswer) != "" {
+	}); err == nil && strings.TrimSpace(providerAnswer) != "" {
 		answer = strings.TrimSpace(providerAnswer)
 		_ = modelName
 	} else if errors.Is(err, errChatGPTRelinkRequired) {
@@ -2236,7 +2236,7 @@ func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, a
 
 func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
-	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt)
+	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt, settings)
 	searchLimit := settings.MaxContextItems * 3
 	if searchLimit < 20 {
 		searchLimit = 20
@@ -2259,7 +2259,7 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, me
 	}
 
 	answer := fallbackRetrievedAnswer(prompt, contexts)
-	if providerAnswer, modelName, err := s.generateAssistantLLMResponse(ctx, auth.User.ID, []assistantLLMMessage{
+	if providerAnswer, modelName, err := s.generateAssistantLLMResponseWithSettings(ctx, auth.User.ID, settings, []assistantLLMMessage{
 		{
 			Role:    "system",
 			Content: settings.SystemPrompt,
@@ -2268,7 +2268,7 @@ func (s *Server) answerRetrievedPrompt(ctx context.Context, home domain.Home, me
 			Role:    "user",
 			Content: assistantPromptWithContext(prompt, contexts),
 		},
-	}, settings.ChatModel); err == nil && strings.TrimSpace(providerAnswer) != "" {
+	}); err == nil && strings.TrimSpace(providerAnswer) != "" {
 		answer = strings.TrimSpace(providerAnswer)
 		_ = modelName
 	} else if errors.Is(err, errChatGPTRelinkRequired) {

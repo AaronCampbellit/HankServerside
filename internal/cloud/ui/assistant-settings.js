@@ -49,8 +49,11 @@ const els = {
   harnessHomeAssistantEnabled: document.getElementById("harness-homeassistant-enabled"),
   harnessProjectDocsEnabled: document.getElementById("harness-project-docs-enabled"),
   harnessConversationsEnabled: document.getElementById("harness-conversations-enabled"),
+  harnessAIProvider: document.getElementById("harness-ai-provider"),
   harnessChatModel: document.getElementById("harness-chat-model"),
+  harnessEmbeddingModel: document.getElementById("harness-embedding-model"),
   harnessModelMeta: document.getElementById("harness-model-meta"),
+  harnessPromptProfile: document.getElementById("harness-prompt-profile"),
   harnessSystemPrompt: document.getElementById("harness-system-prompt"),
   resetAssistantPromptButton: document.getElementById("reset-assistant-prompt-button"),
   toast: document.getElementById("toast"),
@@ -297,6 +300,52 @@ function renderChatModelSelect(settings, defaults) {
   }
 }
 
+function renderProviderSelect(settings, defaults) {
+  const selected = String(settings.ai_provider || "").trim();
+  const providers = defaults.provider_options || [
+    { key: "", label: "Configured default" },
+    { key: "ollama", label: "Local Ollama" },
+    { key: "chatgpt_codex", label: "Linked ChatGPT/Codex" },
+    { key: "openai", label: "OpenAI API key" },
+  ];
+  els.harnessAIProvider.innerHTML = providers.map((provider) => (
+    `<option value="${escapeHTML(provider.key)}">${escapeHTML(provider.label)}</option>`
+  )).join("");
+  els.harnessAIProvider.value = selected;
+}
+
+function renderEmbeddingModelSelect(settings, defaults) {
+  const selected = String(settings.embedding_model || "").trim();
+  const assistant = state.assistant || {};
+  const defaultModel = String(assistant.embedding_model || defaults.embedding_model || "").trim();
+  const models = uniqueValues([
+    ...(defaults.embedding_model_options || []),
+    selected,
+    defaultModel,
+  ]);
+  const defaultLabel = defaultModel ? `Provider default (${defaultModel})` : "Provider default";
+  const options = [{ value: "", label: defaultLabel }].concat(models.map((model) => ({ value: model, label: model })));
+  els.harnessEmbeddingModel.innerHTML = options.map((option) => (
+    `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
+  )).join("");
+  els.harnessEmbeddingModel.value = selected;
+}
+
+function renderPromptProfileSelect(settings, defaults) {
+  const selected = String(settings.prompt_profile || "chatgpt").trim();
+  const profiles = defaults.prompt_profiles || [];
+  els.harnessPromptProfile.innerHTML = profiles.map((profile) => (
+    `<option value="${escapeHTML(profile.key)}">${escapeHTML(profile.label)}</option>`
+  )).join("");
+  els.harnessPromptProfile.value = profiles.some((profile) => profile.key === selected) ? selected : "custom";
+}
+
+function promptProfilePrompt(profileKey) {
+  const profiles = state.settings?.defaults?.prompt_profiles || [];
+  const profile = profiles.find((item) => item.key === profileKey);
+  return profile?.prompt || "";
+}
+
 function renderStatus() {
   const status = state.status || {};
   const assistant = state.assistant || {};
@@ -395,7 +444,10 @@ function renderAssistantSettings() {
   els.harnessHomeAssistantEnabled.checked = settings.homeassistant_enabled !== false;
   els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
   els.harnessConversationsEnabled.checked = settings.conversations_enabled !== false;
+  renderProviderSelect(settings, defaults);
   renderChatModelSelect(settings, defaults);
+  renderEmbeddingModelSelect(settings, defaults);
+  renderPromptProfileSelect(settings, defaults);
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
   renderToolSettings(tools);
   renderMediaWorkflowSettings();
@@ -406,8 +458,11 @@ function renderAssistantSettings() {
     <article class="card">
       <div class="card-title">Current provider: ${escapeHTML(state.assistant?.provider || "local")}</div>
       <div class="meta">Chat model: ${escapeHTML(state.assistant?.chat_model || "local fallback")}</div>
+      <div class="meta">Provider override: ${escapeHTML(settings.ai_provider || "Configured default")}</div>
       <div class="meta">Model override: ${escapeHTML(settings.chat_model || "Provider default")}</div>
       <div class="meta">Embeddings: ${escapeHTML(state.assistant?.embedding_model || "local-hash")}</div>
+      <div class="meta">Embedding override: ${escapeHTML(settings.embedding_model || "Provider default")}</div>
+      <div class="meta">Prompt profile: ${escapeHTML(settings.prompt_profile || "chatgpt")}</div>
       <div class="meta">Vector mode: ${escapeHTML(index.vector_mode || "json_fallback")}</div>
       <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || defaults.max_context_items || 20)} items</div>
     </article>
@@ -614,7 +669,10 @@ function assistantSettingsFormPayload() {
     homeassistant_enabled: els.harnessHomeAssistantEnabled.checked,
     project_docs_enabled: els.harnessProjectDocsEnabled.checked,
     conversations_enabled: els.harnessConversationsEnabled.checked,
+    ai_provider: els.harnessAIProvider.value.trim(),
     chat_model: els.harnessChatModel.value.trim(),
+    embedding_model: els.harnessEmbeddingModel.value.trim(),
+    prompt_profile: els.harnessPromptProfile.value.trim(),
     system_prompt: els.harnessSystemPrompt.value,
   };
 }
@@ -813,10 +871,39 @@ els.mediaJobsOutput.addEventListener("click", (event) => {
 els.settingsSectionButtons.forEach((button) => {
   button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
 });
+els.harnessAIProvider.addEventListener("change", () => {
+  const provider = els.harnessAIProvider.value;
+  if (provider === "ollama" && els.harnessPromptProfile.value !== "local") {
+    els.harnessPromptProfile.value = "local";
+    const prompt = promptProfilePrompt("local");
+    if (prompt) els.harnessSystemPrompt.value = prompt;
+  } else if ((provider === "chatgpt_codex" || provider === "openai") && els.harnessPromptProfile.value !== "chatgpt") {
+    els.harnessPromptProfile.value = "chatgpt";
+    const prompt = promptProfilePrompt("chatgpt");
+    if (prompt) els.harnessSystemPrompt.value = prompt;
+  }
+});
+els.harnessPromptProfile.addEventListener("change", () => {
+  const profile = els.harnessPromptProfile.value;
+  const prompt = promptProfilePrompt(profile);
+  if (prompt) {
+    els.harnessSystemPrompt.value = prompt;
+  }
+});
+els.harnessSystemPrompt.addEventListener("input", () => {
+  const current = els.harnessSystemPrompt.value.trim();
+  const selected = els.harnessPromptProfile.value;
+  const selectedPrompt = promptProfilePrompt(selected).trim();
+  if (selected !== "custom" && selectedPrompt && current !== selectedPrompt) {
+    els.harnessPromptProfile.value = "custom";
+  }
+});
 els.resetAssistantPromptButton.addEventListener("click", () => {
-  const defaultPrompt = state.settings?.defaults?.system_prompt || "";
+  const profile = els.harnessPromptProfile.value === "local" ? "local" : "chatgpt";
+  const defaultPrompt = promptProfilePrompt(profile) || state.settings?.defaults?.system_prompt || "";
   if (defaultPrompt) {
     els.harnessSystemPrompt.value = defaultPrompt;
+    els.harnessPromptProfile.value = profile;
   }
 });
 

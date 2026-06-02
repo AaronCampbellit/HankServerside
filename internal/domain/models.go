@@ -389,7 +389,10 @@ type AssistantSettings struct {
 	ConversationsEnabled bool      `json:"conversations_enabled"`
 	SystemPrompt         string    `json:"system_prompt"`
 	MaxContextItems      int       `json:"max_context_items"`
+	AIProvider           string    `json:"ai_provider"`
 	ChatModel            string    `json:"chat_model"`
+	EmbeddingModel       string    `json:"embedding_model"`
+	PromptProfile        string    `json:"prompt_profile"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 	UpdatedBy            string    `json:"updated_by"`
