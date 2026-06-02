@@ -277,7 +277,11 @@ func (s *Server) handleAssistantModels(w http.ResponseWriter, r *http.Request, h
 		models = status.ChatModelOptions
 		source = "configured"
 	}
-	models = assistantModelOptionsWithConfigured(models, status.DefaultChatModel, settings.ChatModel)
+	defaultModel := status.DefaultChatModel
+	if status.Provider == "ollama" && source == "ollama" && !stringSliceContains(models, defaultModel) {
+		defaultModel = ""
+	}
+	models = assistantModelOptionsWithConfigured(models, defaultModel, settings.ChatModel)
 	writeJSON(w, http.StatusOK, assistantModelOptionsResponse{
 		Provider:       status.Provider,
 		ChatConfigured: status.ChatConfigured,
@@ -288,6 +292,19 @@ func (s *Server) handleAssistantModels(w http.ResponseWriter, r *http.Request, h
 		Source:         source,
 		Error:          errorMessage,
 	})
+}
+
+func stringSliceContains(values []string, needle string) bool {
+	needle = strings.TrimSpace(needle)
+	if needle == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) fetchAssistantChatModels(ctx context.Context, userID string, provider string) ([]string, string, error) {

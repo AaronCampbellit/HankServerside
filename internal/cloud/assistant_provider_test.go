@@ -120,6 +120,58 @@ func TestFetchOllamaChatModelsIncludesLocalChatAndExcludesEmbeddings(t *testing.
 	}
 }
 
+func TestAssistantModelsEndpointOmitsUnavailableOllamaDefault(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_ollama_models", Email: "ollama-models@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_ollama_models", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_ollama_models", UserID: user.ID, TokenHash: hashToken("ollama-models-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, session))
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.AIProvider = "ollama"
+	settings.OllamaBaseURL = "http://ollama.test"
+	settings.ChatModel = "qwen3:14b"
+	must(t, db.UpsertAssistantSettings(ctx, settings))
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"models": []map[string]any{{"name": "qwen3:14b"}},
+		})
+	}))
+	defer provider.Close()
+	settings.OllamaBaseURL = provider.URL
+	must(t, db.UpsertAssistantSettings(ctx, settings))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{Provider: "ollama", OllamaBaseURL: provider.URL, OllamaChatModel: "llama3.1"})
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var response assistantModelOptionsResponse
+	requestJSON(t, testServer, "ollama-models-token", http.MethodGet, "/v1/home/assistant/models", nil, &response)
+	modelSet := map[string]bool{}
+	for _, model := range response.Models {
+		modelSet[model] = true
+	}
+	if !modelSet["qwen3:14b"] {
+		t.Fatalf("models missing configured Ollama model: %#v", response.Models)
+	}
+	if modelSet["llama3.1"] {
+		t.Fatalf("unavailable Ollama default should not be offered: %#v", response.Models)
+	}
+}
+
 func TestSanitizeAssistantModelTextRemovesThinkingBlocks(t *testing.T) {
 	t.Parallel()
 
