@@ -167,7 +167,7 @@ func (s *Store) UpdateAssistantRun(ctx context.Context, run domain.AssistantRun)
 func (s *Store) GetAssistantSettings(ctx context.Context, homeID string, userID string) (domain.AssistantSettings, error) {
 	row := s.queryRow(ctx, `SELECT home_id, user_id, profile_notes_enabled, home_notes_enabled,
 			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, conversations_enabled, system_prompt, max_context_items,
-			ai_provider, ollama_base_url, chat_model, embedding_model, prompt_profile,
+			ai_provider, ollama_base_url, chat_model, embedding_model, prompt_profile, planner_enabled, planner_model,
 			created_at, updated_at, updated_by
 		FROM assistant_settings
 		WHERE home_id = ? AND user_id = ?`, homeID, userID)
@@ -178,9 +178,9 @@ func (s *Store) UpsertAssistantSettings(ctx context.Context, settings domain.Ass
 	_, err := s.exec(ctx, `INSERT INTO assistant_settings (
 			home_id, user_id, profile_notes_enabled, home_notes_enabled,
 			files_enabled, calendar_enabled, homeassistant_enabled, project_docs_enabled, conversations_enabled, system_prompt, max_context_items,
-			ai_provider, ollama_base_url, chat_model, embedding_model, prompt_profile,
+			ai_provider, ollama_base_url, chat_model, embedding_model, prompt_profile, planner_enabled, planner_model,
 			created_at, updated_at, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(home_id, user_id) DO UPDATE SET
 			profile_notes_enabled = excluded.profile_notes_enabled,
 			home_notes_enabled = excluded.home_notes_enabled,
@@ -196,6 +196,8 @@ func (s *Store) UpsertAssistantSettings(ctx context.Context, settings domain.Ass
 			chat_model = excluded.chat_model,
 			embedding_model = excluded.embedding_model,
 			prompt_profile = excluded.prompt_profile,
+			planner_enabled = excluded.planner_enabled,
+			planner_model = excluded.planner_model,
 			updated_at = excluded.updated_at,
 			updated_by = excluded.updated_by`,
 		settings.HomeID,
@@ -214,6 +216,8 @@ func (s *Store) UpsertAssistantSettings(ctx context.Context, settings domain.Ass
 		settings.ChatModel,
 		settings.EmbeddingModel,
 		settings.PromptProfile,
+		settings.PlannerEnabled,
+		settings.PlannerModel,
 		settings.CreatedAt,
 		settings.UpdatedAt,
 		settings.UpdatedBy,
@@ -329,6 +333,8 @@ func scanAssistantSettings(scanner interface{ Scan(dest ...any) error }) (domain
 		&settings.ChatModel,
 		&settings.EmbeddingModel,
 		&settings.PromptProfile,
+		&settings.PlannerEnabled,
+		&settings.PlannerModel,
 		&settings.CreatedAt,
 		&settings.UpdatedAt,
 		&settings.UpdatedBy,

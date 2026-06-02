@@ -185,6 +185,7 @@ const (
 	assistantIntentHomeAssistantQuery assistantIntentKind = "homeassistant.query"
 	assistantIntentProjectDocs        assistantIntentKind = "project_docs"
 	assistantIntentMemorySearch       assistantIntentKind = "assistant.memory_search"
+	assistantIntentReadOnlySynthesis  assistantIntentKind = "read_only.synthesis"
 )
 
 type assistantIntent struct {
@@ -3409,14 +3410,22 @@ func assistantToolArgumentString(arguments map[string]interface{}, key string) s
 
 func assistantPromptWithContext(prompt string, contexts []domain.AssistantRetrievedContext) string {
 	var builder strings.Builder
+	builder.WriteString("Answer using only the Hank context below. When a source path or title is available, cite it naturally in the answer. If the context is incomplete, say what is missing instead of filling gaps.\n\n")
 	builder.WriteString("User request:\n")
 	builder.WriteString(prompt)
 	builder.WriteString("\n\nHank context:\n")
 	for index, item := range contexts {
-		builder.WriteString(fmt.Sprintf("%d. [%s] %s\n", index+1, item.SourceType, item.Title))
+		builder.WriteString(fmt.Sprintf("%d. Source: %s\n", index+1, item.SourceType))
+		if item.Title != "" {
+			builder.WriteString("Title: " + item.Title + "\n")
+		}
 		if item.Path != "" {
 			builder.WriteString("Path: " + item.Path + "\n")
 		}
+		if item.SourceID != "" {
+			builder.WriteString("Source ID: " + item.SourceID + "\n")
+		}
+		builder.WriteString(fmt.Sprintf("Relevance: %.3f\n", item.Score))
 		if item.Snippet != "" {
 			builder.WriteString("Snippet: " + item.Snippet + "\n")
 		}
@@ -3430,7 +3439,8 @@ func fallbackRetrievedAnswer(prompt string, contexts []domain.AssistantRetrieved
 		return "I could not find matching Hank context yet."
 	}
 	top := contexts[0]
-	return fmt.Sprintf("I found `%s` as the closest HankAI match for `%s`.", top.Title, strings.TrimSpace(prompt))
+	label := firstNonBlank(top.Path, top.Title, top.SourceID, top.SourceType)
+	return fmt.Sprintf("I found `%s` as the closest HankAI match for `%s`.", label, strings.TrimSpace(prompt))
 }
 
 func assistantResultCardFromContext(item domain.AssistantRetrievedContext) assistantResultCard {

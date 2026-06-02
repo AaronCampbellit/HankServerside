@@ -350,6 +350,8 @@ CREATE TABLE IF NOT EXISTS assistant_settings (
 	system_prompt TEXT NOT NULL DEFAULT '',
 	max_context_items INTEGER NOT NULL DEFAULT 8,
 	chat_model TEXT NOT NULL DEFAULT '',
+	planner_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+	planner_model TEXT NOT NULL DEFAULT '',
 	created_at TIMESTAMP NOT NULL,
 	updated_at TIMESTAMP NOT NULL,
 	updated_by TEXT NOT NULL,

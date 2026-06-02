@@ -53,6 +53,8 @@ const els = {
   harnessOllamaBaseURL: document.getElementById("harness-ollama-base-url"),
   harnessChatModel: document.getElementById("harness-chat-model"),
   harnessEmbeddingModel: document.getElementById("harness-embedding-model"),
+  harnessPlannerEnabled: document.getElementById("harness-planner-enabled"),
+  harnessPlannerModel: document.getElementById("harness-planner-model"),
   harnessModelMeta: document.getElementById("harness-model-meta"),
   harnessPromptProfile: document.getElementById("harness-prompt-profile"),
   harnessSystemPrompt: document.getElementById("harness-system-prompt"),
@@ -301,6 +303,26 @@ function renderChatModelSelect(settings, defaults) {
   }
 }
 
+function renderPlannerModelSelect(settings, defaults) {
+  const selected = String(settings.planner_model || "").trim();
+  const assistant = state.assistant || {};
+  const modelState = state.models || {};
+  const defaultModel = String(settings.chat_model || modelState.current_model || assistant.chat_model || defaults.chat_model || "").trim();
+  const models = uniqueValues([
+    ...(modelState.models || []),
+    ...(assistant.chat_model_options || []),
+    ...(defaults.chat_model_options || []),
+    selected,
+    defaultModel,
+  ]);
+  const defaultLabel = defaultModel ? `Reuse chat model (${defaultModel})` : "Reuse chat model";
+  const options = [{ value: "", label: defaultLabel }].concat(models.map((model) => ({ value: model, label: model })));
+  els.harnessPlannerModel.innerHTML = options.map((option) => (
+    `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
+  )).join("");
+  els.harnessPlannerModel.value = selected;
+}
+
 function renderProviderSelect(settings, defaults) {
   const selected = String(settings.ai_provider || "").trim();
   const rawProviders = defaults.provider_options || [
@@ -458,6 +480,8 @@ function renderAssistantSettings() {
   els.harnessOllamaBaseURL.value = settings.ollama_base_url || defaults.ollama_base_url || "";
   renderChatModelSelect(settings, defaults);
   renderEmbeddingModelSelect(settings, defaults);
+  els.harnessPlannerEnabled.checked = settings.planner_enabled !== false;
+  renderPlannerModelSelect(settings, defaults);
   renderPromptProfileSelect(settings, defaults);
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
   renderToolSettings(tools);
@@ -474,6 +498,7 @@ function renderAssistantSettings() {
       <div class="meta">Model override: ${escapeHTML(settings.chat_model || "Provider default")}</div>
       <div class="meta">Embeddings: ${escapeHTML(state.assistant?.embedding_model || "local-hash")}</div>
       <div class="meta">Embedding override: ${escapeHTML(settings.embedding_model || "Provider default")}</div>
+      <div class="meta">Planner: ${settings.planner_enabled === false ? "Off" : escapeHTML(settings.planner_model || settings.chat_model || "Chat model")}</div>
       <div class="meta">Prompt profile: ${escapeHTML(settings.prompt_profile || "chatgpt")}</div>
       <div class="meta">Vector mode: ${escapeHTML(index.vector_mode || "json_fallback")}</div>
       <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || defaults.max_context_items || 20)} items</div>
@@ -685,6 +710,8 @@ function assistantSettingsFormPayload() {
     ollama_base_url: els.harnessOllamaBaseURL.value.trim(),
     chat_model: els.harnessChatModel.value.trim(),
     embedding_model: els.harnessEmbeddingModel.value.trim(),
+    planner_enabled: els.harnessPlannerEnabled.checked,
+    planner_model: els.harnessPlannerModel.value.trim(),
     prompt_profile: els.harnessPromptProfile.value.trim(),
     system_prompt: els.harnessSystemPrompt.value,
   };

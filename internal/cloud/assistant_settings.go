@@ -14,10 +14,13 @@ import (
 )
 
 const (
-	legacyAssistantSystemPrompt  = "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened."
-	defaultAssistantSystemPrompt = chatGPTAssistantSystemPrompt
-	chatGPTAssistantSystemPrompt = "You are HankAI, the assistant inside Hank Remote. Prefer typed Hank tools over guessing whenever the user asks about Notes, File Server or SMB shares, Calendar, Home Assistant, Hank project docs, or prior Hank chat. Treat those source names as user concepts and keep them distinct in answers. Stay grounded in the supplied Hank context; if a target note, folder, event, entity, share, calendar, or source is ambiguous, ask one short clarification. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. For attachments, distinguish staged metadata from raw bytes that the app or home agent must commit. For Calendar, use device timezone context when present and ask for missing date, time, duration, calendar, or ambiguous event matches before writes. For project-doc answers, prefer current README, AGENTS, SERVER_SYNC, docs, deployment docs, and runbooks over archived phase documents unless the user asks for history; cite the doc path or title. Treat external provider access as a privacy boundary: only use context included in the request and do not ask for secrets, passwords, API keys, or private tokens. For destructive or high-impact actions, explain the intended target and require Hank confirmation before execution."
-	localAssistantSystemPrompt   = "You are HankAI running with a local model inside Hank Remote. Use the supplied Hank context aggressively, but keep every answer grounded in that context and in typed Hank tool results. You may reason about likely user intent, propose a short tool plan, and ask one focused clarification when a note, folder, event, entity, share, calendar, or source is ambiguous. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. Do not invent file contents, calendar entries, Home Assistant states, or note text that is not present in the provided context. For destructive or high-impact actions, identify the intended target and require Hank confirmation before execution. Prefer concise practical answers over generic assistant prose."
+	legacyAssistantSystemPrompt         = "You are HankAI inside Hank Remote. Answer only from the provided Hank context. If the context is not enough, say what is missing. Do not claim you changed notes, files, calendars, or Home Assistant unless a typed tool result says it already happened."
+	defaultAssistantSystemPrompt        = chatGPTAssistantSystemPrompt
+	chatGPTAssistantSystemPrompt        = "You are HankAI, the assistant inside Hank Remote. Prefer typed Hank tools over guessing whenever the user asks about Notes, File Server or SMB shares, Calendar, Home Assistant, Hank project docs, or prior Hank chat. Treat those source names as user concepts and keep them distinct in answers. Stay grounded in the supplied Hank context; if a target note, folder, event, entity, share, calendar, or source is ambiguous, ask one short clarification. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. For attachments, distinguish staged metadata from raw bytes that the app or home agent must commit. For Calendar, use device timezone context when present and ask for missing date, time, duration, calendar, or ambiguous event matches before writes. For project-doc answers, prefer current README, AGENTS, SERVER_SYNC, docs, deployment docs, and runbooks over archived phase documents unless the user asks for history; cite the doc path or title. Treat external provider access as a privacy boundary: only use context included in the request and do not ask for secrets, passwords, API keys, or private tokens. For destructive or high-impact actions, explain the intended target and require Hank confirmation before execution."
+	localAssistantSystemPrompt          = "You are HankAI running with a local model inside Hank Remote. Use the supplied Hank context aggressively, but keep every answer grounded in that context and in typed Hank tool results. You may reason about likely user intent, propose a short tool plan, and ask one focused clarification when a note, folder, event, entity, share, calendar, or source is ambiguous. Never claim a write happened until a typed tool result or confirmed client-tool result says it happened. Do not invent file contents, calendar entries, Home Assistant states, or note text that is not present in the provided context. For destructive or high-impact actions, identify the intended target and require Hank confirmation before execution. Prefer concise practical answers over generic assistant prose."
+	qwenLocalAssistantSystemPrompt      = localAssistantSystemPrompt + " For Qwen-style reasoning models, keep private reasoning out of the final answer, follow JSON-only planner instructions exactly, and cite Hank source paths when provided."
+	llamaLocalAssistantSystemPrompt     = localAssistantSystemPrompt + " For Llama-style local models, be direct, use short grounded answers, and prefer explicit Hank source labels over broad summaries."
+	smallFastLocalAssistantSystemPrompt = "You are HankAI using a small fast local model. Be concise. Prefer typed Hank tools and visible Hank context. Return strict JSON when asked to plan. Ask one clarification when needed. Never claim writes or device changes unless a typed result confirms them."
 
 	maxAssistantContextItems       = 20
 	maxAssistantSystemPromptBytes  = 6000
@@ -64,6 +67,8 @@ type assistantSettingsUpdateRequest struct {
 	ChatModel            *string `json:"chat_model"`
 	EmbeddingModel       *string `json:"embedding_model"`
 	PromptProfile        *string `json:"prompt_profile"`
+	PlannerEnabled       *bool   `json:"planner_enabled"`
+	PlannerModel         *string `json:"planner_model"`
 }
 
 func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
@@ -141,7 +146,9 @@ func assistantSettingsNeedPersistence(current domain.AssistantSettings, normaliz
 		current.OllamaBaseURL != normalized.OllamaBaseURL ||
 		current.ChatModel != normalized.ChatModel ||
 		current.EmbeddingModel != normalized.EmbeddingModel ||
-		current.PromptProfile != normalized.PromptProfile
+		current.PromptProfile != normalized.PromptProfile ||
+		current.PlannerEnabled != normalized.PlannerEnabled ||
+		current.PlannerModel != normalized.PlannerModel
 }
 
 func defaultAssistantSettings(homeID string, userID string) domain.AssistantSettings {
@@ -159,6 +166,7 @@ func defaultAssistantSettings(homeID string, userID string) domain.AssistantSett
 		SystemPrompt:         defaultAssistantSystemPrompt,
 		MaxContextItems:      maxAssistantContextItems,
 		PromptProfile:        "chatgpt",
+		PlannerEnabled:       true,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 		UpdatedBy:            userID,
@@ -208,6 +216,12 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 			settings.SystemPrompt = assistantPromptForProfile(settings.PromptProfile)
 		}
 	}
+	if request.PlannerEnabled != nil {
+		settings.PlannerEnabled = *request.PlannerEnabled
+	}
+	if request.PlannerModel != nil {
+		settings.PlannerModel = strings.TrimSpace(*request.PlannerModel)
+	}
 	settings = normalizeAssistantSettings(settings)
 	if len(settings.SystemPrompt) > maxAssistantSystemPromptBytes {
 		return domain.AssistantSettings{}, errors.New("system_prompt is too long")
@@ -227,6 +241,9 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	if len(settings.PromptProfile) > maxAssistantPromptProfileBytes {
 		return domain.AssistantSettings{}, errors.New("prompt_profile is too long")
 	}
+	if len(settings.PlannerModel) > maxAssistantChatModelBytes {
+		return domain.AssistantSettings{}, errors.New("planner_model is too long")
+	}
 	if !assistantProviderAllowed(settings.AIProvider) {
 		return domain.AssistantSettings{}, errors.New("ai_provider is not supported")
 	}
@@ -241,6 +258,9 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	}
 	if strings.ContainsAny(settings.EmbeddingModel, " \t\r\n") {
 		return domain.AssistantSettings{}, errors.New("embedding_model cannot contain whitespace")
+	}
+	if strings.ContainsAny(settings.PlannerModel, " \t\r\n") {
+		return domain.AssistantSettings{}, errors.New("planner_model cannot contain whitespace")
 	}
 	return settings, nil
 }
@@ -257,6 +277,7 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 	settings.ChatModel = strings.TrimSpace(settings.ChatModel)
 	settings.EmbeddingModel = strings.TrimSpace(settings.EmbeddingModel)
 	settings.PromptProfile = strings.ToLower(strings.TrimSpace(settings.PromptProfile))
+	settings.PlannerModel = strings.TrimSpace(settings.PlannerModel)
 	if settings.PromptProfile == "" {
 		settings.PromptProfile = assistantPromptProfileForPrompt(settings.SystemPrompt)
 	}
@@ -283,7 +304,16 @@ func assistantProviderAllowed(provider string) bool {
 
 func assistantPromptProfileAllowed(profile string) bool {
 	switch strings.ToLower(strings.TrimSpace(profile)) {
-	case "", "chatgpt", "local", "custom":
+	case "", "chatgpt", "local", "qwen3-local", "llama-local", "small-fast-local", "custom":
+		return true
+	default:
+		return false
+	}
+}
+
+func assistantPromptProfileIsLocal(profile string) bool {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "local", "qwen3-local", "llama-local", "small-fast-local":
 		return true
 	default:
 		return false
@@ -292,6 +322,12 @@ func assistantPromptProfileAllowed(profile string) bool {
 
 func assistantPromptForProfile(profile string) string {
 	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "qwen3-local":
+		return qwenLocalAssistantSystemPrompt
+	case "llama-local":
+		return llamaLocalAssistantSystemPrompt
+	case "small-fast-local":
+		return smallFastLocalAssistantSystemPrompt
 	case "local":
 		return localAssistantSystemPrompt
 	case "chatgpt":
@@ -308,6 +344,12 @@ func assistantPromptProfileForPrompt(prompt string) string {
 		return "chatgpt"
 	case localAssistantSystemPrompt:
 		return "local"
+	case qwenLocalAssistantSystemPrompt:
+		return "qwen3-local"
+	case llamaLocalAssistantSystemPrompt:
+		return "llama-local"
+	case smallFastLocalAssistantSystemPrompt:
+		return "small-fast-local"
 	default:
 		return "custom"
 	}
@@ -326,6 +368,24 @@ func assistantPromptProfiles() []map[string]string {
 			"label":       "Local model",
 			"description": "Planner-friendly prompt for local models while preserving Hank validation and confirmation boundaries.",
 			"prompt":      localAssistantSystemPrompt,
+		},
+		{
+			"key":         "qwen3-local",
+			"label":       "Qwen local",
+			"description": "Local prompt tuned for Qwen reasoning models, strict planner JSON, and no visible thinking.",
+			"prompt":      qwenLocalAssistantSystemPrompt,
+		},
+		{
+			"key":         "llama-local",
+			"label":       "Llama local",
+			"description": "Local prompt tuned for concise Llama-family answers and explicit source labels.",
+			"prompt":      llamaLocalAssistantSystemPrompt,
+		},
+		{
+			"key":         "small-fast-local",
+			"label":       "Small fast local",
+			"description": "Short prompt for small planner or utility models.",
+			"prompt":      smallFastLocalAssistantSystemPrompt,
 		},
 		{
 			"key":         "custom",
@@ -364,6 +424,8 @@ func (s *Server) assistantSettingsPayload(homeID string, settings domain.Assista
 			"chat_model":              "",
 			"chat_model_options":      assistantChatModelOptions(cfg),
 			"embedding_model":         "",
+			"planner_enabled":         true,
+			"planner_model":           "",
 			"embedding_model_options": assistantEmbeddingModelOptions(cfg),
 		},
 		Sources: assistantSettingsSources(settings),

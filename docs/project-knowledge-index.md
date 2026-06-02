@@ -39,6 +39,7 @@ The phase-era documents are archived under [archive/phases](archive/phases). The
 
 - [hankai-chat-tool-improvement-plan.md](hankai-chat-tool-improvement-plan.md)
 - [hankai-intents-rollout.md](hankai-intents-rollout.md)
+- [hankai-local-model-evals.md](hankai-local-model-evals.md)
 - [hermes-chat-workflow.md](hermes-chat-workflow.md)
 
 ## App Contract Notes

@@ -225,6 +225,19 @@
                   <select id="harness-embedding-model"></select>
                   <small>Keep 768-dimension embeddings unless the schema is changed. `nomic-embed-text` is the current local-safe default.</small>
                 </label>
+                <label class="setting-field">
+                  <span>Local planner</span>
+                  <label class="inline-toggle">
+                    <input id="harness-planner-enabled" type="checkbox">
+                    <span>Allow the local model to choose read-only Hank tools before generic fallback.</span>
+                  </label>
+                  <small>Typed tools still enforce Hank permissions and confirmation before writes.</small>
+                </label>
+                <label class="setting-field" for="harness-planner-model">
+                  <span>Planner model</span>
+                  <select id="harness-planner-model"></select>
+                  <small>Optional. Use a smaller local model for routing, or leave blank to reuse the chat model.</small>
+                </label>
               </div>
               <div class="settings-block">
                 <div class="settings-block-head">

@@ -394,6 +394,8 @@ type AssistantSettings struct {
 	ChatModel            string    `json:"chat_model"`
 	EmbeddingModel       string    `json:"embedding_model"`
 	PromptProfile        string    `json:"prompt_profile"`
+	PlannerEnabled       bool      `json:"planner_enabled"`
+	PlannerModel         string    `json:"planner_model"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 	UpdatedBy            string    `json:"updated_by"`

@@ -96,6 +96,34 @@ var assistantToolRegistry = []assistantTool{
 		Execute: executeAssistantCalendarDeleteTool,
 	},
 	{
+		Kind:        assistantIntentReadOnlySynthesis,
+		Description: "Read across multiple enabled Hank sources and synthesize a grounded answer.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isReadOnlyMultiSourcePrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentReadOnlySynthesis, Query: strings.TrimSpace(prompt)}, true
+		},
+		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
+			if runtime.Settings.ProjectDocsEnabled {
+				if err := server.indexAssistantProjectDocs(ctx, runtime.Home.ID, runtime.Auth.User.ID); err != nil {
+					server.logger.Warn("assistant project docs indexing failed", "error", err)
+				}
+			}
+			if runtime.Settings.HomeAssistantEnabled {
+				if err := server.indexAssistantHomeAssistantStates(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
+					server.logger.Warn("assistant Home Assistant indexing failed", "error", err)
+				}
+			}
+			if runtime.Settings.FilesEnabled {
+				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
+					server.logger.Warn("assistant file indexing failed", "error", err)
+				}
+			}
+		},
+		Execute: executeAssistantReadOnlySynthesisTool,
+	},
+	{
 		Kind:        assistantIntentCalendarSearch,
 		Description: "Search indexed device calendar snapshots.",
 		Match: func(prompt string) (assistantIntent, bool) {
@@ -270,7 +298,10 @@ func resolveAssistantTool(prompt string) (assistantTool, assistantIntent) {
 }
 
 func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, settings domain.AssistantSettings, userID string, prompt string) (assistantTool, assistantIntent, bool) {
-	if settings.AIProvider != "ollama" && settings.PromptProfile != "local" {
+	if !settings.PlannerEnabled {
+		return assistantTool{}, assistantIntent{}, false
+	}
+	if settings.AIProvider != "ollama" && !assistantPromptProfileIsLocal(settings.PromptProfile) {
 		return assistantTool{}, assistantIntent{}, false
 	}
 	choices := make([]string, 0, len(assistantToolRegistry))
@@ -296,7 +327,11 @@ func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, setting
 		"User request:",
 		strings.TrimSpace(prompt),
 	}, "\n")
-	answer, _, err := s.generateAssistantLLMResponseWithSettings(ctx, userID, settings, []assistantLLMMessage{
+	plannerSettings := settings
+	if strings.TrimSpace(plannerSettings.PlannerModel) != "" {
+		plannerSettings.ChatModel = strings.TrimSpace(plannerSettings.PlannerModel)
+	}
+	answer, modelName, err := s.generateAssistantLLMResponseWithSettings(ctx, userID, plannerSettings, []assistantLLMMessage{
 		{Role: "system", Content: "You classify HankAI requests into existing typed tools. Return JSON only."},
 		{Role: "user", Content: plannerPrompt},
 	})
@@ -305,6 +340,17 @@ func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, setting
 		return assistantTool{}, assistantIntent{}, false
 	}
 	toolName, query := assistantPlannerChoice(answer)
+	s.recordAssistantTrace(ctx, assistantTraceEvent{
+		Scope:   "assistant",
+		Event:   "assistant.tool.local_planner_result",
+		Summary: "Local model returned a HankAI planner decision.",
+		Details: traceDetails(map[string]any{
+			"model":          modelName,
+			"selected_tool":  toolName,
+			"selected_query": query,
+			"raw_answer":     answer,
+		}),
+	})
 	if toolName == assistantIntentGeneral || toolName == "" {
 		return assistantTool{}, assistantIntent{}, false
 	}
@@ -335,6 +381,51 @@ func assistantPlannerChoice(answer string) (assistantIntentKind, string) {
 		return "", ""
 	}
 	return assistantIntentKind(strings.TrimSpace(response.Tool)), strings.TrimSpace(response.Query)
+}
+
+func isReadOnlyMultiSourcePrompt(prompt string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(prompt))
+	if lowered == "" {
+		return false
+	}
+	writeTerms := []string{" add ", "append ", "create ", "delete ", "move ", "rename ", "update ", "change ", "download ", "turn on", "turn off", "set "}
+	padded := " " + lowered + " "
+	for _, term := range writeTerms {
+		if strings.Contains(padded, term) {
+			return false
+		}
+	}
+	sourceHits := 0
+	sourceGroups := [][]string{
+		{"calendar", "schedule", "event", "tomorrow", "today", "appointment"},
+		{"note", "notes", "list"},
+		{"file", "folder", "smb", "share", "document"},
+		{"home assistant", "entity", "entities", "light", "sensor", "thermostat"},
+		{"project doc", "docs", "readme", "agents.md", "repo", "codebase", "source path"},
+		{"remember", "previously", "prior chat", "decide", "decided", "discussed"},
+	}
+	for _, group := range sourceGroups {
+		for _, term := range group {
+			if strings.Contains(lowered, term) {
+				sourceHits++
+				break
+			}
+		}
+	}
+	if sourceHits < 2 {
+		return false
+	}
+	connectors := []string{" and ", " also ", " plus ", " with ", " compared to ", " alongside "}
+	for _, connector := range connectors {
+		if strings.Contains(lowered, connector) {
+			return true
+		}
+	}
+	return strings.Contains(lowered, "?") && sourceHits >= 3
+}
+
+func executeAssistantReadOnlySynthesisTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	return server.answerRetrievedPrompt(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings, runtime.Prompt)
 }
 
 func executeAssistantFilesSearchTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
