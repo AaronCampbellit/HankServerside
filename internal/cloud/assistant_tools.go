@@ -287,6 +287,8 @@ func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, setting
 		"Return only compact JSON with keys tool and query.",
 		"Use tool \"general\" when no listed tool clearly fits.",
 		"Do not invent tools. Do not include explanations.",
+		"Prefer project_docs for product intent, architecture, deployment, source path, README, AGENTS, runbook, repo, or codebase questions.",
+		"Prefer assistant.memory_search only when the user asks what HankAI previously said, decided, remembered, or discussed.",
 		"",
 		"Available tools:",
 		strings.Join(choices, "\n"),

@@ -3653,6 +3653,12 @@ func isNoteAppendPrompt(prompt string) bool {
 }
 
 func isProjectDocsPrompt(lowered string) bool {
+	if strings.Contains(lowered, "product intent") || strings.Contains(lowered, "project intent") {
+		return true
+	}
+	if strings.Contains(lowered, "source path") && (strings.Contains(lowered, "cite") || strings.Contains(lowered, "source")) {
+		return true
+	}
 	if strings.Contains(lowered, "source path") && strings.Contains(lowered, "hank") {
 		return true
 	}
