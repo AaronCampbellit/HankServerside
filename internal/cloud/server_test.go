@@ -1574,7 +1574,7 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 		TransferToken string `json:"transfer_token"`
 		SourceID      string `json:"source_id"`
 	}{}
-	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/downloads", map[string]string{"path": "docs/report.txt", "source_id": "media"}, &setupResponse)
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/files/downloads", map[string]string{"path": "docs/quarterly report.txt", "source_id": "media"}, &setupResponse)
 	if setupResponse.SourceID != "media" {
 		t.Fatalf("download source_id = %q, want media", setupResponse.SourceID)
 	}
@@ -1592,6 +1592,12 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("download status = %d, want 200", response.StatusCode)
+	}
+	if got := response.Header.Get("Content-Disposition"); got != `attachment; filename="quarterly report.txt"` {
+		t.Fatalf("Content-Disposition = %q, want attachment filename", got)
+	}
+	if got := response.Header.Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
 	}
 
 	body, err := io.ReadAll(response.Body)

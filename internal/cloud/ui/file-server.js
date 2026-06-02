@@ -150,6 +150,20 @@ function formatBytes(value) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function filenameFromContentDisposition(header) {
+  const value = String(header || "");
+  const filenameExt = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (filenameExt) {
+    try {
+      return decodeURIComponent(filenameExt[1].trim());
+    } catch (_) {
+      return filenameExt[1].trim();
+    }
+  }
+  const filename = value.match(/filename=(?:"([^"]+)"|([^;]+))/i);
+  return filename ? (filename[1] || filename[2] || "").trim() : "";
+}
+
 function normalizePath(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed || trimmed === "/") return "/";
@@ -1678,23 +1692,23 @@ async function fetchFileBlob(path, resultLabel) {
     completed_at: new Date().toISOString(),
   };
   renderLastTransfer();
-  return blob;
+  return { blob, filename: filenameFromContentDisposition(response.headers.get("Content-Disposition")) };
 }
 
 async function downloadFile(path, options = {}) {
   try {
     const normalized = normalizePath(path);
-    const blob = await fetchFileBlob(normalized, `downloaded ${formatBytes(0)}`);
+    const { blob, filename } = await fetchFileBlob(normalized, `downloaded ${formatBytes(0)}`);
     state.lastTransfer.result = `downloaded ${formatBytes(blob.size)}`;
     renderLastTransfer();
     const href = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = href;
-    link.download = normalized.split("/").pop() || "download";
+    link.download = filename || normalized.split("/").pop() || "download";
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(href);
+    window.setTimeout(() => URL.revokeObjectURL(href), 30 * 1000);
     if (options.toast !== false) showToast(`Downloaded ${link.download}.`);
   } catch (error) {
     showToast(error.message, true);
@@ -1805,7 +1819,7 @@ async function loadRichPreview(item, requestID, kind) {
   els.previewBody.className = "file-preview-body empty-state";
   els.previewBody.textContent = "Loading preview.";
   try {
-    const blob = await fetchFileBlob(rawItemPath(item), `previewed ${itemName(item)}`);
+    const { blob } = await fetchFileBlob(rawItemPath(item), `previewed ${itemName(item)}`);
     if (requestID !== state.previewRequestID) return;
     if (blob.size > RICH_PREVIEW_LIMIT) {
       els.previewBody.textContent = "This file is too large for automatic preview.";
@@ -1830,7 +1844,7 @@ async function loadTextPreview(item, requestID) {
   els.previewBody.className = "file-preview-body empty-state";
   els.previewBody.textContent = "Loading preview.";
   try {
-    const blob = await fetchFileBlob(rawItemPath(item), `previewed ${itemName(item)}`);
+    const { blob } = await fetchFileBlob(rawItemPath(item), `previewed ${itemName(item)}`);
     if (requestID !== state.previewRequestID) return;
     if (blob.size > TEXT_PREVIEW_LIMIT) {
       els.previewBody.textContent = "This text file is too large for automatic preview.";

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -1210,7 +1211,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		transfer.MarkReady(ready)
 
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(transfer.Path)+`"`)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(transfer.Path)}))
 		if remaining := ready.Size - offset; remaining >= 0 {
 			w.Header().Set("Content-Length", int64ToString(remaining))
 		}
