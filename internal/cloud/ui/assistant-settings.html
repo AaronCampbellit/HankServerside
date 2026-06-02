@@ -204,6 +204,11 @@
                   <select id="harness-ai-provider"></select>
                   <small>Use Local Ollama for self-hosted models, or switch back to linked ChatGPT/Codex for external testing.</small>
                 </label>
+                <label class="setting-field" for="harness-ollama-base-url">
+                  <span>Ollama URL</span>
+                  <input id="harness-ollama-base-url" type="url" inputmode="url" placeholder="http://localhost:11434">
+                  <small>Set the reachable Ollama base URL, then save. HankAI will query that instance for available models.</small>
+                </label>
               </div>
               <div class="settings-block">
                 <div class="settings-block-head">

@@ -390,6 +390,7 @@ type AssistantSettings struct {
 	SystemPrompt         string    `json:"system_prompt"`
 	MaxContextItems      int       `json:"max_context_items"`
 	AIProvider           string    `json:"ai_provider"`
+	OllamaBaseURL        string    `json:"ollama_base_url"`
 	ChatModel            string    `json:"chat_model"`
 	EmbeddingModel       string    `json:"embedding_model"`
 	PromptProfile        string    `json:"prompt_profile"`

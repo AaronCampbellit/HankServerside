@@ -163,6 +163,9 @@ func assistantAIConfigWithSettings(cfg AssistantAIConfig, settings domain.Assist
 	if strings.TrimSpace(settings.AIProvider) != "" {
 		cfg.Provider = settings.AIProvider
 	}
+	if strings.TrimSpace(settings.OllamaBaseURL) != "" {
+		cfg.OllamaBaseURL = settings.OllamaBaseURL
+	}
 	if strings.TrimSpace(settings.EmbeddingModel) != "" {
 		cfg.OllamaEmbeddingModel = settings.EmbeddingModel
 		cfg.OpenAIEmbeddingModel = settings.EmbeddingModel

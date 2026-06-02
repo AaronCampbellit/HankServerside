@@ -54,7 +54,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if defaults.Settings.ChatModel != "" {
 		t.Fatalf("default chat model override = %q, want empty", defaults.Settings.ChatModel)
 	}
-	if defaults.Settings.AIProvider != "" || defaults.Settings.EmbeddingModel != "" || defaults.Settings.PromptProfile != "chatgpt" {
+	if defaults.Settings.AIProvider != "" || defaults.Settings.OllamaBaseURL != "" || defaults.Settings.EmbeddingModel != "" || defaults.Settings.PromptProfile != "chatgpt" {
 		t.Fatalf("default model profile settings = %#v", defaults.Settings)
 	}
 	defaultsJSON, _ := json.Marshal(defaults.Defaults)
@@ -81,6 +81,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 		"profile_notes_enabled": false,
 		"home_notes_enabled":    true,
 		"ai_provider":           "ollama",
+		"ollama_base_url":       " http://ollama:11434/ ",
 		"chat_model":            "gpt-codex-large",
 		"embedding_model":       "nomic-embed-text",
 		"prompt_profile":        "local",
@@ -95,7 +96,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if updated.Settings.SystemPrompt != localAssistantSystemPrompt || updated.Settings.MaxContextItems != maxAssistantContextItems || updated.Settings.ChatModel != "gpt-codex-large" {
 		t.Fatalf("prompt/context settings = %#v", updated.Settings)
 	}
-	if updated.Settings.AIProvider != "ollama" || updated.Settings.EmbeddingModel != "nomic-embed-text" || updated.Settings.PromptProfile != "local" {
+	if updated.Settings.AIProvider != "ollama" || updated.Settings.OllamaBaseURL != "http://ollama:11434" || updated.Settings.EmbeddingModel != "nomic-embed-text" || updated.Settings.PromptProfile != "local" {
 		t.Fatalf("provider/model profile settings = %#v", updated.Settings)
 	}
 	if toolStatus(updated.Tools, "media_download") != "Files off" {
@@ -104,7 +105,7 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 
 	var persisted assistantSettingsResponse
 	requestJSON(t, testServer, "harness-settings-token", http.MethodGet, "/v1/home/assistant/settings", nil, &persisted)
-	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems || persisted.Settings.ChatModel != "gpt-codex-large" || persisted.Settings.AIProvider != "ollama" || persisted.Settings.EmbeddingModel != "nomic-embed-text" || persisted.Settings.PromptProfile != "local" {
+	if persisted.Settings.FilesEnabled || persisted.Settings.CalendarEnabled || persisted.Settings.ProjectDocsEnabled || persisted.Settings.MaxContextItems != maxAssistantContextItems || persisted.Settings.ChatModel != "gpt-codex-large" || persisted.Settings.AIProvider != "ollama" || persisted.Settings.OllamaBaseURL != "http://ollama:11434" || persisted.Settings.EmbeddingModel != "nomic-embed-text" || persisted.Settings.PromptProfile != "local" {
 		t.Fatalf("persisted settings = %#v", persisted.Settings)
 	}
 }

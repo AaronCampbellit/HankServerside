@@ -152,12 +152,13 @@ After signing in to the dashboard, open `AI Settings` to manage the HankAI harne
 - which Hank sources can be sent to the active provider
 - whether HankAI can use your private past conversations as memory
 - which configured AI provider HankAI should use for this Home/user, including Local Ollama, linked ChatGPT/Codex, OpenAI API key, or the configured default
+- which Ollama base URL to use for local chat and embedding model discovery
 - which chat and embedding model overrides HankAI should use for testing local and external providers
 - which prompt profile is active: the stricter ChatGPT/Codex profile, the local-model planner profile, or a custom prompt
 - the chat model override for the active chat provider, including ChatGPT/Codex subscription-backed chat
 - the system prompt HankAI uses
 
-The dashboard model controls do not replace server secrets or provider endpoints. Keep base URLs, API keys, and ChatGPT/Codex device-code settings in `.env.cloud`; use the GUI to switch between already configured providers, models, embedding models, and prompt profiles.
+The dashboard model controls do not replace server secrets. Keep OpenAI API keys and ChatGPT/Codex device-code settings in `.env.cloud`; use the GUI to switch between providers, set the Ollama base URL, choose models, choose embedding models, and swap prompt profiles.
 - the server-owned maximum context window used for provider requests
 
 `Project docs` is one of those sources. By default the Docker image makes `README.md`, `AGENTS.md`, `SERVER_SYNC.md`, and every markdown file under `docs/` available from `/app`. For local runs, `HANK_REMOTE_PROJECT_DOCS_DIR=.` points HankAI at the checkout root.

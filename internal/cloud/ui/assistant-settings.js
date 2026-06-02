@@ -50,6 +50,7 @@ const els = {
   harnessProjectDocsEnabled: document.getElementById("harness-project-docs-enabled"),
   harnessConversationsEnabled: document.getElementById("harness-conversations-enabled"),
   harnessAIProvider: document.getElementById("harness-ai-provider"),
+  harnessOllamaBaseURL: document.getElementById("harness-ollama-base-url"),
   harnessChatModel: document.getElementById("harness-chat-model"),
   harnessEmbeddingModel: document.getElementById("harness-embedding-model"),
   harnessModelMeta: document.getElementById("harness-model-meta"),
@@ -302,15 +303,24 @@ function renderChatModelSelect(settings, defaults) {
 
 function renderProviderSelect(settings, defaults) {
   const selected = String(settings.ai_provider || "").trim();
-  const providers = defaults.provider_options || [
+  const rawProviders = defaults.provider_options || [
     { key: "", label: "Configured default" },
+    { key: "auto", label: "Auto" },
     { key: "ollama", label: "Local Ollama" },
     { key: "chatgpt_codex", label: "Linked ChatGPT/Codex" },
     { key: "openai", label: "OpenAI API key" },
   ];
+  const providers = rawProviders.map((provider) => {
+    const key = String(provider.key ?? provider.value ?? "");
+    const fallbackLabel = key || "Configured default";
+    return { key, label: String(provider.label ?? provider.name ?? fallbackLabel) };
+  });
   els.harnessAIProvider.innerHTML = providers.map((provider) => (
     `<option value="${escapeHTML(provider.key)}">${escapeHTML(provider.label)}</option>`
   )).join("");
+  if (selected && !providers.some((provider) => provider.key === selected)) {
+    els.harnessAIProvider.insertAdjacentHTML("beforeend", `<option value="${escapeHTML(selected)}">${escapeHTML(selected)}</option>`);
+  }
   els.harnessAIProvider.value = selected;
 }
 
@@ -445,6 +455,7 @@ function renderAssistantSettings() {
   els.harnessProjectDocsEnabled.checked = settings.project_docs_enabled !== false;
   els.harnessConversationsEnabled.checked = settings.conversations_enabled !== false;
   renderProviderSelect(settings, defaults);
+  els.harnessOllamaBaseURL.value = settings.ollama_base_url || defaults.ollama_base_url || "";
   renderChatModelSelect(settings, defaults);
   renderEmbeddingModelSelect(settings, defaults);
   renderPromptProfileSelect(settings, defaults);
@@ -459,6 +470,7 @@ function renderAssistantSettings() {
       <div class="card-title">Current provider: ${escapeHTML(state.assistant?.provider || "local")}</div>
       <div class="meta">Chat model: ${escapeHTML(state.assistant?.chat_model || "local fallback")}</div>
       <div class="meta">Provider override: ${escapeHTML(settings.ai_provider || "Configured default")}</div>
+      <div class="meta">Ollama URL: ${escapeHTML(settings.ollama_base_url || defaults.ollama_base_url || "Not configured")}</div>
       <div class="meta">Model override: ${escapeHTML(settings.chat_model || "Provider default")}</div>
       <div class="meta">Embeddings: ${escapeHTML(state.assistant?.embedding_model || "local-hash")}</div>
       <div class="meta">Embedding override: ${escapeHTML(settings.embedding_model || "Provider default")}</div>
@@ -670,6 +682,7 @@ function assistantSettingsFormPayload() {
     project_docs_enabled: els.harnessProjectDocsEnabled.checked,
     conversations_enabled: els.harnessConversationsEnabled.checked,
     ai_provider: els.harnessAIProvider.value.trim(),
+    ollama_base_url: els.harnessOllamaBaseURL.value.trim(),
     chat_model: els.harnessChatModel.value.trim(),
     embedding_model: els.harnessEmbeddingModel.value.trim(),
     prompt_profile: els.harnessPromptProfile.value.trim(),

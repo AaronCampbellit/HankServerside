@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ const (
 	maxAssistantChatModelBytes     = 120
 	maxAssistantProviderBytes      = 40
 	maxAssistantPromptProfileBytes = 40
+	maxAssistantURLBytes           = 300
 )
 
 type assistantSettingsSource struct {
@@ -58,6 +60,7 @@ type assistantSettingsUpdateRequest struct {
 	ConversationsEnabled *bool   `json:"conversations_enabled"`
 	SystemPrompt         *string `json:"system_prompt"`
 	AIProvider           *string `json:"ai_provider"`
+	OllamaBaseURL        *string `json:"ollama_base_url"`
 	ChatModel            *string `json:"chat_model"`
 	EmbeddingModel       *string `json:"embedding_model"`
 	PromptProfile        *string `json:"prompt_profile"`
@@ -135,6 +138,7 @@ func assistantSettingsNeedPersistence(current domain.AssistantSettings, normaliz
 	return current.SystemPrompt != normalized.SystemPrompt ||
 		current.MaxContextItems != normalized.MaxContextItems ||
 		current.AIProvider != normalized.AIProvider ||
+		current.OllamaBaseURL != normalized.OllamaBaseURL ||
 		current.ChatModel != normalized.ChatModel ||
 		current.EmbeddingModel != normalized.EmbeddingModel ||
 		current.PromptProfile != normalized.PromptProfile
@@ -189,6 +193,9 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	if request.AIProvider != nil {
 		settings.AIProvider = strings.ToLower(strings.TrimSpace(*request.AIProvider))
 	}
+	if request.OllamaBaseURL != nil {
+		settings.OllamaBaseURL = strings.TrimRight(strings.TrimSpace(*request.OllamaBaseURL), "/")
+	}
 	if request.ChatModel != nil {
 		settings.ChatModel = strings.TrimSpace(*request.ChatModel)
 	}
@@ -208,6 +215,9 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	if len(settings.AIProvider) > maxAssistantProviderBytes {
 		return domain.AssistantSettings{}, errors.New("ai_provider is too long")
 	}
+	if len(settings.OllamaBaseURL) > maxAssistantURLBytes {
+		return domain.AssistantSettings{}, errors.New("ollama_base_url is too long")
+	}
 	if len(settings.ChatModel) > maxAssistantChatModelBytes {
 		return domain.AssistantSettings{}, errors.New("chat_model is too long")
 	}
@@ -219,6 +229,9 @@ func applyAssistantSettingsUpdate(settings domain.AssistantSettings, request ass
 	}
 	if !assistantProviderAllowed(settings.AIProvider) {
 		return domain.AssistantSettings{}, errors.New("ai_provider is not supported")
+	}
+	if settings.OllamaBaseURL != "" && !assistantHTTPURLAllowed(settings.OllamaBaseURL) {
+		return domain.AssistantSettings{}, errors.New("ollama_base_url must be an http or https URL")
 	}
 	if !assistantPromptProfileAllowed(settings.PromptProfile) {
 		return domain.AssistantSettings{}, errors.New("prompt_profile is not supported")
@@ -240,6 +253,7 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 		settings.SystemPrompt = trimmedPrompt
 	}
 	settings.AIProvider = strings.ToLower(strings.TrimSpace(settings.AIProvider))
+	settings.OllamaBaseURL = strings.TrimRight(strings.TrimSpace(settings.OllamaBaseURL), "/")
 	settings.ChatModel = strings.TrimSpace(settings.ChatModel)
 	settings.EmbeddingModel = strings.TrimSpace(settings.EmbeddingModel)
 	settings.PromptProfile = strings.ToLower(strings.TrimSpace(settings.PromptProfile))
@@ -248,6 +262,14 @@ func normalizeAssistantSettings(settings domain.AssistantSettings) domain.Assist
 	}
 	settings.MaxContextItems = maxAssistantContextItems
 	return settings
+}
+
+func assistantHTTPURLAllowed(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func assistantProviderAllowed(provider string) bool {
@@ -337,6 +359,7 @@ func (s *Server) assistantSettingsPayload(homeID string, settings domain.Assista
 			"prompt_profiles":         assistantPromptProfiles(),
 			"ai_provider":             "",
 			"provider_options":        assistantProviderOptions(),
+			"ollama_base_url":         cfg.OllamaBaseURL,
 			"max_context_items":       maxAssistantContextItems,
 			"chat_model":              "",
 			"chat_model_options":      assistantChatModelOptions(cfg),
