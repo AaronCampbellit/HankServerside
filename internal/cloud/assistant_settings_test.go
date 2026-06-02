@@ -429,6 +429,95 @@ func TestAssistantOpenAIAnswerUsesVectorRetrievedContext(t *testing.T) {
 	}
 }
 
+func TestLocalModelPlannerRoutesGenericPromptToSpecificTool(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_local_planner", Email: "local-planner@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_local_planner", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+
+	root := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("# Hank Remote Test README\n\nThe frobnicator deployment rule lives here."), 0o600))
+
+	chatCalls := 0
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/chat":
+			var body struct {
+				Messages []assistantLLMMessage `json:"messages"`
+				Think    bool                  `json:"think"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Think {
+				t.Fatal("local planner chat request enabled thinking")
+			}
+			chatCalls++
+			content := "Project docs answer."
+			if len(body.Messages) > 1 && strings.Contains(body.Messages[1].Content, "Choose the best Hank tool") {
+				content = `{"tool":"project_docs","query":"frobnicator deployment rule"}`
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"message": map[string]any{"content": content},
+			})
+		case "/api/embeddings":
+			embedding := make([]float64, 768)
+			embedding[7] = 1
+			writeJSON(w, http.StatusOK, map[string]any{"embedding": embedding})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{
+		Provider:             "ollama",
+		OllamaBaseURL:        provider.URL,
+		OllamaChatModel:      "qwen3:14b",
+		OllamaEmbeddingModel: "nomic-embed-text:latest",
+		ProjectDocsDir:       root,
+	})
+
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.AIProvider = "ollama"
+	settings.OllamaBaseURL = provider.URL
+	settings.ChatModel = "qwen3:14b"
+	settings.EmbeddingModel = "nomic-embed-text:latest"
+	settings.PromptProfile = "local"
+	settings.SystemPrompt = localAssistantSystemPrompt
+	settings.ProfileNotesEnabled = false
+	settings.HomeNotesEnabled = false
+	settings.FilesEnabled = false
+	settings.CalendarEnabled = false
+	settings.HomeAssistantEnabled = false
+	settings.ProjectDocsEnabled = true
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+
+	answer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "frobnicator rule please")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse: %v", err)
+	}
+	if answer.Text != "Project docs answer." {
+		t.Fatalf("answer = %#v", answer)
+	}
+	if chatCalls != 2 {
+		t.Fatalf("chat calls = %d, want planner plus answer", chatCalls)
+	}
+	diagnostics := assistantDiagnosticsFromContent(answer)
+	if diagnostics == nil || diagnostics.ToolKind != string(assistantIntentProjectDocs) {
+		t.Fatalf("diagnostics = %#v, want project docs tool", diagnostics)
+	}
+}
+
 func TestAssistantConversationMemoryIsIndexedAndFiltered(t *testing.T) {
 	t.Parallel()
 

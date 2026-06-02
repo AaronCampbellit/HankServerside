@@ -2,7 +2,9 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/dropfile/hankremote/internal/domain"
@@ -265,6 +267,72 @@ func resolveAssistantTool(prompt string) (assistantTool, assistantIntent) {
 	}
 	fallback := assistantToolRegistry[len(assistantToolRegistry)-1]
 	return fallback, assistantIntent{Kind: assistantIntentGeneral, Query: strings.TrimSpace(prompt)}
+}
+
+func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, settings domain.AssistantSettings, userID string, prompt string) (assistantTool, assistantIntent, bool) {
+	if settings.AIProvider != "ollama" && settings.PromptProfile != "local" {
+		return assistantTool{}, assistantIntent{}, false
+	}
+	choices := make([]string, 0, len(assistantToolRegistry))
+	allowed := map[assistantIntentKind]assistantTool{}
+	for _, tool := range assistantToolRegistry {
+		if tool.Kind == assistantIntentGeneral || tool.Kind == assistantIntentMediaSelection {
+			continue
+		}
+		choices = append(choices, fmt.Sprintf("- %s: %s", tool.Kind, tool.Description))
+		allowed[tool.Kind] = tool
+	}
+	plannerPrompt := strings.Join([]string{
+		"Choose the best Hank tool for this user request.",
+		"Return only compact JSON with keys tool and query.",
+		"Use tool \"general\" when no listed tool clearly fits.",
+		"Do not invent tools. Do not include explanations.",
+		"",
+		"Available tools:",
+		strings.Join(choices, "\n"),
+		"",
+		"User request:",
+		strings.TrimSpace(prompt),
+	}, "\n")
+	answer, _, err := s.generateAssistantLLMResponseWithSettings(ctx, userID, settings, []assistantLLMMessage{
+		{Role: "system", Content: "You classify HankAI requests into existing typed tools. Return JSON only."},
+		{Role: "user", Content: plannerPrompt},
+	})
+	if err != nil {
+		s.logger.Warn("assistant local planner failed; using deterministic tool", "error", err)
+		return assistantTool{}, assistantIntent{}, false
+	}
+	toolName, query := assistantPlannerChoice(answer)
+	if toolName == assistantIntentGeneral || toolName == "" {
+		return assistantTool{}, assistantIntent{}, false
+	}
+	tool, ok := allowed[toolName]
+	if !ok {
+		s.logger.Warn("assistant local planner selected unknown tool", "tool", toolName)
+		return assistantTool{}, assistantIntent{}, false
+	}
+	if strings.TrimSpace(query) == "" {
+		query = strings.TrimSpace(prompt)
+	}
+	return tool, assistantIntent{Kind: tool.Kind, Query: query}, true
+}
+
+func assistantPlannerChoice(answer string) (assistantIntentKind, string) {
+	type plannerResponse struct {
+		Tool  string `json:"tool"`
+		Query string `json:"query"`
+	}
+	trimmed := strings.TrimSpace(answer)
+	if start := strings.Index(trimmed, "{"); start >= 0 {
+		if end := strings.LastIndex(trimmed, "}"); end > start {
+			trimmed = trimmed[start : end+1]
+		}
+	}
+	var response plannerResponse
+	if err := json.Unmarshal([]byte(trimmed), &response); err != nil {
+		return "", ""
+	}
+	return assistantIntentKind(strings.TrimSpace(response.Tool)), strings.TrimSpace(response.Query)
 }
 
 func executeAssistantFilesSearchTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {

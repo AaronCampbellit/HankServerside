@@ -1720,6 +1720,22 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 			return content, nil
 		}
 	}
+	if tool.Kind == assistantIntentGeneral {
+		if plannedTool, plannedIntent, ok := s.resolveAssistantToolWithLocalModel(ctx, settings, auth.User.ID, prompt); ok {
+			tool = plannedTool
+			intent = plannedIntent
+			s.recordAssistantTrace(ctx, assistantTraceEvent{
+				Scope:   "assistant",
+				Event:   "assistant.tool.local_planner_selected",
+				Summary: "Local model selected a more specific HankAI tool.",
+				Details: traceDetails(map[string]any{
+					"tool":   tool.Kind,
+					"intent": intent.Kind,
+					"query":  intent.Query,
+				}),
+			})
+		}
+	}
 	indexStartedAt := time.Now()
 	s.recordAssistantTrace(ctx, assistantTraceEvent{
 		Scope:   "assistant",
