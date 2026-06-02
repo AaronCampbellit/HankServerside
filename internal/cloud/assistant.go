@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ type assistantResultCard struct {
 	ActionTitle   string     `json:"action_title"`
 	NoteID        string     `json:"note_id,omitempty"`
 	EventID       string     `json:"event_id,omitempty"`
+	SourceID      string     `json:"source_id,omitempty"`
 	TargetDate    *time.Time `json:"target_date,omitempty"`
 	Path          string     `json:"path,omitempty"`
 	IsDirectory   bool       `json:"is_directory,omitempty"`
@@ -68,8 +70,11 @@ type assistantClientToolRequest struct {
 type assistantPendingAction struct {
 	Kind             string                            `json:"kind"`
 	NoteAppend       *assistantPendingNoteAppend       `json:"note_append,omitempty"`
+	NoteCreate       *assistantPendingNoteCreate       `json:"note_create,omitempty"`
 	CalendarCreate   *assistantPendingCalendarCreate   `json:"calendar_create,omitempty"`
+	CalendarClient   *assistantPendingCalendarClient   `json:"calendar_client,omitempty"`
 	AttachmentCommit *assistantPendingAttachmentCommit `json:"attachment_commit,omitempty"`
+	FileCreateFolder *assistantPendingFileCreateFolder `json:"file_create_folder,omitempty"`
 	MediaDownload    *assistantPendingMediaDownload    `json:"media_download,omitempty"`
 }
 
@@ -83,11 +88,26 @@ type assistantPendingNoteAppend struct {
 	Confirmation  string `json:"confirmation_message"`
 }
 
+type assistantPendingNoteCreate struct {
+	Title        string `json:"title"`
+	BodyMarkdown string `json:"body_markdown,omitempty"`
+	Scope        string `json:"scope"`
+	Confirmation string `json:"confirmation_message"`
+}
+
 type assistantPendingCalendarCreate struct {
 	ToolRequest  assistantClientToolRequest `json:"tool_request"`
 	Title        string                     `json:"title"`
 	DateText     string                     `json:"date_text"`
 	Confirmation string                     `json:"confirmation_message"`
+}
+
+type assistantPendingCalendarClient struct {
+	ToolRequest  assistantClientToolRequest `json:"tool_request"`
+	Title        string                     `json:"title"`
+	Query        string                     `json:"query,omitempty"`
+	Confirmation string                     `json:"confirmation_message"`
+	Destructive  bool                       `json:"is_destructive"`
 }
 
 type assistantPendingAttachmentCommit struct {
@@ -101,6 +121,13 @@ type assistantPendingAttachmentCommit struct {
 	TargetPath      string                     `json:"target_path,omitempty"`
 	ConflictMode    string                     `json:"conflict_mode"`
 	Confirmation    string                     `json:"confirmation_message"`
+}
+
+type assistantPendingFileCreateFolder struct {
+	ToolRequest  assistantClientToolRequest `json:"tool_request"`
+	SourceID     string                     `json:"source_id,omitempty"`
+	Path         string                     `json:"path"`
+	Confirmation string                     `json:"confirmation_message"`
 }
 
 type assistantPendingMediaDownload struct {
@@ -143,11 +170,21 @@ const (
 	assistantIntentNotesList          assistantIntentKind = "notes.list"
 	assistantIntentNotesSearch        assistantIntentKind = "notes.search"
 	assistantIntentNotesAppend        assistantIntentKind = "notes.append"
+	assistantIntentNotesCreate        assistantIntentKind = "notes.create"
+	assistantIntentNotesSummarize     assistantIntentKind = "notes.summarize"
 	assistantIntentFilesSearch        assistantIntentKind = "files.search"
+	assistantIntentFilesListFolder    assistantIntentKind = "files.list_folder"
+	assistantIntentFilesCreateFolder  assistantIntentKind = "files.create_folder"
+	assistantIntentCalendarSearch     assistantIntentKind = "calendar.search"
+	assistantIntentCalendarCreate     assistantIntentKind = "calendar.create_event"
+	assistantIntentCalendarUpdate     assistantIntentKind = "calendar.update_event"
+	assistantIntentCalendarDelete     assistantIntentKind = "calendar.delete_event"
 	assistantIntentMediaSearch        assistantIntentKind = "media.search"
 	assistantIntentMediaSelection     assistantIntentKind = "media.selection"
+	assistantIntentHermesChat         assistantIntentKind = "hermes.chat"
 	assistantIntentHomeAssistantQuery assistantIntentKind = "homeassistant.query"
 	assistantIntentProjectDocs        assistantIntentKind = "project_docs"
+	assistantIntentMemorySearch       assistantIntentKind = "assistant.memory_search"
 )
 
 type assistantIntent struct {
@@ -1663,6 +1700,26 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 		Prompt:     prompt,
 		Session:    session,
 	}
+	if session != nil {
+		if content, handled, err := s.resolvePreviousCardFollowup(ctx, runtime, intent); handled || err != nil {
+			if err != nil {
+				return assistantMessageContent{}, err
+			}
+			switch {
+			case len(content.Cards) > 0 && content.Cards[0].Kind == "calendar":
+				action := assistantIntentCalendarSearch
+				if pending := assistantPendingActionFromContent(content); pending != nil && pending.Kind == "calendar_update" {
+					action = assistantIntentCalendarUpdate
+				} else if pending != nil && pending.Kind == "calendar_delete" {
+					action = assistantIntentCalendarDelete
+				}
+				attachAssistantDiagnostics(&content, assistantTool{Kind: action}, assistantIntent{Kind: action})
+			case len(content.Cards) > 0 && content.Cards[0].Kind == "file":
+				attachAssistantDiagnostics(&content, assistantTool{Kind: assistantIntentFilesListFolder}, assistantIntent{Kind: assistantIntentFilesListFolder})
+			}
+			return content, nil
+		}
+	}
 	indexStartedAt := time.Now()
 	s.recordAssistantTrace(ctx, assistantTraceEvent{
 		Scope:   "assistant",
@@ -1895,11 +1952,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 		}, nil
 	}
 
-	newContent := strings.TrimSpace(target.Content)
-	if newContent != "" && !strings.HasSuffix(newContent, "\n") {
-		newContent += "\n"
-	}
-	newContent += "- " + itemText
+	newContent := appendAssistantNoteText(target.Content, itemText)
 	revision, checksum, err := revisionAndChecksum(newContent, target.PageType, target.BoardJSON)
 	if err != nil {
 		return assistantMessageContent{}, err
@@ -1992,6 +2045,7 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, setting
 				Title:       item.Name,
 				Summary:     item.Path,
 				ActionTitle: "Open in File Server",
+				SourceID:    item.SourceID,
 				Path:        item.Path,
 				IsDirectory: item.IsDirectory,
 			})
@@ -2009,6 +2063,7 @@ func (s *Server) answerFilePrompt(ctx context.Context, home domain.Home, setting
 				Title:       best.Name,
 				Summary:     best.Path,
 				ActionTitle: "Open in File Server",
+				SourceID:    best.SourceID,
 				Path:        best.Path,
 				IsDirectory: best.IsDirectory,
 			},
@@ -2074,6 +2129,54 @@ func (s *Server) answerHomeAssistantPrompt(ctx context.Context, home domain.Home
 	return assistantMessageContent{Text: builder.String(), Cards: cards}, nil
 }
 
+func (s *Server) answerHermesChatPrompt(ctx context.Context, home domain.Home, auth authContext, session *domain.AssistantSession, prompt string) (assistantMessageContent, error) {
+	conversationID := assistantHermesConversationID(home.ID, auth.User.ID, session)
+	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandHermesChat, protocol.HermesChatRequest{
+		Prompt:         strings.TrimSpace(prompt),
+		ConversationID: conversationID,
+		SessionKey:     assistantHermesSessionKey(home.ID, auth.User.ID, session),
+	})
+	if err != nil {
+		return assistantMessageContent{
+			Text: "I couldn't reach Hermes through the home agent right now.",
+		}, nil
+	}
+	if envelope.Error != nil {
+		switch envelope.Error.Code {
+		case "hermes_not_configured", "unsupported_command":
+			return assistantMessageContent{
+				Text: "Hermes chat is not configured on the home agent yet.",
+			}, nil
+		case "request_timeout":
+			return assistantMessageContent{
+				Text: "Hermes did not respond before the request timed out.",
+			}, nil
+		default:
+			return assistantMessageContent{
+				Text: "Hermes returned an error before it could answer.",
+			}, nil
+		}
+	}
+	payload, err := protocol.DecodePayload[protocol.HermesChatResponse](envelope)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	text := strings.TrimSpace(payload.Text)
+	if text == "" {
+		text = "Hermes returned an empty response."
+	}
+	return assistantMessageContent{
+		Text: text,
+		Meta: map[string]interface{}{
+			"hermes": map[string]interface{}{
+				"model":           payload.Model,
+				"response_id":     payload.ResponseID,
+				"conversation_id": payload.ConversationID,
+			},
+		},
+	}, nil
+}
+
 func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
 	queryEmbedding, _, _ := s.embedAssistantText(ctx, auth.User.ID, prompt)
@@ -2095,6 +2198,7 @@ func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, a
 			Text: "I could not find matching Hank Remote project documentation for that.",
 		}, nil
 	}
+	rankProjectDocContexts(projectContexts, prompt)
 
 	answer := fallbackRetrievedAnswer(prompt, projectContexts)
 	if providerAnswer, modelName, err := s.generateAssistantLLMResponse(ctx, auth.User.ID, []assistantLLMMessage{
@@ -2319,6 +2423,27 @@ func (s *Server) finalizeAssistantClientToolRun(ctx context.Context, session dom
 				},
 			},
 		}, nil
+	case "calendar.delete_event":
+		title, _ := result["title"].(string)
+		startsAt, _ := result["starts_at"].(string)
+		eventID, _ := result["event_id"].(string)
+		targetDate := parseAssistantResultTime(startsAt)
+		if title == "" {
+			title = "Deleted Calendar Event"
+		}
+		return assistantMessageContent{
+			Text: fmt.Sprintf("Deleted `%s` from your device calendar.", title),
+			Cards: []assistantResultCard{
+				{
+					Kind:        "calendar",
+					Title:       title,
+					Summary:     startsAt,
+					ActionTitle: "Calendar",
+					EventID:     eventID,
+					TargetDate:  targetDate,
+				},
+			},
+		}, nil
 	case "calendar.search":
 		query, _ := result["query"].(string)
 		if matches, ok := result["matches"].([]interface{}); ok && len(matches) > 0 {
@@ -2408,6 +2533,7 @@ func (s *Server) finalizeAssistantAttachmentCommit(ctx context.Context, session 
 				Title:       defaultString(title, "Uploaded file"),
 				Summary:     path,
 				ActionTitle: "Open in File Server",
+				SourceID:    strings.TrimSpace(file["source_id"]),
 				Path:        path,
 			})
 		}
@@ -2486,6 +2612,7 @@ func (s *Server) attachmentCommitResultContent(result map[string]interface{}, fi
 				Title:       defaultString(title, "Uploaded file"),
 				Summary:     path,
 				ActionTitle: "Open in File Server",
+				SourceID:    strings.TrimSpace(file["source_id"]),
 				Path:        path,
 			})
 		}
@@ -2581,11 +2708,7 @@ func (s *Server) executeConfirmedAssistantAction(
 		if err != nil {
 			return assistantRunResponse{}, err
 		}
-		newContent := strings.TrimSpace(note.Content)
-		if newContent != "" && !strings.HasSuffix(newContent, "\n") {
-			newContent += "\n"
-		}
-		newContent += "- " + pending.NoteAppend.AppendedText
+		newContent := appendAssistantNoteText(note.Content, pending.NoteAppend.AppendedText)
 		revision, checksum, err := revisionAndChecksum(newContent, note.PageType, note.BoardJSON)
 		if err != nil {
 			return assistantRunResponse{}, err
@@ -2641,6 +2764,75 @@ func (s *Server) executeConfirmedAssistantAction(
 			AssistantMessage: &message,
 		}, nil
 
+	case "note_create":
+		if pending.NoteCreate == nil {
+			return assistantRunResponse{}, errors.New("pending note create is missing")
+		}
+		body := strings.TrimSpace(pending.NoteCreate.BodyMarkdown)
+		revision, checksum, err := revisionAndChecksum(body, protocol.NotePageTypeText, "")
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		now := time.Now().UTC()
+		note := domain.UserNote{
+			ID:           newID("note"),
+			NoteID:       newID("note"),
+			OwnerUserID:  userID,
+			Title:        pending.NoteCreate.Title,
+			Content:      body,
+			BodyMarkdown: body,
+			BodyFormat:   "markdown",
+			PageType:     protocol.NotePageTypeText,
+			Revision:     revision,
+			Checksum:     checksum,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			UpdatedBy:    userID,
+		}
+		if err := s.store.UpsertUserNote(ctx, note); err != nil {
+			return assistantRunResponse{}, err
+		}
+		if err := s.indexAssistantNote(ctx, session.HomeID, userID, assistantNoteSourceType(note), note); err != nil {
+			s.logger.Warn("assistant note index refresh failed after create", "note_id", note.ID, "error", err)
+		}
+		content := assistantMessageContent{
+			Text: fmt.Sprintf("Created `%s`.", note.Title),
+			Cards: []assistantResultCard{
+				{
+					Kind:        "note",
+					Title:       note.Title,
+					Summary:     notePreview(note.Content),
+					ActionTitle: "Open in Notes",
+					NoteID:      note.NoteID,
+				},
+			},
+		}
+		message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, content)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		completedAt := time.Now().UTC()
+		run.State = assistantStateCompleted
+		run.RequiresConfirmation = false
+		run.PendingActionJSON = ""
+		run.MessageID = message.ID
+		run.CompletedAt = &completedAt
+		if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, err
+		}
+		settings, err := s.currentAssistantSettings(ctx, session.HomeID, userID)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+			return assistantRunResponse{}, err
+		}
+		return assistantRunResponse{
+			ID:               run.ID,
+			State:            run.State,
+			AssistantMessage: &message,
+		}, nil
+
 	case "calendar_create":
 		if pending.CalendarCreate == nil {
 			return assistantRunResponse{}, errors.New("pending calendar create is missing")
@@ -2662,6 +2854,28 @@ func (s *Server) executeConfirmedAssistantAction(
 			State:               run.State,
 			RequiresClientTools: true,
 			ClientToolRequest:   &pending.CalendarCreate.ToolRequest,
+		}, nil
+	case "calendar_update", "calendar_delete":
+		if pending.CalendarClient == nil {
+			return assistantRunResponse{}, errors.New("pending calendar client action is missing")
+		}
+		payload, err := json.Marshal(pending.CalendarClient.ToolRequest)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		run.State = assistantStateWaitingClientTool
+		run.RequiresConfirmation = false
+		run.RequiresClientTools = true
+		run.PendingActionJSON = string(payload)
+		run.CompletedAt = nil
+		if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, err
+		}
+		return assistantRunResponse{
+			ID:                  run.ID,
+			State:               run.State,
+			RequiresClientTools: true,
+			ClientToolRequest:   &pending.CalendarClient.ToolRequest,
 		}, nil
 	case "attachment_commit":
 		if pending.AttachmentCommit == nil {
@@ -2695,6 +2909,70 @@ func (s *Server) executeConfirmedAssistantAction(
 		}
 		job := response.Job
 		content := mediaDownloadStartedContent(pending.MediaDownload.Title, pending.MediaDownload.Selection, job, pending.MediaDownload.DestinationPath)
+		message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, content)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		completedAt := time.Now().UTC()
+		run.State = assistantStateCompleted
+		run.RequiresConfirmation = false
+		run.PendingActionJSON = ""
+		run.MessageID = message.ID
+		run.CompletedAt = &completedAt
+		if err := s.store.UpdateAssistantRun(ctx, run); err != nil {
+			return assistantRunResponse{}, err
+		}
+		settings, err := s.currentAssistantSettings(ctx, session.HomeID, userID)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		if err := s.touchAssistantSessionAndMemory(ctx, session, settings, completedAt); err != nil {
+			return assistantRunResponse{}, err
+		}
+		return assistantRunResponse{
+			ID:               run.ID,
+			State:            run.State,
+			AssistantMessage: &message,
+		}, nil
+	case "file_create_folder":
+		if pending.FileCreateFolder == nil {
+			return assistantRunResponse{}, errors.New("pending file create folder is missing")
+		}
+		home, err := s.store.GetHomeByID(ctx, session.HomeID)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		membership, err := s.store.GetHomeMembership(ctx, session.HomeID, userID)
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		if err := s.requireHomeFeature(ctx, home, membership, userID, domain.HomePermissionFeatureFiles); err != nil {
+			return assistantRunResponse{}, err
+		}
+		envelope, err := s.sendAgentCommand(ctx, session.HomeID, "files.create_directory", protocol.FilesCreateDirectoryRequest{
+			SourceID: pending.FileCreateFolder.SourceID,
+			Path:     pending.FileCreateFolder.Path,
+		})
+		if err != nil {
+			return assistantRunResponse{}, err
+		}
+		if envelope.Error != nil {
+			return assistantRunResponse{}, errors.New(envelope.Error.Message)
+		}
+		content := assistantMessageContent{
+			Text: fmt.Sprintf("Created File Server folder `%s`.", pending.FileCreateFolder.Path),
+			Cards: []assistantResultCard{
+				{
+					Kind:        "file",
+					Title:       filepathBase(pending.FileCreateFolder.Path),
+					Summary:     pending.FileCreateFolder.Path,
+					ActionTitle: "Open in File Server",
+					SourceID:    pending.FileCreateFolder.SourceID,
+					Path:        pending.FileCreateFolder.Path,
+					IsDirectory: true,
+				},
+			},
+		}
 		message, err := s.persistAssistantMessage(ctx, session, assistantRoleAssistant, content)
 		if err != nil {
 			return assistantRunResponse{}, err
@@ -2798,12 +3076,15 @@ func (s *Server) planCalendarTool(prompt string, timezone string, deviceID strin
 	if !ok {
 		return assistantCalendarPlan{}, false
 	}
-	endsAt := intent.startsAt.Add(24 * time.Hour)
+	endsAt := intent.endsAt
+	if endsAt.IsZero() {
+		endsAt = intent.startsAt.Add(24 * time.Hour)
+	}
 	arguments := map[string]interface{}{
 		"title":      intent.title,
 		"starts_at":  intent.startsAt.Format(time.RFC3339),
 		"ends_at":    endsAt.Format(time.RFC3339),
-		"is_all_day": true,
+		"is_all_day": intent.allDay,
 	}
 	if deviceID != "" {
 		arguments["device_id"] = deviceID
@@ -2937,6 +3218,23 @@ func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *as
 			Details:      details,
 			Destructive:  false,
 		}
+	case "note_create":
+		if pending.NoteCreate == nil {
+			return nil
+		}
+		action := pending.NoteCreate
+		details := []assistantPendingActionDetail{
+			{Label: "Title", Value: action.Title},
+			{Label: "Scope", Value: defaultString(action.Scope, "profile")},
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        "Create note",
+			Summary:      "Hank will create a new personal note after you approve it.",
+			Confirmation: defaultString(action.Confirmation, fmt.Sprintf("Confirm creating `%s`.", action.Title)),
+			Details:      details,
+			Destructive:  false,
+		}
 	case "calendar_create":
 		if pending.CalendarCreate == nil {
 			return nil
@@ -2967,6 +3265,35 @@ func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *as
 			Details:      details,
 			Destructive:  false,
 		}
+	case "calendar_update", "calendar_delete":
+		if pending.CalendarClient == nil {
+			return nil
+		}
+		action := pending.CalendarClient
+		title := "Update calendar event"
+		summary := "Hank will ask this device to update the calendar event after you approve it."
+		if pending.Kind == "calendar_delete" {
+			title = "Delete calendar event"
+			summary = "Hank will ask this device to delete the calendar event after you approve it."
+		}
+		details := []assistantPendingActionDetail{
+			{Label: "Event", Value: action.Title},
+			{Label: "Tool", Value: action.ToolRequest.ToolName},
+		}
+		if action.Query != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Matched search", Value: action.Query})
+		}
+		if startsAt := assistantToolArgumentString(action.ToolRequest.Arguments, "starts_at"); startsAt != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Starts", Value: startsAt})
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        title,
+			Summary:      summary,
+			Confirmation: action.Confirmation,
+			Details:      details,
+			Destructive:  action.Destructive,
+		}
 	case "attachment_commit":
 		if pending.AttachmentCommit == nil {
 			return nil
@@ -2993,6 +3320,25 @@ func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *as
 			Kind:         pending.Kind,
 			Title:        title,
 			Summary:      summary,
+			Confirmation: action.Confirmation,
+			Details:      details,
+			Destructive:  false,
+		}
+	case "file_create_folder":
+		if pending.FileCreateFolder == nil {
+			return nil
+		}
+		action := pending.FileCreateFolder
+		details := []assistantPendingActionDetail{
+			{Label: "Path", Value: action.Path},
+		}
+		if action.SourceID != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Source", Value: action.SourceID})
+		}
+		return &assistantPendingActionSummary{
+			Kind:         pending.Kind,
+			Title:        "Create File Server folder",
+			Summary:      "Hank will ask the home agent to create this folder after you approve it.",
 			Confirmation: action.Confirmation,
 			Details:      details,
 			Destructive:  false,
@@ -3098,6 +3444,7 @@ func assistantResultCardFromContext(item domain.AssistantRetrievedContext) assis
 			Title:       item.Title,
 			Summary:     item.Snippet,
 			ActionTitle: "Open in File Server",
+			SourceID:    item.SourceID,
 			Path:        item.Path,
 		}
 	case "homeassistant_entity":
@@ -3212,8 +3559,65 @@ func assistantSessionTitle(prompt string) string {
 }
 
 func classifyAssistantIntent(prompt string) assistantIntent {
+	if isCalendarCreatePrompt(prompt) {
+		return assistantIntent{Kind: assistantIntentCalendarCreate, Query: strings.TrimSpace(prompt)}
+	}
 	_, intent := resolveAssistantTool(prompt)
 	return intent
+}
+
+func hermesCommandPrompt(prompt string) (string, bool) {
+	trimmed := strings.TrimSpace(prompt)
+	if trimmed == "" {
+		return "", false
+	}
+	lowered := strings.ToLower(trimmed)
+	if lowered != "/hermes" && !strings.HasPrefix(lowered, "/hermes ") && !strings.HasPrefix(lowered, "/hermes\n") && !strings.HasPrefix(lowered, "/hermes\t") {
+		return "", false
+	}
+	return strings.TrimSpace(trimmed[len("/hermes"):]), true
+}
+
+func assistantHermesConversationID(homeID string, userID string, session *domain.AssistantSession) string {
+	parts := []string{"hank", sanitizeHermesScopePart(homeID), sanitizeHermesScopePart(userID)}
+	if session != nil {
+		parts = append(parts, sanitizeHermesScopePart(session.ID))
+	}
+	return strings.Join(parts, ":")
+}
+
+func assistantHermesSessionKey(homeID string, userID string, session *domain.AssistantSession) string {
+	parts := []string{"agent", "main", "hank", "home", sanitizeHermesScopePart(homeID), "user", sanitizeHermesScopePart(userID)}
+	if session != nil {
+		parts = append(parts, "session", sanitizeHermesScopePart(session.ID))
+	}
+	return strings.Join(parts, ":")
+}
+
+func sanitizeHermesScopePart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	var builder strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			builder.WriteRune(r)
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		case r == '-' || r == '_':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	if builder.Len() == 0 {
+		return "unknown"
+	}
+	return builder.String()
 }
 
 func isNoteAppendPrompt(prompt string) bool {
@@ -4106,11 +4510,64 @@ func notePreview(content string) string {
 	return strings.TrimSpace(content[:120]) + "..."
 }
 
+func appendAssistantNoteText(content string, itemText string) string {
+	content = strings.TrimRight(strings.TrimSpace(content), "\n")
+	itemText = strings.TrimSpace(itemText)
+	prefix := "- "
+	lastLine := ""
+	if content != "" {
+		lines := strings.Split(content, "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			if line := strings.TrimSpace(lines[i]); line != "" {
+				lastLine = line
+				break
+			}
+		}
+	}
+	switch {
+	case strings.HasPrefix(lastLine, "- [ ] ") || strings.HasPrefix(strings.ToLower(lastLine), "- [x] "):
+		prefix = "- [ ] "
+	case strings.HasPrefix(lastLine, "* "):
+		prefix = "* "
+	case strings.HasPrefix(lastLine, "- "):
+		prefix = "- "
+	case leadingNumberedListValue(lastLine) > 0:
+		prefix = fmt.Sprintf("%d. ", leadingNumberedListValue(lastLine)+1)
+	}
+	if content == "" {
+		return prefix + itemText
+	}
+	return content + "\n" + prefix + itemText
+}
+
+func leadingNumberedListValue(line string) int {
+	line = strings.TrimSpace(line)
+	dot := strings.Index(line, ".")
+	if dot <= 0 {
+		return 0
+	}
+	for _, char := range line[:dot] {
+		if char < '0' || char > '9' {
+			return 0
+		}
+	}
+	if dot+1 >= len(line) || line[dot+1] != ' ' {
+		return 0
+	}
+	value, err := strconv.Atoi(line[:dot])
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
 type assistantCalendarIntent struct {
 	title        string
 	startsAt     time.Time
+	endsAt       time.Time
 	rawDateText  string
 	explicitYear bool
+	allDay       bool
 }
 
 type assistantCalendarPlan struct {
@@ -4122,9 +4579,15 @@ type assistantCalendarPlan struct {
 }
 
 func parseCalendarCreateIntent(prompt string, timezone string) (assistantCalendarIntent, bool) {
-	lowered := strings.ToLower(strings.TrimSpace(prompt))
+	trimmed := strings.TrimSpace(prompt)
+	lowered := strings.ToLower(trimmed)
 	if !strings.HasPrefix(lowered, "add ") && !strings.HasPrefix(lowered, "create ") && !strings.HasPrefix(lowered, "schedule ") {
 		return assistantCalendarIntent{}, false
+	}
+
+	location := assistantTimeLocation(timezone)
+	if intent, ok := parseCalendarCreateIntentFromNaturalText(trimmed, location); ok {
+		return intent, true
 	}
 
 	var splitToken string
@@ -4148,12 +4611,6 @@ func parseCalendarCreateIntent(prompt string, timezone string) (assistantCalenda
 		return assistantCalendarIntent{}, false
 	}
 
-	location := time.Local
-	if timezone != "" {
-		if loaded, err := time.LoadLocation(timezone); err == nil {
-			location = loaded
-		}
-	}
 	now := time.Now().In(location)
 	for _, layout := range []string{"January 2 2006", "Jan 2 2006", "January 2", "Jan 2"} {
 		parsed, err := time.ParseInLocation(layout, dateText, location)
@@ -4169,11 +4626,92 @@ func parseCalendarCreateIntent(prompt string, timezone string) (assistantCalenda
 		return assistantCalendarIntent{
 			title:        title,
 			startsAt:     parsed,
+			endsAt:       parsed.Add(24 * time.Hour),
 			rawDateText:  dateText,
 			explicitYear: strings.Contains(layout, "2006"),
+			allDay:       true,
 		}, true
 	}
 	return assistantCalendarIntent{}, false
+}
+
+func parseCalendarCreateIntentFromNaturalText(prompt string, location *time.Location) (assistantCalendarIntent, bool) {
+	originalEventText := cleanCalendarCreateTitle(prompt)
+	for _, prefix := range []string{"calendar event for ", "event for "} {
+		if strings.HasPrefix(strings.ToLower(originalEventText), prefix) {
+			originalEventText = strings.TrimSpace(originalEventText[len(prefix):])
+			break
+		}
+	}
+	date, label, ok := parseCalendarDayReference(originalEventText, location)
+	if !ok {
+		return assistantCalendarIntent{}, false
+	}
+	lowered := strings.ToLower(originalEventText)
+	dateIndex := len(originalEventText)
+	for _, token := range append([]string{"today", "tomorrow"}, calendarDayReferenceTokens()...) {
+		if index := strings.Index(lowered, token); index >= 0 && index < dateIndex {
+			dateIndex = index
+		}
+	}
+	if dateIndex == len(originalEventText) {
+		return assistantCalendarIntent{}, false
+	}
+	title := strings.Trim(strings.TrimSpace(originalEventText[:dateIndex]), "\"'` ,")
+	title = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(title), " on"), " for"))
+	title = cleanCalendarCreateTitle(title)
+	if title == "" {
+		return assistantCalendarIntent{}, false
+	}
+	timeText := originalEventText[dateIndex:]
+	if atIndex := strings.LastIndex(strings.ToLower(timeText), " at "); atIndex >= 0 {
+		timeText = timeText[atIndex+len(" at "):]
+	}
+	hour, minute, hasTime := parseClockText(timeText)
+	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, location)
+	allDay := true
+	end := start.Add(24 * time.Hour)
+	if hasTime {
+		start = time.Date(date.Year(), date.Month(), date.Day(), hour, minute, 0, 0, location)
+		end = start.Add(time.Hour)
+		allDay = false
+	}
+	return assistantCalendarIntent{
+		title:        title,
+		startsAt:     start,
+		endsAt:       end,
+		rawDateText:  label,
+		explicitYear: assistantPromptHasExplicitYear(originalEventText),
+		allDay:       allDay,
+	}, true
+}
+
+func assistantPromptHasExplicitYear(prompt string) bool {
+	for _, field := range strings.Fields(strings.NewReplacer(",", " ", ".", " ").Replace(prompt)) {
+		field = strings.Trim(field, " ")
+		if len(field) != 4 {
+			continue
+		}
+		year, err := strconv.Atoi(field)
+		if err == nil && year >= 1900 && year <= 2500 {
+			return true
+		}
+	}
+	return false
+}
+
+func calendarDayReferenceTokens() []string {
+	tokens := make([]string, 0, len(calendarWeekdayNames())+24)
+	for _, weekday := range calendarWeekdayNames() {
+		tokens = append(tokens, weekday.name)
+	}
+	for _, month := range []string{
+		"january", "jan", "february", "feb", "march", "mar", "april", "apr", "may", "june", "jun",
+		"july", "jul", "august", "aug", "september", "sep", "october", "oct", "november", "nov", "december", "dec",
+	} {
+		tokens = append(tokens, month)
+	}
+	return tokens
 }
 
 func cleanCalendarCreateTitle(value string) string {

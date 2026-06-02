@@ -21,6 +21,7 @@ const (
 
 	ServiceTypeHomeAssistant = "homeassistant"
 	ServiceTypeSMB           = "smb"
+	ServiceTypeHermes        = "hermes"
 
 	HomePermissionFeatureHomeAssistant = "homeassistant"
 	HomePermissionFeatureFiles         = "files"
@@ -148,20 +149,6 @@ type UserProfileSecretVault struct {
 	Vault     json.RawMessage `json:"vault"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-type HomeNote struct {
-	HomeID    string     `json:"home_id"`
-	NoteID    string     `json:"note_id"`
-	Title     string     `json:"title"`
-	Content   string     `json:"content"`
-	PageType  string     `json:"page_type"`
-	BoardJSON string     `json:"board_json,omitempty"`
-	Revision  string     `json:"revision"`
-	Checksum  string     `json:"checksum"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	UpdatedBy string     `json:"updated_by"`
 }
 
 type HomeNoteSyncState struct {
@@ -420,12 +407,4 @@ type OpenAIAccount struct {
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
-}
-
-type OpenAIOAuthState struct {
-	StateHash    string    `json:"-"`
-	UserID       string    `json:"user_id"`
-	CodeVerifier string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
-	ExpiresAt    time.Time `json:"expires_at"`
 }

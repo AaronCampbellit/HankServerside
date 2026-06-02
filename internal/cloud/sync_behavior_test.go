@@ -364,6 +364,95 @@ func TestServiceProfileApplySetsBackupTimestamp(t *testing.T) {
 	}
 }
 
+func TestHermesServiceProfileApplyRoutesToAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	appliedAt := time.Now().UTC().Round(0)
+	go func() {
+		for {
+			var envelope protocol.Envelope
+			if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+				return
+			}
+			if envelope.Type != protocol.TypeCloudCommand {
+				continue
+			}
+
+			command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+			if err != nil || command.Command != "config.apply" {
+				return
+			}
+			var apply protocol.ConfigApplyRequest
+			if err := json.Unmarshal(command.Body, &apply); err != nil {
+				t.Errorf("config.apply body decode: %v", err)
+				return
+			}
+			if apply.ServiceType != domain.ServiceTypeHermes {
+				t.Errorf("service_type = %q, want %q", apply.ServiceType, domain.ServiceTypeHermes)
+				return
+			}
+			var public struct {
+				APIBaseURL     string `json:"api_base_url"`
+				Model          string `json:"model"`
+				TimeoutSeconds int    `json:"timeout_seconds"`
+			}
+			if err := json.Unmarshal(apply.PublicConfig, &public); err != nil {
+				t.Errorf("public config decode: %v", err)
+				return
+			}
+			if public.APIBaseURL != "http://hermes-vm:8642" || public.Model != "hermes-agent" || public.TimeoutSeconds != 120 {
+				t.Errorf("public config = %#v", public)
+				return
+			}
+			var secrets map[string]string
+			if err := json.Unmarshal(apply.Secrets, &secrets); err != nil {
+				t.Errorf("secrets decode: %v", err)
+				return
+			}
+			if secrets["api_key"] != "hermes-secret" {
+				t.Errorf("api key secret = %q", secrets["api_key"])
+				return
+			}
+
+			reply, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.ConfigApplyResponse{
+				Profile: protocol.ServiceProfileSnapshot{
+					ServiceType:    domain.ServiceTypeHermes,
+					PublicConfig:   mustEncodeBody(t, map[string]any{"api_base_url": "http://hermes-vm:8642", "model": "hermes-agent", "timeout_seconds": 120, "api_key_set": true}),
+					SecretVersion:  1,
+					AppliedVersion: 1,
+					Status:         domain.SyncStatusHealthy,
+					UpdatedAt:      appliedAt,
+				},
+			})
+			_ = wsjson.Write(ctx, agentConn, reply)
+		}
+	}()
+
+	var profile domain.HomeServiceProfile
+	requestJSON(t, testServer, sessionToken, http.MethodPut, "/v1/home/service-profiles/hermes", map[string]any{
+		"public_config": map[string]any{"api_base_url": "http://hermes-vm:8642", "model": "hermes-agent", "timeout_seconds": 120},
+		"secrets":       map[string]any{"api_key": "hermes-secret"},
+		"persist":       true,
+	}, &profile)
+
+	if profile.ServiceType != domain.ServiceTypeHermes {
+		t.Fatalf("service_type = %q, want %q", profile.ServiceType, domain.ServiceTypeHermes)
+	}
+	if profile.SecretVersion != 1 || profile.AppliedVersion != 1 {
+		t.Fatalf("versions = secret %d applied %d, want 1/1", profile.SecretVersion, profile.AppliedVersion)
+	}
+	if profile.Status != domain.SyncStatusHealthy {
+		t.Fatalf("profile status = %q, want %q", profile.Status, domain.SyncStatusHealthy)
+	}
+}
+
 func readUntilAgentRegistered(t *testing.T, ctx context.Context, conn *websocket.Conn) {
 	t.Helper()
 	for {

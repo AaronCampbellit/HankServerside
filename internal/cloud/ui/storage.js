@@ -1,3 +1,5 @@
+const api = window.HankAPI.request;
+
 const state = {
   user: null,
   status: null,
@@ -60,24 +62,6 @@ const els = {
   toast: document.getElementById("toast"),
 };
 
-async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const csrf = document.cookie.split("; ").find((part) => part.startsWith("hank_remote_csrf="))?.split("=")[1];
-  if (csrf && !headers.has("X-Hank-CSRF-Token")) {
-    headers.set("X-Hank-CSRF-Token", decodeURIComponent(csrf));
-  }
-  if (!headers.has("Content-Type") && options.body) {
-    headers.set("Content-Type", "application/json");
-  }
-  const response = await fetch(path, { ...options, headers });
-  const contentType = response.headers.get("Content-Type") || "";
-  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) {
-    const message = typeof payload === "string" ? payload : payload.error || payload.message || response.statusText;
-    throw new Error(message);
-  }
-  return payload;
-}
 
 function escapeHTML(value) {
   return String(value || "")

@@ -158,6 +158,9 @@ func TestAssistantModelsEndpointUsesLinkedChatGPTCodexModels(t *testing.T) {
 		if got := r.Header.Get("ChatGPT-Account-ID"); got != "workspace-123" {
 			t.Fatalf("ChatGPT-Account-ID = %q", got)
 		}
+		if got := r.URL.Query().Get("client_version"); got != chatGPTCodexClientVersion {
+			t.Fatalf("client_version = %q", got)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"models": []map[string]any{
 				{"id": "gpt-codex-large"},

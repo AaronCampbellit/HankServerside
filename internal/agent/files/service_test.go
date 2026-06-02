@@ -273,9 +273,8 @@ func TestSMBConfigEnablesService(t *testing.T) {
 	t.Parallel()
 
 	service := NewWithConfig(Config{
-		SMB: SMBConfig{
-			Host:  "192.168.1.20",
-			Share: "media",
+		Shares: []SMBConfig{
+			{Host: "192.168.1.20", Share: "media"},
 		},
 	})
 

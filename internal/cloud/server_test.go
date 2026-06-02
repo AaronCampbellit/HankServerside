@@ -358,18 +358,16 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 	}
 	paths := []string{
 		"/dashboard",
-		"/dashboard/home-users",
-		"/dashboard/service-profiles",
-		"/dashboard/sync-status",
-		"/dashboard/storage",
 		"/dashboard/hank",
 		"/dashboard/home-assistant",
-		"/dashboard/assistant-settings",
 		"/dashboard/profile-notes",
 		"/dashboard/file-server",
 		"/dashboard/settings",
+		"/dashboard/settings/people-pane",
 		"/dashboard/settings/connections-pane",
-		"/dashboard/accept-invitation",
+		"/dashboard/settings/ai-pane",
+		"/dashboard/settings/backups-pane",
+		"/dashboard/settings/join-home-pane",
 	}
 
 	for _, routePath := range paths {
@@ -425,7 +423,9 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		"/dashboard/home-assistant",
 		"/dashboard/profile-notes",
 		"/dashboard/file-server",
+		"/dashboard/settings/people-pane",
 		"/dashboard/settings/connections-pane",
+		"/dashboard/settings/ai-pane",
 	}
 
 	for _, routePath := range normalPages {
@@ -448,33 +448,31 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		response.Body.Close()
 	}
 
-	redirects := map[string]string{
-		"/dashboard/home-users":         "/dashboard/settings#people",
-		"/dashboard/service-profiles":   "/dashboard/settings#connections",
-		"/dashboard/sync-status":        "/dashboard#health",
-		"/dashboard/assistant-settings": "/dashboard/settings#ai",
-		"/dashboard/accept-invitation":  "/dashboard/settings#join-home",
+	legacyPaths := []string{
+		"/dashboard/home-users",
+		"/dashboard/service-profiles",
+		"/dashboard/sync-status",
+		"/dashboard/storage",
+		"/dashboard/assistant-settings",
+		"/dashboard/accept-invitation",
 	}
-	for routePath, wantLocation := range redirects {
+	for _, routePath := range legacyPaths {
 		response := requestDashboardPage(t, testServer, routePath, "member-token")
-		if response.StatusCode != http.StatusSeeOther {
+		if response.StatusCode != http.StatusNotFound {
 			data, _ := io.ReadAll(response.Body)
 			response.Body.Close()
-			t.Fatalf("member legacy %s status = %d, want %d body=%s", routePath, response.StatusCode, http.StatusSeeOther, string(data))
-		}
-		if location := response.Header.Get("Location"); location != wantLocation {
-			t.Fatalf("legacy %s redirect location = %q, want %q", routePath, location, wantLocation)
+			t.Fatalf("member legacy %s status = %d, want %d body=%s", routePath, response.StatusCode, http.StatusNotFound, string(data))
 		}
 		response.Body.Close()
 	}
 
-	acceptResponse := requestDashboardPage(t, testServer, "/dashboard/accept-invitation", "outsider-token")
-	if acceptResponse.StatusCode != http.StatusSeeOther {
-		data, _ := io.ReadAll(acceptResponse.Body)
-		acceptResponse.Body.Close()
-		t.Fatalf("outsider accept-invitation status = %d, want %d body=%s", acceptResponse.StatusCode, http.StatusSeeOther, string(data))
+	joinResponse := requestDashboardPage(t, testServer, "/dashboard/settings/join-home-pane", "outsider-token")
+	if joinResponse.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(joinResponse.Body)
+		joinResponse.Body.Close()
+		t.Fatalf("outsider join-home pane status = %d, want %d body=%s", joinResponse.StatusCode, http.StatusOK, string(data))
 	}
-	acceptResponse.Body.Close()
+	joinResponse.Body.Close()
 
 	settingsResponse := requestDashboardPage(t, testServer, "/dashboard/settings", "outsider-token")
 	if settingsResponse.StatusCode != http.StatusOK {
@@ -484,7 +482,7 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 	}
 	settingsResponse.Body.Close()
 
-	storageResponse := requestDashboardPage(t, testServer, "/dashboard/storage", "member-token")
+	storageResponse := requestDashboardPage(t, testServer, "/dashboard/settings/backups-pane", "member-token")
 	if storageResponse.StatusCode != http.StatusForbidden {
 		data, _ := io.ReadAll(storageResponse.Body)
 		storageResponse.Body.Close()
@@ -561,6 +559,55 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	}
 }
 
+func TestDashboardPagesUseSharedAPIClient(t *testing.T) {
+	t.Parallel()
+
+	entries, err := fs.ReadDir(uiAssets, "ui")
+	if err != nil {
+		t.Fatalf("read ui assets: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		data, err := fs.ReadFile(uiAssets, "ui/"+name)
+		if err != nil {
+			t.Fatalf("%s read: %v", name, err)
+		}
+		body := string(data)
+		switch {
+		case strings.HasSuffix(name, ".html") && strings.Contains(body, `<script src="/assets/`):
+			apiIndex := strings.Index(body, `<script src="/assets/api-client.js"`)
+			if apiIndex == -1 {
+				t.Fatalf("%s missing shared api-client.js", name)
+			}
+			if firstScript := strings.Index(body, `<script src="/assets/`); firstScript != apiIndex {
+				t.Fatalf("%s should load api-client.js before page scripts", name)
+			}
+		case strings.HasSuffix(name, ".js"):
+			for _, forbidden := range []string{`async function api(`, `function api(`, `async function apiJSON(`, `function apiJSON(`, `apiJSON(`, "\n) {\n", `const headers = new Headers(options.headers || {})`} {
+				if name == "api-client.js" && forbidden == `const headers = new Headers(options.headers || {})` {
+					continue
+				}
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("%s reintroduced local dashboard API helper %q", name, forbidden)
+				}
+			}
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/assets/api-client.js", nil)
+	response := httptest.NewRecorder()
+	serveUIAsset(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("api-client.js asset status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
+		t.Fatalf("api-client.js content-type = %q", contentType)
+	}
+}
+
 func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
 	t.Parallel()
 
@@ -614,7 +661,7 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("dashboard.html read: %v", err)
 	}
 	body := string(dashboard)
-	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-link-form"`, `id="quick-link-add" type="button" class="secondary" hidden`, `id="quick-links-list"`, `Add Link`} {
+	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-link-form" class="quick-link-form" hidden`, `id="quick-link-add" type="button" class="icon-button secondary"`, `aria-label="Add quick link"`, `aria-expanded="false"`, `id="quick-links-list"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("dashboard quick links markup missing %q", expected)
 		}
@@ -630,7 +677,7 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("dashboard.js read: %v", err)
 	}
 	scriptBody := string(script)
-	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "refreshQuickLinks", "data-quick-link-edit", "data-quick-link-empty-add"} {
+	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "refreshQuickLinks", "data-quick-link-edit", "toggleQuickLinkForm", "userOwnsDeploymentHome"} {
 		if !strings.Contains(scriptBody, expected) {
 			t.Fatalf("dashboard quick links script missing %q", expected)
 		}
@@ -677,7 +724,7 @@ func TestDashboardHealthPanelIsOperatorFriendly(t *testing.T) {
 	}
 }
 
-func TestOpenAIStatusReportsConfigAndLinkedAccount(t *testing.T) {
+func TestOpenAIStatusReportsChatGPTDeviceConfigAndLinkedAccount(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -691,7 +738,7 @@ func TestOpenAIStatusReportsConfigAndLinkedAccount(t *testing.T) {
 	must(t, db.CreateSession(ctx, session))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
-	server.ConfigureOpenAI("client-id", "client-secret", "https://remote.example.com/v1/oauth/openai/callback", "openid profile email")
+	server.ConfigureAssistantAI(AssistantAIConfig{Provider: assistantProviderChatGPTCodex, ChatGPTOAuthEnabled: true, ChatGPTAuthIssuer: "https://auth.example.com", ChatGPTBackendBaseURL: "https://chatgpt.example.com/backend-api/codex", ChatGPTClientID: "test-client"})
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
@@ -703,17 +750,23 @@ func TestOpenAIStatusReportsConfigAndLinkedAccount(t *testing.T) {
 	if status.Linked {
 		t.Fatal("linked = true before account exists")
 	}
+	if status.AuthMode != chatGPTDeviceAuthMode || status.AuthProvider != openAIAccountProviderChatGPTCodex {
+		t.Fatalf("auth mode/provider = %q/%q", status.AuthMode, status.AuthProvider)
+	}
 
 	expiresAt := now.Add(2 * time.Hour)
 	must(t, db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
-		UserID:       user.ID,
-		AccessToken:  "access",
-		RefreshToken: "refresh",
-		TokenType:    "Bearer",
-		Scope:        "openid profile",
-		ExpiresAt:    &expiresAt,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		UserID:          user.ID,
+		ProviderUserID:  "workspace-123",
+		AuthProvider:    openAIAccountProviderChatGPTCodex,
+		ChatGPTPlanType: "plus",
+		AccessToken:     "access",
+		RefreshToken:    "refresh",
+		TokenType:       "Bearer",
+		Scope:           "openid profile",
+		ExpiresAt:       &expiresAt,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}))
 
 	status = openAIAccountStatusResponse{}
@@ -724,8 +777,31 @@ func TestOpenAIStatusReportsConfigAndLinkedAccount(t *testing.T) {
 	if status.Scope != "openid profile" {
 		t.Fatalf("scope = %q, want %q", status.Scope, "openid profile")
 	}
+	if status.ChatGPTPlanType != "plus" {
+		t.Fatalf("chatgpt plan = %q, want plus", status.ChatGPTPlanType)
+	}
 	if status.ExpiresAt == nil {
 		t.Fatal("expires_at is nil")
+	}
+}
+
+func TestOpenAIBrowserCallbackRouteIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	response, err := http.Get(testServer.URL + "/v1/oauth/openai/callback")
+	if err != nil {
+		t.Fatalf("callback request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("callback status = %d, want %d", response.StatusCode, http.StatusNotFound)
 	}
 }
 
@@ -1089,12 +1165,33 @@ func TestHomeQuickLinksRequireAdminForMutations(t *testing.T) {
 		t.Fatalf("created link = %#v", created.Link)
 	}
 
+	must(t, db.UpdateHomeMembershipRole(ctx, home.ID, admin.ID, domain.HomeRoleMember))
+	var ownerList struct {
+		Links   []domain.HomeQuickLink `json:"links"`
+		CanEdit bool                   `json:"can_edit"`
+	}
+	requestJSON(t, testServer, adminToken, http.MethodGet, "/v1/home/quick-links", nil, &ownerList)
+	if !ownerList.CanEdit || len(ownerList.Links) != 1 {
+		t.Fatalf("deployment owner list should retain edit access after stale role: %#v", ownerList)
+	}
+
+	var staleOwnerCreated struct {
+		Link domain.HomeQuickLink `json:"link"`
+	}
+	requestJSON(t, testServer, adminToken, http.MethodPost, "/v1/home/quick-links", map[string]any{
+		"title": "GitHub",
+		"url":   "https://github.com",
+	}, &staleOwnerCreated)
+	if staleOwnerCreated.Link.ID == "" {
+		t.Fatalf("deployment owner create with stale role = %#v", staleOwnerCreated.Link)
+	}
+
 	var memberList struct {
 		Links   []domain.HomeQuickLink `json:"links"`
 		CanEdit bool                   `json:"can_edit"`
 	}
 	requestJSON(t, testServer, memberToken, http.MethodGet, "/v1/home/quick-links", nil, &memberList)
-	if memberList.CanEdit || len(memberList.Links) != 1 {
+	if memberList.CanEdit || len(memberList.Links) != 2 {
 		t.Fatalf("member list = %#v", memberList)
 	}
 

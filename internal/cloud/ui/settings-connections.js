@@ -1,3 +1,5 @@
+const api = window.HankAPI.request;
+
 const state = {
   user: null,
   homes: [],
@@ -20,6 +22,12 @@ const els = {
   haTimeoutSeconds: document.getElementById("ha-timeout-seconds"),
   haToken: document.getElementById("ha-token"),
   haPersist: document.getElementById("ha-persist"),
+  hermesForm: document.getElementById("hermes-form"),
+  hermesAPIBaseURL: document.getElementById("hermes-api-base-url"),
+  hermesModel: document.getElementById("hermes-model"),
+  hermesTimeoutSeconds: document.getElementById("hermes-timeout-seconds"),
+  hermesAPIKey: document.getElementById("hermes-api-key"),
+  hermesPersist: document.getElementById("hermes-persist"),
   settingsRole: document.getElementById("settings-role"),
   smbForm: document.getElementById("smb-form"),
   smbSharesList: document.getElementById("smb-shares-list"),
@@ -35,25 +43,6 @@ const els = {
   toast: document.getElementById("toast"),
 };
 
-async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const csrf = document.cookie.split("; ").find((part) => part.startsWith("hank_remote_csrf="))?.split("=")[1];
-  if (csrf && !headers.has("X-Hank-CSRF-Token")) {
-    headers.set("X-Hank-CSRF-Token", decodeURIComponent(csrf));
-  }
-  if (!headers.has("Content-Type") && options.body && !(options.body instanceof Blob)) {
-    headers.set("Content-Type", "application/json");
-  }
-  const response = await fetch(path, { ...options, headers });
-  const contentType = response.headers.get("Content-Type") || "";
-  const isJSON = contentType.includes("application/json");
-  const payload = isJSON ? await response.json() : await response.text();
-  if (!response.ok) {
-    const message = typeof payload === "string" ? payload : payload.error || payload.message || response.statusText;
-    throw new Error(message);
-  }
-  return payload;
-}
 
 function showToast(message, isError = false) {
   els.toast.hidden = false;
@@ -138,6 +127,20 @@ function homeAssistantConfig(profile) {
   return {
     base_url: config.base_url || config.url || "",
     timeout_seconds: Number(config.timeout_seconds || 10) || 10,
+  };
+}
+
+function normalizeHermesAPIBaseURL(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function hermesConfig(profile) {
+  const config = profileConfig(profile);
+  return {
+    api_base_url: config.api_base_url || "",
+    model: config.model || "hermes-agent",
+    timeout_seconds: Number(config.timeout_seconds || 120) || 120,
+    api_key_set: Boolean(config.api_key_set),
   };
 }
 
@@ -264,6 +267,9 @@ function renderSummary() {
   els.haForm.querySelectorAll("input, textarea, button").forEach((element) => {
     element.disabled = !admin;
   });
+  els.hermesForm.querySelectorAll("input, textarea, button").forEach((element) => {
+    element.disabled = !admin;
+  });
   els.smbForm.querySelectorAll("input, button").forEach((element) => {
     element.disabled = !admin;
   });
@@ -310,11 +316,18 @@ function renderSummary() {
 function renderForms() {
   const homeAssistant = profileByType("homeassistant");
   const smb = profileByType("smb");
+  const hermes = profileByType("hermes");
   const smbConfig = profileConfig(smb);
   const haConfig = homeAssistantConfig(homeAssistant);
+  const hermesProfileConfig = hermesConfig(hermes);
   els.haBaseURL.value = haConfig.base_url;
   els.haTimeoutSeconds.value = haConfig.timeout_seconds;
   els.haToken.value = "";
+  els.hermesAPIBaseURL.value = hermesProfileConfig.api_base_url;
+  els.hermesModel.value = hermesProfileConfig.model;
+  els.hermesTimeoutSeconds.value = hermesProfileConfig.timeout_seconds;
+  els.hermesAPIKey.value = "";
+  els.hermesAPIKey.placeholder = hermesProfileConfig.api_key_set ? "Hermes API key saved" : "Paste API_SERVER_KEY";
   state.smbShares = sharesFromConfig(smbConfig);
   if (!state.smbShares.some((share) => share.id === state.editingSMBShareID)) {
     state.editingSMBShareID = state.smbShares[0]?.id || "";
@@ -453,6 +466,48 @@ async function saveHomeAssistant(event) {
   }
 }
 
+async function saveHermesSettings(event) {
+  event.preventDefault();
+  if (!isAdmin()) {
+    showToast("Only admins can change Hermes settings.", true);
+    return;
+  }
+  try {
+    const apiBaseURL = normalizeHermesAPIBaseURL(els.hermesAPIBaseURL.value);
+    const model = els.hermesModel.value.trim() || "hermes-agent";
+    const timeoutSeconds = Number.parseInt(els.hermesTimeoutSeconds.value, 10) || 120;
+    if (!apiBaseURL) {
+      showToast("Hermes API base URL is required.", true);
+      return;
+    }
+    const existingConfig = hermesConfig(profileByType("hermes"));
+    if (!els.hermesAPIKey.value.trim() && !existingConfig.api_key_set) {
+      showToast("Hermes API key is required.", true);
+      return;
+    }
+    const payload = {
+      public_config: {
+        api_base_url: apiBaseURL,
+        model,
+        timeout_seconds: timeoutSeconds,
+      },
+      persist: els.hermesPersist.checked,
+    };
+    if (els.hermesAPIKey.value.trim()) {
+      payload.secrets = { api_key: els.hermesAPIKey.value.trim() };
+    }
+    await api("/v1/home/service-profiles/hermes", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    els.hermesAPIKey.value = "";
+    await loadProfiles();
+    showToast("Hermes settings saved.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 async function saveSMBSettings(event) {
   event.preventDefault();
   if (!isAdmin()) {
@@ -579,6 +634,7 @@ els.homeSelect.addEventListener("change", async () => {
   await loadProfiles();
 });
 els.haForm.addEventListener("submit", saveHomeAssistant);
+els.hermesForm.addEventListener("submit", saveHermesSettings);
 els.smbForm.addEventListener("submit", saveSMBSettings);
 els.smbAddShareButton.addEventListener("click", addSMBShare);
 els.smbRemoveShareButton.addEventListener("click", removeSMBShare);

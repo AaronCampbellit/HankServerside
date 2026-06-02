@@ -123,7 +123,7 @@ if [ "$failures" -eq 0 ]; then
     fail "cloud /readyz did not respond on localhost:${port}"
   fi
 
-  if compose run --rm cloud /usr/local/bin/hank-remote-cloud migrate status --strict >/tmp/hank-remote-migration-status.$$ 2>/tmp/hank-remote-migration-status-err.$$; then
+  if compose run --rm --entrypoint /usr/local/bin/hank-remote-cloud cloud migrate status --strict >/tmp/hank-remote-migration-status.$$ 2>/tmp/hank-remote-migration-status-err.$$; then
     pass "migration status is strict-clean"
   else
     fail "migration status check failed"

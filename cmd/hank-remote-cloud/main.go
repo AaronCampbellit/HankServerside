@@ -48,7 +48,6 @@ func main() {
 	}
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
-	server.ConfigureOpenAI(cfg.OpenAIClientID, cfg.OpenAIClientSecret, cfg.OpenAIRedirectURI, cfg.OpenAIScopes)
 	server.ConfigureAPNS(cloud.APNSConfig{
 		TeamID:      cfg.APNS.TeamID,
 		KeyID:       cfg.APNS.KeyID,
@@ -114,20 +113,17 @@ func runMigrateCommand(ctx context.Context, cfg config.Cloud, args []string) err
 	}
 
 	switch args[0] {
-	case "up", "baseline":
+	case "up":
 		db, err := store.OpenMigrating(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
 		return db.CheckMigrations(ctx)
+	case "baseline":
+		return store.BaselineExisting(ctx, cfg.DatabaseURL)
 	case "status":
-		db, err := store.Open(ctx, cfg.DatabaseURL)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		statuses, err := db.MigrationStatuses(ctx)
+		statuses, err := store.MigrationStatuses(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return err
 		}
@@ -135,7 +131,7 @@ func runMigrateCommand(ctx context.Context, cfg config.Cloud, args []string) err
 			fmt.Printf("%06d %s checksum=%s applied_at=%s duration_ms=%d\n", status.Version, status.Name, status.Checksum, status.AppliedAt.Format(time.RFC3339), status.DurationMS)
 		}
 		if len(args) > 1 && args[1] == "--strict" {
-			return db.CheckMigrations(ctx)
+			return store.CheckMigrations(ctx, cfg.DatabaseURL)
 		}
 		return nil
 	default:

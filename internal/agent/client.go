@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
+	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
 	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
@@ -37,7 +38,7 @@ type Client struct {
 	moveSlots  chan struct{}
 }
 
-func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, logger *slog.Logger) *Client {
+func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, hermes *agenthermes.Service, logger *slog.Logger) *Client {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -53,6 +54,9 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 	if notes == nil {
 		notes = agentnotes.New("")
 	}
+	if hermes == nil {
+		hermes = agenthermes.New(agenthermes.Config{})
+	}
 
 	return &Client{
 		cloudURL:   cloudURL,
@@ -66,7 +70,8 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 			files:  files,
 			media:  media,
 			notes:  notes,
-			config: newConfigManager(configPath, ha, files),
+			hermes: hermes,
+			config: newConfigManager(configPath, ha, files, hermes),
 		},
 		uploads:   make(map[string]*uploadTransfer),
 		moves:     make(map[string]context.CancelFunc),
@@ -345,6 +350,9 @@ func (c *Client) capabilities() []string {
 			protocol.CommandMediaDownloadStatus,
 			protocol.CommandMediaImageFetch,
 		)
+	}
+	if c.dispatcher.hermes != nil && c.dispatcher.hermes.Enabled() {
+		capabilities = append(capabilities, protocol.CommandHermesChat)
 	}
 	capabilities = append(capabilities, "config.status", "config.apply")
 	return capabilities

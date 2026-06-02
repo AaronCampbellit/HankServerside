@@ -16,6 +16,7 @@ const (
 )
 
 type FileItem struct {
+	SourceID    string    `json:"source_id,omitempty"`
 	Path        string    `json:"path"`
 	Name        string    `json:"name"`
 	IsDirectory bool      `json:"is_directory"`

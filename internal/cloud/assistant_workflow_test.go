@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -37,7 +38,17 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "media quoted movie search", prompt: `find "normal" movie`, want: assistantIntentMediaSearch},
 		{name: "media quoted download search", prompt: `search for "normal" movie for download`, want: assistantIntentMediaSearch},
 		{name: "file search", prompt: "find 2025 taxes", want: assistantIntentFilesSearch},
+		{name: "note content search", prompt: "find information in my notes about SMB", want: assistantIntentNotesSearch},
+		{name: "tax folder search", prompt: "find the 2025 tax folder", want: assistantIntentFilesSearch},
+		{name: "attachment SMB phrase", prompt: "add this PDF to the taxes SMB share", want: assistantIntentFilesSearch},
+		{name: "store list append", prompt: "add buy coffee to the store list", want: assistantIntentNotesAppend},
+		{name: "calendar tomorrow", prompt: "what do I have tomorrow", want: assistantIntentCalendarSearch},
+		{name: "calendar create timed", prompt: "create calendar event for dentist Friday at 2", want: assistantIntentCalendarCreate},
+		{name: "calendar update", prompt: "move my dentist appointment to 3", want: assistantIntentCalendarUpdate},
+		{name: "calendar delete", prompt: "delete the dentist appointment tomorrow", want: assistantIntentCalendarDelete},
 		{name: "project docs", prompt: "what does AGENTS.md say", want: assistantIntentProjectDocs},
+		{name: "assistant memory decision", prompt: "what did we decide about calendar defaults", want: assistantIntentMemorySearch},
+		{name: "Hermes slash command", prompt: "/Hermes summarize the current plan", want: assistantIntentHermesChat},
 	}
 
 	for _, test := range tests {
@@ -50,6 +61,64 @@ func TestAssistantIntentClassification(t *testing.T) {
 				t.Fatalf("classifyAssistantIntent(%q) = %s, want %s", test.prompt, got.Kind, test.want)
 			}
 		})
+	}
+}
+
+func TestAssistantSlotExtraction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		prompt      string
+		wantAction  string
+		wantObject  string
+		wantPayload string
+		wantDest    string
+	}{
+		{prompt: "add buy batteries to the store list", wantAction: "append", wantObject: "note", wantPayload: "buy batteries", wantDest: "store list"},
+		{prompt: "what do I have tomorrow", wantAction: "list", wantObject: "calendar"},
+		{prompt: "what did we decide about SMB shares", wantAction: "find", wantObject: "chat_history"},
+		{prompt: "create a folder called Warranty in Documents", wantAction: "create", wantObject: "file"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.prompt, func(t *testing.T) {
+			t.Parallel()
+
+			got := extractAssistantSlots(test.prompt)
+			if got.Action != test.wantAction || got.Object != test.wantObject {
+				t.Fatalf("slots = %#v, want action=%q object=%q", got, test.wantAction, test.wantObject)
+			}
+			if test.wantPayload != "" && got.Payload != test.wantPayload {
+				t.Fatalf("payload = %q, want %q; slots=%#v", got.Payload, test.wantPayload, got)
+			}
+			if test.wantDest != "" && got.Destination != test.wantDest {
+				t.Fatalf("destination = %q, want %q; slots=%#v", got.Destination, test.wantDest, got)
+			}
+		})
+	}
+}
+
+func TestAssistantParsingHelpers(t *testing.T) {
+	t.Parallel()
+
+	title, body := parseNoteCreatePrompt("create a note titled HankAI validation saying the 5.5 live workflow test passed")
+	if title != "HankAI validation" || body != "the 5.5 live workflow test passed" {
+		t.Fatalf("parseNoteCreatePrompt title=%q body=%q", title, body)
+	}
+
+	path, sourceID := parseCreateFolderTarget("create folder _hank_validation/live-run/hank-chat-flow on primary")
+	if path != "_hank_validation/live-run/hank-chat-flow" || sourceID != "primary" {
+		t.Fatalf("parseCreateFolderTarget path=%q source_id=%q", path, sourceID)
+	}
+
+	query, sourceID := stripFileSourceSuffix("_hank_validation on the secondary file server")
+	if query != "_hank_validation" || sourceID != "secondary" {
+		t.Fatalf("stripFileSourceSuffix query=%q source_id=%q", query, sourceID)
+	}
+
+	index, ok := assistantSelectionIndex("use the second one", 3)
+	if !ok || index != 1 {
+		t.Fatalf("assistantSelectionIndex = %d %t, want 1 true", index, ok)
 	}
 }
 
@@ -118,6 +187,32 @@ func TestAssistantNoteRankingPrefersExactTitleThenTitleThenBody(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("ranked notes = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestAssistantAppendTextInheritsNoteStyle(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		item    string
+		want    string
+	}{
+		{name: "empty defaults to bullet", content: "", item: "buy batteries", want: "- buy batteries"},
+		{name: "bullet", content: "- milk", item: "eggs", want: "- milk\n- eggs"},
+		{name: "checklist", content: "- [x] call Patrick", item: "send notes", want: "- [x] call Patrick\n- [ ] send notes"},
+		{name: "numbered", content: "1. first\n2. second", item: "third", want: "1. first\n2. second\n3. third"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := appendAssistantNoteText(test.content, test.item); got != test.want {
+				t.Fatalf("appendAssistantNoteText() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -410,6 +505,175 @@ func TestAssistantConfirmationResponseIncludesStructuredSummary(t *testing.T) {
 	fetched := server.assistantRunResponseForSession(ctx, session, run)
 	if fetched.PendingActionSummary == nil || fetched.PendingActionSummary.Kind != "calendar_create" {
 		t.Fatalf("fetched run missing pending action summary: %#v", fetched)
+	}
+}
+
+func TestAssistantCalendarSearchAndMutationPlanning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now()
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, time.Local).AddDate(0, 0, 1)
+	user := domain.User{ID: "usr_assistant_calendar", Email: "assistant-calendar@example.com", PasswordHash: "hash", CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	home := domain.Home{ID: "home_assistant_calendar", UserID: user.ID, Name: "Home", CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	session := domain.AssistantSession{ID: "asess_calendar", HomeID: home.ID, UserID: user.ID, Title: "Calendar", LastMessageAt: now.UTC(), CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.UpsertAssistantCalendarEntries(ctx, []domain.AssistantCalendarEntry{
+		{
+			ID:              "acal_dentist",
+			HomeID:          home.ID,
+			UserID:          user.ID,
+			DeviceID:        "device-calendar",
+			ExternalEventID: "event_dentist",
+			CalendarID:      "Personal",
+			Title:           "Dentist Appointment",
+			StartsAt:        tomorrow,
+			EndsAt:          tomorrow.Add(time.Hour),
+			SearchText:      "Dentist Appointment Personal",
+			UpdatedAt:       now.UTC(),
+		},
+	}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.ProjectDocsEnabled = false
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+
+	agenda, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "what do I have tomorrow")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse calendar search: %v", err)
+	}
+	if len(agenda.Cards) != 1 || agenda.Cards[0].Kind != "calendar" || agenda.Cards[0].EventID != "event_dentist" {
+		t.Fatalf("calendar agenda cards = %#v", agenda.Cards)
+	}
+	diagnostics := assistantDiagnosticsFromContent(agenda)
+	if diagnostics == nil || diagnostics.ToolKind != string(assistantIntentCalendarSearch) {
+		t.Fatalf("calendar diagnostics = %#v", diagnostics)
+	}
+
+	updateRun, err := server.processAssistantMessage(ctx, home, membership, auth, session, "move my dentist appointment to 4", "device-calendar", "UTC")
+	if err != nil {
+		t.Fatalf("process calendar update: %v", err)
+	}
+	if !updateRun.RequiresConfirmation || updateRun.PendingActionSummary == nil || updateRun.PendingActionSummary.Kind != "calendar_update" {
+		t.Fatalf("calendar update did not require confirmation: %#v", updateRun)
+	}
+	run, err := db.GetAssistantRun(ctx, updateRun.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantRun update: %v", err)
+	}
+	var pending assistantPendingAction
+	if err := json.Unmarshal([]byte(run.PendingActionJSON), &pending); err != nil {
+		t.Fatalf("pending update JSON: %v", err)
+	}
+	if pending.CalendarClient == nil || pending.CalendarClient.ToolRequest.ToolName != "calendar.update_event" {
+		t.Fatalf("pending update action = %#v", pending)
+	}
+	if startsAt := assistantToolArgumentString(pending.CalendarClient.ToolRequest.Arguments, "starts_at"); !strings.Contains(startsAt, "16:00:00") {
+		t.Fatalf("planned starts_at = %q, want 4pm", startsAt)
+	}
+	toolRun, err := server.executeConfirmedAssistantAction(ctx, session, run, pending, user.ID)
+	if err != nil {
+		t.Fatalf("execute calendar update confirmation: %v", err)
+	}
+	if !toolRun.RequiresClientTools || toolRun.ClientToolRequest == nil || toolRun.ClientToolRequest.ToolName != "calendar.update_event" {
+		t.Fatalf("calendar update did not request client tool: %#v", toolRun)
+	}
+
+	deleteRun, err := server.processAssistantMessage(ctx, home, membership, auth, session, "delete the dentist appointment tomorrow", "device-calendar", "UTC")
+	if err != nil {
+		t.Fatalf("process calendar delete: %v", err)
+	}
+	if !deleteRun.RequiresConfirmation || deleteRun.PendingActionSummary == nil || deleteRun.PendingActionSummary.Kind != "calendar_delete" || !deleteRun.PendingActionSummary.Destructive {
+		t.Fatalf("calendar delete did not require destructive confirmation: %#v", deleteRun)
+	}
+}
+
+func TestAssistantCalendarFollowupSelectsPreviousCard(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, time.Local).AddDate(0, 0, 1)
+	user := domain.User{ID: "usr_assistant_calendar_followup", Email: "assistant-calendar-followup@example.com", PasswordHash: "hash", CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	home := domain.Home{ID: "home_assistant_calendar_followup", UserID: user.ID, Name: "Home", CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	session := domain.AssistantSession{ID: "asess_calendar_followup", HomeID: home.ID, UserID: user.ID, Title: "Calendar", LastMessageAt: now.UTC(), CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.UpsertAssistantCalendarEntries(ctx, []domain.AssistantCalendarEntry{
+		{
+			ID:              "acal_dentist_one",
+			HomeID:          home.ID,
+			UserID:          user.ID,
+			DeviceID:        "device-calendar",
+			ExternalEventID: "event_dentist_one",
+			CalendarID:      "Personal",
+			Title:           "Dentist Appointment One",
+			StartsAt:        start,
+			EndsAt:          start.Add(time.Hour),
+			SearchText:      "Dentist Appointment One Personal",
+			UpdatedAt:       now.UTC(),
+		},
+		{
+			ID:              "acal_dentist_two",
+			HomeID:          home.ID,
+			UserID:          user.ID,
+			DeviceID:        "device-calendar",
+			ExternalEventID: "event_dentist_two",
+			CalendarID:      "Personal",
+			Title:           "Dentist Appointment Two",
+			StartsAt:        start.Add(time.Hour),
+			EndsAt:          start.Add(2 * time.Hour),
+			SearchText:      "Dentist Appointment Two Personal",
+			UpdatedAt:       now.UTC(),
+		},
+	}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+
+	ambiguous, err := server.processAssistantMessage(ctx, home, membership, auth, session, "move my dentist appointment to 4", "device-calendar", "UTC")
+	if err != nil {
+		t.Fatalf("ambiguous update: %v", err)
+	}
+	if ambiguous.RequiresConfirmation || ambiguous.AssistantMessage == nil || len(ambiguous.AssistantMessage.Cards) != 2 {
+		t.Fatalf("ambiguous update response = %#v", ambiguous)
+	}
+
+	selected, err := server.processAssistantMessage(ctx, home, membership, auth, session, "second one to 5", "device-calendar", "UTC")
+	if err != nil {
+		t.Fatalf("followup selection: %v", err)
+	}
+	if !selected.RequiresConfirmation || selected.PendingActionSummary == nil || selected.PendingActionSummary.Kind != "calendar_update" {
+		t.Fatalf("followup did not create update confirmation: %#v", selected)
+	}
+	if !strings.Contains(selected.PendingActionSummary.Confirmation, "5:00 PM") {
+		t.Fatalf("followup confirmation = %q, want new 5pm time", selected.PendingActionSummary.Confirmation)
+	}
+	run, err := db.GetAssistantRun(ctx, selected.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantRun selected: %v", err)
+	}
+	var pending assistantPendingAction
+	if err := json.Unmarshal([]byte(run.PendingActionJSON), &pending); err != nil {
+		t.Fatalf("pending selected JSON: %v", err)
+	}
+	if got := assistantToolArgumentString(pending.CalendarClient.ToolRequest.Arguments, "event_id"); got != "event_dentist_two" {
+		t.Fatalf("selected event_id = %q, want event_dentist_two", got)
+	}
+	if startsAt := assistantToolArgumentString(pending.CalendarClient.ToolRequest.Arguments, "starts_at"); !strings.Contains(startsAt, "17:00:00") {
+		t.Fatalf("selected starts_at = %q, want 5pm", startsAt)
 	}
 }
 
@@ -831,6 +1095,7 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	must(t, db.UpsertAssistantFileIndex(ctx, domain.AssistantFileIndex{
 		ID:               "afile_2025_taxes",
 		HomeID:           home.ID,
+		ServiceProfileID: "archive",
 		Path:             "Documents/Taxes/2025 Taxes",
 		Name:             "2025 Taxes",
 		IsDirectory:      true,
@@ -844,6 +1109,7 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	must(t, db.UpsertAssistantFileIndex(ctx, domain.AssistantFileIndex{
 		ID:               "afile_2025_w2",
 		HomeID:           home.ID,
+		ServiceProfileID: "archive",
 		Path:             "Documents/Taxes/2025 Taxes/W2.pdf",
 		Name:             "W2.pdf",
 		IsDirectory:      false,
@@ -871,7 +1137,7 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateAssistantResponse: %v", err)
 	}
-	if len(answer.Cards) != 1 || answer.Cards[0].Kind != "file" || answer.Cards[0].Path != "Documents/Taxes/2025 Taxes" {
+	if len(answer.Cards) != 1 || answer.Cards[0].Kind != "file" || answer.Cards[0].Path != "Documents/Taxes/2025 Taxes" || answer.Cards[0].SourceID != "archive" {
 		t.Fatalf("file search cards = %#v", answer.Cards)
 	}
 	diagnostics := assistantDiagnosticsFromContent(answer)
@@ -892,6 +1158,76 @@ func TestAssistantFileSearchUsesFileIndex(t *testing.T) {
 	}
 	if len(allAnswer.Cards) < 2 {
 		t.Fatalf("broad file search cards = %#v, want multiple", allAnswer.Cards)
+	}
+}
+
+func TestAssistantFileCreateFolderRequiresConfirmation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_assistant_file_create", Email: "assistant-file-create@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_assistant_file_create", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.ProjectDocsEnabled = false
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+
+	answer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "create a folder called Warranty in Documents")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse create folder: %v", err)
+	}
+	pending := assistantPendingActionFromContent(answer)
+	if pending == nil || pending.Kind != "file_create_folder" || pending.FileCreateFolder == nil {
+		t.Fatalf("missing file create pending action: %#v", answer)
+	}
+	if pending.FileCreateFolder.Path != "Documents/Warranty" {
+		t.Fatalf("create folder path = %q, want Documents/Warranty", pending.FileCreateFolder.Path)
+	}
+}
+
+func TestAssistantMemorySearchUsesConversationIndex(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_assistant_memory", Email: "assistant-memory@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_assistant_memory", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AssistantSession{ID: "asess_memory", HomeID: home.ID, UserID: user.ID, Title: "Calendar defaults", LastMessageAt: now, CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.CreateAssistantMessage(ctx, domain.AssistantMessage{
+		ID:          "amsg_memory_user",
+		SessionID:   session.ID,
+		Role:        assistantRoleUser,
+		Status:      assistantStateCompleted,
+		ContentJSON: `{"text":"Default calendar should be configurable in calendar settings."}`,
+		ModelName:   assistantModelName,
+		CreatedAt:   now,
+	}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := server.indexAssistantConversation(ctx, session, user.ID); err != nil {
+		t.Fatalf("indexAssistantConversation: %v", err)
+	}
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	answer, err := server.answerAssistantMemoryPrompt(ctx, home.ID, user.ID, &session, settings, "what did we decide about calendar defaults")
+	if err != nil {
+		t.Fatalf("answerAssistantMemoryPrompt: %v", err)
+	}
+	if len(answer.Cards) != 1 || answer.Cards[0].Kind != "assistant_conversation" || answer.Cards[0].Path != session.ID {
+		t.Fatalf("memory cards = %#v", answer.Cards)
 	}
 }
 
@@ -1009,6 +1345,51 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	}
 }
 
+func TestAssistantHermesCommandRoutesThroughAgent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	requests := make(chan protocol.HermesChatRequest, 1)
+	go serveAssistantHermesChat(ctx, t, agentConn, agentID, homeID, requests)
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/Hermes what should I check next?",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &run)
+	if run.AssistantMessage == nil {
+		t.Fatalf("missing assistant message: %#v", run)
+	}
+	if run.AssistantMessage.Text != "Hermes says check the API server." {
+		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
+	}
+	if run.Diagnostics == nil || run.Diagnostics.ToolKind != string(assistantIntentHermesChat) || run.Diagnostics.Query != "what should I check next?" {
+		t.Fatalf("diagnostics = %#v", run.Diagnostics)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Prompt != "what should I check next?" {
+			t.Fatalf("Hermes prompt = %q", request.Prompt)
+		}
+		if !strings.Contains(request.ConversationID, session.ID) || !strings.Contains(request.SessionKey, session.ID) {
+			t.Fatalf("Hermes scope = conversation %q session key %q", request.ConversationID, request.SessionKey)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for Hermes command")
+	}
+}
+
 func assistantTraceHasEvent(events []assistantTraceEvent, eventName string) bool {
 	for _, event := range events {
 		if event.Event == eventName {
@@ -1069,4 +1450,51 @@ func serveAssistantHomeAssistantStates(ctx context.Context, t *testing.T, agentC
 		}
 		_ = wsjson.Write(ctx, agentConn, response)
 	}
+}
+
+func serveAssistantHermesChat(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, requests chan<- protocol.HermesChatRequest) {
+	t.Helper()
+
+	for {
+		var envelope protocol.Envelope
+		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+			return
+		}
+		if envelope.Type != protocol.TypeCloudCommand {
+			continue
+		}
+		command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+		if err != nil {
+			return
+		}
+		if command.Command != protocol.CommandHermesChat {
+			continue
+		}
+		request, err := decodeProtocolBody[protocol.HermesChatRequest](command.Body)
+		if err != nil {
+			return
+		}
+		select {
+		case requests <- request:
+		default:
+		}
+		response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.HermesChatResponse{
+			Text:           "Hermes says check the API server.",
+			Model:          "hermes-agent",
+			ResponseID:     "resp_test",
+			ConversationID: request.ConversationID,
+		})
+		if err != nil {
+			return
+		}
+		_ = wsjson.Write(ctx, agentConn, response)
+	}
+}
+
+func decodeProtocolBody[T any](body json.RawMessage) (T, error) {
+	var out T
+	if len(body) == 0 {
+		return out, nil
+	}
+	return out, json.Unmarshal(body, &out)
 }

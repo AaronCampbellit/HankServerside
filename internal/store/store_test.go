@@ -597,6 +597,23 @@ func TestBaselineExistingSchemaThenReadOnlyStatus(t *testing.T) {
 	if err := migrations.BaselineExisting(ctx, db.DB(), 0); err != nil {
 		t.Fatalf("BaselineExisting: %v", err)
 	}
+	statuses, err := migrations.AppliedReadOnly(ctx, db.DB())
+	if err != nil {
+		t.Fatalf("AppliedReadOnly after baseline: %v", err)
+	}
+	all, err := migrations.All()
+	if err != nil {
+		t.Fatalf("migrations.All: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Version != all[0].Version || statuses[0].Checksum != all[0].Checksum {
+		t.Fatalf("migration statuses after baseline = %#v, want first migration only", statuses)
+	}
+	if err := migrations.CheckReadOnly(ctx, db.DB()); !errors.Is(err, migrations.ErrPendingMigrations) {
+		t.Fatalf("CheckReadOnly after baseline = %v, want ErrPendingMigrations", err)
+	}
+	if err := migrations.ApplyPending(ctx, db.DB()); err != nil {
+		t.Fatalf("ApplyPending after baseline: %v", err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close migrating store: %v", err)
 	}
@@ -606,12 +623,99 @@ func TestBaselineExistingSchemaThenReadOnlyStatus(t *testing.T) {
 		t.Fatalf("Open after baseline: %v", err)
 	}
 	defer opened.Close()
-	statuses, err := opened.MigrationStatuses(ctx)
+	statuses, err = opened.MigrationStatuses(ctx)
 	if err != nil {
 		t.Fatalf("MigrationStatuses: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].Version != migrations.Baseline().Version || statuses[0].Checksum != migrations.Checksum(migrations.Baseline()) {
-		t.Fatalf("migration statuses = %#v, want baseline", statuses)
+	if len(statuses) != len(all) {
+		t.Fatalf("migration statuses = %#v, want %d applied migrations", statuses, len(all))
+	}
+}
+
+func TestLegacyCleanupMigrationsArchiveAndCanonicalizeNotes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	url := testutil.PostgreSQLTestURL(t)
+	raw, err := sql.Open(driverName, url)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer raw.Close()
+
+	all, err := migrations.All()
+	if err != nil {
+		t.Fatalf("migrations.All: %v", err)
+	}
+	for _, statement := range all[0].Statements {
+		if _, err := raw.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("apply baseline statement: %v", err)
+		}
+	}
+	if _, err := raw.ExecContext(ctx, `ALTER TABLE user_notes DROP CONSTRAINT IF EXISTS user_notes_page_type_check`); err != nil {
+		t.Fatalf("drop current page type constraint: %v", err)
+	}
+	if _, err := raw.ExecContext(ctx, `ALTER TABLE user_notes ADD CONSTRAINT user_notes_page_type_check CHECK (page_type IN ('text', 'board'))`); err != nil {
+		t.Fatalf("add legacy page type constraint: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := raw.ExecContext(ctx, `INSERT INTO users (id, email, password_hash, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)`, "usr_legacy", "legacy@example.com", "hash", now); err != nil {
+		t.Fatalf("insert legacy user: %v", err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO homes (id, user_id, name, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)`, "home_legacy", "usr_legacy", "Legacy Home", now); err != nil {
+		t.Fatalf("insert legacy home: %v", err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO home_notes (home_id, note_id, title, content, page_type, board_json, revision, checksum, updated_at, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		"home_legacy", "home-note.md", "Home Note", "Legacy home body", "text", "", "rev-home", "sum-home", now, "usr_legacy"); err != nil {
+		t.Fatalf("insert legacy home note: %v", err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO user_notes (id, note_id, owner_user_id, home_id, title, content, body_markdown, page_type, board_json, revision, checksum, crdt_state_json, collab_version, created_at, updated_at, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, '', $7, $8, $9, $10, $11, $12, $13, $13, $14)`,
+		"note_legacy", "legacy.md", "usr_legacy", "home_legacy", "Legacy Board", "Legacy profile body", "board", `{"columns":[]}`, "rev-profile", "sum-profile", "{}", 1, now, "usr_legacy"); err != nil {
+		t.Fatalf("insert legacy user note: %v", err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO openai_oauth_states (state_hash, user_id, code_verifier, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5)`, "state-hash", "usr_legacy", "verifier", now, now.Add(time.Hour)); err != nil {
+		t.Fatalf("insert legacy oauth state: %v", err)
+	}
+
+	if err := migrations.ApplyPending(ctx, raw); err != nil {
+		t.Fatalf("ApplyPending: %v", err)
+	}
+	if tableExists(t, ctx, raw, "home_notes") {
+		t.Fatal("home_notes still exists after cleanup migration")
+	}
+	if tableExists(t, ctx, raw, "openai_oauth_states") {
+		t.Fatal("openai_oauth_states still exists after cleanup migration")
+	}
+	if !tableExists(t, ctx, raw, "legacy_home_notes_archive") {
+		t.Fatal("legacy_home_notes_archive missing after cleanup migration")
+	}
+	if columnExists(t, ctx, raw, "user_notes", "content") {
+		t.Fatal("user_notes.content still exists after cleanup migration")
+	}
+
+	var archivedBody string
+	if err := raw.QueryRowContext(ctx, `SELECT content FROM legacy_home_notes_archive WHERE home_id = $1 AND note_id = $2`, "home_legacy", "home-note.md").Scan(&archivedBody); err != nil {
+		t.Fatalf("query archived home note: %v", err)
+	}
+	if archivedBody != "Legacy home body" {
+		t.Fatalf("archived home note body = %q", archivedBody)
+	}
+
+	var bodyMarkdown, pageType string
+	if err := raw.QueryRowContext(ctx, `SELECT body_markdown, page_type FROM user_notes WHERE id = $1`, "note_legacy").Scan(&bodyMarkdown, &pageType); err != nil {
+		t.Fatalf("query cleaned user note: %v", err)
+	}
+	if bodyMarkdown != "Legacy profile body" || pageType != "kanban" {
+		t.Fatalf("cleaned user note body/page_type = %q/%q, want canonical body and kanban", bodyMarkdown, pageType)
+	}
+	if err := migrations.CheckReadOnly(ctx, raw); err != nil {
+		t.Fatalf("CheckReadOnly after cleanup: %v", err)
 	}
 }
 
@@ -708,6 +812,28 @@ func countPublicTables(t *testing.T, ctx context.Context, db *sql.DB) int {
 		t.Fatalf("count public tables: %v", err)
 	}
 	return count
+}
+
+func tableExists(t *testing.T, ctx context.Context, db *sql.DB, tableName string) bool {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1
+	)`, tableName).Scan(&exists); err != nil {
+		t.Fatalf("check table %s: %v", tableName, err)
+	}
+	return exists
+}
+
+func columnExists(t *testing.T, ctx context.Context, db *sql.DB, tableName, columnName string) bool {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+	)`, tableName, columnName).Scan(&exists); err != nil {
+		t.Fatalf("check column %s.%s: %v", tableName, columnName, err)
+	}
+	return exists
 }
 
 func assertSameStrings(t *testing.T, got []string, want []string) {

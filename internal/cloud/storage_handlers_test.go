@@ -83,7 +83,7 @@ func TestStoragePageRequiresAdmin(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	adminReq, err := http.NewRequest(http.MethodGet, testServer.URL+"/dashboard/storage", nil)
+	adminReq, err := http.NewRequest(http.MethodGet, testServer.URL+"/dashboard/settings/backups-pane", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestStoragePageRequiresAdmin(t *testing.T) {
 		t.Fatalf("admin storage page status = %d, want %d", adminResp.StatusCode, http.StatusOK)
 	}
 
-	memberReq, err := http.NewRequest(http.MethodGet, testServer.URL+"/dashboard/storage", nil)
+	memberReq, err := http.NewRequest(http.MethodGet, testServer.URL+"/dashboard/settings/backups-pane", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -61,7 +61,9 @@
             <span class="quick-links-actions">
               <span id="quick-links-count" class="pill">0 links</span>
               <button id="quick-links-refresh" type="button" class="secondary">Refresh</button>
-              <button id="quick-link-add" type="button" class="secondary" hidden>Add Link</button>
+              <button id="quick-link-add" type="button" class="icon-button secondary" title="Add quick link" aria-label="Add quick link" aria-expanded="false" hidden>
+                <span aria-hidden="true">+</span>
+              </button>
             </span>
           </div>
           <form id="quick-link-form" class="quick-link-form" hidden>
@@ -151,7 +153,8 @@
       <div id="toast" class="toast" hidden></div>
     </div>
 
+    <script src="/assets/api-client.js" defer></script>
     <script src="/assets/dashboard.js?v=20260601-health-panel" defer></script>
-    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/admin-nav.js?v=20260601-nav-scope" defer></script>
   </body>
 </html>

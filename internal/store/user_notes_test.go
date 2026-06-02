@@ -92,7 +92,7 @@ func TestUserNotesStoreFullMetadataAndPostgresNotify(t *testing.T) {
 	}
 }
 
-func TestSaveUserNoteRepairsLegacyPageTypeConstraint(t *testing.T) {
+func TestSaveUserNoteUsesCanonicalBodyMarkdownOnly(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -104,31 +104,32 @@ func TestSaveUserNoteRepairsLegacyPageTypeConstraint(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.exec(ctx, `ALTER TABLE user_notes DROP CONSTRAINT IF EXISTS user_notes_page_type_check`); err != nil {
-		t.Fatalf("drop constraint: %v", err)
+	var contentColumnCount int
+	if err := db.queryRow(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'user_notes' AND column_name = 'content'`).Scan(&contentColumnCount); err != nil {
+		t.Fatalf("count content column: %v", err)
 	}
-	if _, err := db.exec(ctx, `ALTER TABLE user_notes ADD CONSTRAINT user_notes_page_type_check CHECK (page_type IN ('text', 'board'))`); err != nil {
-		t.Fatalf("add legacy constraint: %v", err)
+	if contentColumnCount != 0 {
+		t.Fatalf("user_notes.content column count = %d, want 0", contentColumnCount)
 	}
 
 	now := time.Now().UTC()
-	user := domain.User{ID: "usr_notes_kanban_repair", Email: "notes-kanban-repair@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	user := domain.User{ID: "usr_notes_body", Email: "notes-body@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
 	if err := db.CreateUser(ctx, user); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
 	note := domain.UserNote{
-		ID:            "note_kanban_repair",
+		ID:            "note_body",
 		NoteID:        "board.md",
 		OwnerUserID:   user.ID,
 		Title:         "Board",
-		Content:       "# Board",
-		BodyMarkdown:  "# Board",
+		Content:       "compatibility alias should not be stored",
+		BodyMarkdown:  "# Canonical Board",
 		BodyFormat:    "markdown",
 		PageType:      "kanban",
 		BoardJSON:     `{"columns":[]}`,
-		Revision:      "rev-kanban",
-		Checksum:      "sum-kanban",
+		Revision:      "rev-body",
+		Checksum:      "sum-body",
 		CRDTStateJSON: "{}",
 		CollabVersion: 1,
 		CreatedAt:     now,
@@ -137,7 +138,7 @@ func TestSaveUserNoteRepairsLegacyPageTypeConstraint(t *testing.T) {
 	}
 	if err := db.SaveUserNoteWithOperations(ctx, note, []domain.NoteOperation{{
 		NoteID:         note.ID,
-		OpID:           "op-kanban",
+		OpID:           "op-body",
 		ActorUserID:    user.ID,
 		SessionID:      "test",
 		BaseVersion:    0,
@@ -145,14 +146,14 @@ func TestSaveUserNoteRepairsLegacyPageTypeConstraint(t *testing.T) {
 		OpJSON:         `{"type":"replace_snapshot","page_type":"kanban"}`,
 		CreatedAt:      now,
 	}}); err != nil {
-		t.Fatalf("SaveUserNoteWithOperations repaired legacy constraint: %v", err)
+		t.Fatalf("SaveUserNoteWithOperations: %v", err)
 	}
 
 	fetched, err := db.GetProfileNote(ctx, user.ID, "board.md")
 	if err != nil {
 		t.Fatalf("GetProfileNote: %v", err)
 	}
-	if fetched.PageType != "kanban" {
-		t.Fatalf("page_type = %q, want kanban", fetched.PageType)
+	if fetched.PageType != "kanban" || fetched.BodyMarkdown != "# Canonical Board" || fetched.Content != fetched.BodyMarkdown {
+		t.Fatalf("fetched note page/body/content = %q/%q/%q", fetched.PageType, fetched.BodyMarkdown, fetched.Content)
 	}
 }

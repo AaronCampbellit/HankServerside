@@ -1,3 +1,5 @@
+const api = window.HankAPI.request;
+
 const state = {
   user: null,
   homes: [],
@@ -61,25 +63,6 @@ if (isSettingsHomePane) {
   }
 }
 
-async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const csrf = document.cookie.split("; ").find((part) => part.startsWith("hank_remote_csrf="))?.split("=")[1];
-  if (csrf && !headers.has("X-Hank-CSRF-Token")) {
-    headers.set("X-Hank-CSRF-Token", decodeURIComponent(csrf));
-  }
-  if (!headers.has("Content-Type") && options.body && !(options.body instanceof Blob)) {
-    headers.set("Content-Type", "application/json");
-  }
-  const response = await fetch(path, { ...options, headers });
-  const contentType = response.headers.get("Content-Type") || "";
-  const isJSON = contentType.includes("application/json");
-  const payload = isJSON ? await response.json() : await response.text();
-  if (!response.ok) {
-    const message = typeof payload === "string" ? payload : payload.error || payload.message || response.statusText;
-    throw new Error(message);
-  }
-  return payload;
-}
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
@@ -112,6 +95,15 @@ function selectedHome() {
   return state.homes.find((home) => home.id === els.tokenHome.value) || state.homes[0] || null;
 }
 
+function userOwnsDeploymentHome() {
+  const home = state.homes[0] || null;
+  return Boolean(home?.user_id && state.user?.id && home.user_id === state.user.id);
+}
+
+function canEditQuickLinks(payload = {}) {
+  return Boolean(payload.can_edit) || userOwnsDeploymentHome();
+}
+
 function agentIDFromHomeName(homeName) {
   const slug = String(homeName || "")
     .trim()
@@ -134,29 +126,10 @@ function agentEnvFile(payload, home) {
     `HANK_REMOTE_AGENT_HOME_NAME=${dotenvValue(home?.name || "Home")}`,
     "HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent",
     "",
-    "# Optional Home Assistant connection. Configure later from Settings > Connections.",
-    "HANK_REMOTE_HA_BASE_URL=",
-    "HANK_REMOTE_HA_TOKEN=",
-    "HANK_REMOTE_HA_TIMEOUT_SECONDS=10",
-    "",
-    "# Optional SMB connection. Leave blank to use the Docker files volume.",
-    "HANK_REMOTE_SMB_HOST=",
-    "HANK_REMOTE_SMB_SHARE=",
-    "HANK_REMOTE_SMB_USERNAME=",
-    "HANK_REMOTE_SMB_PASSWORD=",
-    "HANK_REMOTE_SMB_DOMAIN=",
-    "HANK_REMOTE_SMB_SHARES_JSON=",
-    "",
     "HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files",
     "HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes",
     "",
-    "# Optional media download workflow. Credentials can be edited later from Settings > AI.",
-    "HANK_REMOTE_MEDIA_GRAMATON_ENABLED=false",
-    "HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=https://gramaton.io",
-    "HANK_REMOTE_MEDIA_GRAMATON_USERNAME=",
-    "HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=",
-    "HANK_REMOTE_MEDIA_DESTINATION_PATH=",
-    "HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION=true",
+    "# Configure Home Assistant, SMB shares, and media credentials from dashboard Settings.",
   ].join("\n");
 }
 
@@ -269,7 +242,11 @@ function quickLinkStatusInfo(link) {
 
 function renderQuickLinks() {
   els.quickLinksCount.textContent = `${state.quickLinks.length} link${state.quickLinks.length === 1 ? "" : "s"}`;
+  state.quickLinksCanEdit = state.quickLinksCanEdit || userOwnsDeploymentHome();
   els.quickLinkAdd.hidden = !state.quickLinksCanEdit;
+  if (!state.quickLinksCanEdit) {
+    hideQuickLinkForm();
+  }
   if (!state.quickLinks.length) {
     els.quickLinksList.className = "quick-links-grid empty-state";
     els.quickLinksList.innerHTML = `
@@ -277,9 +254,7 @@ function renderQuickLinks() {
         <strong>No quick links saved.</strong>
         <span>${state.quickLinksCanEdit ? "Add links for dashboards, admin tools, and service pages." : "Ask an admin to add shared home links."}</span>
       </div>
-      ${state.quickLinksCanEdit ? `<button type="button" class="secondary" data-quick-link-empty-add>Add Link</button>` : ""}
     `;
-    els.quickLinksList.querySelector("[data-quick-link-empty-add]")?.addEventListener("click", () => showQuickLinkForm());
     return;
   }
 
@@ -327,15 +302,17 @@ function renderQuickLinks() {
 }
 
 function showQuickLinkForm(link = null) {
-  if (!state.quickLinksCanEdit) {
+  if (!canEditQuickLinks({ can_edit: state.quickLinksCanEdit })) {
     return;
   }
+  state.quickLinksCanEdit = true;
   els.quickLinkID.value = link?.id || "";
   els.quickLinkTitle.value = link?.title || "";
   els.quickLinkURL.value = link?.url || "";
   els.quickLinkDescription.value = link?.description || "";
   els.quickLinkHealth.checked = link ? Boolean(link.health_check_enabled) : true;
   els.quickLinkForm.hidden = false;
+  els.quickLinkAdd.setAttribute("aria-expanded", "true");
   els.quickLinkTitle.focus();
 }
 
@@ -344,6 +321,15 @@ function hideQuickLinkForm() {
   els.quickLinkID.value = "";
   els.quickLinkHealth.checked = true;
   els.quickLinkForm.hidden = true;
+  els.quickLinkAdd.setAttribute("aria-expanded", "false");
+}
+
+function toggleQuickLinkForm() {
+  if (els.quickLinkForm.hidden) {
+    showQuickLinkForm();
+    return;
+  }
+  hideQuickLinkForm();
 }
 
 function renderTokens(homeID) {
@@ -600,6 +586,10 @@ async function loadHomes() {
     state.homes = [];
   }
   renderHomes();
+  if (userOwnsDeploymentHome()) {
+    state.quickLinksCanEdit = true;
+    renderQuickLinks();
+  }
 }
 
 async function loadAgents() {
@@ -612,10 +602,10 @@ async function loadQuickLinks() {
   try {
     const payload = await api("/v1/home/quick-links");
     state.quickLinks = payload.links || [];
-    state.quickLinksCanEdit = Boolean(payload.can_edit);
+    state.quickLinksCanEdit = canEditQuickLinks(payload);
   } catch (_) {
     state.quickLinks = [];
-    state.quickLinksCanEdit = false;
+    state.quickLinksCanEdit = userOwnsDeploymentHome();
   }
   renderQuickLinks();
 }
@@ -627,7 +617,7 @@ async function refreshQuickLinks() {
   try {
     const payload = await api("/v1/home/quick-links/checks", { method: "POST", body: JSON.stringify({}) });
     state.quickLinks = payload.links || [];
-    state.quickLinksCanEdit = Boolean(payload.can_edit);
+    state.quickLinksCanEdit = canEditQuickLinks(payload);
     renderQuickLinks();
     return payload;
   } finally {
@@ -677,7 +667,7 @@ async function loadSetupStatus() {
 
 async function saveQuickLink(event) {
   event.preventDefault();
-  if (!state.quickLinksCanEdit) {
+  if (!canEditQuickLinks({ can_edit: state.quickLinksCanEdit })) {
     showToast("Only admins can change quick links.", true);
     return;
   }
@@ -731,7 +721,7 @@ async function moveQuickLink(index, direction) {
       body: JSON.stringify({ ids: links.map((link) => link.id) }),
     });
     state.quickLinks = payload.links || links;
-    state.quickLinksCanEdit = Boolean(payload.can_edit);
+    state.quickLinksCanEdit = canEditQuickLinks(payload);
     renderQuickLinks();
   } catch (error) {
     showToast(error.message, true);
@@ -835,7 +825,7 @@ els.quickLinksRefresh.addEventListener("click", () => refreshQuickLinks()
     loadQuickLinks().catch(() => {});
     showToast(error.message || "Quick link status checks could not be refreshed.", true);
   }));
-els.quickLinkAdd.addEventListener("click", () => showQuickLinkForm());
+els.quickLinkAdd.addEventListener("click", toggleQuickLinkForm);
 els.quickLinkForm.addEventListener("submit", saveQuickLink);
 els.quickLinkCancel.addEventListener("click", hideQuickLinkForm);
 els.tokenForm.addEventListener("submit", (event) => issueToken(event).catch((error) => showToast(error.message, true)));

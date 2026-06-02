@@ -54,10 +54,6 @@ type Server struct {
 	realtimeCancel        context.CancelFunc
 	sessionTTL            time.Duration
 	requestTimeout        time.Duration
-	openAIClientID        string
-	openAIClientSecret    string
-	openAIRedirectURI     string
-	openAIScopes          string
 	assistantAI           AssistantAIConfig
 	chatGPTDeviceAuths    *chatGPTDeviceAuthRegistry
 	noteAttachmentRoot    string
@@ -126,18 +122,16 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.handleLoginPage)
 	mux.HandleFunc("/dashboard", server.handleDashboardPage)
-	mux.HandleFunc("/dashboard/home-users", server.handleHomeUsersPage)
-	mux.HandleFunc("/dashboard/service-profiles", server.handleServiceProfilesPage)
-	mux.HandleFunc("/dashboard/sync-status", server.handleSyncStatusPage)
-	mux.HandleFunc("/dashboard/storage", server.handleStoragePage)
 	mux.HandleFunc("/dashboard/hank", server.handleHankPage)
 	mux.HandleFunc("/dashboard/home-assistant", server.handleHomeAssistantPage)
-	mux.HandleFunc("/dashboard/assistant-settings", server.handleAssistantSettingsPage)
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
 	mux.HandleFunc("/dashboard/file-server", server.handleFileServerPage)
 	mux.HandleFunc("/dashboard/settings", server.handleSettingsPage)
+	mux.HandleFunc("/dashboard/settings/people-pane", server.handleSettingsPeoplePane)
 	mux.HandleFunc("/dashboard/settings/connections-pane", server.handleSettingsConnectionsPane)
-	mux.HandleFunc("/dashboard/accept-invitation", server.handleAcceptInvitationPage)
+	mux.HandleFunc("/dashboard/settings/ai-pane", server.handleSettingsAIPane)
+	mux.HandleFunc("/dashboard/settings/backups-pane", server.handleSettingsBackupsPane)
+	mux.HandleFunc("/dashboard/settings/join-home-pane", server.handleSettingsJoinHomePane)
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)
 	mux.HandleFunc("/favicon.ico", serveUIFavicon)
 	mux.HandleFunc("/assets/", serveUIAsset)
@@ -153,7 +147,6 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/me/notification-settings", server.handleNotificationSettings)
 	mux.HandleFunc("/v1/oauth/openai/status", server.handleOpenAIOAuthStatus)
 	mux.HandleFunc("/v1/oauth/openai/start", server.handleOpenAIOAuthStart)
-	mux.HandleFunc("/v1/oauth/openai/callback", server.handleOpenAIOAuthCallback)
 	mux.HandleFunc("/v1/me/notes", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/notes/", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/profile", server.handleProfileSettingsHTTP)
@@ -183,13 +176,6 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	go server.forwardStorageEvents(realtimeCtx)
 
 	return server
-}
-
-func (s *Server) ConfigureOpenAI(clientID, clientSecret, redirectURI, scopes string) {
-	s.openAIClientID = strings.TrimSpace(clientID)
-	s.openAIClientSecret = strings.TrimSpace(clientSecret)
-	s.openAIRedirectURI = strings.TrimSpace(redirectURI)
-	s.openAIScopes = strings.TrimSpace(scopes)
 }
 
 func (s *Server) ConfigureAssistantAI(cfg AssistantAIConfig) {
@@ -893,6 +879,10 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 				s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "permission_denied", err.Error(), nil)
 				continue
 			}
+		}
+		if strings.HasPrefix(command.Command, "hermes.") && membership.Role != domain.HomeRoleAdmin {
+			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "permission_denied", errAdminRoleRequired.Error(), nil)
+			continue
 		}
 
 		if strings.HasPrefix(command.Command, "notes.") {

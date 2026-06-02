@@ -194,9 +194,9 @@ func (s *Store) CreateNoteAttachmentAndSaveNote(ctx context.Context, attachment 
 	}
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_notes (
-				id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
+				id, note_id, owner_user_id, home_id, parent_id, sort_order, title, body_markdown, body_format, page_type, board_json,
 				revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				note_id = excluded.note_id,
 				owner_user_id = excluded.owner_user_id,
@@ -204,7 +204,6 @@ func (s *Store) CreateNoteAttachmentAndSaveNote(ctx context.Context, attachment 
 				parent_id = excluded.parent_id,
 				sort_order = excluded.sort_order,
 				title = excluded.title,
-				content = excluded.content,
 				body_markdown = excluded.body_markdown,
 				body_format = excluded.body_format,
 				page_type = excluded.page_type,
@@ -223,7 +222,6 @@ func (s *Store) CreateNoteAttachmentAndSaveNote(ctx context.Context, attachment 
 		nullableText(note.ParentID),
 		note.SortOrder,
 		note.Title,
-		noteBodyMarkdown(note),
 		noteBodyMarkdown(note),
 		noteBodyFormat(note),
 		note.PageType,
@@ -318,9 +316,9 @@ func (s *Store) DeleteNoteAttachmentAndSaveNote(ctx context.Context, noteID stri
 	}
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_notes (
-				id, note_id, owner_user_id, home_id, parent_id, sort_order, title, content, body_markdown, body_format, page_type, board_json,
+				id, note_id, owner_user_id, home_id, parent_id, sort_order, title, body_markdown, body_format, page_type, board_json,
 				revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				note_id = excluded.note_id,
 				owner_user_id = excluded.owner_user_id,
@@ -328,7 +326,6 @@ func (s *Store) DeleteNoteAttachmentAndSaveNote(ctx context.Context, noteID stri
 				parent_id = excluded.parent_id,
 				sort_order = excluded.sort_order,
 				title = excluded.title,
-				content = excluded.content,
 				body_markdown = excluded.body_markdown,
 				body_format = excluded.body_format,
 				page_type = excluded.page_type,
@@ -347,7 +344,6 @@ func (s *Store) DeleteNoteAttachmentAndSaveNote(ctx context.Context, noteID stri
 		nullableText(note.ParentID),
 		note.SortOrder,
 		note.Title,
-		noteBodyMarkdown(note),
 		noteBodyMarkdown(note),
 		noteBodyFormat(note),
 		note.PageType,

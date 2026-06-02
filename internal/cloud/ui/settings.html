@@ -54,26 +54,27 @@
           <iframe class="settings-pane-frame" title="Quick link settings" data-src="/dashboard?pane=1&amp;embedded=1#quick-links-panel"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="people" hidden>
-          <iframe class="settings-pane-frame" title="People settings" data-src="/dashboard/home-users?pane=1&amp;embedded=1"></iframe>
+          <iframe class="settings-pane-frame" title="People settings" data-src="/dashboard/settings/people-pane?embedded=1"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="connections" hidden>
           <iframe class="settings-pane-frame" title="Connection settings" data-src="/dashboard/settings/connections-pane?embedded=1"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="ai" hidden>
-          <iframe class="settings-pane-frame" title="AI settings" data-src="/dashboard/assistant-settings?pane=1&amp;embedded=1"></iframe>
+          <iframe class="settings-pane-frame" title="AI settings" data-src="/dashboard/settings/ai-pane?embedded=1"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="backups" data-admin-only="true" hidden>
-          <iframe class="settings-pane-frame" title="Backup settings" data-src="/dashboard/storage?pane=1&amp;embedded=1"></iframe>
+          <iframe class="settings-pane-frame" title="Backup settings" data-src="/dashboard/settings/backups-pane?embedded=1"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="join-home" hidden>
-          <iframe class="settings-pane-frame" title="Join home" data-src="/dashboard/accept-invitation?pane=1&amp;embedded=1"></iframe>
+          <iframe class="settings-pane-frame" title="Join home" data-src="/dashboard/settings/join-home-pane?embedded=1"></iframe>
         </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
+    <script src="/assets/api-client.js" defer></script>
     <script src="/assets/settings.js?v=20260530-resizer-guard" defer></script>
-    <script src="/assets/admin-nav.js?v=20260525-site-reorg" defer></script>
+    <script src="/assets/admin-nav.js?v=20260601-nav-scope" defer></script>
   </body>
 </html>

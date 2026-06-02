@@ -9,6 +9,7 @@ import (
 
 	"github.com/dropfile/hankremote/internal/agent"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
+	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
 	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
@@ -32,22 +33,8 @@ func main() {
 	}
 
 	ha := agentha.New(cfg.HA.BaseURL, cfg.HA.Token, cfg.HA.Timeout)
-	legacySMB := cfg.SMB
-	if len(cfg.SMBShares) > 0 {
-		legacySMB = config.SMB{}
-	}
 	files := agentfiles.NewWithConfig(agentfiles.Config{
-		Root: cfg.FilesRoot,
-		SMB: agentfiles.SMBConfig{
-			ID:       legacySMB.ID,
-			Name:     legacySMB.Name,
-			Host:     legacySMB.Host,
-			Share:    legacySMB.Share,
-			Username: legacySMB.Username,
-			Password: legacySMB.Password,
-			Domain:   legacySMB.Domain,
-			Policy:   agentFilePolicy(legacySMB.Policy),
-		},
+		Root:   cfg.FilesRoot,
 		Shares: agentSMBShares(cfg.SMBShares),
 	})
 	media := agentmedia.New(agentmedia.Config{
@@ -64,8 +51,14 @@ func main() {
 		EnvPath:                       cfg.ConfigPath,
 	}, files, logger)
 	notes := agentnotes.New(cfg.NotesRoot)
+	hermes := agenthermes.New(agenthermes.Config{
+		BaseURL: cfg.Hermes.APIBaseURL,
+		APIKey:  cfg.Hermes.APIKey,
+		Model:   cfg.Hermes.Model,
+		Timeout: cfg.Hermes.Timeout,
+	})
 
-	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, media, notes, logger)
+	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, media, notes, hermes, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

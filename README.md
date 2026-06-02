@@ -28,7 +28,6 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `PUT /v1/me/profile-backup`
   - `GET /v1/oauth/openai/status`
   - `GET /v1/oauth/openai/start`
-  - `GET /v1/oauth/openai/callback`
   - `POST /v1/ws/app-ticket`
   - `GET /v1/home`
   - `PUT /v1/home`
@@ -95,7 +94,11 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `GET /dashboard/profile-notes`
   - `GET /dashboard/file-server`
   - `GET /dashboard/settings`
+  - `GET /dashboard/settings/people-pane`
   - `GET /dashboard/settings/connections-pane`
+  - `GET /dashboard/settings/ai-pane`
+  - `GET /dashboard/settings/backups-pane`
+  - `GET /dashboard/settings/join-home-pane`
   - `GET /docs/deployment`
 - cloud operations endpoints:
   - `GET /healthz`
@@ -125,6 +128,7 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `notes.search`
   - `notes.tags`
   - `notes.tag_rollup`
+  - `hermes.chat`
 
 ## Project Layout
 
@@ -288,7 +292,7 @@ pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside &&
 - agent and app auth are separate
 - the cloud and agent run on the same machine under one Compose stack, but the agent starts only after a token exists
 - the dashboard issues tokens and generates the `.env.agent` file content; deployment changes are applied by editing `.env.agent` and refreshing the `agent` profile
-- file access can use either the Docker-managed `hank_agent_files` volume or one or more direct SMB shares configured in the dashboard
+- file access can use either the Docker-managed `hank_agent_files` volume or one or more direct SMB shares configured in dashboard Settings; SMB env storage uses `HANK_REMOTE_SMB_SHARES_JSON`
 - remote notes now expose additive metadata for `page_type`, preview text, extracted tags, remote search, tag rollups, and kanban board payloads
 
 ## Operations Docs

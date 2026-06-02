@@ -145,8 +145,8 @@ Set `HANK_REMOTE_DB_OPS_DOCKER_GID` to the numeric group owner of `/var/run/dock
 
 Keep `HANK_REMOTE_SECRET_ENCRYPTION_KEY` stable after first use. Hank Remote uses it to encrypt stored OAuth tokens, APNs device tokens, and profile secret vault data at rest. If this key is lost, already encrypted application secrets cannot be read and must be re-linked or re-entered.
 
-`HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
-The production vector schema is fixed at 768 dimensions. Do not set `HANK_REMOTE_AI_EMBEDDING_DIMENSION` in production unless a future migration explicitly changes the vector dimension.
+`HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Browser-redirect OpenAI OAuth is not supported. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
+Production should run with pgvector available through the bundled Postgres image. The JSON embedding fallback exists only for local development or degraded local testing when pgvector is not available. The production vector schema is fixed at 768 dimensions. Do not set `HANK_REMOTE_AI_EMBEDDING_DIMENSION` in production unless a future migration explicitly changes the vector dimension.
 
 After signing in to the dashboard, open `AI Settings` to manage the HankAI harness. Those settings are stored in the database and apply immediately to the next HankAI message:
 - which Hank sources can be sent to the active provider
@@ -268,9 +268,9 @@ nano .env.agent
 chmod 600 .env.agent
 ```
 
-`.env.agent` can contain Home Assistant tokens, SMB usernames/passwords, media-service credentials, and the Hank Remote agent token. Treat it as a secret file and keep mode `0600`.
+`.env.agent` contains the Hank Remote agent token and may later contain Settings-managed Home Assistant, SMB, and media-service credentials. Treat it as a secret file and keep mode `0600`.
 
-The Compose agent container is allowed to update the bind-mounted `.env.agent` file so Settings > Connections can persist Home Assistant and SMB credentials after first start. Keep the host file `0600`; only set `HANK_REMOTE_AGENT_CONTAINER_USER` if you also manage `.env.agent` and agent volume ownership for that custom container user.
+The Compose agent container is allowed to update the bind-mounted `.env.agent` file so Settings > Connections can persist Home Assistant and SMB credentials after first start. SMB shares are stored only in `HANK_REMOTE_SMB_SHARES_JSON`. Keep the host file `0600`; only set `HANK_REMOTE_AGENT_CONTAINER_USER` if you also manage `.env.agent` and agent volume ownership for that custom container user.
 
 The generated file should look like this:
 
@@ -281,27 +281,14 @@ HANK_REMOTE_AGENT_TOKEN=replace-with-issued-token
 HANK_REMOTE_AGENT_HOME_NAME=Home
 HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent
 
-HANK_REMOTE_HA_BASE_URL=
-HANK_REMOTE_HA_TOKEN=
-HANK_REMOTE_HA_TIMEOUT_SECONDS=10
-
-HANK_REMOTE_SMB_HOST=
-HANK_REMOTE_SMB_SHARE=
-HANK_REMOTE_SMB_USERNAME=
-HANK_REMOTE_SMB_PASSWORD=
-HANK_REMOTE_SMB_DOMAIN=
-HANK_REMOTE_SMB_SHARES_JSON=
-
 HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files
 HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes
 
-HANK_REMOTE_MEDIA_GRAMATON_ENABLED=false
-HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=https://gramaton.io
-HANK_REMOTE_MEDIA_GRAMATON_USERNAME=
-HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=
-HANK_REMOTE_MEDIA_SOURCE_ID=
-HANK_REMOTE_MEDIA_DESTINATION_PATH=
-HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION=true
+# Optional Hermes Agent bridge for HankAI `/Hermes ...` chat.
+HANK_REMOTE_HERMES_API_BASE_URL=
+HANK_REMOTE_HERMES_API_KEY=
+HANK_REMOTE_HERMES_MODEL=hermes-agent
+HANK_REMOTE_HERMES_TIMEOUT_SECONDS=120
 ```
 
 Keep this value unchanged for the single-server Compose deployment:
@@ -310,9 +297,18 @@ Keep this value unchanged for the single-server Compose deployment:
 HANK_REMOTE_AGENT_CLOUD_URL=ws://cloud:8080/ws/agent
 ```
 
-Leave Home Assistant and SMB values blank during first start if you want to enter them from the dashboard. After the agent is online, use Settings > Connections to save Home Assistant and SMB credentials; the agent persists those values back into `.env.agent`.
+After the agent is online, use Settings > Connections to save Home Assistant and SMB credentials; the agent persists those values back into `.env.agent`.
 
-When SMB is blank, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For multiple SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
+When no SMB shares are configured, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
+
+For Hermes Agent chat from HankAI, run Hermes with its API server enabled on the Hermes VM, then open Settings > Connections and save the Hermes API base URL plus API key. The dashboard sends the settings to the online home agent, and the agent persists them into `.env.agent` when `Save on home connector` is enabled. `HANK_REMOTE_HERMES_API_BASE_URL` should be the agent-reachable base URL, for example `http://hermes-vm:8642` or `http://hermes-vm:8642/v1`, and `HANK_REMOTE_HERMES_API_KEY` should match the Hermes `API_SERVER_KEY`. HankAI routes only explicit `/Hermes ...` prompts to Hermes, and the Hermes key stays in `.env.agent`.
+
+If you have an older `.env.agent` with legacy single-share SMB keys, convert it before updating the agent:
+
+```bash
+cd /srv/hank-remote/HankServerside
+scripts/migrate-agent-smb-env.sh .env.agent
+```
 
 ## 9. Start The Agent
 
@@ -334,7 +330,7 @@ The dashboard should show the Home agent as online.
 
 ## 10. Storage And Backups
 
-Open `/dashboard/storage` as an admin.
+Open `/dashboard/settings#backups` as an admin.
 
 After first boot:
 
@@ -396,6 +392,6 @@ Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
 - first admin registration works once on a fresh database
 - later public registration returns `403`
 - the agent starts only after `.env.agent` exists
-- `/dashboard/storage` loads for admins
+- `/dashboard/settings#backups` loads for admins
 - Home agent status becomes online
 - the Hank app can sign in through the public URL

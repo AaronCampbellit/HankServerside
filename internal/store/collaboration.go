@@ -230,34 +230,6 @@ func (s *Store) UpsertHomeMemberPermissions(ctx context.Context, permissions dom
 	return err
 }
 
-func (s *Store) UpsertHomeNote(ctx context.Context, note domain.HomeNote) error {
-	_, err := s.exec(ctx, `INSERT INTO home_notes (home_id, note_id, title, content, page_type, board_json, revision, checksum, deleted_at, updated_at, updated_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(home_id, note_id) DO UPDATE SET
-		title = excluded.title,
-		content = excluded.content,
-		page_type = excluded.page_type,
-		board_json = excluded.board_json,
-		revision = excluded.revision,
-		checksum = excluded.checksum,
-		deleted_at = excluded.deleted_at,
-		updated_at = excluded.updated_at,
-		updated_by = excluded.updated_by`,
-		note.HomeID,
-		note.NoteID,
-		note.Title,
-		note.Content,
-		note.PageType,
-		note.BoardJSON,
-		note.Revision,
-		note.Checksum,
-		note.DeletedAt,
-		note.UpdatedAt,
-		note.UpdatedBy,
-	)
-	return err
-}
-
 func (s *Store) GetLatestHomeNoteUpdate(ctx context.Context, homeID string) (*time.Time, error) {
 	row := s.queryRow(ctx, `SELECT MAX(updated_at)
 		FROM user_notes

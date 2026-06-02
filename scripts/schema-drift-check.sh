@@ -27,7 +27,7 @@ run_direct_status() {
 }
 
 run_compose_status() {
-	compose run -T --rm cloud /usr/local/bin/hank-remote-cloud migrate status --strict >"$status_file"
+	compose run -T --rm --entrypoint /usr/local/bin/hank-remote-cloud cloud migrate status --strict >"$status_file"
 }
 
 normalize_schema_dump() {
@@ -68,7 +68,7 @@ run_deep_compose_check() {
 		createdb -U "$POSTGRES_USER" "$1"
 	' sh "$expected_db" >/dev/null
 
-	compose run -T --rm -e HANK_REMOTE_SCHEMA_DRIFT_EXPECTED_DB="$expected_db" cloud sh -ceu '
+	compose run -T --rm -e HANK_REMOTE_SCHEMA_DRIFT_EXPECTED_DB="$expected_db" --entrypoint sh cloud -ceu '
 		if [ -z "${POSTGRES_USER:-}" ] || [ -z "${POSTGRES_PASSWORD:-}" ]; then
 			echo "POSTGRES_USER and POSTGRES_PASSWORD are required for deep schema drift checks" >&2
 			exit 1

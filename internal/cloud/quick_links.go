@@ -37,7 +37,7 @@ func (s *Server) handleHomeQuickLinks(w http.ResponseWriter, r *http.Request, ho
 			s.writeHomeQuickLinks(w, r, home, membership)
 			return true
 		case http.MethodPost:
-			if membership.Role != domain.HomeRoleAdmin {
+			if !canEditHomeQuickLinks(home, membership) {
 				http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 				return true
 			}
@@ -63,7 +63,7 @@ func (s *Server) handleHomeQuickLinks(w http.ResponseWriter, r *http.Request, ho
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return true
 		}
-		if membership.Role != domain.HomeRoleAdmin {
+		if !canEditHomeQuickLinks(home, membership) {
 			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 			return true
 		}
@@ -75,14 +75,14 @@ func (s *Server) handleHomeQuickLinks(w http.ResponseWriter, r *http.Request, ho
 		linkID := strings.TrimSpace(parts[1])
 		switch r.Method {
 		case http.MethodPut:
-			if membership.Role != domain.HomeRoleAdmin {
+			if !canEditHomeQuickLinks(home, membership) {
 				http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 				return true
 			}
 			s.updateHomeQuickLink(w, r, home, auth, linkID)
 			return true
 		case http.MethodDelete:
-			if membership.Role != domain.HomeRoleAdmin {
+			if !canEditHomeQuickLinks(home, membership) {
 				http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 				return true
 			}
@@ -103,7 +103,7 @@ func (s *Server) writeHomeQuickLinks(w http.ResponseWriter, r *http.Request, hom
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, quickLinkListResponse(links, membership))
+	writeJSON(w, http.StatusOK, quickLinkListResponse(home, links, membership))
 }
 
 func (s *Server) createHomeQuickLink(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
@@ -212,7 +212,7 @@ func (s *Server) reorderHomeQuickLinks(w http.ResponseWriter, r *http.Request, h
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, quickLinkListResponse(links, membership))
+	writeJSON(w, http.StatusOK, quickLinkListResponse(home, links, membership))
 }
 
 func (s *Server) checkAndWriteHomeQuickLinks(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership) {
@@ -222,14 +222,22 @@ func (s *Server) checkAndWriteHomeQuickLinks(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	links = s.checkHomeQuickLinks(r.Context(), home.ID, links)
-	writeJSON(w, http.StatusOK, quickLinkListResponse(links, membership))
+	writeJSON(w, http.StatusOK, quickLinkListResponse(home, links, membership))
 }
 
-func quickLinkListResponse(links []domain.HomeQuickLink, membership domain.HomeMembership) map[string]any {
+func quickLinkListResponse(home domain.Home, links []domain.HomeQuickLink, membership domain.HomeMembership) map[string]any {
 	return map[string]any{
 		"links":    links,
-		"can_edit": membership.Role == domain.HomeRoleAdmin,
+		"can_edit": canEditHomeQuickLinks(home, membership),
 	}
+}
+
+func canEditHomeQuickLinks(home domain.Home, membership domain.HomeMembership) bool {
+	role := strings.ToLower(strings.TrimSpace(membership.Role))
+	if role == domain.HomeRoleAdmin || role == "owner" {
+		return true
+	}
+	return home.UserID != "" && membership.UserID != "" && home.UserID == membership.UserID
 }
 
 func normalizedQuickLink(body quickLinkRequest, existing domain.HomeQuickLink) (domain.HomeQuickLink, error) {

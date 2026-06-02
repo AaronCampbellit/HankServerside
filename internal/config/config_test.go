@@ -166,11 +166,7 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	t.Setenv("HANK_REMOTE_HA_BASE_URL", "http://127.0.0.1:8123")
 	t.Setenv("HANK_REMOTE_HA_TOKEN", "ha-token")
 	t.Setenv("HANK_REMOTE_HA_TIMEOUT_SECONDS", "12")
-	t.Setenv("HANK_REMOTE_SMB_HOST", "192.168.1.20")
-	t.Setenv("HANK_REMOTE_SMB_SHARE", "media")
-	t.Setenv("HANK_REMOTE_SMB_USERNAME", "aaron")
-	t.Setenv("HANK_REMOTE_SMB_PASSWORD", "secret")
-	t.Setenv("HANK_REMOTE_SMB_DOMAIN", "WORKGROUP")
+	t.Setenv("HANK_REMOTE_SMB_SHARES_JSON", `[{"id":"media","host":"192.168.1.20","share":"media","username":"aaron","password":"secret","domain":"WORKGROUP"}]`)
 	t.Setenv("HANK_REMOTE_AGENT_FILES_ROOT", "/srv/hank/files")
 	t.Setenv("HANK_REMOTE_AGENT_NOTES_ROOT", "/srv/hank/notes")
 	t.Setenv("HANK_REMOTE_MEDIA_SOURCE_ID", "archive")
@@ -190,11 +186,8 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	if cfg.HA.Timeout != 12*time.Second {
 		t.Fatalf("HA.Timeout = %s, want %s", cfg.HA.Timeout, 12*time.Second)
 	}
-	if cfg.SMB.Host != "192.168.1.20" || cfg.SMB.Share != "media" || cfg.SMB.Username != "aaron" || cfg.SMB.Password != "secret" || cfg.SMB.Domain != "WORKGROUP" {
-		t.Fatalf("SMB config = %#v", cfg.SMB)
-	}
 	if len(cfg.SMBShares) != 1 || cfg.SMBShares[0].Share != "media" {
-		t.Fatalf("SMBShares = %#v, want legacy SMB as first share", cfg.SMBShares)
+		t.Fatalf("SMBShares = %#v, want JSON SMB share", cfg.SMBShares)
 	}
 	if cfg.FilesRoot != "/srv/hank/files" || cfg.NotesRoot != "/srv/hank/notes" {
 		t.Fatalf("roots = files:%q notes:%q", cfg.FilesRoot, cfg.NotesRoot)
@@ -204,6 +197,24 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	}
 	if cfg.Media.SourceID != "archive" {
 		t.Fatalf("Media.SourceID = %q, want archive", cfg.Media.SourceID)
+	}
+}
+
+func TestLoadAgentIgnoresLegacySingleShareSMBEnv(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_SMB_HOST", "192.168.1.20")
+	t.Setenv("HANK_REMOTE_SMB_SHARE", "media")
+	t.Setenv("HANK_REMOTE_SMB_USERNAME", "aaron")
+	t.Setenv("HANK_REMOTE_SMB_PASSWORD", "secret")
+	t.Setenv("HANK_REMOTE_SMB_DOMAIN", "WORKGROUP")
+
+	cfg, err := LoadAgent()
+	if err != nil {
+		t.Fatalf("LoadAgent error: %v", err)
+	}
+	if len(cfg.SMBShares) != 0 {
+		t.Fatalf("SMBShares = %#v, want legacy single-share env ignored", cfg.SMBShares)
 	}
 }
 

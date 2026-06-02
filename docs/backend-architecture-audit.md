@@ -2,6 +2,8 @@
 
 Date: 2026-05-30
 
+Status as of 2026-06-01: this is a point-in-time audit artifact, not the current operator guide. Several findings have since been resolved in code through versioned migrations, bearer file-transfer tokens, header-only agent auth, canonical dashboard Settings routes, and legacy note/SMB cleanup. Use [backend-production-repair-plan.md](backend-production-repair-plan.md), [deployment.md](deployment.md), and the runbooks for current implementation and setup work. Multi-home SaaS and multi-node cloud warnings below describe out-of-scope expansion risk, not the current single-home product target.
+
 ## Scope and Evidence
 
 This audit reviewed the current `HankServerside` repository, with emphasis on the cloud service, home agent, protocol, persistence layer, Docker topology, storage operations, route handlers, authentication, authorization, file handling, observability, backup, and restore workflows.
@@ -200,11 +202,11 @@ The schema is created at process startup in `internal/store/store.go`. Tables in
 | Identity and homes | `users`, `homes`, `home_memberships`, `home_invitations` |
 | Agents and sessions | `agents`, `agent_tokens`, `app_sessions` |
 | Notifications | `notification_settings`, `apns_devices` |
-| Notes | `home_notes`, `user_notes`, `note_shares`, `note_operations`, `note_attachments` |
+| Notes | `user_notes`, `note_shares`, `note_operations`, `note_attachments`; legacy `home_notes` rows are archived by migration |
 | Profile data | `user_profile_settings`, `user_profile_secret_vaults`, `user_profile_backups` |
 | Home config | `home_note_sync_state`, `home_service_profiles`, `home_permissions`, `home_member_permissions` |
 | Assistant | `assistant_sessions`, `assistant_messages`, `assistant_runs`, `assistant_attachments`, `assistant_tool_calls`, `assistant_settings`, `assistant_documents`, `assistant_chunks`, `assistant_file_index`, `assistant_calendar_entries` |
-| OpenAI OAuth | `openai_accounts`, `openai_oauth_states` |
+| OpenAI accounts | `openai_accounts`; browser-redirect OAuth state storage was removed |
 
 ### Schema Strengths
 
@@ -213,7 +215,7 @@ The schema is created at process startup in `internal/store/store.go`. Tables in
 - Many core foreign keys exist.
 - Important uniqueness rules exist for email, token hashes, memberships, note IDs, assistant chunks, assistant settings, OpenAI accounts, and calendar external IDs.
 - Soft-delete columns exist for notes and note attachments.
-- pgvector is optional, so the service can run without the extension.
+- pgvector is required for production vector search. JSON embedding fallback remains only for local/development resilience when the extension is unavailable.
 
 ### High-Risk Schema Issues
 
@@ -249,10 +251,10 @@ The schema is created at process startup in `internal/store/store.go`. Tables in
 
 | Issue | Risk | Recommendation |
 | --- | --- | --- |
-| `home_notes` and `user_notes` both exist | Legacy duplicate storage and migration complexity | Freeze `home_notes`, migrate fully to `user_notes`, then remove or archive in a versioned migration |
-| `user_notes.content` and `user_notes.body_markdown` both store body-like data | Divergence risk | Define one canonical body column and migrate readers/writers |
+| `home_notes` and `user_notes` both exist | Resolved 2026-06-01 by archiving `home_notes` rows and dropping live storage in a versioned migration | Keep `legacy_home_notes_archive` read-only for operator recovery only |
+| `user_notes.content` and `user_notes.body_markdown` both store body-like data | Resolved 2026-06-01 by making `body_markdown` canonical and keeping `content` only as an API alias | Do not recreate the duplicate DB column |
 | `assistant_documents`, `assistant_chunks`, and `assistant_file_index` duplicate searchable content from notes/files/conversations | Expected for search, but retention is unclear | Add lifecycle jobs and source invalidation rules |
-| `assistant_file_index.embedding_json` and `embedding` duplicate vector data | Operationally useful fallback, but doubles storage | Keep only if pgvector optionality is intentional, document retention |
+| `assistant_file_index.embedding_json` and `embedding` duplicate vector data | JSON fallback is local/dev-only after 2026-06-01; production should use pgvector | Keep fallback guarded and document production pgvector requirement |
 
 ### Index Review
 
@@ -399,7 +401,7 @@ Adopt a migration tool or a small internal migration runner with:
 | Auth | `/v1/auth/register`, `/v1/auth/login`, `/v1/auth/logout` |
 | User profile | `/v1/me`, `/v1/me/notes`, `/v1/me/profile`, `/v1/me/profile-secret-vault`, `/v1/me/profile-backup` |
 | Notifications | `/v1/me/devices/apns`, `/v1/me/notification-settings` |
-| OAuth | `/v1/oauth/openai/status`, `/v1/oauth/openai/start`, `/v1/oauth/openai/callback` |
+| ChatGPT/Codex link | `/v1/oauth/openai/status`, `/v1/oauth/openai/start` device-code flow; browser callback route removed after this audit |
 | Home | `/v1/home`, `/v1/home/...`, `/v1/home/invitations/accept` |
 | File transfers | `/v1/home/files/downloads`, `/v1/home/files/uploads`, `/v1/file-transfers/{id}` |
 | WebSocket | `/ws/agent`, `/ws/app`, `/v1/ws/app-ticket` |
@@ -811,7 +813,7 @@ This does not mean production is safe. Several high findings must be resolved be
 3. Add missing `CHECK` constraints for roles, statuses, page types, provider values, and run states.
 4. Add or formalize FK delete behavior.
 5. Fix `assistant_file_index` uniqueness to include `service_profile_id`.
-6. Resolve `home_notes` legacy storage and canonicalize note body storage.
+6. Resolved 2026-06-01: `home_notes` live storage was archived/dropped and `body_markdown` is canonical note storage.
 7. Add cleanup jobs for expired sessions, invitations, OAuth states, revoked/expired tokens, and derived indexes.
 
 ### Stage 2: Observability and Recovery

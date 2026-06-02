@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,6 +64,8 @@ type assistantLLMMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
+
+const chatGPTCodexClientVersion = "0.135.0"
 
 func (c *AssistantAIConfig) normalize() {
 	c.Provider = strings.ToLower(strings.TrimSpace(c.Provider))
@@ -491,7 +494,14 @@ func fetchChatGPTCodexModels(ctx context.Context, baseURL string, token string, 
 	if strings.TrimSpace(accountID) != "" {
 		headers["ChatGPT-Account-ID"] = accountID
 	}
-	endpoint := strings.TrimRight(baseURL, "/") + "/models"
+	endpointURL, err := url.Parse(strings.TrimRight(baseURL, "/") + "/models")
+	if err != nil {
+		return nil, err
+	}
+	query := endpointURL.Query()
+	query.Set("client_version", chatGPTCodexClientVersion)
+	endpointURL.RawQuery = query.Encode()
+	endpoint := endpointURL.String()
 	data, err := getEndpointBody(ctx, endpoint, headers)
 	if err != nil {
 		return nil, err

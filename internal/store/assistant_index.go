@@ -260,7 +260,7 @@ func (s *Store) SearchAssistantContext(ctx context.Context, homeID string, userI
 		return nil, err
 	}
 
-	fileRows, err := s.query(ctx, `SELECT path, name, search_text, updated_at, embedding_json
+	fileRows, err := s.query(ctx, `SELECT service_profile_id, path, name, search_text, updated_at, embedding_json
 		FROM assistant_file_index
 		WHERE home_id = ?
 		ORDER BY updated_at DESC
@@ -270,9 +270,9 @@ func (s *Store) SearchAssistantContext(ctx context.Context, homeID string, userI
 	}
 	defer fileRows.Close()
 	for fileRows.Next() {
-		var pathValue, name, searchText, embeddingJSON string
+		var sourceID, pathValue, name, searchText, embeddingJSON string
 		var updatedAt sql.NullTime
-		if err := fileRows.Scan(&pathValue, &name, &searchText, &updatedAt, &embeddingJSON); err != nil {
+		if err := fileRows.Scan(&sourceID, &pathValue, &name, &searchText, &updatedAt, &embeddingJSON); err != nil {
 			return nil, err
 		}
 		score := textScore(loweredQuery, terms, strings.ToLower(name+" "+pathValue+" "+searchText))
@@ -282,7 +282,7 @@ func (s *Store) SearchAssistantContext(ctx context.Context, homeID string, userI
 		}
 		mergeAssistantContextResult(&results, resultIndex, domain.AssistantRetrievedContext{
 			SourceType:   "file",
-			SourceID:     pathValue,
+			SourceID:     strings.TrimSpace(sourceID),
 			Title:        name,
 			Path:         pathValue,
 			CanonicalURI: "hank://files/" + strings.TrimPrefix(pathValue, "/"),
@@ -391,7 +391,7 @@ func (s *Store) searchAssistantVectorContext(ctx context.Context, homeID string,
 		return nil, err
 	}
 
-	fileRows, err := s.query(ctx, `SELECT path, name, search_text, updated_at, 1 - (embedding <=> ?::vector) AS vector_score
+	fileRows, err := s.query(ctx, `SELECT service_profile_id, path, name, search_text, updated_at, 1 - (embedding <=> ?::vector) AS vector_score
 		FROM assistant_file_index
 		WHERE home_id = ? AND embedding IS NOT NULL
 		ORDER BY embedding <=> ?::vector
@@ -401,10 +401,10 @@ func (s *Store) searchAssistantVectorContext(ctx context.Context, homeID string,
 	}
 	defer fileRows.Close()
 	for fileRows.Next() {
-		var pathValue, name, searchText string
+		var sourceID, pathValue, name, searchText string
 		var updatedAt sql.NullTime
 		var vectorScore sql.NullFloat64
-		if err := fileRows.Scan(&pathValue, &name, &searchText, &updatedAt, &vectorScore); err != nil {
+		if err := fileRows.Scan(&sourceID, &pathValue, &name, &searchText, &updatedAt, &vectorScore); err != nil {
 			return nil, err
 		}
 		score := textScore(loweredQuery, terms, strings.ToLower(name+" "+pathValue+" "+searchText))
@@ -416,7 +416,7 @@ func (s *Store) searchAssistantVectorContext(ctx context.Context, homeID string,
 		}
 		results = append(results, domain.AssistantRetrievedContext{
 			SourceType:   "file",
-			SourceID:     pathValue,
+			SourceID:     strings.TrimSpace(sourceID),
 			Title:        name,
 			Path:         pathValue,
 			CanonicalURI: "hank://files/" + strings.TrimPrefix(pathValue, "/"),

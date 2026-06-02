@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
+	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
 	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
@@ -20,6 +21,7 @@ type commandDispatcher struct {
 	files  *agentfiles.Service
 	media  *agentmedia.Service
 	notes  *agentnotes.Service
+	hermes *agenthermes.Service
 	config *configManager
 }
 
@@ -279,6 +281,17 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		}
 		return response, nil
 
+	case protocol.CommandHermesChat:
+		request, err := decodeBody[protocol.HermesChatRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_hermes_request", err)
+		}
+		response, err := d.hermes.Chat(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
 	case "notes.list":
 		notes, err := d.notes.List(ctx)
 		if err != nil {
@@ -420,6 +433,8 @@ func mapError(err error) *protocol.ErrorPayload {
 		return &protocol.ErrorPayload{Code: "files_not_configured", Message: err.Error()}
 	case errors.Is(err, agentnotes.ErrDisabled):
 		return &protocol.ErrorPayload{Code: "notes_not_configured", Message: err.Error()}
+	case errors.Is(err, agenthermes.ErrDisabled):
+		return &protocol.ErrorPayload{Code: "hermes_not_configured", Message: err.Error()}
 	case errors.Is(err, errUnsupportedServiceType):
 		return &protocol.ErrorPayload{Code: "unsupported_service_type", Message: err.Error()}
 	case errors.Is(err, agentnotes.ErrConflict):

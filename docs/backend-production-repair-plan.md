@@ -4,6 +4,8 @@ Date: 2026-05-30
 
 Related audit: `docs/backend-architecture-audit.md`
 
+Status note, 2026-06-01: the legacy cleanup pass resolved the schema-migration framework, note-body canonicalization, `home_notes` archival/removal, legacy single-share SMB env fallback, public legacy dashboard routes, shared dashboard API helper, browser-redirect OpenAI OAuth removal, phase-doc archival, and production pgvector guidance. Remaining items in this plan still apply unless marked resolved below.
+
 ## Objective
 
 Bring Hank Remote backend readiness from the current audit score of 58/100 to 100/100 for the first production target: a single-home deployment that a client runs for their own home and their own invited users.
@@ -313,14 +315,13 @@ Acceptance:
 
 ### R1.6 Normalize note storage
 
+Status, 2026-06-01: resolved. `user_notes.body_markdown` is canonical stored body data, API `content` is only a compatibility alias, `home_notes` rows are archived to `legacy_home_notes_archive`, and live `home_notes` storage/writes were removed by versioned migration.
+
 Repair:
 
-- Make `user_notes.body_markdown` the canonical body column.
-- Keep `content` as compatibility shadow for one release, written from canonical content.
-- Stop reading from `home_notes` except in one-time migration.
-- Add migration to backfill `body_markdown`.
-- Add migration or archive table for legacy `home_notes`.
-- Add a follow-up deletion migration after compatibility expires.
+- Do not recreate `user_notes.content`.
+- Keep `legacy_home_notes_archive` read-only for operator recovery.
+- Keep note tests proving API alias behavior and migration cleanup.
 
 Acceptance:
 
@@ -869,14 +870,14 @@ Acceptance:
 
 ### R6.4 Remove compatibility debt
 
+Status, 2026-06-01: partly resolved. Transfer query tokens, legacy `home_notes` reads/writes, public legacy dashboard routes, browser-redirect OpenAI OAuth, legacy SMB single-share env fallback, and phase docs as current guidance have been removed. Query-parameter agent auth and other future compatibility windows should remain explicit in issue-specific work.
+
 Repair:
 
 - Remove query-parameter agent auth after compatibility window.
-- Remove transfer query tokens.
 - Remove ambiguous or bypass-prone singleton helper paths after `DeploymentHomeResolver` is in place.
-- Remove legacy `home_notes` reads.
 - Remove any UI/API affordance that suggests multiple homes are supported in one deployment.
-- Retire phase docs that conflict with current runbooks.
+- Keep archived phase docs under `docs/archive/phases` and current guidance in deployment docs, runbooks, and this repair plan.
 
 Acceptance:
 

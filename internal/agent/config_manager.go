@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
+	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
@@ -24,18 +25,21 @@ type configManager struct {
 	envPath  string
 	ha       *agentha.Client
 	files    *agentfiles.Service
+	hermes   *agenthermes.Service
 	profiles map[string]protocol.ServiceProfileSnapshot
 }
 
-func newConfigManager(envPath string, ha *agentha.Client, files *agentfiles.Service) *configManager {
+func newConfigManager(envPath string, ha *agentha.Client, files *agentfiles.Service, hermes *agenthermes.Service) *configManager {
 	m := &configManager{
 		envPath:  strings.TrimSpace(envPath),
 		ha:       ha,
 		files:    files,
-		profiles: make(map[string]protocol.ServiceProfileSnapshot, 2),
+		hermes:   hermes,
+		profiles: make(map[string]protocol.ServiceProfileSnapshot, 3),
 	}
 	m.profiles[domain.ServiceTypeHomeAssistant] = m.homeAssistantProfile(0, 0, "")
 	m.profiles[domain.ServiceTypeSMB] = m.smbProfile(0, 0, "")
+	m.profiles[domain.ServiceTypeHermes] = m.hermesProfile(0, 0, "")
 	return m
 }
 
@@ -128,6 +132,43 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 		}
 		return profile, nil
 
+	case domain.ServiceTypeHermes:
+		var public struct {
+			APIBaseURL     string `json:"api_base_url"`
+			Model          string `json:"model"`
+			TimeoutSeconds int    `json:"timeout_seconds"`
+		}
+		if len(request.PublicConfig) > 0 {
+			if err := json.Unmarshal(request.PublicConfig, &public); err != nil {
+				return protocol.ServiceProfileSnapshot{}, err
+			}
+		}
+		var secrets struct {
+			APIKey string `json:"api_key"`
+		}
+		if len(request.Secrets) > 0 {
+			if err := json.Unmarshal(request.Secrets, &secrets); err != nil {
+				return protocol.ServiceProfileSnapshot{}, err
+			}
+		}
+		timeout := time.Duration(public.TimeoutSeconds) * time.Second
+		apiKey := secrets.APIKey
+		if apiKey == "" {
+			apiKey = m.hermes.APIKey()
+		}
+		m.hermes.ApplyConfig(public.APIBaseURL, apiKey, public.Model, timeout)
+		profile := m.hermesProfile(request.SecretVersion, request.SecretVersion, "")
+		m.profiles[request.ServiceType] = profile
+		if request.Persist {
+			if err := m.persistHermes(public.APIBaseURL, apiKey, public.Model, public.TimeoutSeconds); err != nil {
+				profile.Status = domain.SyncStatusDegraded
+				profile.LastError = err.Error()
+				m.profiles[request.ServiceType] = profile
+				return profile, err
+			}
+		}
+		return profile, nil
+
 	default:
 		return protocol.ServiceProfileSnapshot{}, errUnsupportedServiceType
 	}
@@ -158,6 +199,23 @@ func (m *configManager) smbProfile(secretVersion int, appliedVersion int, lastEr
 	}
 	return protocol.ServiceProfileSnapshot{
 		ServiceType:    domain.ServiceTypeSMB,
+		PublicConfig:   publicConfig,
+		SecretVersion:  secretVersion,
+		AppliedVersion: appliedVersion,
+		Status:         status,
+		LastError:      lastError,
+		UpdatedAt:      time.Now().UTC(),
+	}
+}
+
+func (m *configManager) hermesProfile(secretVersion int, appliedVersion int, lastError string) protocol.ServiceProfileSnapshot {
+	publicConfig, _ := json.Marshal(m.hermes.Snapshot())
+	status := domain.SyncStatusHealthy
+	if lastError != "" {
+		status = domain.SyncStatusDegraded
+	}
+	return protocol.ServiceProfileSnapshot{
+		ServiceType:    domain.ServiceTypeHermes,
 		PublicConfig:   publicConfig,
 		SecretVersion:  secretVersion,
 		AppliedVersion: appliedVersion,
@@ -329,15 +387,11 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 	if err != nil {
 		return err
 	}
-	var primary agentfiles.SMBConfig
-	if len(configs) > 0 {
-		primary = configs[0]
-	}
-	env["HANK_REMOTE_SMB_HOST"] = strings.TrimSpace(primary.Host)
-	env["HANK_REMOTE_SMB_SHARE"] = strings.TrimSpace(primary.Share)
-	env["HANK_REMOTE_SMB_USERNAME"] = strings.TrimSpace(primary.Username)
-	env["HANK_REMOTE_SMB_PASSWORD"] = primary.Password
-	env["HANK_REMOTE_SMB_DOMAIN"] = strings.TrimSpace(primary.Domain)
+	delete(env, "HANK_REMOTE_SMB_HOST")
+	delete(env, "HANK_REMOTE_SMB_SHARE")
+	delete(env, "HANK_REMOTE_SMB_USERNAME")
+	delete(env, "HANK_REMOTE_SMB_PASSWORD")
+	delete(env, "HANK_REMOTE_SMB_DOMAIN")
 	type envShare struct {
 		ID       string                  `json:"id,omitempty"`
 		Name     string                  `json:"name,omitempty"`
@@ -364,7 +418,7 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 			Policy:   cfg.Policy,
 		})
 	}
-	if len(shares) > 1 {
+	if len(shares) > 0 {
 		encoded, err := json.Marshal(shares)
 		if err != nil {
 			return err
@@ -372,6 +426,25 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 		env["HANK_REMOTE_SMB_SHARES_JSON"] = string(encoded)
 	} else {
 		delete(env, "HANK_REMOTE_SMB_SHARES_JSON")
+	}
+	return writeEnvFile(m.envPath, env)
+}
+
+func (m *configManager) persistHermes(apiBaseURL string, apiKey string, model string, timeoutSeconds int) error {
+	if m.envPath == "" {
+		return nil
+	}
+	env, err := m.readEnvFile()
+	if err != nil {
+		return err
+	}
+	env["HANK_REMOTE_HERMES_API_BASE_URL"] = strings.TrimSpace(apiBaseURL)
+	if apiKey != "" {
+		env["HANK_REMOTE_HERMES_API_KEY"] = strings.TrimSpace(apiKey)
+	}
+	env["HANK_REMOTE_HERMES_MODEL"] = strings.TrimSpace(model)
+	if timeoutSeconds > 0 {
+		env["HANK_REMOTE_HERMES_TIMEOUT_SECONDS"] = fmt.Sprintf("%d", timeoutSeconds)
 	}
 	return writeEnvFile(m.envPath, env)
 }

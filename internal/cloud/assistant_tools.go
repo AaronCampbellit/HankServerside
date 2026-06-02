@@ -27,6 +27,18 @@ type assistantTool struct {
 
 var assistantToolRegistry = []assistantTool{
 	{
+		Kind:        assistantIntentHermesChat,
+		Description: "Route an explicit /Hermes prompt to the Hermes agent through the home agent.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			query, ok := hermesCommandPrompt(prompt)
+			if !ok {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentHermesChat, Query: query}, true
+		},
+		Execute: executeAssistantHermesChatTool,
+	},
+	{
 		Kind:        assistantIntentNotesAppend,
 		Description: "Append a short item to a uniquely matched Hank note or list.",
 		Match: func(prompt string) (assistantIntent, bool) {
@@ -36,6 +48,72 @@ var assistantToolRegistry = []assistantTool{
 			return assistantIntent{Kind: assistantIntentNotesAppend, Query: noteSearchQuery(prompt)}, true
 		},
 		Execute: executeAssistantNotesAppendTool,
+	},
+	{
+		Kind:        assistantIntentNotesCreate,
+		Description: "Create a new personal Hank note after confirmation.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isNoteCreatePrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentNotesCreate, Query: strings.TrimSpace(prompt)}, true
+		},
+		Execute: executeAssistantNotesCreateTool,
+	},
+	{
+		Kind:        assistantIntentNotesSummarize,
+		Description: "Summarize a uniquely matched note or a small matched set of notes.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isNoteSummarizePrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentNotesSummarize, Query: noteSummaryQuery(prompt)}, true
+		},
+		Execute: executeAssistantNotesSummarizeTool,
+	},
+	{
+		Kind:        assistantIntentCalendarUpdate,
+		Description: "Plan a confirmed device calendar event update.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isCalendarMutationUpdatePrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentCalendarUpdate, Query: calendarMutationQuery(prompt)}, true
+		},
+		Execute: executeAssistantCalendarUpdateTool,
+	},
+	{
+		Kind:        assistantIntentCalendarDelete,
+		Description: "Plan a confirmed device calendar event delete.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isCalendarDeletePrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentCalendarDelete, Query: calendarMutationQuery(prompt)}, true
+		},
+		Execute: executeAssistantCalendarDeleteTool,
+	},
+	{
+		Kind:        assistantIntentCalendarSearch,
+		Description: "Search indexed device calendar snapshots.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isCalendarSearchPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentCalendarSearch, Query: calendarSearchQuery(prompt)}, true
+		},
+		Execute: executeAssistantCalendarSearchTool,
+	},
+	{
+		Kind:        assistantIntentMemorySearch,
+		Description: "Search private HankAI conversation memory.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isAssistantMemoryPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentMemorySearch, Query: assistantMemoryQuery(prompt)}, true
+		},
+		Execute: executeAssistantMemorySearchTool,
 	},
 	{
 		Kind:        assistantIntentProjectDocs,
@@ -106,6 +184,42 @@ var assistantToolRegistry = []assistantTool{
 			return assistantIntent{Kind: assistantIntentMediaSearch, Query: query}, true
 		},
 		Execute: executeAssistantMediaSearchTool,
+	},
+	{
+		Kind:        assistantIntentFilesCreateFolder,
+		Description: "Create a File Server folder after Hank confirmation.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isFileCreateFolderPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentFilesCreateFolder, Query: parseCreateFolderPath(prompt)}, true
+		},
+		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
+			if runtime.Settings.FilesEnabled {
+				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
+					server.logger.Warn("assistant file indexing failed", "error", err)
+				}
+			}
+		},
+		Execute: executeAssistantFilesCreateFolderTool,
+	},
+	{
+		Kind:        assistantIntentFilesListFolder,
+		Description: "List a File Server folder's immediate contents.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isFileListFolderPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentFilesListFolder, Query: fileFolderQuery(prompt)}, true
+		},
+		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
+			if runtime.Settings.FilesEnabled {
+				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
+					server.logger.Warn("assistant file indexing failed", "error", err)
+				}
+			}
+		},
+		Execute: executeAssistantFilesListFolderTool,
 	},
 	{
 		Kind:        assistantIntentFilesSearch,
@@ -230,6 +344,16 @@ func executeAssistantHomeAssistantQueryTool(ctx context.Context, server *Server,
 		}, nil
 	}
 	return server.answerHomeAssistantPrompt(ctx, runtime.Home, runtime.Prompt)
+}
+
+func executeAssistantHermesChatTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	if runtime.Membership.Role != domain.HomeRoleAdmin {
+		return assistantMessageContent{Text: "Hermes chat is only available to Home admins right now."}, nil
+	}
+	if strings.TrimSpace(intent.Query) == "" {
+		return assistantMessageContent{Text: "Send `/Hermes` followed by the message you want Hermes to handle."}, nil
+	}
+	return server.answerHermesChatPrompt(ctx, runtime.Home, runtime.Auth, runtime.Session, intent.Query)
 }
 
 func executeAssistantProjectDocsTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {

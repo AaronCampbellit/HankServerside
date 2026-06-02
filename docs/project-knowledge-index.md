@@ -15,21 +15,31 @@ These documents stay in the repo root because common tooling expects them there.
 - [architecture.md](architecture.md)
 - [deployment.md](deployment.md)
 - [roadmap.md](roadmap.md)
+- [backend-production-repair-plan.md](backend-production-repair-plan.md)
+- [backend-architecture-audit.md](backend-architecture-audit.md): dated 2026-05-30 point-in-time audit; use the repair plan, deployment guide, and runbooks for current operator actions.
+- [legacy-code-audit.md](legacy-code-audit.md): dated 2026-06-01 cleanup audit with implementation resolution status.
 
-## Feature Phases
+## Historical Phase Archive
 
-- [phase-1-identity-and-routing.md](phase-1-identity-and-routing.md)
-- [phase-1-tasklist.md](phase-1-tasklist.md)
-- [phase-2-home-assistant.md](phase-2-home-assistant.md)
-- [phase-2-tasklist.md](phase-2-tasklist.md)
-- [phase-3-files.md](phase-3-files.md)
-- [phase-3-tasklist.md](phase-3-tasklist.md)
-- [phase-4-notes.md](phase-4-notes.md)
-- [phase-4-tasklist.md](phase-4-tasklist.md)
-- [phase-5-operations.md](phase-5-operations.md)
-- [phase-5-tasklist.md](phase-5-tasklist.md)
-- [phase-6-hank-assistant.md](phase-6-hank-assistant.md)
+The phase-era documents are archived under [archive/phases](archive/phases). They are retained as historical implementation context only and should not be treated as current setup, operator, or repair guidance.
+
+- [archive/phases/phase-1-identity-and-routing.md](archive/phases/phase-1-identity-and-routing.md)
+- [archive/phases/phase-1-tasklist.md](archive/phases/phase-1-tasklist.md)
+- [archive/phases/phase-2-home-assistant.md](archive/phases/phase-2-home-assistant.md)
+- [archive/phases/phase-2-tasklist.md](archive/phases/phase-2-tasklist.md)
+- [archive/phases/phase-3-files.md](archive/phases/phase-3-files.md)
+- [archive/phases/phase-3-tasklist.md](archive/phases/phase-3-tasklist.md)
+- [archive/phases/phase-4-notes.md](archive/phases/phase-4-notes.md)
+- [archive/phases/phase-4-tasklist.md](archive/phases/phase-4-tasklist.md)
+- [archive/phases/phase-5-operations.md](archive/phases/phase-5-operations.md)
+- [archive/phases/phase-5-tasklist.md](archive/phases/phase-5-tasklist.md)
+- [archive/phases/phase-6-hank-assistant.md](archive/phases/phase-6-hank-assistant.md)
+
+## Feature Notes
+
+- [hankai-chat-tool-improvement-plan.md](hankai-chat-tool-improvement-plan.md)
 - [hankai-intents-rollout.md](hankai-intents-rollout.md)
+- [hermes-chat-workflow.md](hermes-chat-workflow.md)
 
 ## App Contract Notes
 

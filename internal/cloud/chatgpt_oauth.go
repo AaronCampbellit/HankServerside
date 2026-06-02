@@ -22,7 +22,6 @@ import (
 const (
 	assistantProviderChatGPTCodex     = "chatgpt_codex"
 	openAIAccountProviderChatGPTCodex = "chatgpt_codex"
-	openAIAccountProviderLegacyOpenAI = "openai_oauth"
 	chatGPTDeviceAuthMode             = "device_code"
 	chatGPTDeviceAuthTTL              = 15 * time.Minute
 	chatGPTDeviceAuthDefaultPollAfter = 5
@@ -62,6 +61,15 @@ type chatGPTDeviceAuthStartResponse struct {
 	UserCode         string    `json:"user_code"`
 	ExpiresAt        time.Time `json:"expires_at"`
 	PollAfterSeconds int       `json:"poll_after_seconds"`
+}
+
+type openAITokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	Scope        string `json:"scope"`
+	ExpiresIn    int64  `json:"expires_in"`
+	IDToken      string `json:"id_token"`
 }
 
 func newChatGPTDeviceAuthRegistry() *chatGPTDeviceAuthRegistry {

@@ -61,7 +61,6 @@ func (c SMBConfig) Enabled() bool {
 
 type Config struct {
 	Root   string
-	SMB    SMBConfig
 	Shares []SMBConfig
 	Policy AccessPolicy
 }
@@ -126,7 +125,7 @@ func NewWithConfig(cfg Config) *Service {
 	return &Service{
 		root:           strings.TrimSpace(cfg.Root),
 		localPolicy:    cfg.Policy,
-		smbShares:      normalizeSMBConfigs(appendLegacySMBConfig(cfg.SMB, cfg.Shares)),
+		smbShares:      normalizeSMBConfigs(cfg.Shares),
 		smbConnections: make(map[string]*smbConnection),
 	}
 }
@@ -212,15 +211,6 @@ func (s *Service) SMBConfigs() []SMBConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneSMBConfigs(s.smbShares)
-}
-
-func appendLegacySMBConfig(legacy SMBConfig, shares []SMBConfig) []SMBConfig {
-	configs := make([]SMBConfig, 0, len(shares)+1)
-	if legacy.Enabled() {
-		configs = append(configs, legacy)
-	}
-	configs = append(configs, shares...)
-	return configs
 }
 
 func normalizeSMBConfigs(configs []SMBConfig) []SMBConfig {
@@ -489,10 +479,16 @@ func (s *Service) ListSource(ctx context.Context, sourceID string, path string) 
 	if err := source.authorize("read", path, 0); err != nil {
 		return nil, err
 	}
+	var items []protocol.FileItem
 	if source.Type == fileSourceTypeSMB {
-		return s.listSMB(ctx, source.ID, path)
+		items, err = s.listSMB(ctx, source.ID, path)
+	} else {
+		items, err = s.listLocal(ctx, path)
 	}
-	return s.listLocal(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	return decorateFileItemsSource(items, source.ID), nil
 }
 
 func (s *Service) Stat(ctx context.Context, path string) (protocol.FileItem, error) {
@@ -507,10 +503,17 @@ func (s *Service) StatSource(ctx context.Context, sourceID string, path string) 
 	if err := source.authorize("read", path, 0); err != nil {
 		return protocol.FileItem{}, err
 	}
+	var item protocol.FileItem
 	if source.Type == fileSourceTypeSMB {
-		return s.statSMB(ctx, source.ID, path)
+		item, err = s.statSMB(ctx, source.ID, path)
+	} else {
+		item, err = s.statLocal(ctx, path)
 	}
-	return s.statLocal(ctx, path)
+	if err != nil {
+		return protocol.FileItem{}, err
+	}
+	item.SourceID = source.ID
+	return item, nil
 }
 
 func (s *Service) Search(ctx context.Context, query string, limit int) ([]protocol.FileItem, error) {
@@ -1166,6 +1169,13 @@ func sortItems(items []protocol.FileItem) {
 		}
 		return items[i].Name < items[j].Name
 	})
+}
+
+func decorateFileItemsSource(items []protocol.FileItem, sourceID string) []protocol.FileItem {
+	for i := range items {
+		items[i].SourceID = sourceID
+	}
+	return items
 }
 
 func fileSearchScore(item protocol.FileItem, query string) int {

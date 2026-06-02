@@ -18,4 +18,4 @@ compose run --rm --no-deps --entrypoint sh "$SERVICE" -c 'su-exec postgres pg_ch
 echo "Starting PostgreSQL, db-ops, and cloud..."
 compose up -d "$SERVICE" db-ops cloud
 
-echo "Checksum enablement requested. Check /dashboard/storage after PostgreSQL is healthy."
+echo "Checksum enablement requested. Check /dashboard/settings#backups after PostgreSQL is healthy."

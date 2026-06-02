@@ -844,7 +844,7 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 		}
 
 		serviceType := parts[1]
-		if serviceType != domain.ServiceTypeHomeAssistant && serviceType != domain.ServiceTypeSMB {
+		if serviceType != domain.ServiceTypeHomeAssistant && serviceType != domain.ServiceTypeSMB && serviceType != domain.ServiceTypeHermes {
 			http.Error(w, "unsupported service type", http.StatusBadRequest)
 			return true
 		}
@@ -882,7 +882,7 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 		}
 		profile.SecretVersion = secretVersion
 
-		applyToAgent := len(body.Secrets) > 0 || (serviceType == domain.ServiceTypeSMB && len(body.PublicConfig) > 0)
+		applyToAgent := len(body.Secrets) > 0 || ((serviceType == domain.ServiceTypeSMB || serviceType == domain.ServiceTypeHermes) && len(body.PublicConfig) > 0)
 		if applyToAgent {
 			_, ok := s.router.GetAgent(home.ID)
 			if !ok {

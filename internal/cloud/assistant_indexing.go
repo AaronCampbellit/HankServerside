@@ -103,6 +103,7 @@ func assistantConversationSearchText(session domain.AssistantSession, messages [
 				card.Summary,
 				card.NoteID,
 				card.EventID,
+				card.SourceID,
 				card.Path,
 				card.SearchText,
 			}, " "))
@@ -286,8 +287,9 @@ func (s *Server) indexAssistantFiles(ctx context.Context, home domain.Home, memb
 			modifiedAt = now
 		}
 		if err := s.store.UpsertAssistantFileIndex(ctx, domain.AssistantFileIndex{
-			ID:               stableAssistantID("afile", home.ID+":"+item.Path),
+			ID:               stableAssistantID("afile", home.ID+":"+item.SourceID+":"+item.Path),
 			HomeID:           home.ID,
+			ServiceProfileID: strings.TrimSpace(item.SourceID),
 			Path:             item.Path,
 			Name:             item.Name,
 			IsDirectory:      item.IsDirectory,

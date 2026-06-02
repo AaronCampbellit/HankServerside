@@ -10,21 +10,17 @@ import (
 )
 
 type Cloud struct {
-	Addr               string
-	DatabaseURL        string
-	SessionTTL         time.Duration
-	RequestTimeout     time.Duration
-	DBOpsStateDir      string
-	DBOpsLogDir        string
-	DBOpsIntentSecret  string
-	NoteAttachmentDir  string
-	OpenAIClientID     string
-	OpenAIClientSecret string
-	OpenAIRedirectURI  string
-	OpenAIScopes       string
-	SecretKey          string
-	AssistantAI        AssistantAI
-	APNS               APNS
+	Addr              string
+	DatabaseURL       string
+	SessionTTL        time.Duration
+	RequestTimeout    time.Duration
+	DBOpsStateDir     string
+	DBOpsLogDir       string
+	DBOpsIntentSecret string
+	NoteAttachmentDir string
+	SecretKey         string
+	AssistantAI       AssistantAI
+	APNS              APNS
 }
 
 type AssistantAI struct {
@@ -75,11 +71,11 @@ type Agent struct {
 	HomeName   string
 	ConfigPath string
 	HA         HomeAssistant
-	SMB        SMB
 	SMBShares  []SMB
 	FilesRoot  string
 	NotesRoot  string
 	Media      Media
+	Hermes     Hermes
 }
 
 type HomeAssistant struct {
@@ -120,6 +116,13 @@ type Media struct {
 	RequireConfirmation  bool
 }
 
+type Hermes struct {
+	APIBaseURL string
+	APIKey     string
+	Model      string
+	Timeout    time.Duration
+}
+
 func LoadCloud() (Cloud, error) {
 	sessionTTL, err := durationSeconds("HANK_REMOTE_SESSION_TTL_SECONDS", 60*60*24*7)
 	if err != nil {
@@ -146,19 +149,15 @@ func LoadCloud() (Cloud, error) {
 	}
 
 	return Cloud{
-		Addr:               envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
-		DatabaseURL:        envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
-		SessionTTL:         sessionTTL,
-		RequestTimeout:     requestTimeout,
-		DBOpsStateDir:      envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
-		DBOpsLogDir:        envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
-		DBOpsIntentSecret:  dbOpsIntentSecret,
-		NoteAttachmentDir:  envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
-		OpenAIClientID:     strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_ID")),
-		OpenAIClientSecret: strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_CLIENT_SECRET")),
-		OpenAIRedirectURI:  strings.TrimSpace(os.Getenv("HANK_REMOTE_OPENAI_REDIRECT_URI")),
-		OpenAIScopes:       envOrDefault("HANK_REMOTE_OPENAI_SCOPES", "openid profile email"),
-		SecretKey:          strings.TrimSpace(os.Getenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY")),
+		Addr:              envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
+		DatabaseURL:       envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
+		SessionTTL:        sessionTTL,
+		RequestTimeout:    requestTimeout,
+		DBOpsStateDir:     envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
+		DBOpsLogDir:       envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
+		DBOpsIntentSecret: dbOpsIntentSecret,
+		NoteAttachmentDir: envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
+		SecretKey:         strings.TrimSpace(os.Getenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY")),
 		APNS: APNS{
 			TeamID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TEAM_ID")),
 			KeyID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_KEY_ID")),
@@ -218,14 +217,11 @@ func LoadAgent() (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
-	legacySMB := SMB{
-		Host:     strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_HOST")),
-		Share:    strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_SHARE")),
-		Username: strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_USERNAME")),
-		Password: os.Getenv("HANK_REMOTE_SMB_PASSWORD"),
-		Domain:   strings.TrimSpace(os.Getenv("HANK_REMOTE_SMB_DOMAIN")),
+	hermesTimeout, err := durationSeconds("HANK_REMOTE_HERMES_TIMEOUT_SECONDS", 120)
+	if err != nil {
+		return Agent{}, err
 	}
-	smbShares, err := loadSMBShares(legacySMB, os.Getenv("HANK_REMOTE_SMB_SHARES_JSON"))
+	smbShares, err := loadSMBShares(os.Getenv("HANK_REMOTE_SMB_SHARES_JSON"))
 	if err != nil {
 		return Agent{}, err
 	}
@@ -249,17 +245,16 @@ func LoadAgent() (Agent, error) {
 			TVDestinationPath:    strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_TV_DESTINATION_PATH")),
 			RequireConfirmation:  boolEnvOrDefault("HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION", true),
 		},
+		Hermes: Hermes{
+			APIBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_HERMES_API_BASE_URL")), "/"),
+			APIKey:     strings.TrimSpace(os.Getenv("HANK_REMOTE_HERMES_API_KEY")),
+			Model:      envOrDefault("HANK_REMOTE_HERMES_MODEL", "hermes-agent"),
+			Timeout:    hermesTimeout,
+		},
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),
 			Token:   strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_TOKEN")),
 			Timeout: haTimeout,
-		},
-		SMB: SMB{
-			Host:     legacySMB.Host,
-			Share:    legacySMB.Share,
-			Username: legacySMB.Username,
-			Password: legacySMB.Password,
-			Domain:   legacySMB.Domain,
 		},
 		SMBShares: smbShares,
 	}
@@ -274,7 +269,7 @@ func LoadAgent() (Agent, error) {
 	}
 }
 
-func loadSMBShares(legacy SMB, rawJSON string) ([]SMB, error) {
+func loadSMBShares(rawJSON string) ([]SMB, error) {
 	var shares []SMB
 	if strings.TrimSpace(rawJSON) != "" {
 		if err := json.Unmarshal([]byte(rawJSON), &shares); err != nil {
@@ -282,14 +277,6 @@ func loadSMBShares(legacy SMB, rawJSON string) ([]SMB, error) {
 		}
 		for i := range shares {
 			shares[i] = normalizeSMBEnv(shares[i])
-		}
-	}
-	legacy = normalizeSMBEnv(legacy)
-	if legacy.Host != "" || legacy.Share != "" {
-		if len(shares) == 0 {
-			shares = append(shares, legacy)
-		} else if !containsSMBShare(shares, legacy) {
-			shares = append([]SMB{legacy}, shares...)
 		}
 	}
 	return shares, nil
@@ -303,18 +290,6 @@ func normalizeSMBEnv(value SMB) SMB {
 	value.Username = strings.TrimSpace(value.Username)
 	value.Domain = strings.TrimSpace(value.Domain)
 	return value
-}
-
-func containsSMBShare(shares []SMB, candidate SMB) bool {
-	for _, share := range shares {
-		if strings.TrimSpace(candidate.ID) != "" && strings.TrimSpace(share.ID) == strings.TrimSpace(candidate.ID) {
-			return true
-		}
-		if strings.TrimSpace(share.Host) == strings.TrimSpace(candidate.Host) && strings.TrimSpace(share.Share) == strings.TrimSpace(candidate.Share) {
-			return true
-		}
-	}
-	return false
 }
 
 func envOrDefault(key string, fallback string) string {

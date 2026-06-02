@@ -4,7 +4,6 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 
@@ -30,48 +29,12 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard", "dashboard.html")
 }
 
-func (s *Server) handleHomeUsersPage(w http.ResponseWriter, r *http.Request) {
-	if isSettingsPaneRequest(r) {
-		s.serveHomeMemberUIPage(w, r, "/dashboard/home-users", "home-users.html")
-		return
-	}
-	s.redirectHomeMemberUIPage(w, r, "/dashboard/home-users", "/dashboard/settings#people")
-}
-
-func (s *Server) handleServiceProfilesPage(w http.ResponseWriter, r *http.Request) {
-	if isSettingsPaneRequest(r) {
-		s.serveHomeMemberUIPage(w, r, "/dashboard/service-profiles", "service-profiles.html")
-		return
-	}
-	s.redirectHomeMemberUIPage(w, r, "/dashboard/service-profiles", "/dashboard/settings#connections")
-}
-
-func (s *Server) handleSyncStatusPage(w http.ResponseWriter, r *http.Request) {
-	s.redirectHomeMemberUIPage(w, r, "/dashboard/sync-status", "/dashboard#health")
-}
-
-func (s *Server) handleStoragePage(w http.ResponseWriter, r *http.Request) {
-	if isSettingsPaneRequest(r) {
-		s.serveAdminUIPage(w, r, "/dashboard/storage", "storage.html")
-		return
-	}
-	s.redirectAdminUIPage(w, r, "/dashboard/storage", "/dashboard/settings#backups")
-}
-
 func (s *Server) handleHankPage(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard/hank", "hank.html")
 }
 
 func (s *Server) handleHomeAssistantPage(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard/home-assistant", "home-assistant.html")
-}
-
-func (s *Server) handleAssistantSettingsPage(w http.ResponseWriter, r *http.Request) {
-	if isSettingsPaneRequest(r) {
-		s.serveHomeMemberUIPage(w, r, "/dashboard/assistant-settings", "assistant-settings.html")
-		return
-	}
-	s.redirectHomeMemberUIPage(w, r, "/dashboard/assistant-settings", "/dashboard/settings#ai")
 }
 
 func (s *Server) handleProfileNotesPage(w http.ResponseWriter, r *http.Request) {
@@ -86,20 +49,24 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings", "settings.html")
 }
 
+func (s *Server) handleSettingsPeoplePane(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/people-pane", "home-users.html")
+}
+
 func (s *Server) handleSettingsConnectionsPane(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/connections-pane", "settings-connections.html")
 }
 
-func (s *Server) handleAcceptInvitationPage(w http.ResponseWriter, r *http.Request) {
-	if isSettingsPaneRequest(r) {
-		s.serveAuthenticatedUIPage(w, r, "/dashboard/accept-invitation", "accept-invitation.html")
-		return
-	}
-	target := "/dashboard/settings#join-home"
-	if token := r.URL.Query().Get("token"); token != "" {
-		target = "/dashboard/settings?token=" + url.QueryEscape(token) + "#join-home"
-	}
-	s.redirectAuthenticatedUIPage(w, r, "/dashboard/accept-invitation", target)
+func (s *Server) handleSettingsAIPane(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/ai-pane", "assistant-settings.html")
+}
+
+func (s *Server) handleSettingsBackupsPane(w http.ResponseWriter, r *http.Request) {
+	s.serveAdminUIPage(w, r, "/dashboard/settings/backups-pane", "storage.html")
+}
+
+func (s *Server) handleSettingsJoinHomePane(w http.ResponseWriter, r *http.Request) {
+	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings/join-home-pane", "accept-invitation.html")
 }
 
 func serveDeploymentGuide(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +90,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "login.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
+	case "api-client.js", "login.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "site.webmanifest":
 		serveUIFile(w, r, name, "application/manifest+json; charset=utf-8")
@@ -132,10 +99,6 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-func isSettingsPaneRequest(r *http.Request) bool {
-	return r.URL.Query().Get("pane") == "1"
 }
 
 func (s *Server) serveAuthenticatedUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, assetName string) {
@@ -148,18 +111,6 @@ func (s *Server) serveAuthenticatedUIPage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
-}
-
-func (s *Server) redirectAuthenticatedUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, target string) {
-	if r.URL.Path != expectedPath {
-		http.NotFound(w, r)
-		return
-	}
-	if _, err := s.appAuthFromRequest(r); err != nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) serveHomeMemberUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, assetName string) {
@@ -179,23 +130,6 @@ func (s *Server) serveHomeMemberUIPage(w http.ResponseWriter, r *http.Request, e
 	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
 }
 
-func (s *Server) redirectHomeMemberUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, target string) {
-	if r.URL.Path != expectedPath {
-		http.NotFound(w, r)
-		return
-	}
-	auth, err := s.appAuthFromRequest(r)
-	if err != nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	if _, _, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID); err != nil {
-		http.Error(w, "home membership required", http.StatusForbidden)
-		return
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
-}
-
 func (s *Server) serveAdminUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, assetName string) {
 	if r.URL.Path != expectedPath {
 		http.NotFound(w, r)
@@ -212,24 +146,6 @@ func (s *Server) serveAdminUIPage(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
-}
-
-func (s *Server) redirectAdminUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, target string) {
-	if r.URL.Path != expectedPath {
-		http.NotFound(w, r)
-		return
-	}
-	auth, err := s.appAuthFromRequest(r)
-	if err != nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	_, membership, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID)
-	if err != nil || membership.Role != domain.HomeRoleAdmin {
-		http.Error(w, "admin role required", http.StatusForbidden)
-		return
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func serveUIFile(w http.ResponseWriter, r *http.Request, name string, contentType string) {

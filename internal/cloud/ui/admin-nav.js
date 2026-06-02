@@ -1,4 +1,5 @@
 (() => {
+  const navAPI = window.HankAPI.request;
   const adminSelector = '[data-admin-only="true"]';
   const dashboardPages = [
     {
@@ -128,17 +129,6 @@
     });
     renderSideNav();
     preloadDashboardPages();
-  }
-
-  async function apiJSON(path) {
-    const response = await fetch(path, { credentials: "same-origin" });
-    const contentType = response.headers.get("Content-Type") || "";
-    const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-    if (!response.ok) {
-      const message = typeof payload === "string" ? payload : payload.error || payload.message || response.statusText;
-      throw new Error(message);
-    }
-    return payload;
   }
 
   function visiblePages() {
@@ -529,8 +519,8 @@
   async function applyAdminVisibility() {
     setAdminOnlyVisible(false);
     try {
-      const me = await apiJSON("/v1/me");
-      const membersPayload = await apiJSON("/v1/home/members");
+      const me = await navAPI("/v1/me");
+      const membersPayload = await navAPI("/v1/home/members");
       const members = membersPayload.members || [];
       const current = members.find((member) => member.user_id === me.user?.id);
       setAdminOnlyVisible(current?.role === "admin");

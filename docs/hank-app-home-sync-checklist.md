@@ -419,17 +419,17 @@ For `waiting_confirmation` runs:
 - call `/v1/home/assistant/runs/{runID}/confirm` with explicit decision
 - treat `pending_action_summary` as display-only; HankServerside still owns the authoritative pending action payload
 
-### OpenAI OAuth Linking
+### ChatGPT/Codex Device-Code Linking
 
 Add app-side account linking/status UX wired to:
 - `GET /v1/oauth/openai/status`
 - `GET /v1/oauth/openai/start`
-- server callback route `GET /v1/oauth/openai/callback`
 
 Expected behavior:
-- if status/start returns `auth_mode: "authorization_url"`, open `authorization_url` and complete provider login/consent
-- if status/start returns `auth_mode: "device_code"`, show `user_code`, open `verification_url`, and poll based on `poll_after_seconds`
+- when start returns `auth_mode: "device_code"`, show `user_code`, open `verification_url`, and poll based on `poll_after_seconds`
 - return to Hank and refresh assistant link status
+
+The old browser-redirect OpenAI OAuth callback route is removed. OpenAI API-key provider support remains a server/operator setting; ChatGPT/Codex subscription linking uses device code only.
 
 ### Assistant Settings
 

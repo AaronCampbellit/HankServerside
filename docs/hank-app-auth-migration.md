@@ -87,7 +87,6 @@ To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, 
 
 - `GET /v1/oauth/openai/start`
 - `GET /v1/oauth/openai/status`
-- `GET /v1/oauth/openai/callback` (cloud callback endpoint)
 - `GET /v1/home/assistant/settings`
 - `PUT /v1/home/assistant/settings`
 
@@ -95,10 +94,11 @@ To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, 
 
 1. Ensure the user is authenticated with normal Hank session auth (`Authorization: Bearer <session_token>`).
 2. Call `GET /v1/oauth/openai/start`.
-3. If the response includes `authorization_url`, open it in an in-app browser or external browser with app return handling.
-4. If the response includes `auth_mode: "device_code"`, show `verification_url`, `user_code`, `expires_at`, and `poll_after_seconds`. The server polls the auth service and stores the final tokens server-side.
-5. For the legacy redirect flow, OpenAI redirects to `/v1/oauth/openai/callback` where token exchange and linking are finalized server-side.
-6. App should call `GET /v1/oauth/openai/status` until linked, failed, or expired, then show success/failure status in Assistant settings.
+3. Show `verification_url`, `user_code`, `expires_at`, and `poll_after_seconds` when the response includes `auth_mode: "device_code"`.
+4. The server polls the auth service and stores the final tokens server-side.
+5. App should call `GET /v1/oauth/openai/status` until linked, failed, or expired, then show success/failure status in Assistant settings.
+
+The older browser-redirect OpenAI OAuth callback has been removed. Keep OpenAI API-key provider support as the production API-key path, and use this device-code flow only for ChatGPT/Codex subscription-backed chat.
 
 ### UX Requirements
 
@@ -106,7 +106,7 @@ To enable experimental subscription-backed ChatGPT usage inside Hank Assistant, 
   - linked/not linked status
   - "Link ChatGPT/Codex" action when the server reports `auth_provider: "chatgpt_codex"` or `auth_mode: "device_code"`
   - pending device code, plan type, token expiry, and "Relink" if link fails/expired
-- Show actionable error copy if link fails (invalid state, expired state, provider failure).
+- Show actionable error copy if device-code linking fails or expires.
 - If not linked, Assistant tab should still work for local flows where available, but clearly indicate ChatGPT subscription-backed features require linking.
 - The current dashboard can show the device code. Hank iOS needs a follow-up UI change if it should show the device code natively instead of only opening a browser link.
 
