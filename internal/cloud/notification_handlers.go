@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/dropfile/hankremote/internal/domain"
@@ -65,6 +66,92 @@ func (s *Server) handleAPNSDeviceRegistration(w http.ResponseWriter, r *http.Req
 		"device_id":  device.DeviceID,
 		"categories": categories,
 	})
+}
+
+func (s *Server) handleWebPushVAPIDPublicKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, ok := s.requireAuth(w, r); !ok {
+		return
+	}
+	publicKey := strings.TrimSpace(os.Getenv("HANK_REMOTE_WEB_PUSH_VAPID_PUBLIC_KEY"))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"public_key": publicKey,
+		"available":  publicKey != "",
+	})
+}
+
+func (s *Server) handleWebPushDeviceRegistration(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var body struct {
+			DeviceID          string   `json:"device_id"`
+			Endpoint          string   `json:"endpoint"`
+			P256DH            string   `json:"p256dh"`
+			Auth              string   `json:"auth"`
+			EnabledCategories []string `json:"enabled_categories"`
+		}
+		if err := parseJSON(w, r, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		body.DeviceID = strings.TrimSpace(body.DeviceID)
+		body.Endpoint = strings.TrimSpace(body.Endpoint)
+		body.P256DH = strings.TrimSpace(body.P256DH)
+		body.Auth = strings.TrimSpace(body.Auth)
+		if body.DeviceID == "" || body.Endpoint == "" || body.P256DH == "" || body.Auth == "" {
+			http.Error(w, "device_id, endpoint, p256dh, and auth are required", http.StatusBadRequest)
+			return
+		}
+		if !strings.HasPrefix(body.Endpoint, "https://") {
+			http.Error(w, "web push endpoint must use https", http.StatusBadRequest)
+			return
+		}
+		categories := sanitizeNotificationCategories(body.EnabledCategories)
+		encodedCategories, err := json.Marshal(categories)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		device, err := s.store.UpsertWebPushDevice(r.Context(), domain.WebPushDevice{
+			UserID:            auth.User.ID,
+			SessionID:         auth.Session.ID,
+			DeviceID:          body.DeviceID,
+			Endpoint:          body.Endpoint,
+			P256DH:            body.P256DH,
+			Auth:              body.Auth,
+			EnabledCategories: encodedCategories,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":          true,
+			"device_id":   device.DeviceID,
+			"categories":  categories,
+			"deliverable": strings.TrimSpace(os.Getenv("HANK_REMOTE_WEB_PUSH_VAPID_PRIVATE_KEY")) != "",
+		})
+	case http.MethodDelete:
+		deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+		if deviceID == "" {
+			http.Error(w, "device_id is required", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.DeleteWebPushDevice(r.Context(), auth.User.ID, deviceID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleAPNSDevice(w http.ResponseWriter, r *http.Request) {

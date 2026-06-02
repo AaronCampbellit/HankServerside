@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -101,6 +102,124 @@ func (s *Store) DeleteAPNSDevice(ctx context.Context, userID string, deviceID st
 func (s *Store) DeleteAPNSDevicesForSession(ctx context.Context, sessionID string) error {
 	_, err := s.exec(ctx, `DELETE FROM apns_devices WHERE session_id = ?`, sessionID)
 	return err
+}
+
+func (s *Store) UpsertWebPushDevice(ctx context.Context, device domain.WebPushDevice) (domain.WebPushDevice, error) {
+	now := time.Now().UTC()
+	if device.CreatedAt.IsZero() {
+		device.CreatedAt = now
+	}
+	device.UpdatedAt = now
+	device.LastRegisteredAt = now
+	if len(device.EnabledCategories) == 0 || !json.Valid(device.EnabledCategories) {
+		device.EnabledCategories = json.RawMessage(`[]`)
+	}
+	endpoint, err := s.encryptSecret(device.Endpoint)
+	if err != nil {
+		return domain.WebPushDevice{}, err
+	}
+	p256dh, err := s.encryptSecret(device.P256DH)
+	if err != nil {
+		return domain.WebPushDevice{}, err
+	}
+	auth, err := s.encryptSecret(device.Auth)
+	if err != nil {
+		return domain.WebPushDevice{}, err
+	}
+	_, err = s.exec(ctx, `INSERT INTO web_push_devices (
+			user_id, session_id, device_id, endpoint, p256dh, auth, enabled_categories,
+			created_at, updated_at, last_registered_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, device_id) DO UPDATE SET
+			session_id = excluded.session_id,
+			endpoint = excluded.endpoint,
+			p256dh = excluded.p256dh,
+			auth = excluded.auth,
+			enabled_categories = excluded.enabled_categories,
+			updated_at = excluded.updated_at,
+			last_registered_at = excluded.last_registered_at`,
+		device.UserID,
+		device.SessionID,
+		device.DeviceID,
+		endpoint,
+		p256dh,
+		auth,
+		string(device.EnabledCategories),
+		device.CreatedAt,
+		device.UpdatedAt,
+		device.LastRegisteredAt,
+	)
+	if err != nil {
+		return domain.WebPushDevice{}, err
+	}
+	return device, nil
+}
+
+func (s *Store) DeleteWebPushDevice(ctx context.Context, userID string, deviceID string) error {
+	result, err := s.exec(ctx, `DELETE FROM web_push_devices WHERE user_id = ? AND device_id = ?`, userID, deviceID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteWebPushDevicesForSession(ctx context.Context, sessionID string) error {
+	_, err := s.exec(ctx, `DELETE FROM web_push_devices WHERE session_id = ?`, sessionID)
+	return err
+}
+
+func (s *Store) ListActiveWebPushDevicesForUsers(ctx context.Context, userIDs []string) ([]domain.WebPushDevice, error) {
+	userIDs = cleanUniqueStrings(userIDs)
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	query := `SELECT d.user_id, d.session_id, d.device_id, d.endpoint, d.p256dh, d.auth,
+			d.enabled_categories, d.created_at, d.updated_at, d.last_registered_at
+		FROM web_push_devices d
+		JOIN app_sessions s ON s.id = d.session_id
+		WHERE d.user_id IN (` + placeholders(len(userIDs)) + `)
+			AND s.revoked_at IS NULL
+			AND s.expires_at > ?
+		ORDER BY d.updated_at DESC`
+	args := make([]any, 0, len(userIDs)+1)
+	for _, userID := range userIDs {
+		args = append(args, userID)
+	}
+	args = append(args, time.Now().UTC())
+	rows, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var devices []domain.WebPushDevice
+	for rows.Next() {
+		device, err := scanWebPushDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		device.Endpoint, err = s.decryptSecret(device.Endpoint)
+		if err != nil {
+			return nil, err
+		}
+		device.P256DH, err = s.decryptSecret(device.P256DH)
+		if err != nil {
+			return nil, err
+		}
+		device.Auth, err = s.decryptSecret(device.Auth)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, device)
+	}
+	return devices, rows.Err()
 }
 
 func (s *Store) ListActiveAPNSDevicesForUsers(ctx context.Context, userIDs []string) ([]domain.APNSDevice, error) {
@@ -266,6 +385,30 @@ func scanAPNSDevice(scanner interface{ Scan(dest ...any) error }) (domain.APNSDe
 	}
 	if err != nil {
 		return domain.APNSDevice{}, err
+	}
+	device.EnabledCategories = json.RawMessage(categories)
+	return device, nil
+}
+
+func scanWebPushDevice(scanner interface{ Scan(dest ...any) error }) (domain.WebPushDevice, error) {
+	var device domain.WebPushDevice
+	var categories string
+	if err := scanner.Scan(
+		&device.UserID,
+		&device.SessionID,
+		&device.DeviceID,
+		&device.Endpoint,
+		&device.P256DH,
+		&device.Auth,
+		&categories,
+		&device.CreatedAt,
+		&device.UpdatedAt,
+		&device.LastRegisteredAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WebPushDevice{}, ErrNotFound
+		}
+		return domain.WebPushDevice{}, err
 	}
 	device.EnabledCategories = json.RawMessage(categories)
 	return device, nil

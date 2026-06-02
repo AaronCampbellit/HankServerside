@@ -136,6 +136,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)
 	mux.HandleFunc("/favicon.ico", serveUIFavicon)
 	mux.HandleFunc("/assets/", serveUIAsset)
+	mux.HandleFunc("/pwa", servePWA)
+	mux.HandleFunc("/pwa/", servePWA)
 	mux.HandleFunc("/healthz", server.handleHealthz)
 	mux.HandleFunc("/readyz", server.handleReadyz)
 	mux.HandleFunc("/metrics", server.handleMetrics)
@@ -144,6 +146,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/logout", server.handleAuthLogout)
 	mux.HandleFunc("/v1/me", server.handleMe)
 	mux.HandleFunc("/v1/me/devices/apns", server.handleAPNSDeviceRegistration)
+	mux.HandleFunc("/v1/me/devices/webpush", server.handleWebPushDeviceRegistration)
+	mux.HandleFunc("/v1/me/devices/webpush/vapid-public-key", server.handleWebPushVAPIDPublicKey)
 	mux.HandleFunc("/v1/me/devices/", server.handleAPNSDevice)
 	mux.HandleFunc("/v1/me/notification-settings", server.handleNotificationSettings)
 	mux.HandleFunc("/v1/oauth/openai/status", server.handleOpenAIOAuthStatus)
@@ -163,7 +167,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 
 	server.http = &http.Server{
 		Addr:              addr,
-		Handler:           securityHeadersMiddleware(requestIDMiddleware(server.metricsMiddleware(mux))),
+		Handler:           securityHeadersMiddleware(corsMiddleware(requestIDMiddleware(server.metricsMiddleware(mux)))),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Minute,
@@ -567,6 +571,9 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.DeleteAPNSDevicesForSession(r.Context(), auth.Session.ID); err != nil {
 		s.logger.Warn("failed to delete APNs devices for revoked session", "session_id", auth.Session.ID, "error", err)
+	}
+	if err := s.store.DeleteWebPushDevicesForSession(r.Context(), auth.Session.ID); err != nil {
+		s.logger.Warn("failed to delete Web Push devices for revoked session", "session_id", auth.Session.ID, "error", err)
 	}
 	clearSessionCookie(w, r)
 	s.logger.Info("app session revoked", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID)

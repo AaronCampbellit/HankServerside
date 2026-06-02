@@ -90,7 +90,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "api-client.js", "login.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
+	case "api-client.js", "ui-helpers.js", "login.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "site.webmanifest":
 		serveUIFile(w, r, name, "application/manifest+json; charset=utf-8")

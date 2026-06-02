@@ -4,15 +4,17 @@ const state = {
   user: null,
   canViewBackups: false,
   activeTab: "",
+  paneLoadID: 0,
 };
 
 const settingsTabs = Array.from(document.querySelectorAll("[data-settings-page-tab]"));
-const settingsPanels = Array.from(document.querySelectorAll("[data-settings-page-panel]"));
 const els = {
   logoutButton: document.getElementById("logout-button"),
   sessionState: document.getElementById("session-state"),
   sessionMeta: document.getElementById("session-meta"),
   toast: document.getElementById("toast"),
+  paneRoot: document.getElementById("settings-pane-root"),
+  paneLoading: document.getElementById("settings-pane-loading"),
 };
 
 const tabAliases = {
@@ -25,18 +27,40 @@ const tabAliases = {
   invitations: "join-home",
   invite: "join-home",
 };
-const minFrameHeight = 620;
-const framePadding = 14;
-
+const paneDefinitions = {
+  home: {
+    path: "/dashboard?pane=1&embedded=1",
+    script: "/assets/dashboard.js?v=20260601-health-panel",
+  },
+  "quick-links": {
+    path: "/dashboard?pane=1&embedded=1#quick-links-panel",
+    script: "/assets/dashboard.js?v=20260601-health-panel",
+    afterMount: () => document.getElementById("quick-links-panel")?.scrollIntoView({ block: "start" }),
+  },
+  people: {
+    path: "/dashboard/settings/people-pane?embedded=1",
+    script: "/assets/home-users.js",
+  },
+  connections: {
+    path: "/dashboard/settings/connections-pane?embedded=1",
+    script: "/assets/settings-connections.js?v=20260601-hermes",
+  },
+  ai: {
+    path: "/dashboard/settings/ai-pane?embedded=1",
+    script: "/assets/assistant-settings.js",
+  },
+  backups: {
+    path: "/dashboard/settings/backups-pane?embedded=1",
+    script: "/assets/storage.js",
+  },
+  "join-home": {
+    path: "/dashboard/settings/join-home-pane?embedded=1",
+    script: "/assets/accept-invitation.js",
+  },
+};
 
 function showToast(message, isError = false) {
-  els.toast.hidden = false;
-  els.toast.textContent = message;
-  els.toast.style.background = isError ? "rgba(142, 45, 28, 0.94)" : "rgba(35, 27, 20, 0.92)";
-  clearTimeout(showToast.timeoutID);
-  showToast.timeoutID = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 3400);
+  window.HankUI?.toast(message, { error: isError, target: els.toast });
 }
 
 function renderSession() {
@@ -55,7 +79,7 @@ function tabIsAllowed(tab) {
 }
 
 function frameURL(frame, tab) {
-  const raw = frame.dataset.src || "";
+  const raw = paneDefinitions[tab]?.path || paneDefinitions.home.path;
   const url = new URL(raw, window.location.origin);
   const current = new URLSearchParams(window.location.search);
   const token = current.get("token");
@@ -70,74 +94,52 @@ function frameURL(frame, tab) {
   return url.toString();
 }
 
-function resizeFrame(frame) {
+function extractMain(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const main = doc.querySelector("main");
+  if (!main) {
+    throw new Error("Settings pane did not include a main content area.");
+  }
+  return {
+    className: main.className,
+    html: main.innerHTML,
+  };
+}
+
+async function importPaneScript(script, loadID) {
+  const url = new URL(script, window.location.origin);
+  url.searchParams.set("settings_mount", String(loadID));
+  await import(url.toString());
+}
+
+async function loadNativePane(tab) {
+  const definition = paneDefinitions[tab] || paneDefinitions.home;
+  const loadID = ++state.paneLoadID;
+  els.paneLoading.hidden = false;
+  els.paneLoading.textContent = `Loading ${tab.replace("-", " ")} settings.`;
+  els.paneRoot.hidden = true;
+  els.paneRoot.innerHTML = "";
   try {
-    const doc = frame.contentDocument;
-    const win = frame.contentWindow;
-    if (!doc || !win) return;
-    const contentRoot = doc.querySelector(".shell") || doc.querySelector("main") || doc.body;
-    if (!contentRoot) return;
-    const rect = contentRoot.getBoundingClientRect();
-    const bodyStyle = win.getComputedStyle(doc.body);
-    const marginTop = Number.parseFloat(bodyStyle.marginTop) || 0;
-    const marginBottom = Number.parseFloat(bodyStyle.marginBottom) || 0;
-    const measuredHeight = Math.ceil(rect.height + marginTop + marginBottom + framePadding);
-    const nextHeight = Math.max(minFrameHeight, measuredHeight);
-    const currentHeight = Number.parseFloat(frame.style.height) || 0;
-    if (Math.abs(currentHeight - nextHeight) > 2) {
-      frame.style.height = `${nextHeight}px`;
+    const response = await fetch(frameURL(null, tab), { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(response.statusText || "Settings pane could not be loaded.");
     }
-  } catch (_) {
-  }
-}
-
-function scheduleFrameResize(frame) {
-  if (frame.dataset.resizePending === "true") {
-    return;
-  }
-  frame.dataset.resizePending = "true";
-  window.requestAnimationFrame(() => {
-    frame.dataset.resizePending = "false";
-    resizeFrame(frame);
-  });
-}
-
-function installFrameResizer(frame) {
-  if (frame.dataset.resizerInstalled === "true") {
-    scheduleFrameResize(frame);
-    return;
-  }
-  frame.dataset.resizerInstalled = "true";
-  frame.addEventListener("load", () => {
-    resizeFrame(frame);
-    try {
-      const doc = frame.contentDocument;
-      const resize = () => scheduleFrameResize(frame);
-      frame._settingsPaneResizeObserver?.disconnect();
-      const contentRoot = doc?.querySelector(".shell") || doc?.querySelector("main") || doc?.body;
-      const nodeType = frame.contentWindow?.Node;
-      const canObserve = contentRoot && (!nodeType || contentRoot instanceof nodeType);
-      if (frame.contentWindow?.ResizeObserver && canObserve) {
-        const observer = new frame.contentWindow.ResizeObserver(resize);
-        observer.observe(contentRoot);
-        frame._settingsPaneResizeObserver = observer;
-      }
-      frame.contentWindow?.addEventListener("resize", resize);
-      window.setTimeout(resize, 150);
-      window.setTimeout(resize, 600);
-    } catch (_) {
-    }
-  });
-}
-
-function loadPanelFrame(panel, tab) {
-  const frame = panel.querySelector("iframe[data-src]");
-  if (!frame) return;
-  installFrameResizer(frame);
-  if (!frame.src) {
-    frame.src = frameURL(frame, tab);
-  } else {
-    resizeFrame(frame);
+    const html = await response.text();
+    if (loadID !== state.paneLoadID) return;
+    const main = extractMain(html);
+    els.paneRoot.className = `settings-mounted-pane ${main.className || ""}`.trim();
+    els.paneRoot.innerHTML = main.html;
+    els.paneRoot.hidden = false;
+    els.paneLoading.hidden = true;
+    await importPaneScript(definition.script, loadID);
+    if (loadID !== state.paneLoadID) return;
+    definition.afterMount?.();
+  } catch (error) {
+    if (loadID !== state.paneLoadID) return;
+    els.paneRoot.hidden = true;
+    els.paneLoading.hidden = false;
+    els.paneLoading.textContent = error.message || "Settings pane could not be loaded.";
+    showToast(els.paneLoading.textContent, true);
   }
 }
 
@@ -150,13 +152,7 @@ function setActiveTab(tab, updateHash = true) {
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
   });
-  settingsPanels.forEach((panel) => {
-    const active = panel.dataset.settingsPagePanel === allowed;
-    panel.hidden = !active;
-    if (active) {
-      loadPanelFrame(panel, allowed);
-    }
-  });
+  loadNativePane(allowed);
   if (updateHash && window.location.hash !== `#${allowed}`) {
     window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}#${allowed}`);
   }

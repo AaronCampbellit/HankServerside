@@ -134,6 +134,19 @@ type APNSDevice struct {
 	LastRegisteredAt  time.Time       `json:"last_registered_at"`
 }
 
+type WebPushDevice struct {
+	UserID            string          `json:"user_id"`
+	SessionID         string          `json:"session_id"`
+	DeviceID          string          `json:"device_id"`
+	Endpoint          string          `json:"endpoint"`
+	P256DH            string          `json:"p256dh"`
+	Auth              string          `json:"auth"`
+	EnabledCategories json.RawMessage `json:"enabled_categories"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	LastRegisteredAt  time.Time       `json:"last_registered_at"`
+}
+
 type UserProfileSettings struct {
 	UserID    string          `json:"user_id"`
 	Revision  int             `json:"revision"`

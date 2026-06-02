@@ -173,6 +173,41 @@ func TestNotificationSettingsAndAPNSDevices(t *testing.T) {
 	if len(devices) != 0 {
 		t.Fatalf("devices after delete = %#v", devices)
 	}
+
+	webDevice, err := db.UpsertWebPushDevice(ctx, domain.WebPushDevice{
+		UserID:            user.ID,
+		SessionID:         session.ID,
+		DeviceID:          "web-device-1",
+		Endpoint:          "https://push.example.test/subscription-1",
+		P256DH:            "p256dh-1",
+		Auth:              "auth-1",
+		EnabledCategories: json.RawMessage(`["storage"]`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertWebPushDevice: %v", err)
+	}
+	if webDevice.DeviceID != "web-device-1" || string(webDevice.EnabledCategories) != `["storage"]` {
+		t.Fatalf("webDevice = %#v", webDevice)
+	}
+
+	webDevices, err := db.ListActiveWebPushDevicesForUsers(ctx, []string{user.ID})
+	if err != nil {
+		t.Fatalf("ListActiveWebPushDevicesForUsers: %v", err)
+	}
+	if len(webDevices) != 1 || webDevices[0].Endpoint != "https://push.example.test/subscription-1" || webDevices[0].Auth != "auth-1" {
+		t.Fatalf("webDevices = %#v", webDevices)
+	}
+
+	if err := db.DeleteWebPushDevicesForSession(ctx, session.ID); err != nil {
+		t.Fatalf("DeleteWebPushDevicesForSession: %v", err)
+	}
+	webDevices, err = db.ListActiveWebPushDevicesForUsers(ctx, []string{user.ID})
+	if err != nil {
+		t.Fatalf("ListActiveWebPushDevicesForUsers after delete: %v", err)
+	}
+	if len(webDevices) != 0 {
+		t.Fatalf("webDevices after delete = %#v", webDevices)
+	}
 }
 
 func TestLoginBackoffPersistsAndClears(t *testing.T) {

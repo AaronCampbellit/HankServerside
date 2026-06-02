@@ -93,6 +93,49 @@ func TestNotificationSettingsAndAPNSHandlers(t *testing.T) {
 	if len(devices) != 0 {
 		t.Fatalf("devices after delete = %#v", devices)
 	}
+
+	var webKey struct {
+		PublicKey string `json:"public_key"`
+		Available bool   `json:"available"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/me/devices/webpush/vapid-public-key", nil, &webKey)
+	if webKey.Available || webKey.PublicKey != "" {
+		t.Fatalf("unexpected default web push key = %#v", webKey)
+	}
+
+	var webRegistration struct {
+		OK          bool     `json:"ok"`
+		DeviceID    string   `json:"device_id"`
+		Categories  []string `json:"categories"`
+		Deliverable bool     `json:"deliverable"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodPost, "/v1/me/devices/webpush", map[string]any{
+		"device_id":          "web-handler-" + suffix,
+		"endpoint":           "https://push.example.test/sub/" + suffix,
+		"p256dh":             "p256dh-" + suffix,
+		"auth":               "auth-" + suffix,
+		"enabled_categories": []string{"storage", "unknown", "dashboard_entities"},
+	}, &webRegistration)
+	if !webRegistration.OK || webRegistration.DeviceID != "web-handler-"+suffix || !slices.Equal(webRegistration.Categories, []string{domain.NotificationCategoryStorage, domain.NotificationCategoryDashboardEntities}) || webRegistration.Deliverable {
+		t.Fatalf("web registration = %#v", webRegistration)
+	}
+
+	webDevices, err := db.ListActiveWebPushDevicesForUsers(ctx, []string{user.ID})
+	if err != nil {
+		t.Fatalf("ListActiveWebPushDevicesForUsers: %v", err)
+	}
+	if len(webDevices) != 1 || webDevices[0].Endpoint != "https://push.example.test/sub/"+suffix || webDevices[0].Auth != "auth-"+suffix {
+		t.Fatalf("web devices = %#v", webDevices)
+	}
+
+	requestJSON(t, testServer, sessionRawToken, http.MethodDelete, "/v1/me/devices/webpush?device_id=web-handler-"+suffix, nil, nil)
+	webDevices, err = db.ListActiveWebPushDevicesForUsers(ctx, []string{user.ID})
+	if err != nil {
+		t.Fatalf("ListActiveWebPushDevicesForUsers after delete: %v", err)
+	}
+	if len(webDevices) != 0 {
+		t.Fatalf("web devices after delete = %#v", webDevices)
+	}
 }
 
 func TestNotificationEventsTargetRelevantUsers(t *testing.T) {

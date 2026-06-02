@@ -386,6 +386,39 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestConfiguredCORSPreflight(t *testing.T) {
+	t.Setenv("HANK_REMOTE_ALLOWED_ORIGINS", "http://localhost:5173,https://pwa.example.test")
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	request, err := http.NewRequest(http.MethodOptions, testServer.URL+"/v1/home", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	request.Header.Set("Origin", "http://localhost:5173")
+	request.Header.Set("Access-Control-Request-Method", "GET")
+	request.Header.Set("Access-Control-Request-Headers", "Authorization")
+	response, err := testServer.Client().Do(request)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want %d", response.StatusCode, http.StatusNoContent)
+	}
+	if got := response.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("allow origin = %q", got)
+	}
+	if got := response.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(got, "Authorization") {
+		t.Fatalf("allow headers = %q", got)
+	}
+}
+
 func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 	t.Parallel()
 
@@ -608,6 +641,45 @@ func TestDashboardPagesUseSharedAPIClient(t *testing.T) {
 	}
 }
 
+func TestPWARoutesServeInstallableApp(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path        string
+		contentType string
+		contains    string
+	}{
+		{path: "/pwa", contentType: "text/html", contains: `href="/pwa/manifest.webmanifest"`},
+		{path: "/pwa/", contentType: "text/html", contains: `src="/pwa/assets/`},
+		{path: "/pwa/manifest.webmanifest", contentType: "application/manifest+json", contains: `"scope": "/pwa/"`},
+		{path: "/pwa/sw.js", contentType: "application/javascript", contains: "hank-pwa-v"},
+		{path: "/pwa/missing/client-route", contentType: "text/html", contains: `<div id="root">`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			response := httptest.NewRecorder()
+			servePWA(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+			}
+			if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, tt.contentType) {
+				t.Fatalf("content-type = %q, want %q", contentType, tt.contentType)
+			}
+			if body := response.Body.String(); !strings.Contains(body, tt.contains) {
+				t.Fatalf("body missing %q", tt.contains)
+			}
+		})
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/pwa/assets/missing.js", nil)
+	response := httptest.NewRecorder()
+	servePWA(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing asset status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
 func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
 	t.Parallel()
 
@@ -648,7 +720,20 @@ func TestDashboardSetupFilePanelStaysInSettingsHomePane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings.html read: %v", err)
 	}
-	if !strings.Contains(string(settings), `data-src="/dashboard?pane=1&amp;embedded=1"`) {
+	settingsBody := string(settings)
+	for _, expected := range []string{`id="settings-pane-root"`, `id="settings-pane-loading"`} {
+		if !strings.Contains(settingsBody, expected) {
+			t.Fatalf("settings native pane shell missing %q", expected)
+		}
+	}
+	if strings.Contains(settingsBody, `<iframe`) {
+		t.Fatal("settings page should mount native panes instead of iframe panes")
+	}
+	settingsScript, err := fs.ReadFile(uiAssets, "ui/settings.js")
+	if err != nil {
+		t.Fatalf("settings.js read: %v", err)
+	}
+	if !strings.Contains(string(settingsScript), `path: "/dashboard?pane=1&embedded=1"`) {
 		t.Fatal("settings home pane should continue to load the dashboard with pane=1")
 	}
 }
@@ -688,9 +773,18 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("settings.html read: %v", err)
 	}
 	settingsBody := string(settings)
-	for _, expected := range []string{`data-settings-page-tab="quick-links"`, `data-settings-page-panel="quick-links"`, `#quick-links-panel`} {
+	for _, expected := range []string{`data-settings-page-tab="quick-links"`, `id="settings-pane-root"`} {
 		if !strings.Contains(settingsBody, expected) {
 			t.Fatalf("settings quick links target missing %q", expected)
+		}
+	}
+	settingsScript, err := fs.ReadFile(uiAssets, "ui/settings.js")
+	if err != nil {
+		t.Fatalf("settings.js read: %v", err)
+	}
+	for _, expected := range []string{`"quick-links":`, `path: "/dashboard?pane=1&embedded=1#quick-links-panel"`, `script: "/assets/dashboard.js?v=20260601-health-panel"`} {
+		if !strings.Contains(string(settingsScript), expected) {
+			t.Fatalf("settings quick links native loader missing %q", expected)
 		}
 	}
 }

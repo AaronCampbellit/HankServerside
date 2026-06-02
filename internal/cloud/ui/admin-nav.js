@@ -491,6 +491,9 @@
     if (!url.pathname.startsWith("/dashboard")) {
       return false;
     }
+    if (window.location.pathname === "/dashboard/settings" || url.pathname === "/dashboard/settings") {
+      return false;
+    }
     return url.pathname !== window.location.pathname || url.search !== window.location.search;
   }
 
