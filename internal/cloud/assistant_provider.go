@@ -536,7 +536,7 @@ func postOllamaChat(ctx context.Context, baseURL string, model string, messages 
 		if response.Error != "" {
 			return "", errors.New(response.Error)
 		}
-		return strings.TrimSpace(response.Message.Content), nil
+		return sanitizeAssistantModelText(response.Message.Content), nil
 	}
 	if lastErr != nil {
 		return "", lastErr
@@ -669,7 +669,7 @@ func fetchOllamaChatModels(ctx context.Context, baseURL string) ([]string, error
 			lastErr = err
 			continue
 		}
-		return assistantModelIDsFromJSON(data, false), nil
+		return assistantModelIDsFromJSON(data, true), nil
 	}
 	if lastErr != nil {
 		return nil, lastErr
@@ -859,7 +859,7 @@ func assistantModelIDAllowed(value string, chatOnly bool) bool {
 		return true
 	}
 	lowered := strings.ToLower(id)
-	for _, blocked := range []string{"embedding", "whisper", "tts", "dall-e", "image", "moderation", "audio", "transcribe", "speech", "realtime"} {
+	for _, blocked := range []string{"embed", "embedding", "whisper", "tts", "dall-e", "image", "moderation", "audio", "transcribe", "speech", "realtime"} {
 		if strings.Contains(lowered, blocked) {
 			return false
 		}
@@ -867,7 +867,35 @@ func assistantModelIDAllowed(value string, chatOnly bool) bool {
 	return strings.HasPrefix(lowered, "gpt-") ||
 		strings.HasPrefix(lowered, "o") ||
 		strings.Contains(lowered, "codex") ||
-		strings.Contains(lowered, "chat")
+		strings.Contains(lowered, "chat") ||
+		strings.Contains(lowered, "llama") ||
+		strings.Contains(lowered, "mistral") ||
+		strings.Contains(lowered, "mixtral") ||
+		strings.Contains(lowered, "qwen") ||
+		strings.Contains(lowered, "gemma") ||
+		strings.Contains(lowered, "phi") ||
+		strings.Contains(lowered, "deepseek") ||
+		strings.Contains(lowered, "command-r") ||
+		strings.Contains(lowered, "yi")
+}
+
+func sanitizeAssistantModelText(value string) string {
+	text := strings.TrimSpace(value)
+	for {
+		lowered := strings.ToLower(text)
+		start := strings.Index(lowered, "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(lowered[start:], "</think>")
+		if end < 0 {
+			text = strings.TrimSpace(text[:start])
+			break
+		}
+		end += start + len("</think>")
+		text = strings.TrimSpace(text[:start] + text[end:])
+	}
+	return text
 }
 
 func localEmbedding(text string, dimension int) []float64 {

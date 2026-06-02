@@ -79,6 +79,53 @@ func TestOllamaBaseURLCandidatesFallbackFromLocalhostToDockerHost(t *testing.T) 
 	}
 }
 
+func TestFetchOllamaChatModelsIncludesLocalChatAndExcludesEmbeddings(t *testing.T) {
+	t.Parallel()
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"models": []map[string]any{
+				{"name": "qwen3:14b"},
+				{"name": "llama3.2:latest"},
+				{"name": "nomic-embed-text:latest"},
+			},
+		})
+	}))
+	defer provider.Close()
+
+	models, err := fetchOllamaChatModels(context.Background(), provider.URL)
+	if err != nil {
+		t.Fatalf("fetchOllamaChatModels error = %v", err)
+	}
+	modelSet := map[string]bool{}
+	for _, model := range models {
+		modelSet[model] = true
+	}
+	if !modelSet["qwen3:14b"] || !modelSet["llama3.2:latest"] {
+		t.Fatalf("local chat models missing: %#v", models)
+	}
+	if modelSet["nomic-embed-text:latest"] {
+		t.Fatalf("embedding model should not be offered as chat model: %#v", models)
+	}
+}
+
+func TestSanitizeAssistantModelTextRemovesThinkingBlocks(t *testing.T) {
+	t.Parallel()
+
+	got := sanitizeAssistantModelText("  <think>private reasoning</think>\nUse the vector DB context to answer.  ")
+	if got != "Use the vector DB context to answer." {
+		t.Fatalf("sanitizeAssistantModelText = %q", got)
+	}
+	got = sanitizeAssistantModelText("Answer first. <think>later reasoning</think> Answer second.")
+	if got != "Answer first.  Answer second." {
+		t.Fatalf("sanitizeAssistantModelText inline = %q", got)
+	}
+}
+
 func TestAssistantStatusUsesLinkedChatGPTCodexWhenConfigured(t *testing.T) {
 	t.Parallel()
 
