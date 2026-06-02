@@ -21,6 +21,13 @@ func TestAssistantProviderUsesConfiguredOllama(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/chat":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode Ollama chat body: %v", err)
+			}
+			if body["think"] != false {
+				t.Fatalf("Ollama chat think = %#v, want false", body["think"])
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"message": map[string]any{"content": "Grounded answer from Ollama."},
 			})

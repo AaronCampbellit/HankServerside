@@ -511,10 +511,12 @@ func postOllamaChat(ctx context.Context, baseURL string, model string, messages 
 		Model    string                `json:"model"`
 		Messages []assistantLLMMessage `json:"messages"`
 		Stream   bool                  `json:"stream"`
+		Think    bool                  `json:"think"`
 	}
 	body.Model = model
 	body.Messages = messages
 	body.Stream = false
+	body.Think = false
 	var response struct {
 		Message struct {
 			Content string `json:"content"`

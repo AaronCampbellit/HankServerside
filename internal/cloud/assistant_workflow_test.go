@@ -47,6 +47,7 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "calendar update", prompt: "move my dentist appointment to 3", want: assistantIntentCalendarUpdate},
 		{name: "calendar delete", prompt: "delete the dentist appointment tomorrow", want: assistantIntentCalendarDelete},
 		{name: "project docs", prompt: "what does AGENTS.md say", want: assistantIntentProjectDocs},
+		{name: "project docs from source path request", prompt: "Using Hank context, what is Hank Remote supposed to do? Keep it concise and cite any project-doc source path if available.", want: assistantIntentProjectDocs},
 		{name: "assistant memory decision", prompt: "what did we decide about calendar defaults", want: assistantIntentMemorySearch},
 		{name: "Hermes slash command", prompt: "/Hermes summarize the current plan", want: assistantIntentHermesChat},
 	}

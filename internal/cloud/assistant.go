@@ -3637,6 +3637,12 @@ func isNoteAppendPrompt(prompt string) bool {
 }
 
 func isProjectDocsPrompt(lowered string) bool {
+	if strings.Contains(lowered, "source path") && strings.Contains(lowered, "hank") {
+		return true
+	}
+	if strings.Contains(lowered, "hank context") && (strings.Contains(lowered, "hank remote") || strings.Contains(lowered, "project") || strings.Contains(lowered, "supposed to do")) {
+		return true
+	}
 	projectTerms := []string{
 		"agents.md",
 		"readme",
