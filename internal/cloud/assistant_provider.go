@@ -90,6 +90,9 @@ func (c *AssistantAIConfig) normalize() {
 		c.OpenAIChatModel = "gpt-4o-mini"
 	}
 	c.OpenAIEmbeddingModel = strings.TrimSpace(c.OpenAIEmbeddingModel)
+	if c.OpenAIEmbeddingModel == "" {
+		c.OpenAIEmbeddingModel = "text-embedding-3-small"
+	}
 	c.ChatGPTAuthIssuer = strings.TrimRight(strings.TrimSpace(c.ChatGPTAuthIssuer), "/")
 	if c.ChatGPTAuthIssuer == "" {
 		c.ChatGPTAuthIssuer = "https://auth.openai.com"
@@ -169,6 +172,9 @@ func (s *Server) assistantStatus(ctx context.Context, userID string, modelOverri
 		status.EmbeddingConfigured = true
 		status.EmbeddingModel = cfg.OllamaEmbeddingModel
 	} else if strings.TrimSpace(cfg.OpenAIAPIKey) != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
+		status.EmbeddingConfigured = true
+		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
+	} else if provider == assistantProviderChatGPTCodex && token != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
 		status.EmbeddingConfigured = true
 		status.EmbeddingModel = cfg.OpenAIEmbeddingModel
 	}
@@ -382,7 +388,35 @@ func (s *Server) embedAssistantText(ctx context.Context, userID string, text str
 			s.logger.Warn("assistant OpenAI embedding failed", "error", err)
 		}
 	}
+	if cfg.ChatGPTOAuthEnabled && strings.TrimSpace(userID) != "" && strings.TrimSpace(cfg.OpenAIEmbeddingModel) != "" {
+		if embedding, err := s.embedAssistantTextWithLinkedChatGPT(ctx, userID, cfg, text); err == nil && len(embedding) > 0 {
+			return normalizeEmbedding(embedding, cfg.EmbeddingDimension), cfg.OpenAIEmbeddingModel, assistantProviderChatGPTCodex
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, errChatGPTRelinkRequired) {
+			s.logger.Warn("assistant ChatGPT/Codex embedding failed", "error", err)
+		}
+	}
 	return localEmbedding(text, cfg.EmbeddingDimension), "local-hash", "v1"
+}
+
+func (s *Server) embedAssistantTextWithLinkedChatGPT(ctx context.Context, userID string, cfg AssistantAIConfig, text string) ([]float64, error) {
+	account, err := s.chatGPTCodexAccount(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	embedding, err := postOpenAIEmbedding(ctx, cfg.OpenAIBaseURL, account.AccessToken, cfg.OpenAIEmbeddingModel, cfg.EmbeddingDimension, text)
+	var providerErr *providerHTTPError
+	if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+		account, err = s.refreshChatGPTCodexAccount(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		embedding, err = postOpenAIEmbedding(ctx, cfg.OpenAIBaseURL, account.AccessToken, cfg.OpenAIEmbeddingModel, cfg.EmbeddingDimension, text)
+		if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+			_ = s.store.DeleteOpenAIAccount(ctx, userID)
+			return nil, errChatGPTRelinkRequired
+		}
+	}
+	return embedding, err
 }
 
 func postOllamaChat(ctx context.Context, baseURL string, model string, messages []assistantLLMMessage) (string, error) {

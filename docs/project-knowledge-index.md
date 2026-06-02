@@ -59,3 +59,5 @@ The phase-era documents are archived under [archive/phases](archive/phases). The
 ## HankAI Indexing
 
 HankAI indexes root markdown files and every markdown file under `docs/` as the `Project docs` source. The cloud Docker image copies those files into `/app`, and local development defaults to the repo root. Override with `HANK_REMOTE_PROJECT_DOCS_DIR` if the markdown lives somewhere else.
+
+Use `docs/hankai-vector-index.md` as the current inventory of HankAI vector-index sources, provider embedding behavior, and retrieval boundaries.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
 
@@ -303,6 +304,114 @@ func TestAssistantProjectDocsAreIndexedAsHarnessSource(t *testing.T) {
 	}
 	if !strings.Contains(sentMessages[1].Content, "[project_doc]") || !strings.Contains(sentMessages[1].Content, "frobnicator") {
 		t.Fatalf("project docs were not sent as context: %s", sentMessages[1].Content)
+	}
+}
+
+func TestAssistantOpenAIAnswerUsesVectorRetrievedContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_openai_vector", Email: "openai-vector@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_openai_vector", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+
+	var sentMessages []assistantLLMMessage
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer api-key" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			var body struct {
+				Messages []assistantLLMMessage `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			sentMessages = body.Messages
+			writeJSON(w, http.StatusOK, map[string]any{
+				"choices": []map[string]any{
+					{"message": map[string]any{"content": "The breaker panel is in the basement closet."}},
+				},
+			})
+		case "/v1/embeddings":
+			var body struct {
+				Input string `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			embedding := make([]float64, 768)
+			loweredInput := strings.ToLower(body.Input)
+			if strings.Contains(loweredInput, "breaker") || strings.Contains(loweredInput, "fuse") {
+				embedding[5] = 1
+			} else {
+				embedding[19] = 1
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"data": []map[string]any{
+					{"embedding": embedding},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{
+		Provider:        "openai",
+		OpenAIBaseURL:   provider.URL,
+		OpenAIAPIKey:    "api-key",
+		OpenAIChatModel: "gpt-test",
+	})
+
+	settings := defaultAssistantSettings(home.ID, user.ID)
+	settings.ProfileNotesEnabled = true
+	settings.HomeNotesEnabled = false
+	settings.FilesEnabled = false
+	settings.CalendarEnabled = false
+	settings.HomeAssistantEnabled = false
+	settings.ProjectDocsEnabled = false
+	settings.ConversationsEnabled = false
+
+	note := domain.UserNote{
+		ID:           "unote_openai_vector",
+		NoteID:       "basement-closet",
+		OwnerUserID:  user.ID,
+		Title:        "Basement Closet",
+		Content:      "The breaker panel is in the basement closet.",
+		BodyMarkdown: "The breaker panel is in the basement closet.",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		UpdatedBy:    user.ID,
+	}
+	must(t, db.UpsertUserNote(ctx, note))
+
+	auth := authContext{User: user}
+	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+	answer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "where is the fuse box?")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse: %v", err)
+	}
+	if answer.Text != "The breaker panel is in the basement closet." {
+		t.Fatalf("answer = %#v", answer)
+	}
+	if len(sentMessages) != 2 {
+		t.Fatalf("messages = %#v", sentMessages)
+	}
+	if !strings.Contains(sentMessages[1].Content, "[profile_note] Basement Closet") || !strings.Contains(sentMessages[1].Content, "breaker panel") {
+		t.Fatalf("vector-retrieved context was not sent to OpenAI chat: %s", sentMessages[1].Content)
 	}
 }
 

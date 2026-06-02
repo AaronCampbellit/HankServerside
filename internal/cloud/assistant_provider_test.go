@@ -116,8 +116,11 @@ func TestAssistantStatusUsesLinkedChatGPTCodexWhenConfigured(t *testing.T) {
 	if status["chat_model_default"] != "gpt-codex-test" || status["chat_model_override"] != "gpt-codex-large" {
 		t.Fatalf("chat model defaults = %#v", status)
 	}
-	if status["embedding_configured"] != false {
-		t.Fatalf("embedding_configured = %#v, want false", status["embedding_configured"])
+	if status["embedding_configured"] != true {
+		t.Fatalf("embedding_configured = %#v, want true", status["embedding_configured"])
+	}
+	if status["embedding_model"] != "embed-test" {
+		t.Fatalf("embedding_model = %#v", status["embedding_model"])
 	}
 }
 
@@ -309,6 +312,70 @@ func TestChatGPTCodexProviderUsesModelOverride(t *testing.T) {
 	}
 	if answer != "Override answer." || model != "chatgpt_codex:gpt-codex-large" {
 		t.Fatalf("answer/model = %q/%q", answer, model)
+	}
+}
+
+func TestChatGPTCodexLinkedAccountCanEmbedForVectorSearch(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_chatgpt_embed", Email: "chatgpt-embed@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
+		UserID:          user.ID,
+		ProviderUserID:  "workspace-123",
+		AuthProvider:    openAIAccountProviderChatGPTCodex,
+		ChatGPTPlanType: "plus",
+		AccessToken:     "linked-token",
+		TokenType:       "Bearer",
+		Scope:           "chatgpt_codex",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}))
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer linked-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		var body struct {
+			Model      string `json:"model"`
+			Input      string `json:"input"`
+			Dimensions int    `json:"dimensions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Model != "embed-linked" || body.Input != "hello" || body.Dimensions != 4 {
+			t.Fatalf("embedding body = %#v", body)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": []map[string]any{
+				{"embedding": []float64{0.1, 0.2, 0.3, 0.4}},
+			},
+		})
+	}))
+	defer provider.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureAssistantAI(AssistantAIConfig{
+		Provider:             assistantProviderChatGPTCodex,
+		ChatGPTOAuthEnabled:  true,
+		OpenAIBaseURL:        provider.URL,
+		OpenAIEmbeddingModel: "embed-linked",
+		EmbeddingDimension:   4,
+	})
+
+	embedding, model, version := server.embedAssistantText(ctx, user.ID, "hello")
+	if len(embedding) != 4 || model != "embed-linked" || version != assistantProviderChatGPTCodex {
+		t.Fatalf("embedding metadata = len %d %q/%q", len(embedding), model, version)
 	}
 }
 
