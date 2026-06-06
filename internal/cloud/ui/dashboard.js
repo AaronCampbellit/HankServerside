@@ -10,6 +10,7 @@ const state = {
   setup: null,
   quickLinks: [],
   quickLinksCanEdit: false,
+  quickLinksEditMode: false,
   tokensByHome: new Map(),
   refreshTimer: 0,
   quickLinksRefreshTimer: 0,
@@ -26,12 +27,14 @@ const els = {
   homeForm: document.getElementById("home-form"),
   homeName: document.getElementById("home-name"),
   homeList: document.getElementById("home-list"),
+  homePanelTitle: document.getElementById("home-panel-title"),
   homeCount: document.getElementById("home-count"),
   agentList: document.getElementById("agent-list"),
   agentCount: document.getElementById("agent-count"),
   quickLinksCount: document.getElementById("quick-links-count"),
   quickLinksRefresh: document.getElementById("quick-links-refresh"),
   quickLinkAdd: document.getElementById("quick-link-add"),
+  quickLinksEditMode: document.getElementById("quick-links-edit-mode"),
   quickLinkForm: document.getElementById("quick-link-form"),
   quickLinkID: document.getElementById("quick-link-id"),
   quickLinkTitle: document.getElementById("quick-link-title"),
@@ -141,6 +144,9 @@ function renderSession() {
 }
 
 function renderHomes() {
+  els.homePanelTitle.textContent = isSettingsHomePane ? "Home Name" : "Current Home";
+  els.homeForm.hidden = !isSettingsHomePane;
+  els.homeCount.hidden = !isSettingsHomePane;
   els.homeCount.textContent = `${state.homes.length} home${state.homes.length === 1 ? "" : "s"}`;
   els.tokenHome.innerHTML = "";
   if (!state.homes.length) {
@@ -166,7 +172,6 @@ function renderHomes() {
           <div class="card-title">${escapeHTML(home.name)}</div>
           <div class="meta">This is the home the Hank app connects to.</div>
         </div>
-        <span class="pill">Created ${formatDate(home.created_at)}</span>
       </div>
       <div class="item-actions">
         <a class="ops-card manage-link" href="/dashboard/settings#people">Manage People</a>
@@ -229,13 +234,10 @@ function quickLinkStatusInfo(link) {
     return { className: "disabled", label: "Not checked", detail: "Status checks off" };
   }
   if (status === "up") {
-    const code = link.status_code ? ` · ${link.status_code}` : "";
-    return { className: "up", label: "Up", detail: `Up${code} · ${formatDate(link.last_checked_at)}` };
+    return { className: "up", label: "Up", detail: "Up" };
   }
   if (status === "down") {
-    const code = link.status_code ? ` · ${link.status_code}` : "";
-    const detail = link.last_error || `Review${code}`;
-    return { className: "down", label: "Review", detail: `${detail} · ${formatDate(link.last_checked_at)}` };
+    return { className: "down", label: "Review", detail: link.last_error || "Review" };
   }
   return { className: "unchecked", label: "Unchecked", detail: "Waiting for first check" };
 }
@@ -243,8 +245,18 @@ function quickLinkStatusInfo(link) {
 function renderQuickLinks() {
   els.quickLinksCount.textContent = `${state.quickLinks.length} link${state.quickLinks.length === 1 ? "" : "s"}`;
   state.quickLinksCanEdit = state.quickLinksCanEdit || userOwnsDeploymentHome();
-  els.quickLinkAdd.hidden = !state.quickLinksCanEdit;
   if (!state.quickLinksCanEdit) {
+    state.quickLinksEditMode = false;
+  }
+  els.quickLinksEditMode.hidden = !state.quickLinksCanEdit;
+  els.quickLinksEditMode.setAttribute("aria-pressed", String(state.quickLinksEditMode));
+  els.quickLinksEditMode.textContent = state.quickLinksEditMode ? "Done" : "Edit";
+  els.quickLinksCount.hidden = !state.quickLinksEditMode;
+  els.quickLinksRefresh.hidden = !state.quickLinksEditMode;
+  els.quickLinkAdd.hidden = !state.quickLinksEditMode;
+  if (!state.quickLinksCanEdit) {
+    hideQuickLinkForm();
+  } else if (!state.quickLinksEditMode && !els.quickLinkForm.hidden) {
     hideQuickLinkForm();
   }
   if (!state.quickLinks.length) {
@@ -262,7 +274,7 @@ function renderQuickLinks() {
   els.quickLinksList.innerHTML = state.quickLinks.map((link, index) => {
     const status = quickLinkStatusInfo(link);
     const description = link.description || quickLinkHost(link.url);
-    const adminActions = state.quickLinksCanEdit ? `
+    const adminActions = state.quickLinksCanEdit && state.quickLinksEditMode ? `
       <div class="quick-link-card-actions">
         <button type="button" class="ghost" data-quick-link-move="${index}" data-direction="-1" ${index === 0 ? "disabled" : ""}>Up</button>
         <button type="button" class="ghost" data-quick-link-move="${index}" data-direction="1" ${index === state.quickLinks.length - 1 ? "disabled" : ""}>Down</button>
@@ -322,6 +334,17 @@ function hideQuickLinkForm() {
   els.quickLinkHealth.checked = true;
   els.quickLinkForm.hidden = true;
   els.quickLinkAdd.setAttribute("aria-expanded", "false");
+}
+
+function toggleQuickLinksEditMode() {
+  if (!state.quickLinksCanEdit) {
+    return;
+  }
+  state.quickLinksEditMode = !state.quickLinksEditMode;
+  if (!state.quickLinksEditMode) {
+    hideQuickLinkForm();
+  }
+  renderQuickLinks();
 }
 
 function toggleQuickLinkForm() {
@@ -825,6 +848,7 @@ els.quickLinksRefresh.addEventListener("click", () => refreshQuickLinks()
     loadQuickLinks().catch(() => {});
     showToast(error.message || "Quick link status checks could not be refreshed.", true);
   }));
+els.quickLinksEditMode.addEventListener("click", toggleQuickLinksEditMode);
 els.quickLinkAdd.addEventListener("click", toggleQuickLinkForm);
 els.quickLinkForm.addEventListener("submit", saveQuickLink);
 els.quickLinkCancel.addEventListener("click", hideQuickLinkForm);

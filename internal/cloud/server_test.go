@@ -653,6 +653,35 @@ func TestDashboardSetupFilePanelStaysInSettingsHomePane(t *testing.T) {
 	}
 }
 
+func TestDashboardHomePanelKeepsNameEditingInSettingsPane(t *testing.T) {
+	t.Parallel()
+
+	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
+	if err != nil {
+		t.Fatalf("dashboard.html read: %v", err)
+	}
+	body := string(dashboard)
+	for _, expected := range []string{`id="home-panel-title">Current Home`, `id="home-count" class="pill" hidden`, `id="home-form" class="inline-form" hidden`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("dashboard home panel markup missing %q", expected)
+		}
+	}
+
+	script, err := fs.ReadFile(uiAssets, "ui/dashboard.js")
+	if err != nil {
+		t.Fatalf("dashboard.js read: %v", err)
+	}
+	scriptBody := string(script)
+	for _, expected := range []string{`isSettingsHomePane ? "Home Name" : "Current Home"`, `els.homeForm.hidden = !isSettingsHomePane`, `els.homeCount.hidden = !isSettingsHomePane`, `Manage People`, `href="/dashboard/settings#people"`, `Connections`, `href="/dashboard/settings#connections"`} {
+		if !strings.Contains(scriptBody, expected) {
+			t.Fatalf("dashboard home panel script missing %q", expected)
+		}
+	}
+	if strings.Contains(scriptBody, `Created ${formatDate(home.created_at)}`) {
+		t.Fatal("dashboard home card should not show created date")
+	}
+}
+
 func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 	t.Parallel()
 
@@ -661,7 +690,7 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("dashboard.html read: %v", err)
 	}
 	body := string(dashboard)
-	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-link-form" class="quick-link-form" hidden`, `id="quick-link-add" type="button" class="icon-button secondary"`, `aria-label="Add quick link"`, `aria-expanded="false"`, `id="quick-links-list"`} {
+	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-links-count" class="pill" hidden`, `id="quick-links-refresh" type="button" class="secondary" hidden`, `id="quick-link-form" class="quick-link-form" hidden`, `id="quick-link-add" type="button" class="icon-button secondary"`, `aria-label="Add quick link"`, `aria-expanded="false"`, `id="quick-links-edit-mode" type="button" class="secondary" aria-pressed="false" hidden`, `id="quick-links-list"`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("dashboard quick links markup missing %q", expected)
 		}
@@ -677,7 +706,7 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 		t.Fatalf("dashboard.js read: %v", err)
 	}
 	scriptBody := string(script)
-	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "refreshQuickLinks", "data-quick-link-edit", "toggleQuickLinkForm", "userOwnsDeploymentHome"} {
+	for _, expected := range []string{"/v1/home/quick-links", "quickLinksCanEdit", "quickLinksEditMode", "refreshQuickLinks", "data-quick-link-edit", "toggleQuickLinksEditMode", "toggleQuickLinkForm", "userOwnsDeploymentHome"} {
 		if !strings.Contains(scriptBody, expected) {
 			t.Fatalf("dashboard quick links script missing %q", expected)
 		}

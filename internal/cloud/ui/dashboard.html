@@ -37,10 +37,10 @@
       <main class="grid">
         <section class="panel">
           <div class="panel-head">
-            <h2>Home Name</h2>
-            <span id="home-count" class="pill">0 homes</span>
+            <h2 id="home-panel-title">Current Home</h2>
+            <span id="home-count" class="pill" hidden>0 homes</span>
           </div>
-          <form id="home-form" class="inline-form">
+          <form id="home-form" class="inline-form" hidden>
             <input id="home-name" type="text" placeholder="Home">
             <button type="submit">Save Name</button>
           </form>
@@ -59,11 +59,12 @@
           <div class="panel-head">
             <h2>Quick Links</h2>
             <span class="quick-links-actions">
-              <span id="quick-links-count" class="pill">0 links</span>
-              <button id="quick-links-refresh" type="button" class="secondary">Refresh</button>
+              <span id="quick-links-count" class="pill" hidden>0 links</span>
+              <button id="quick-links-refresh" type="button" class="secondary" hidden>Refresh</button>
               <button id="quick-link-add" type="button" class="icon-button secondary" title="Add quick link" aria-label="Add quick link" aria-expanded="false" hidden>
                 <span aria-hidden="true">+</span>
               </button>
+              <button id="quick-links-edit-mode" type="button" class="secondary" aria-pressed="false" hidden>Edit</button>
             </span>
           </div>
           <form id="quick-link-form" class="quick-link-form" hidden>
