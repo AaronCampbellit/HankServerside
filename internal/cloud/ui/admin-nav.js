@@ -5,6 +5,7 @@
     {
       href: "/dashboard",
       label: "Home",
+      mobileLabel: "Home",
       detail: "Home name, connector setup, server checks, and quick links.",
       keywords: ["home", "home name", "connector", "agent", "setup file", "token", "health", "server"],
       group: "Home",
@@ -12,6 +13,7 @@
     {
       href: "/dashboard/hank",
       label: "Hank",
+      mobileLabel: "Hank",
       detail: "Ask HankAI about notes, calendars, Home Assistant, and files.",
       keywords: ["hank", "hankai", "ai", "assistant", "chat", "notes", "calendar", "home assistant", "files", "smb"],
       group: "Tools",
@@ -19,6 +21,7 @@
     {
       href: "/dashboard/home-assistant",
       label: "Home Assistant",
+      mobileLabel: "HA",
       detail: "Run Home Assistant health, state, and service commands.",
       keywords: ["home assistant", "ha", "states", "service", "lights", "sensors", "tools"],
       group: "Tools",
@@ -26,6 +29,7 @@
     {
       href: "/dashboard/file-server",
       label: "File Server",
+      mobileLabel: "Files",
       detail: "Browse, upload, download, and manage home files.",
       keywords: ["file server", "files", "file share", "smb", "nas", "transfers", "upload", "download", "file moves"],
       group: "Tools",
@@ -33,6 +37,7 @@
     {
       href: "/dashboard/profile-notes",
       label: "Notes",
+      mobileLabel: "Notes",
       detail: "Write, search, and autosave profile notes.",
       keywords: ["notes", "my notes", "documents", "editor", "autosave", "formatting", "search notes"],
       group: "Tools",
@@ -40,6 +45,7 @@
     {
       href: "/dashboard/settings",
       label: "Settings",
+      mobileLabel: "Settings",
       detail: "Home, people, connections, AI, backups, and invitations.",
       keywords: ["settings", "home settings", "people", "connections", "ai", "backups", "join home", "invite"],
       group: "Settings",
@@ -97,6 +103,7 @@
     {
       href: "/docs/deployment",
       label: "Setup Guide",
+      mobileLabel: "Setup",
       detail: "One-server setup, .env.cloud, .env.agent, Docker, and first checks.",
       keywords: ["setup", "deployment", "guide", "docker", "env cloud", "env agent", "port", "18080", "first checks"],
       group: "Support",
@@ -267,7 +274,15 @@
         const link = document.createElement("a");
         link.className = `tab-link${isActivePage(page) ? " active" : ""}`;
         link.href = page.href;
-        link.textContent = page.label;
+        link.title = page.label;
+        link.setAttribute("aria-label", page.label);
+        const label = document.createElement("span");
+        label.className = "tab-link-label";
+        label.textContent = page.label;
+        const mobileLabel = document.createElement("span");
+        mobileLabel.className = "tab-link-mobile-label";
+        mobileLabel.textContent = page.mobileLabel || page.label;
+        link.append(label, mobileLabel);
         if (isActivePage(page)) {
           link.setAttribute("aria-current", "page");
         }
@@ -283,6 +298,18 @@
       searchShell.querySelector("#dashboard-settings-search"),
       searchShell.querySelector("#dashboard-settings-results"),
     );
+  }
+
+  function collapseMobileDetails() {
+    if (!window.matchMedia("(max-width: 820px)").matches) {
+      return;
+    }
+    document.querySelectorAll("details.collapsible-panel[open]").forEach((details) => {
+      if (details.dataset.mobileKeepOpen === "true") {
+        return;
+      }
+      details.open = false;
+    });
   }
 
   function currentFrameSource() {
@@ -531,12 +558,14 @@
 
   function start() {
     if (installEmbeddedMode()) {
+      collapseMobileDetails();
       applyAdminVisibility();
       return;
     }
     installDashboardShell();
     installSmoothNavigation();
     ensureDashboardFrame();
+    collapseMobileDetails();
     applyAdminVisibility();
     preloadDashboardPages();
   }

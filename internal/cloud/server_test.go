@@ -659,6 +659,52 @@ func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
 	}
 }
 
+func TestUIPagesDoNotLinkInstallManifests(t *testing.T) {
+	t.Parallel()
+
+	entries, err := fs.ReadDir(uiAssets, "ui")
+	if err != nil {
+		t.Fatalf("read ui assets: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			continue
+		}
+		data, err := fs.ReadFile(uiAssets, "ui/"+entry.Name())
+		if err != nil {
+			t.Fatalf("%s read: %v", entry.Name(), err)
+		}
+		body := string(data)
+		for _, forbidden := range []string{`rel="manifest"`, "serviceWorker"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s should not include install-app behavior %q", entry.Name(), forbidden)
+			}
+		}
+	}
+}
+
+func TestPWARoutesAreRemoved(t *testing.T) {
+	t.Parallel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	for _, path := range []string{"/pwa", "/pwa/", "/pwa/sw.js", "/pwa/manifest.webmanifest", "/assets/site.webmanifest"} {
+		response, err := http.Get(testServer.URL + path)
+		if err != nil {
+			t.Fatalf("%s request: %v", path, err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, response.StatusCode, http.StatusNotFound)
+		}
+	}
+}
+
 func TestDashboardSetupFilePanelStaysInSettingsHomePane(t *testing.T) {
 	t.Parallel()
 
