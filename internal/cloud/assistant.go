@@ -181,6 +181,14 @@ const (
 	assistantIntentCalendarDelete     assistantIntentKind = "calendar.delete_event"
 	assistantIntentMediaSearch        assistantIntentKind = "media.search"
 	assistantIntentMediaSelection     assistantIntentKind = "media.selection"
+	assistantIntentGramatonCommand    assistantIntentKind = "gramaton.command"
+	assistantIntentHACommand          assistantIntentKind = "ha.command"
+	assistantIntentFilesCommand       assistantIntentKind = "files.command"
+	assistantIntentNotesCommand       assistantIntentKind = "notes.command"
+	assistantIntentAppendCommand      assistantIntentKind = "append.command"
+	assistantIntentCalendarCommand    assistantIntentKind = "calendar.command"
+	assistantIntentDocsCommand        assistantIntentKind = "docs.command"
+	assistantIntentStatusCommand      assistantIntentKind = "status.command"
 	assistantIntentHermesChat         assistantIntentKind = "hermes.chat"
 	assistantIntentHomeAssistantQuery assistantIntentKind = "homeassistant.query"
 	assistantIntentProjectDocs        assistantIntentKind = "project_docs"
@@ -3593,15 +3601,24 @@ func classifyAssistantIntent(prompt string) assistantIntent {
 }
 
 func hermesCommandPrompt(prompt string) (string, bool) {
+	return slashCommandPrompt(prompt, "hermes")
+}
+
+func gramatonCommandPrompt(prompt string) (string, bool) {
+	return slashCommandPrompt(prompt, "gramaton")
+}
+
+func slashCommandPrompt(prompt string, command string) (string, bool) {
 	trimmed := strings.TrimSpace(prompt)
 	if trimmed == "" {
 		return "", false
 	}
+	command = "/" + strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
 	lowered := strings.ToLower(trimmed)
-	if lowered != "/hermes" && !strings.HasPrefix(lowered, "/hermes ") && !strings.HasPrefix(lowered, "/hermes\n") && !strings.HasPrefix(lowered, "/hermes\t") {
+	if lowered != command && !strings.HasPrefix(lowered, command+" ") && !strings.HasPrefix(lowered, command+"\n") && !strings.HasPrefix(lowered, command+"\t") {
 		return "", false
 	}
-	return strings.TrimSpace(trimmed[len("/hermes"):]), true
+	return strings.TrimSpace(trimmed[len(command):]), true
 }
 
 func assistantHermesConversationID(homeID string, userID string, session *domain.AssistantSession) string {

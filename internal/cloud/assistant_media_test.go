@@ -54,6 +54,31 @@ func TestMediaAvailabilityPromptMatching(t *testing.T) {
 	}
 }
 
+func TestGramatonSlashCommandPrompt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		prompt string
+		want   string
+		ok     bool
+	}{
+		{prompt: "/gramaton dutton ranch", want: "dutton ranch", ok: true},
+		{prompt: "/Gramaton\nDutton Ranch", want: "Dutton Ranch", ok: true},
+		{prompt: "/gramaton", want: "", ok: true},
+		{prompt: "/gramatonic dutton ranch", ok: false},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.prompt, func(t *testing.T) {
+			t.Parallel()
+			got, ok := gramatonCommandPrompt(test.prompt)
+			if ok != test.ok || got != test.want {
+				t.Fatalf("gramatonCommandPrompt(%q) = %q, %v; want %q, %v", test.prompt, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
+
 func TestAssistantMediaCardCarriesPosterImage(t *testing.T) {
 	t.Parallel()
 

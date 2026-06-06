@@ -52,6 +52,14 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "read only multi source", prompt: "what do I have tomorrow and do my notes mention dentist", want: assistantIntentReadOnlySynthesis},
 		{name: "assistant memory decision", prompt: "what did we decide about calendar defaults", want: assistantIntentMemorySearch},
 		{name: "Hermes slash command", prompt: "/Hermes summarize the current plan", want: assistantIntentHermesChat},
+		{name: "Gramaton slash command", prompt: "/gramaton dutton ranch", want: assistantIntentGramatonCommand},
+		{name: "Home Assistant slash command", prompt: "/ha garage lights", want: assistantIntentHACommand},
+		{name: "files slash command", prompt: "/files 2025 taxes", want: assistantIntentFilesCommand},
+		{name: "notes slash command", prompt: "/notes grocery list", want: assistantIntentNotesCommand},
+		{name: "append slash command", prompt: "/append buy eggs to grocery list", want: assistantIntentAppendCommand},
+		{name: "calendar slash command", prompt: "/calendar tomorrow", want: assistantIntentCalendarCommand},
+		{name: "docs slash command", prompt: "/docs deployment", want: assistantIntentDocsCommand},
+		{name: "status slash command", prompt: "/status", want: assistantIntentStatusCommand},
 	}
 
 	for _, test := range tests {

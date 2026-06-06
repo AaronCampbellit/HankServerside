@@ -3239,6 +3239,61 @@ button:disabled {
   resize: vertical;
 }
 
+.hank-command-palette {
+  display: grid;
+  gap: 6px;
+  max-width: 680px;
+  padding: 7px;
+  border: 1px solid rgba(82, 190, 160, 0.38);
+  border-radius: 8px;
+  background: rgba(24, 24, 24, 0.96);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3);
+}
+
+.hank-command-palette[hidden] {
+  display: none;
+}
+
+.hank-command-option {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.hank-command-option:hover,
+.hank-command-option.active {
+  background: rgba(82, 190, 160, 0.13);
+  transform: none;
+}
+
+.hank-command-name {
+  font-weight: 800;
+  color: var(--brand);
+}
+
+.hank-command-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.hank-command-copy span,
+.hank-command-placeholder {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.hank-command-placeholder {
+  justify-self: end;
+}
+
 .hank-attachment-tray {
   display: flex;
   flex-wrap: wrap;

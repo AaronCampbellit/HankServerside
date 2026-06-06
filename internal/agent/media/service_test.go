@@ -842,11 +842,15 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	defer cancel()
 
 	var baseURL string
+	var episodeRequestsMissingRecent int
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<a href="/session/logout">Sign out</a><script>var token_key = "token";</script>`)
 	})
 	mux.HandleFunc("/series/fixture-show", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("season") != "" && r.URL.Query().Get("recent") != "true" {
+			episodeRequestsMissingRecent++
+		}
 		switch {
 		case r.URL.Query().Get("season") == "1" && r.URL.Query().Get("episode") == "1":
 			fmt.Fprintf(w, `<h1>Fixture Show</h1><a href="%s/download/s1e1_1080p.mp4?file=Fixture_Show_S01E01_1080p.mp4">Download 1080p</a>`, baseURL)
@@ -889,11 +893,14 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 		ID:       "series/fixture-show",
 		Title:    "Fixture Show",
 		Type:     protocol.MediaTypeSeries,
-		PagePath: "/series/fixture-show",
+		PagePath: "/series/fixture-show?recent=true",
 	}
 	planResponse, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{Selection: selection})
 	if err != nil {
 		t.Fatalf("PlanDownload: %v", err)
+	}
+	if episodeRequestsMissingRecent != 0 {
+		t.Fatalf("episode requests missing recent=true: %d", episodeRequestsMissingRecent)
 	}
 	plan := planResponse.Plan
 	if plan.ItemCount != 2 || plan.PreferredQualityCount != 1 || plan.FallbackQualityCount != 1 || plan.ExistingCount != 1 {
@@ -1209,6 +1216,65 @@ func TestMoviePlanUsesDynamic1080pLink(t *testing.T) {
 	item := response.Plan.Items[0]
 	if !item.DownloadOK || item.Quality != "1080p" || item.Filename != "Project_Hail_Mary_1080p.mp4" {
 		t.Fatalf("dynamic item = %#v, want 1080p dynamic link item", item)
+	}
+}
+
+func TestSeriesPlanUsesDynamicEpisodeLink(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var sawDynamicRequest bool
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a><script>var token_key = "root-token";</script>`)
+	})
+	mux.HandleFunc("/series/20441-dutton-ranch", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("season") == "1" && r.URL.Query().Get("episode") == "5" {
+			fmt.Fprint(w, `<h1>Dutton Ranch</h1><script>var token_key = "episode-token";</script><a id="dlbtn" href="#">Download</a>`)
+			return
+		}
+		fmt.Fprint(w, `<h1>Dutton Ranch</h1><div class="tv-details-episodes"><ol id="season1"><li data-episode="5">Peaceful Find Peace</li></ol></div>`)
+	})
+	mux.HandleFunc("/series/getTvLink", func(w http.ResponseWriter, r *http.Request) {
+		sawDynamicRequest = true
+		if r.URL.Query().Get("id") != "20441" || r.URL.Query().Get("s") != "1" || r.URL.Query().Get("e") != "5" || r.URL.Query().Get("token") != "episode-token" {
+			t.Fatalf("dynamic series query = %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"dl":"%s/download/dutton_s1e5_720p.mp4?file=Dutton_Ranch_S1E5_720p.mp4","dl_hd":""}`, baseURL)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+
+	response, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{Selection: protocol.MediaSearchResult{
+		ID:       "series/20441-dutton-ranch",
+		Title:    "Dutton Ranch",
+		Type:     protocol.MediaTypeSeries,
+		PagePath: "/series/20441-dutton-ranch?recent=true",
+	}})
+	if err != nil {
+		t.Fatalf("PlanDownload: %v", err)
+	}
+	if !sawDynamicRequest {
+		t.Fatal("dynamic series link endpoint was not called")
+	}
+	if len(response.Plan.Items) != 1 {
+		t.Fatalf("items = %#v, want one", response.Plan.Items)
+	}
+	item := response.Plan.Items[0]
+	if !item.DownloadOK || item.Quality != "720p" || item.Filename != "Dutton_Ranch_S1E5_720p.mp4" {
+		t.Fatalf("dynamic series item = %#v, want 720p dynamic link item", item)
 	}
 }
 

@@ -870,7 +870,7 @@ func (s *Service) pageToken(ctx context.Context, path string) (string, error) {
 }
 
 func (s *Service) buildPlan(ctx context.Context, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, []plannedDownload, error) {
-	selection.PagePath = canonicalMediaPath(selection.PagePath)
+	selection.PagePath = canonicalMediaPathWithContext(selection.PagePath)
 	if selection.PagePath == "" {
 		return protocol.MediaDownloadPlan{}, nil, fmt.Errorf("media selection is missing a page path")
 	}
@@ -982,8 +982,10 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 	})
 
 	downloads := make([]plannedDownload, 0, len(episodes))
+	episodeBasePath := canonicalMediaPath(selection.PagePath)
+	episodeContext := mediaPageContext(selection.PagePath)
 	for _, episode := range episodes {
-		pagePath := fmt.Sprintf("%s?season=%d&episode=%d", selection.PagePath, episode.season, episode.episode)
+		pagePath := mediaEpisodePath(episodeBasePath, episodeContext, episode.season, episode.episode)
 		episodePage, err := s.fetchPage(ctx, pagePath)
 		itemTitle := firstNonBlank(episode.title, fmt.Sprintf("S%dE%d", episode.season, episode.episode))
 		item := protocol.MediaDownloadItem{
@@ -997,6 +999,9 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 		var link downloadLink
 		if err == nil {
 			link = chooseDownloadLink(episodePage.downloads)
+			if link.href == "" {
+				link = s.dynamicSeriesDownloadLink(ctx, selection.PagePath, episode.season, episode.episode, episodePage.token)
+			}
 			downloadURL := ""
 			if link.href != "" {
 				downloadURL, _ = s.resolveURL(link.href)
@@ -1017,6 +1022,46 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 		downloads = append(downloads, plannedDownload{item: item, mediaTitle: title, downloadURL: link.href})
 	}
 	return s.planFromDownloads(selection, downloads), downloads, nil
+}
+
+func (s *Service) dynamicSeriesDownloadLink(ctx context.Context, pagePath string, season int, episode int, token string) downloadLink {
+	id := mediaPageID(pagePath)
+	if id == "" {
+		return downloadLink{}
+	}
+	if token == "" {
+		token, _ = s.pageToken(ctx, pagePath)
+	}
+	if token == "" {
+		return downloadLink{}
+	}
+	values := url.Values{}
+	values.Set("id", id)
+	values.Set("token", token)
+	values.Set("s", strconv.Itoa(season))
+	values.Set("e", strconv.Itoa(episode))
+	values.Set("oPid", "")
+	body, status, err := s.fetchText(ctx, http.MethodGet, "/series/getTvLink?"+values.Encode(), nil)
+	if err != nil || status >= 400 {
+		if err != nil {
+			s.logger.Debug("dynamic series download link failed", "page", pagePath, "season", season, "episode", episode, "error", err)
+		} else {
+			s.logger.Debug("dynamic series download link returned status", "page", pagePath, "season", season, "episode", episode, "status", status)
+		}
+		return downloadLink{}
+	}
+	var payload movieLinkPayload
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		s.logger.Debug("dynamic series download link JSON decode failed", "page", pagePath, "season", season, "episode", episode, "error", err)
+		return downloadLink{}
+	}
+	if href := strings.TrimSpace(payload.DownloadHD); href != "" {
+		return downloadLink{href: href, quality: "1080p"}
+	}
+	if href := strings.TrimSpace(payload.Download); href != "" {
+		return downloadLink{href: href, quality: "720p"}
+	}
+	return downloadLink{}
 }
 
 func (s *Service) fetchPage(ctx context.Context, pagePath string) (parsedPage, error) {
@@ -1874,6 +1919,42 @@ func canonicalMediaPath(raw string) string {
 		return ""
 	}
 	return "/" + match[1] + "/" + match[2]
+}
+
+func canonicalMediaPathWithContext(raw string) string {
+	basePath := canonicalMediaPath(raw)
+	if basePath == "" {
+		return ""
+	}
+	values := mediaPageContext(raw)
+	if len(values) == 0 {
+		return basePath
+	}
+	return basePath + "?" + values.Encode()
+}
+
+func mediaPageContext(raw string) url.Values {
+	values := url.Values{}
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return values
+	}
+	if strings.EqualFold(parsed.Query().Get("recent"), "true") {
+		values.Set("recent", "true")
+	}
+	return values
+}
+
+func mediaEpisodePath(basePath string, context url.Values, season int, episode int) string {
+	values := url.Values{}
+	for key, entries := range context {
+		for _, entry := range entries {
+			values.Add(key, entry)
+		}
+	}
+	values.Set("season", strconv.Itoa(season))
+	values.Set("episode", strconv.Itoa(episode))
+	return basePath + "?" + values.Encode()
 }
 
 func mediaID(raw string) string {

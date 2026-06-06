@@ -50,11 +50,69 @@ const els = {
   attachButton: document.getElementById("attach-button"),
   messageForm: document.getElementById("message-form"),
   messageInput: document.getElementById("message-input"),
+  commandPalette: document.getElementById("command-palette"),
   sendButton: document.getElementById("send-button"),
   toast: document.getElementById("toast"),
 };
 
 const maxChatAttachmentBytes = 100 * 1024 * 1024;
+
+const slashCommands = [
+  {
+    command: "/gramaton",
+    label: "Gramaton",
+    description: "Search media downloads and start the media workflow.",
+    placeholder: "title",
+  },
+  {
+    command: "/Hermes",
+    label: "Hermes",
+    description: "Send a prompt directly to the Hermes Agent workflow.",
+    placeholder: "prompt",
+  },
+  {
+    command: "/ha",
+    label: "Home Assistant",
+    description: "Search Home Assistant entity state.",
+    placeholder: "entity",
+  },
+  {
+    command: "/files",
+    label: "Files",
+    description: "Search File Server files and folders.",
+    placeholder: "name",
+  },
+  {
+    command: "/notes",
+    label: "Notes",
+    description: "Search notes, or list notes when no query is provided.",
+    placeholder: "query",
+  },
+  {
+    command: "/append",
+    label: "Append Note",
+    description: "Append text to a matched note.",
+    placeholder: "text to note",
+  },
+  {
+    command: "/calendar",
+    label: "Calendar",
+    description: "Search calendar snapshots.",
+    placeholder: "date or event",
+  },
+  {
+    command: "/docs",
+    label: "Docs",
+    description: "Search Hank Remote project documentation.",
+    placeholder: "query",
+  },
+  {
+    command: "/status",
+    label: "Status",
+    description: "Show enabled HankAI workflow surfaces.",
+    placeholder: "",
+  },
+];
 
 
 function escapeHTML(value) {
@@ -178,6 +236,54 @@ function attachmentOnlyMessageText(attachments) {
     return `Uploaded ${attachments[0].filename}.`;
   }
   return `Uploaded ${attachments.length} attachments.`;
+}
+
+function commandQuery(value) {
+  const trimmed = String(value || "").trimStart();
+  if (!trimmed.startsWith("/")) return null;
+  const firstLine = trimmed.split(/\r?\n/, 1)[0];
+  if (/\s/.test(firstLine) && !firstLine.endsWith(" ")) return null;
+  return firstLine.toLowerCase();
+}
+
+function matchingSlashCommands(value) {
+  const query = commandQuery(value);
+  if (query === null) return [];
+  return slashCommands.filter((item) => item.command.toLowerCase().startsWith(query));
+}
+
+function hideCommandPalette() {
+  if (!els.commandPalette) return;
+  els.commandPalette.hidden = true;
+  els.commandPalette.innerHTML = "";
+}
+
+function renderCommandPalette() {
+  if (!els.commandPalette) return;
+  const matches = matchingSlashCommands(els.messageInput.value);
+  if (!matches.length) {
+    hideCommandPalette();
+    return;
+  }
+  els.commandPalette.hidden = false;
+  els.commandPalette.innerHTML = matches.map((item, index) => `
+    <button type="button" class="hank-command-option${index === 0 ? " active" : ""}" data-command="${escapeHTML(item.command)}">
+      <span class="hank-command-name">${escapeHTML(item.command)}</span>
+      <span class="hank-command-copy">
+        <strong>${escapeHTML(item.label)}</strong>
+        <span>${escapeHTML(item.description)}</span>
+      </span>
+      <span class="hank-command-placeholder">${escapeHTML(item.placeholder)}</span>
+    </button>
+  `).join("");
+}
+
+function selectSlashCommand(command) {
+  const selected = slashCommands.find((item) => item.command === command);
+  if (!selected) return;
+  els.messageInput.value = `${selected.command} `;
+  hideCommandPalette();
+  els.messageInput.focus();
 }
 
 function preferredAppSocketURL() {
@@ -1061,6 +1167,7 @@ async function submitChatMessage(content, attachmentsToSend = [], options = {}) 
     }
     if (!acceptedByServer && options.fromDraft && content && !els.messageInput.value.trim()) {
       els.messageInput.value = content;
+      renderCommandPalette();
     }
     showToast(error.message, true);
   } finally {
@@ -1076,11 +1183,32 @@ async function sendMessage(event) {
 }
 
 function handleMessageInputKeydown(event) {
+  if (!els.commandPalette?.hidden) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideCommandPalette();
+      return;
+    }
+    if (event.key === "Tab") {
+      const active = els.commandPalette.querySelector(".hank-command-option.active");
+      if (active) {
+        event.preventDefault();
+        selectSlashCommand(active.dataset.command);
+        return;
+      }
+    }
+  }
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
     return;
   }
   event.preventDefault();
   els.messageForm.requestSubmit();
+}
+
+function handleCommandPaletteClick(event) {
+  const option = event.target.closest("[data-command]");
+  if (!option) return;
+  selectSlashCommand(option.dataset.command);
 }
 
 function handleMessageListClick(event) {
@@ -1315,6 +1443,8 @@ els.sessionList.addEventListener("click", (event) => {
 });
 els.messageForm.addEventListener("submit", sendMessage);
 els.messageInput.addEventListener("keydown", handleMessageInputKeydown);
+els.messageInput.addEventListener("input", renderCommandPalette);
+els.commandPalette?.addEventListener("click", handleCommandPaletteClick);
 els.messageList.addEventListener("click", handleMessageListClick);
 els.attachButton.addEventListener("click", () => els.attachmentInput.click());
 els.attachmentInput.addEventListener("change", () => {

@@ -150,7 +150,11 @@ func executeAssistantCalendarSearchTool(ctx context.Context, server *Server, run
 	if !runtime.Settings.CalendarEnabled {
 		return assistantMessageContent{Text: "Calendar access is turned off in HankAI settings."}, nil
 	}
-	return server.answerCalendarSearchPrompt(ctx, runtime.Home.ID, runtime.Auth.User.ID, runtime.Prompt, "")
+	prompt := assistantCommandPrompt(intent, runtime.Prompt)
+	if strings.TrimSpace(prompt) == "" {
+		prompt = "today"
+	}
+	return server.answerCalendarSearchPrompt(ctx, runtime.Home.ID, runtime.Auth.User.ID, prompt, "")
 }
 
 func executeAssistantCalendarUpdateTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {

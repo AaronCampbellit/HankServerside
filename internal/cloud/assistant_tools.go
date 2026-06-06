@@ -27,6 +27,21 @@ type assistantTool struct {
 	Execute      func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error)
 }
 
+func assistantSlashTool(kind assistantIntentKind, command string, description string, execute func(context.Context, *Server, assistantToolRuntime, assistantIntent) (assistantMessageContent, error)) assistantTool {
+	return assistantTool{
+		Kind:        kind,
+		Description: description,
+		Match: func(prompt string) (assistantIntent, bool) {
+			query, ok := slashCommandPrompt(prompt, command)
+			if !ok {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: kind, Query: query}, true
+		},
+		Execute: execute,
+	}
+}
+
 var assistantToolRegistry = []assistantTool{
 	{
 		Kind:        assistantIntentHermesChat,
@@ -40,6 +55,25 @@ var assistantToolRegistry = []assistantTool{
 		},
 		Execute: executeAssistantHermesChatTool,
 	},
+	{
+		Kind:        assistantIntentGramatonCommand,
+		Description: "Route an explicit /gramaton title search to the media download workflow.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			query, ok := gramatonCommandPrompt(prompt)
+			if !ok {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentGramatonCommand, Query: query}, true
+		},
+		Execute: executeAssistantMediaSearchTool,
+	},
+	assistantSlashTool(assistantIntentHACommand, "ha", "Route an explicit /ha query to Home Assistant state lookup.", executeAssistantHomeAssistantQueryTool),
+	assistantSlashTool(assistantIntentFilesCommand, "files", "Route an explicit /files query to File Server search.", executeAssistantFilesSearchTool),
+	assistantSlashTool(assistantIntentNotesCommand, "notes", "Route an explicit /notes query to note search or note listing.", executeAssistantNotesTool),
+	assistantSlashTool(assistantIntentAppendCommand, "append", "Route an explicit /append instruction to the note append workflow.", executeAssistantNotesAppendTool),
+	assistantSlashTool(assistantIntentCalendarCommand, "calendar", "Route an explicit /calendar query to calendar snapshot search.", executeAssistantCalendarSearchTool),
+	assistantSlashTool(assistantIntentDocsCommand, "docs", "Route an explicit /docs query to Hank Remote project documentation.", executeAssistantProjectDocsTool),
+	assistantSlashTool(assistantIntentStatusCommand, "status", "Show enabled HankAI workflow surfaces and source status.", executeAssistantStatusCommandTool),
 	{
 		Kind:        assistantIntentNotesAppend,
 		Description: "Append a short item to a uniquely matched Hank note or list.",
@@ -307,7 +341,7 @@ func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, setting
 	choices := make([]string, 0, len(assistantToolRegistry))
 	allowed := map[assistantIntentKind]assistantTool{}
 	for _, tool := range assistantToolRegistry {
-		if tool.Kind == assistantIntentGeneral || tool.Kind == assistantIntentMediaSelection {
+		if tool.Kind == assistantIntentGeneral || tool.Kind == assistantIntentMediaSelection || strings.HasSuffix(string(tool.Kind), ".command") {
 			continue
 		}
 		choices = append(choices, fmt.Sprintf("- %s: %s", tool.Kind, tool.Description))
@@ -428,9 +462,41 @@ func executeAssistantReadOnlySynthesisTool(ctx context.Context, server *Server, 
 	return server.answerRetrievedPrompt(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings, runtime.Prompt)
 }
 
+func assistantCommandPrompt(intent assistantIntent, fallback string) string {
+	if strings.TrimSpace(intent.Query) != "" || strings.HasSuffix(string(intent.Kind), ".command") {
+		return strings.TrimSpace(intent.Query)
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func executeAssistantStatusCommandTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	settings := normalizeAssistantSettings(runtime.Settings)
+	rows := []string{
+		fmt.Sprintf("- Chat: %s", enabledLabel(assistantSettingsHasEnabledSources(settings))),
+		fmt.Sprintf("- Home Assistant: %s", enabledLabel(settings.HomeAssistantEnabled)),
+		fmt.Sprintf("- Files: %s", enabledLabel(settings.FilesEnabled)),
+		fmt.Sprintf("- Notes: %s", enabledLabel(settings.ProfileNotesEnabled || settings.HomeNotesEnabled)),
+		fmt.Sprintf("- Calendar: %s", enabledLabel(settings.CalendarEnabled)),
+		fmt.Sprintf("- Project docs: %s", enabledLabel(settings.ProjectDocsEnabled)),
+		fmt.Sprintf("- Media downloads: %s", enabledLabel(settings.FilesEnabled)),
+	}
+	return assistantMessageContent{Text: "HankAI workflow status:\n" + strings.Join(rows, "\n")}, nil
+}
+
+func enabledLabel(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "off"
+}
+
 func executeAssistantFilesSearchTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
 	if !runtime.Settings.FilesEnabled {
 		return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
+	}
+	prompt := assistantCommandPrompt(intent, runtime.Prompt)
+	if strings.TrimSpace(prompt) == "" {
+		return assistantMessageContent{Text: "Send `/files` followed by a file or folder name to search."}, nil
 	}
 	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
@@ -438,12 +504,15 @@ func executeAssistantFilesSearchTool(ctx context.Context, server *Server, runtim
 		}
 		return assistantMessageContent{}, err
 	}
-	return server.answerFilePrompt(ctx, runtime.Home, runtime.Settings, runtime.Prompt)
+	return server.answerFilePrompt(ctx, runtime.Home, runtime.Settings, prompt)
 }
 
 func executeAssistantMediaSearchTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
 	if !runtime.Settings.FilesEnabled {
 		return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
+	}
+	if strings.TrimSpace(intent.Query) == "" {
+		return assistantMessageContent{Text: "Send `/gramaton` followed by a movie or TV show title."}, nil
 	}
 	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
@@ -464,34 +533,46 @@ func executeAssistantNotesAppendTool(ctx context.Context, server *Server, runtim
 	if !runtime.Settings.ProfileNotesEnabled && !runtime.Settings.HomeNotesEnabled {
 		return assistantMessageContent{Text: "Notes access is turned off in HankAI settings."}, nil
 	}
+	prompt := assistantCommandPrompt(intent, runtime.Prompt)
+	if intent.Kind == assistantIntentAppendCommand {
+		if strings.TrimSpace(prompt) == "" {
+			return assistantMessageContent{Text: "Send `/append` followed by the text and target note, like `/append buy eggs to grocery list`."}, nil
+		}
+		prompt = "add " + prompt
+	}
 	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
 			return assistantMessageContent{Text: "Notes access is disabled for your Home membership right now."}, nil
 		}
 		return assistantMessageContent{}, err
 	}
-	return server.answerAppendNotePrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings, runtime.Prompt)
+	return server.answerAppendNotePrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings, prompt)
 }
 
 func executeAssistantNotesTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
 	if !runtime.Settings.ProfileNotesEnabled && !runtime.Settings.HomeNotesEnabled {
 		return assistantMessageContent{Text: "Notes access is turned off in HankAI settings."}, nil
 	}
+	prompt := assistantCommandPrompt(intent, runtime.Prompt)
 	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
 			return assistantMessageContent{Text: "Notes access is disabled for your Home membership right now."}, nil
 		}
 		return assistantMessageContent{}, err
 	}
-	if intent.Kind == assistantIntentNotesList {
+	if intent.Kind == assistantIntentNotesList || (intent.Kind == assistantIntentNotesCommand && strings.TrimSpace(prompt) == "") {
 		return server.answerNoteListPrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings)
 	}
-	return server.answerNoteSearchPrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings, runtime.Prompt)
+	return server.answerNoteSearchPrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings, prompt)
 }
 
 func executeAssistantHomeAssistantQueryTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
 	if !runtime.Settings.HomeAssistantEnabled {
 		return assistantMessageContent{Text: "Home Assistant access is turned off in HankAI settings."}, nil
+	}
+	prompt := assistantCommandPrompt(intent, runtime.Prompt)
+	if strings.TrimSpace(prompt) == "" {
+		prompt = "entities"
 	}
 	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureHomeAssistant); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
@@ -499,12 +580,12 @@ func executeAssistantHomeAssistantQueryTool(ctx context.Context, server *Server,
 		}
 		return assistantMessageContent{}, err
 	}
-	if isHomeAssistantMutationPrompt(runtime.Prompt) {
+	if isHomeAssistantMutationPrompt(prompt) {
 		return assistantMessageContent{
 			Text: "I can look up Home Assistant state right now, but changing devices still needs a confirmed control workflow before HankAI can run it.",
 		}, nil
 	}
-	return server.answerHomeAssistantPrompt(ctx, runtime.Home, runtime.Prompt)
+	return server.answerHomeAssistantPrompt(ctx, runtime.Home, prompt)
 }
 
 func executeAssistantHermesChatTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
@@ -521,7 +602,11 @@ func executeAssistantProjectDocsTool(ctx context.Context, server *Server, runtim
 	if !runtime.Settings.ProjectDocsEnabled {
 		return assistantMessageContent{Text: "Project docs access is turned off in HankAI settings."}, nil
 	}
-	return server.answerProjectDocPrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings, runtime.Prompt)
+	prompt := assistantCommandPrompt(intent, runtime.Prompt)
+	if strings.TrimSpace(prompt) == "" {
+		return assistantMessageContent{Text: "Send `/docs` followed by what you want to find in Hank Remote docs."}, nil
+	}
+	return server.answerProjectDocPrompt(ctx, runtime.Home, runtime.Auth, runtime.Settings, prompt)
 }
 
 func executeAssistantGeneralTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
