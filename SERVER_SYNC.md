@@ -11,6 +11,155 @@ Use it for:
 
 If a change is app-only, do not add it here.
 
+## Current Server Contract
+
+The current Hank Remote server contract is a singleton `/v1/home` surface plus
+profile-owned `/v1/me` state. Hank should treat this section as the active
+schema snapshot and treat older `/v1/homes/{homeID}/...` entries as obsolete
+migration history.
+
+### Route Ownership
+
+- `/v1/home/...` is for deployment-Home state shared by members of the single
+  Hank Remote Home:
+  - Home metadata: `GET /v1/home`, `PUT /v1/home`
+  - members, invitations, roles, and permissions
+  - agent status and setup tokens
+  - Home Assistant, files, shared Home notes, sync health, service profiles,
+    quick links, storage, and assistant state
+- `/v1/me/...` is for signed-in user profile state:
+  - profile notes
+  - profile settings and dashboard tile preferences
+  - encrypted profile secret vault
+  - profile backup payloads
+  - notification settings and APNs device registrations
+- File transfer byte streams use short-lived transfer URLs outside both
+  namespaces after setup:
+  - `GET /v1/file-transfers/{transferID}`
+  - `PUT /v1/file-transfers/{transferID}`
+
+### Active `/v1/home` Routes
+
+- Home:
+  - `GET /v1/home`
+  - `PUT /v1/home`
+- Members and invitations:
+  - `GET /v1/home/members`
+  - `GET /v1/home/members/invitations`
+  - `POST /v1/home/members/invitations`
+  - `POST /v1/home/invitations/accept`
+  - `DELETE /v1/home/members/invitations/{invitationID}`
+  - `DELETE /v1/home/members/{userID}`
+  - `PUT /v1/home/members/{userID}/role`
+- Permissions:
+  - `GET /v1/home/permissions`
+  - `PUT /v1/home/permissions`
+  - `GET /v1/home/members/{userID}/permissions`
+  - `PUT /v1/home/members/{userID}/permissions`
+- Agent:
+  - `GET /v1/home/agent`
+  - `GET /v1/home/agent/tokens`
+  - `POST /v1/home/agent/tokens`
+  - `DELETE /v1/home/agent/tokens/{tokenID}`
+- Shared Home notes:
+  - `GET /v1/home/notes`
+  - `GET /v1/home/notes/{noteID}`
+  - `PUT /v1/home/notes/{noteID}`
+  - `DELETE /v1/home/notes/{noteID}`
+- Files:
+  - `POST /v1/home/files/downloads`
+  - `POST /v1/home/files/uploads`
+- Sync and service profiles:
+  - `GET /v1/home/sync`
+  - `GET /v1/home/service-profiles`
+  - `PUT /v1/home/service-profiles/{serviceType}`
+- Quick links:
+  - `GET /v1/home/quick-links`
+  - `POST /v1/home/quick-links`
+  - `POST /v1/home/quick-links/checks`
+  - `PUT /v1/home/quick-links/order`
+  - `PUT /v1/home/quick-links/{linkID}`
+  - `DELETE /v1/home/quick-links/{linkID}`
+- Storage:
+  - `GET /v1/home/storage/status`
+  - `GET /v1/home/storage/config`
+  - `PUT /v1/home/storage/config`
+  - `GET /v1/home/storage/events`
+  - `POST /v1/home/storage/backup`
+  - `POST /v1/home/storage/restore-test`
+  - `POST /v1/home/storage/restore-primary`
+- Assistant:
+  - `GET /v1/home/assistant/status`
+  - `GET /v1/home/assistant/settings`
+  - `PUT /v1/home/assistant/settings`
+  - `GET /v1/home/assistant/sessions`
+  - `POST /v1/home/assistant/sessions`
+  - `GET /v1/home/assistant/sessions/{sessionID}`
+  - `DELETE /v1/home/assistant/sessions/{sessionID}`
+  - `GET /v1/home/assistant/sessions/{sessionID}/messages`
+  - `POST /v1/home/assistant/sessions/{sessionID}/messages`
+  - `GET /v1/home/assistant/runs/{runID}`
+  - `POST /v1/home/assistant/runs/{runID}/confirm`
+  - `POST /v1/home/assistant/runs/{runID}/client-tool-results`
+  - `GET /v1/home/assistant/media-jobs/{jobID}`
+  - `POST /v1/home/assistant/media-jobs/{jobID}/cancel`
+  - `PUT /v1/home/assistant/calendar-index`
+
+### Active `/v1/me` Routes
+
+- Authenticated user:
+  - `GET /v1/me`
+- Profile notes:
+  - `GET /v1/me/notes`
+  - `POST /v1/me/notes`
+  - `GET /v1/me/notes/{noteID}`
+  - `PUT /v1/me/notes/{noteID}`
+  - `DELETE /v1/me/notes/{noteID}`
+- Profile sync:
+  - `GET /v1/me/profile`
+  - `PUT /v1/me/profile`
+  - `GET /v1/me/profile-secret-vault`
+  - `PUT /v1/me/profile-secret-vault`
+  - `GET /v1/me/profile-backup`
+  - `PUT /v1/me/profile-backup`
+- Notifications:
+  - `POST /v1/me/devices/apns`
+  - `DELETE /v1/me/devices/{deviceID}/apns`
+  - `GET /v1/me/notification-settings`
+  - `PUT /v1/me/notification-settings`
+
+### Current Profile Settings Shape
+
+`GET /v1/me/profile` returns:
+
+- `revision`
+- `updated_at`
+- `settings`
+
+`PUT /v1/me/profile` accepts:
+
+- `expected_revision`: optional; omit or send `null` when creating the first
+  profile settings row
+- `settings`: arbitrary JSON object
+
+The current cross-surface dashboard tile key is:
+
+```json
+{
+  "dashboard_tiles": [
+    {
+      "entity_id": "light.kitchen",
+      "is_enabled": true
+    }
+  ]
+}
+```
+
+Hank iOS and the browser Home Assistant dashboard should both use this
+`dashboard_tiles` key so pinned entity tiles mirror across clients. Disabled
+tiles may be represented with `"is_enabled": false`; omitted or true means the
+tile is active.
+
 ## Status Labels
 
 - `planned`
