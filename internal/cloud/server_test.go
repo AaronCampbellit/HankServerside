@@ -608,6 +608,36 @@ func TestDashboardPagesUseSharedAPIClient(t *testing.T) {
 	}
 }
 
+func TestHomeAssistantDashboardTilesUseProfileSettings(t *testing.T) {
+	t.Parallel()
+
+	script, err := fs.ReadFile(uiAssets, "ui/home-assistant.js")
+	if err != nil {
+		t.Fatalf("read home-assistant.js: %v", err)
+	}
+	body := string(script)
+	for _, expected := range []string{
+		`api("/v1/me/profile")`,
+		`api("/v1/me/profile", {`,
+		`dashboard_tiles`,
+		`expected_revision: state.profileRevision > 0 ? state.profileRevision : null`,
+		`is_enabled: true`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("home-assistant.js missing profile-backed dashboard contract %q", expected)
+		}
+	}
+	for _, forbidden := range []string{
+		`hank-homeassistant-dashboard`,
+		`localStorage.getItem`,
+		`localStorage.setItem`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("home-assistant.js should not store dashboard tiles in browser local storage: found %q", forbidden)
+		}
+	}
+}
+
 func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
 	t.Parallel()
 

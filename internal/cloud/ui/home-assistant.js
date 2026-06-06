@@ -9,6 +9,8 @@ const state = {
   requestCounter: 0,
   states: [],
   dashboardEntityIDs: [],
+  profileSettings: {},
+  profileRevision: 0,
 };
 
 const els = {
@@ -93,21 +95,47 @@ function fuzzyScore(query, text) {
   return score;
 }
 
-function dashboardStorageKey() {
-  return `hank-homeassistant-dashboard:${state.user?.id || "anonymous"}`;
-}
-
-function loadDashboard() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(dashboardStorageKey()) || "[]");
-    state.dashboardEntityIDs = Array.isArray(stored) ? stored.filter(Boolean) : [];
-  } catch {
-    state.dashboardEntityIDs = [];
+function normalizeDashboardTiles(settings) {
+  const tiles = Array.isArray(settings?.dashboard_tiles) ? settings.dashboard_tiles : [];
+  const entityIDs = [];
+  const seen = new Set();
+  for (const tile of tiles) {
+    const entityID = String(tile?.entity_id || "").trim();
+    if (!entityID || seen.has(entityID)) continue;
+    if (tile?.is_enabled === false) continue;
+    seen.add(entityID);
+    entityIDs.push(entityID);
   }
+  return entityIDs;
 }
 
-function saveDashboard() {
-  window.localStorage.setItem(dashboardStorageKey(), JSON.stringify(state.dashboardEntityIDs));
+async function loadProfileDashboard() {
+  const profile = await api("/v1/me/profile");
+  const settings = profile.settings && typeof profile.settings === "object" ? profile.settings : {};
+  state.profileSettings = settings;
+  state.profileRevision = Number(profile.revision || 0);
+  state.dashboardEntityIDs = normalizeDashboardTiles(settings);
+}
+
+async function saveProfileDashboard() {
+  const dashboardTiles = state.dashboardEntityIDs.map((entityID) => ({
+    entity_id: entityID,
+    is_enabled: true,
+  }));
+  const settings = {
+    ...state.profileSettings,
+    dashboard_tiles: dashboardTiles,
+  };
+  const profile = await api("/v1/me/profile", {
+    method: "PUT",
+    body: JSON.stringify({
+      expected_revision: state.profileRevision > 0 ? state.profileRevision : null,
+      settings,
+    }),
+  });
+  state.profileSettings = profile.settings && typeof profile.settings === "object" ? profile.settings : settings;
+  state.profileRevision = Number(profile.revision || state.profileRevision + 1);
+  state.dashboardEntityIDs = normalizeDashboardTiles(state.profileSettings);
 }
 
 function stateByEntityID(entityID) {
@@ -352,8 +380,9 @@ function renderDashboard() {
   wireEntityActions(els.haDashboard);
 }
 
-function toggleDashboardEntity(entityID) {
+async function toggleDashboardEntity(entityID) {
   if (!entityID) return;
+  const previousEntityIDs = [...state.dashboardEntityIDs];
   if (state.dashboardEntityIDs.includes(entityID)) {
     const item = stateByEntityID(entityID);
     const label = entityName(item) || entityID;
@@ -364,9 +393,19 @@ function toggleDashboardEntity(entityID) {
   } else {
     state.dashboardEntityIDs = [...state.dashboardEntityIDs, entityID];
   }
-  saveDashboard();
   renderDashboard();
   renderEntityResults();
+  try {
+    await saveProfileDashboard();
+    renderDashboard();
+    renderEntityResults();
+    showToast("Dashboard tiles saved.");
+  } catch (error) {
+    state.dashboardEntityIDs = previousEntityIDs;
+    renderDashboard();
+    renderEntityResults();
+    showToast(error.message, true);
+  }
 }
 
 async function toggleEntity(entityID) {
@@ -422,7 +461,7 @@ async function hydrate() {
   try {
     const me = await api("/v1/me");
     state.user = me.user;
-    loadDashboard();
+    await loadProfileDashboard();
     renderSession();
     await loadAgents();
     renderDashboard();

@@ -3216,6 +3216,7 @@ button:disabled {
 }
 
 .hank-message-form {
+  position: relative;
   display: grid;
   gap: 8px;
   margin-top: 14px;
@@ -3240,6 +3241,11 @@ button:disabled {
 }
 
 .hank-command-palette {
+  position: absolute;
+  left: 0;
+  right: 96px;
+  bottom: calc(100% + 8px);
+  z-index: 20;
   display: grid;
   gap: 6px;
   max-width: 680px;
