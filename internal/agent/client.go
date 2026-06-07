@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ type Client struct {
 	movesMu    sync.Mutex
 	moves      map[string]context.CancelFunc
 	moveSlots  chan struct{}
+	restartFn  func()
 }
 
 func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, hermes *agenthermes.Service, logger *slog.Logger) *Client {
@@ -76,7 +78,12 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 		uploads:   make(map[string]*uploadTransfer),
 		moves:     make(map[string]context.CancelFunc),
 		moveSlots: make(chan struct{}, 1),
+		restartFn: defaultRestartFn,
 	}
+}
+
+func defaultRestartFn() {
+	os.Exit(0)
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -264,6 +271,8 @@ func (c *Client) handleCommand(ctx context.Context, conn *websocket.Conn, envelo
 	c.logger.Info("handling cloud command", "agent_id", c.agentID, "home_id", envelope.HomeID, "command", command.Command, "request_id", envelope.RequestID)
 
 	switch command.Command {
+	case protocol.CommandSystemRestart:
+		return c.handleRestartCommand(ctx, conn, envelope, command)
 	case "files.move":
 		return c.startMoveJob(ctx, conn, envelope, command)
 	case "files.move_cancel":
@@ -292,13 +301,47 @@ func (c *Client) handleCommand(ctx context.Context, conn *websocket.Conn, envelo
 	return c.writeJSON(ctx, conn, response)
 }
 
+func (c *Client) handleRestartCommand(ctx context.Context, conn *websocket.Conn, envelope protocol.Envelope, command protocol.RoutedCommand) error {
+	request, err := decodeBody[protocol.SystemRestartRequest](command.Body)
+	if err != nil {
+		return c.writeError(ctx, conn, envelope.RequestID, envelope.HomeID, "invalid_restart_request", err.Error(), nil)
+	}
+	restartAt := time.Now().UTC().Add(500 * time.Millisecond)
+	responseBody, err := protocol.EncodeBody(protocol.SystemRestartResponse{
+		OK:        true,
+		Message:   "agent restart scheduled",
+		RestartAt: restartAt,
+	})
+	if err != nil {
+		return c.writeError(ctx, conn, envelope.RequestID, envelope.HomeID, "encoding_failed", err.Error(), nil)
+	}
+	response := protocol.Envelope{
+		Version:   protocol.Version,
+		Type:      protocol.TypeCloudResponse,
+		RequestID: envelope.RequestID,
+		AgentID:   c.agentID,
+		HomeID:    envelope.HomeID,
+		Timestamp: time.Now().UTC(),
+		Payload:   responseBody,
+	}
+	if err := c.writeJSON(ctx, conn, response); err != nil {
+		return err
+	}
+	c.logger.Warn("agent restart requested", "agent_id", c.agentID, "home_id", envelope.HomeID, "request_id", envelope.RequestID, "reason", request.Reason)
+	go func() {
+		time.Sleep(time.Until(restartAt))
+		c.restartFn()
+	}()
+	return nil
+}
+
 func (c *Client) writeError(ctx context.Context, conn *websocket.Conn, requestID string, homeID string, code string, message string, details map[string]any) error {
 	envelope := protocol.NewErrorEnvelope(protocol.TypeCloudResponse, requestID, c.agentID, homeID, code, message, details)
 	return c.writeJSON(ctx, conn, envelope)
 }
 
 func (c *Client) capabilities() []string {
-	capabilities := []string{protocol.CommandSystemPing}
+	capabilities := []string{protocol.CommandSystemPing, protocol.CommandSystemRestart}
 	if c.dispatcher.ha.Enabled() {
 		capabilities = append(capabilities,
 			"homeassistant.health",
@@ -318,6 +361,7 @@ func (c *Client) capabilities() []string {
 			"files.rename",
 			"files.move",
 			"files.move_cancel",
+			"files.move_rollback",
 			"files.delete",
 		)
 	}

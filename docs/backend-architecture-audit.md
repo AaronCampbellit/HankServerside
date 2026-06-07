@@ -4,6 +4,19 @@ Date: 2026-05-30
 
 Status as of 2026-06-01: this is a point-in-time audit artifact, not the current operator guide. Several findings have since been resolved in code through versioned migrations, bearer file-transfer tokens, header-only agent auth, canonical dashboard Settings routes, and legacy note/SMB cleanup. Use [backend-production-repair-plan.md](backend-production-repair-plan.md), [deployment.md](deployment.md), and the runbooks for current implementation and setup work. Multi-home SaaS and multi-node cloud warnings below describe out-of-scope expansion risk, not the current single-home product target.
 
+## Current Status Snapshot
+
+Status as of 2026-06-06:
+
+| Area | Current status | Current source of truth |
+| --- | --- | --- |
+| Schema changes | Versioned embedded migrations, migration status, and schema drift checks are the active path. | `internal/migrations`, `make migrate-status`, `make schema-drift-check` |
+| Service profiles | Home Assistant, SMB, and Hermes are accepted service types, with a migration constraint update for Hermes. | `internal/domain/models.go`, `internal/migrations/sql/000008_home_service_profiles_hermes.up.sql` |
+| Secret storage | `HANK_REMOTE_SECRET_ENCRYPTION_KEY` is required for normal cloud startup; plaintext storage needs an explicit local-development opt-out. | `internal/config/config.go`, `docs/deployment.md` |
+| File transfers and jobs | Transfer status is exposed, managed file jobs support cancel/retry, and `rollback_required` move jobs can be rolled back. | `internal/cloud/file_jobs.go`, `docs/runbooks/file-transfer-failures.md` |
+| Lifecycle cleanup | Maintenance now prunes expired operational rows, old transfer records, selected assistant attachment metadata, deleted note attachment rows, and safe stale note attachment files with configurable interval and retention. | `internal/store/production_state.go`, `internal/cloud/note_attachments.go`, `internal/config/config.go` |
+| Scope | The current production target remains a single-home self-hosted deployment, not horizontal SaaS scaling. | `AGENTS.md`, `docs/backend-production-repair-plan.md` |
+
 ## Scope and Evidence
 
 This audit reviewed the current `HankServerside` repository, with emphasis on the cloud service, home agent, protocol, persistence layer, Docker topology, storage operations, route handlers, authentication, authorization, file handling, observability, backup, and restore workflows.
@@ -474,7 +487,7 @@ Risks:
 - App WebSocket tickets are process-local.
 - Login backoff is process-local.
 - `requestIsHTTPS` trusts `X-Forwarded-Proto` without a trusted-proxy boundary.
-- Secret encryption is optional. If `HANK_REMOTE_SECRET_ENCRYPTION_KEY` is absent, OAuth/access secrets can persist plaintext by design.
+- Secret encryption now requires `HANK_REMOTE_SECRET_ENCRYPTION_KEY` for normal startup. Historical deployments that previously ran without it may still contain plaintext values until a detect-and-reencrypt path exists.
 - Existing local `.env.cloud` and `.env.agent` files are mode `0644`; they should be `0600`.
 
 ### Authorization
@@ -508,7 +521,7 @@ Strengths:
 Risks:
 
 - Local `.env.cloud` and `.env.agent` are world-readable by default permissions in this checkout (`0644`).
-- Secret-at-rest encryption is optional.
+- Secret-at-rest encryption is required for normal startup; old plaintext rows from previous no-key deployments still need a migration/remediation path.
 - Agent config persistence can write SMB passwords into `.env.agent`.
 - db-ops has access to operational secrets and the Docker socket.
 - Secret rotation is partially documented, but no automated rotation workflow was verified.
@@ -523,10 +536,10 @@ Strengths:
 
 Risks:
 
-- Cross-source `files.move` is implemented as recursive copy plus delete. There is no checksum verification, rollback, resume, idempotency key, or partial-copy cleanup guarantee.
+- Cross-source `files.move` is implemented as recursive copy, verify, then delete source. `rollback_required` jobs can now delete the copied destination and mark the job `rolled_back`; resume and idempotency-key support remain future hardening.
 - Long file operations can occupy routed request slots for extended periods.
-- File-transfer tokens are process-local and URL-based.
-- Note attachment byte cleanup after soft delete needs an explicit lifecycle job.
+- File-transfer token state is durable and status is exposed; operational retention and stale-row cleanup remain part of maintenance.
+- Note attachment byte cleanup after soft delete is handled by lifecycle maintenance for safe stale files; backup/restore alignment remains an operator responsibility.
 
 ### Input Validation
 

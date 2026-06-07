@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -62,6 +63,9 @@ func (s *Service) MoveBetweenSourcesWithProgress(ctx context.Context, sourceID s
 	}
 
 	if source.ID == destination.ID && source.Type == destination.Type {
+		if err := validateSameSourceMove(from, to, isDirectory); err != nil {
+			return MoveProgress{}, err
+		}
 		if err := s.RenameSource(ctx, source.ID, from, to); err != nil {
 			return MoveProgress{}, err
 		}
@@ -99,6 +103,18 @@ func (s *Service) MoveBetweenSourcesWithProgress(ctx context.Context, sourceID s
 		return progress, &MoveError{Stage: MoveFailureStageVerified, Err: err}
 	}
 	return progress, nil
+}
+
+func validateSameSourceMove(from string, to string, isDirectory bool) error {
+	sourcePath := cleanPath(from)
+	destinationPath := cleanPath(to)
+	if sourcePath == destinationPath {
+		return fmt.Errorf("item is already at destination")
+	}
+	if isDirectory && destinationPath != "" && strings.HasPrefix(destinationPath, sourcePath+"/") {
+		return fmt.Errorf("cannot move a directory inside itself")
+	}
+	return nil
 }
 
 type movePlan struct {

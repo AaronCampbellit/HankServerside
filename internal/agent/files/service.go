@@ -714,6 +714,20 @@ func (s *Service) DeleteSource(ctx context.Context, sourceID string, path string
 	return s.deleteLocal(ctx, path, isDirectory)
 }
 
+func (s *Service) RollbackMoveDestination(ctx context.Context, destinationSourceID string, to string, isDirectory bool) error {
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return fmt.Errorf("rollback destination path is required")
+	}
+	if _, err := s.StatSource(ctx, destinationSourceID, to); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return s.DeleteSource(ctx, destinationSourceID, to, isDirectory)
+}
+
 func (s *Service) Download(ctx context.Context, path string) (string, error) {
 	return s.DownloadSource(ctx, "", path)
 }

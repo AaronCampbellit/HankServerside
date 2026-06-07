@@ -322,6 +322,78 @@ func TestInterruptedFileOperationJobsBecomeRollbackRequired(t *testing.T) {
 	}
 }
 
+func TestRollbackRequiredFileOperationJobCanBeRolledBack(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	now := time.Now().UTC()
+	job := store.FileOperationJob{
+		ID:                  "filejob_rollback_required",
+		HomeID:              homeID,
+		UserID:              "usr_1",
+		Operation:           protocol.FileOperationMove,
+		SourceID:            "primary",
+		DestinationSourceID: "secondary",
+		FromPath:            "/source",
+		ToPath:              "/dest",
+		IsDirectory:         true,
+		Status:              "rollback_required",
+		ErrorMessage:        "source delete failed after verified copy",
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		CompletedAt:         &now,
+	}
+	must(t, db.CreateFileOperationJob(ctx, job))
+
+	rollbackSeen := make(chan protocol.FilesMoveRollbackRequest, 1)
+	go func() {
+		for {
+			var envelope protocol.Envelope
+			if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+				return
+			}
+			if envelope.Type != protocol.TypeCloudCommand {
+				continue
+			}
+			command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+			if err != nil || command.Command != "files.move_rollback" {
+				continue
+			}
+			request, err := decodeBody[protocol.FilesMoveRollbackRequest](command.Body)
+			if err != nil {
+				return
+			}
+			rollbackSeen <- request
+			response, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.FileOperationJobResponse{
+				OK:     true,
+				JobID:  request.JobID,
+				Status: "rolled_back",
+			})
+			_ = wsjson.Write(ctx, agentConn, response)
+		}
+	}()
+
+	var rolledBack map[string]any
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/file-jobs/"+job.ID+"/rollback", nil, &rolledBack)
+	if rolledBack["status"] != "rolled_back" {
+		t.Fatalf("rollback response status = %#v, want rolled_back", rolledBack["status"])
+	}
+	select {
+	case request := <-rollbackSeen:
+		if request.JobID != job.ID || request.DestinationSourceID != "secondary" || request.To != "/dest" || !request.IsDirectory {
+			t.Fatalf("rollback request = %#v", request)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for rollback command")
+	}
+}
+
 func TestFilePolicyDeniesBlockedPrefixesDeleteAndMaxUpload(t *testing.T) {
 	t.Parallel()
 

@@ -10,17 +10,20 @@ import (
 )
 
 type Cloud struct {
-	Addr              string
-	DatabaseURL       string
-	SessionTTL        time.Duration
-	RequestTimeout    time.Duration
-	DBOpsStateDir     string
-	DBOpsLogDir       string
-	DBOpsIntentSecret string
-	NoteAttachmentDir string
-	SecretKey         string
-	AssistantAI       AssistantAI
-	APNS              APNS
+	Addr                  string
+	DatabaseURL           string
+	SessionTTL            time.Duration
+	RequestTimeout        time.Duration
+	MaintenanceInterval   time.Duration
+	MaintenanceRetention  time.Duration
+	DBOpsStateDir         string
+	DBOpsLogDir           string
+	DBOpsIntentSecret     string
+	NoteAttachmentDir     string
+	SecretKey             string
+	AllowPlaintextSecrets bool
+	AssistantAI           AssistantAI
+	APNS                  APNS
 }
 
 type AssistantAI struct {
@@ -133,6 +136,14 @@ func LoadCloud() (Cloud, error) {
 	if err != nil {
 		return Cloud{}, err
 	}
+	maintenanceInterval, err := durationSeconds("HANK_REMOTE_MAINTENANCE_INTERVAL_SECONDS", 3600)
+	if err != nil {
+		return Cloud{}, err
+	}
+	maintenanceRetention, err := durationDays("HANK_REMOTE_MAINTENANCE_RETENTION_DAYS", 30)
+	if err != nil {
+		return Cloud{}, err
+	}
 
 	embeddingDimension := envOrDefault("HANK_REMOTE_AI_EMBEDDING_DIMENSION", "768")
 	embeddingDimensionValue, err := strconv.Atoi(embeddingDimension)
@@ -147,17 +158,25 @@ func LoadCloud() (Cloud, error) {
 	if dbOpsIntentSecret == "" {
 		return Cloud{}, fmt.Errorf("HANK_REMOTE_DB_OPS_INTENT_SECRET is required")
 	}
+	secretKey := strings.TrimSpace(os.Getenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY"))
+	allowPlaintextSecrets := boolEnvOrDefault("HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS", false)
+	if secretKey == "" && !allowPlaintextSecrets {
+		return Cloud{}, fmt.Errorf("HANK_REMOTE_SECRET_ENCRYPTION_KEY is required unless HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true is explicitly set for local development")
+	}
 
 	return Cloud{
-		Addr:              envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
-		DatabaseURL:       envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
-		SessionTTL:        sessionTTL,
-		RequestTimeout:    requestTimeout,
-		DBOpsStateDir:     envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
-		DBOpsLogDir:       envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
-		DBOpsIntentSecret: dbOpsIntentSecret,
-		NoteAttachmentDir: envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
-		SecretKey:         strings.TrimSpace(os.Getenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY")),
+		Addr:                  envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
+		DatabaseURL:           envOrDefault("HANK_REMOTE_CLOUD_DATABASE_URL", "postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable"),
+		SessionTTL:            sessionTTL,
+		RequestTimeout:        requestTimeout,
+		MaintenanceInterval:   maintenanceInterval,
+		MaintenanceRetention:  maintenanceRetention,
+		DBOpsStateDir:         envOrDefault("HANK_REMOTE_DB_OPS_STATE_DIR", "/var/lib/hank/db-ops/state"),
+		DBOpsLogDir:           envOrDefault("HANK_REMOTE_DB_OPS_LOG_DIR", "/var/log/hank/db-ops"),
+		DBOpsIntentSecret:     dbOpsIntentSecret,
+		NoteAttachmentDir:     envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
+		SecretKey:             secretKey,
+		AllowPlaintextSecrets: allowPlaintextSecrets,
 		APNS: APNS{
 			TeamID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TEAM_ID")),
 			KeyID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_KEY_ID")),
@@ -319,4 +338,13 @@ func durationSeconds(key string, fallback int) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", key)
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func durationDays(key string, fallback int) (time.Duration, error) {
+	raw := envOrDefault(key, strconv.Itoa(fallback))
+	days, err := strconv.Atoi(raw)
+	if err != nil || days <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return time.Duration(days) * 24 * time.Hour, nil
 }

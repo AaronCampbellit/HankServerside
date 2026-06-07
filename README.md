@@ -30,6 +30,7 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `GET /v1/oauth/openai/start`
   - `POST /v1/ws/app-ticket`
   - `GET /v1/home`
+  - `GET /v1/home/setup-status`
   - `PUT /v1/home`
   - `POST /v1/home/invitations/accept`
   - `GET /v1/home/members`
@@ -42,7 +43,14 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `PUT /v1/home/permissions`
   - `GET /v1/home/members/{userID}/permissions`
   - `PUT /v1/home/members/{userID}/permissions`
+  - `GET /v1/home/quick-links`
+  - `POST /v1/home/quick-links`
+  - `PUT /v1/home/quick-links/{linkID}`
+  - `DELETE /v1/home/quick-links/{linkID}`
+  - `GET /v1/home/audit-events`
+  - `GET /v1/home/query-telemetry`
   - `GET /v1/home/agent`
+  - `POST /v1/home/agent/restart`
   - `GET /v1/home/agent/tokens`
   - `POST /v1/home/agent/tokens`
   - `DELETE /v1/home/agent/tokens/{tokenID}`
@@ -66,12 +74,14 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `GET /v1/home/assistant/status`
   - `GET /v1/home/assistant/settings`
   - `PUT /v1/home/assistant/settings`
+  - `GET /v1/home/assistant/models`
   - `GET /v1/home/assistant/sessions`
   - `POST /v1/home/assistant/sessions`
   - `GET /v1/home/assistant/sessions/{sessionID}`
   - `DELETE /v1/home/assistant/sessions/{sessionID}`
   - `GET /v1/home/assistant/sessions/{sessionID}/messages`
   - `POST /v1/home/assistant/sessions/{sessionID}/messages`
+  - `DELETE /v1/home/assistant/sessions/{sessionID}/attachments/{attachmentID}/discard`
   - `GET /v1/home/assistant/runs/{runID}`
   - `POST /v1/home/assistant/runs/{runID}/confirm`
   - `POST /v1/home/assistant/runs/{runID}/client-tool-results`
@@ -79,9 +89,16 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `GET /v1/home/assistant/logs`
   - `GET /v1/home/assistant/media-settings`
   - `PUT /v1/home/assistant/media-settings`
+  - `GET /v1/home/assistant/media-image`
   - `GET /v1/home/assistant/media-jobs/{jobID}`
   - `POST /v1/home/assistant/media-jobs/{jobID}/cancel`
+  - `GET /v1/home/file-jobs`
+  - `GET /v1/home/file-jobs/{jobID}`
+  - `POST /v1/home/file-jobs/{jobID}/cancel`
+  - `POST /v1/home/file-jobs/{jobID}/retry`
+  - `POST /v1/home/file-jobs/{jobID}/rollback`
   - `GET /v1/file-transfers/{transferID}`
+  - `GET /v1/file-transfers/{transferID}/status`
   - `PUT /v1/file-transfers/{transferID}`
 - cloud WebSocket relay:
   - `GET /ws/app`
@@ -114,10 +131,14 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `homeassistant.call_service`
   - `files.list`
   - `files.stat`
+  - `files.search`
   - `files.download`
   - `files.upload`
   - `files.create_directory`
   - `files.rename`
+  - `files.move`
+  - `files.move_cancel`
+  - `files.move_rollback`
   - `files.delete`
   - `notes.list`
   - `notes.fetch`
@@ -128,7 +149,18 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `notes.search`
   - `notes.tags`
   - `notes.tag_rollup`
+  - `media.settings_status`
+  - `media.settings_apply`
+  - `media.download_jobs`
+  - `media.download_cancel`
+  - `media.search`
+  - `media.plan_download`
+  - `media.download_start`
+  - `media.download_status`
+  - `media.image_fetch`
   - `hermes.chat`
+  - `config.status`
+  - `config.apply`
 
 ## Project Layout
 
@@ -185,8 +217,11 @@ export HANK_REMOTE_CLOUD_ADDR=:8080
 export HANK_REMOTE_CLOUD_DATABASE_URL='postgres://hankremote:hankremote@127.0.0.1:5432/hankremote?sslmode=disable'
 export HANK_REMOTE_DB_OPS_INTENT_SECRET='local-dev-db-ops-intent-secret'
 export HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS='local-dev-backup-passphrase'
+export HANK_REMOTE_SECRET_ENCRYPTION_KEY='local-dev-secret-encryption-key'
 make run-cloud
 ```
+
+For throwaway local-only experiments, `HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true` explicitly permits plaintext secret storage. Do not use that opt-out for shared or production-like installs.
 
 3. Register the first admin account. The first successful registration auto-creates the singleton Home:
 

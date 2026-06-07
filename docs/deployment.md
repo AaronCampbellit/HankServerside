@@ -93,6 +93,8 @@ HANK_REMOTE_CLOUD_DATABASE_URL=postgres://hankremote:replace-with-real-db-passwo
 
 HANK_REMOTE_SESSION_TTL_SECONDS=604800
 HANK_REMOTE_REQUEST_TIMEOUT_SECONDS=120
+HANK_REMOTE_MAINTENANCE_INTERVAL_SECONDS=3600
+HANK_REMOTE_MAINTENANCE_RETENTION_DAYS=30
 HANK_REMOTE_SECRET_ENCRYPTION_KEY=replace-with-stable-random-secret-encryption-key
 
 HANK_REMOTE_AI_PROVIDER=auto
@@ -143,7 +145,18 @@ Keep `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`. Encrypted pgBackRest backups cannot 
 
 Set `HANK_REMOTE_DB_OPS_DOCKER_GID` to the numeric group owner of `/var/run/docker.sock` before starting `db-ops`. The db-ops container runs as a non-root user and needs that supplementary group for restore-test orchestration.
 
-Keep `HANK_REMOTE_SECRET_ENCRYPTION_KEY` stable after first use. Hank Remote uses it to encrypt stored OAuth tokens, APNs device tokens, and profile secret vault data at rest. If this key is lost, already encrypted application secrets cannot be read and must be re-linked or re-entered.
+`HANK_REMOTE_MAINTENANCE_INTERVAL_SECONDS` controls how often cloud lifecycle cleanup runs. `HANK_REMOTE_MAINTENANCE_RETENTION_DAYS` controls the shared retention cutoff for expired operational rows, old transfer history, login backoff rows, selected assistant attachment metadata, deleted note attachment rows, and safe stale note attachment files.
+
+Keep `HANK_REMOTE_SECRET_ENCRYPTION_KEY` stable after first use. Hank Remote requires it for normal cloud startup and uses it to encrypt stored OAuth tokens, APNs device tokens, and profile secret vault data at rest. If this key is lost, already encrypted application secrets cannot be read and must be re-linked or re-entered. The only supported no-key mode is an explicit local-development opt-out with `HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true`; do not use that setting for shared or production-like installs.
+
+After adding the key to an older deployment that may have previously stored plaintext secrets, run:
+
+```bash
+docker compose --env-file .env.cloud run -T --rm --entrypoint /usr/local/bin/hank-remote-cloud cloud secrets status --strict
+docker compose --env-file .env.cloud run -T --rm --entrypoint /usr/local/bin/hank-remote-cloud cloud secrets reencrypt
+```
+
+`secrets status` prints only counts for plaintext OpenAI OAuth tokens, APNs device tokens, and profile secret vault rows. `secrets reencrypt` rewrites those known plaintext rows using the configured `HANK_REMOTE_SECRET_ENCRYPTION_KEY`.
 
 `HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Browser-redirect OpenAI OAuth is not supported. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
 Production should run with pgvector available through the bundled Postgres image. The JSON embedding fallback exists only for local development or degraded local testing when pgvector is not available. The production vector schema is fixed at 768 dimensions. Do not set `HANK_REMOTE_AI_EMBEDDING_DIMENSION` in production unless a future migration explicitly changes the vector dimension.
@@ -333,6 +346,11 @@ docker compose --env-file .env.cloud --profile agent logs -f agent
 ```
 
 The dashboard should show the Home agent as online.
+
+Admins can also restart an online home connector from Settings > Home. The
+button sends a controlled `system.restart` command to the agent, and the agent
+exits after acknowledging the request. The host supervisor must restart it; the
+Compose deployment does this through the agent service restart policy.
 
 ## 10. Storage And Backups
 

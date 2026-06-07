@@ -191,7 +191,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			snapshot["status"] = online.agent.Status
 			snapshot["capabilities"] = online.capabilities
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"agent": snapshot})
+		writeJSON(w, http.StatusOK, map[string]any{"agent": snapshot, "can_restart": membership.Role == domain.HomeRoleAdmin})
 		return true
 	}
 
@@ -284,6 +284,34 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			"expires_at":   token.ExpiresAt,
 			"created_at":   token.CreatedAt,
 			"agent_status": agent.Status,
+		})
+		return true
+	}
+
+	if len(parts) == 2 && parts[0] == "agent" && parts[1] == "restart" && r.Method == http.MethodPost {
+		if membership.Role != domain.HomeRoleAdmin {
+			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+			return true
+		}
+		envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandSystemRestart, protocol.SystemRestartRequest{Reason: "dashboard operator requested restart"})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return true
+		}
+		if envelope.Error != nil {
+			http.Error(w, envelope.Error.Message, http.StatusBadGateway)
+			return true
+		}
+		payload, err := protocol.DecodePayload[protocol.SystemRestartResponse](envelope)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return true
+		}
+		s.audit(r.Context(), "agent.restart_requested", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "agent", envelope.AgentID, map[string]any{"restart_at": payload.RestartAt})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":         payload.OK,
+			"message":    payload.Message,
+			"restart_at": payload.RestartAt,
 		})
 		return true
 	}

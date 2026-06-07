@@ -35,6 +35,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "secrets" {
+		if err := runSecretsCommand(ctx, cfg, os.Args[2:]); err != nil {
+			logger.Error("secret storage command failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -46,8 +53,12 @@ func main() {
 		logger.Error("failed to configure secret encryption", "error", err)
 		os.Exit(1)
 	}
+	if cfg.AllowPlaintextSecrets {
+		logger.Warn("plaintext secret storage is explicitly enabled; set HANK_REMOTE_SECRET_ENCRYPTION_KEY before production use")
+	}
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
+	server.ConfigureSecretStorageStatus(cfg.SecretKey != "", cfg.AllowPlaintextSecrets)
 	server.ConfigureAPNS(cloud.APNSConfig{
 		TeamID:      cfg.APNS.TeamID,
 		KeyID:       cfg.APNS.KeyID,
@@ -78,7 +89,7 @@ func main() {
 		logger.Error("failed to start runtime coordination", "error", err)
 		os.Exit(1)
 	}
-	server.StartMaintenance(time.Hour, 30*24*time.Hour)
+	server.StartMaintenance(cfg.MaintenanceInterval, cfg.MaintenanceRetention)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -137,4 +148,52 @@ func runMigrateCommand(ctx context.Context, cfg config.Cloud, args []string) err
 	default:
 		return errors.New("unknown migrate command")
 	}
+}
+
+func runSecretsCommand(ctx context.Context, cfg config.Cloud, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: hank-remote-cloud secrets [status|reencrypt]")
+	}
+	db, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.ConfigureSecretEncryption(cfg.SecretKey); err != nil {
+		return err
+	}
+
+	switch args[0] {
+	case "status":
+		report, err := db.SecretStorageReport(ctx)
+		if err != nil {
+			return err
+		}
+		printSecretStorageReport(report)
+		if len(args) > 1 && args[1] == "--strict" && report.PlaintextTotal() > 0 {
+			return fmt.Errorf("plaintext secret rows detected")
+		}
+		return nil
+	case "reencrypt":
+		report, err := db.ReencryptPlaintextSecrets(ctx)
+		if err != nil {
+			return err
+		}
+		printSecretStorageReport(report)
+		fmt.Printf("secret_columns_reencrypted=%d\n", report.ReencryptedSecretColumns)
+		if report.PlaintextTotal() > 0 {
+			return fmt.Errorf("plaintext secret rows remain after re-encryption")
+		}
+		return nil
+	default:
+		return errors.New("unknown secrets command")
+	}
+}
+
+func printSecretStorageReport(report store.SecretStorageReport) {
+	fmt.Printf("plaintext_openai_access_tokens=%d\n", report.OpenAIAccessTokens)
+	fmt.Printf("plaintext_openai_refresh_tokens=%d\n", report.OpenAIRefreshTokens)
+	fmt.Printf("plaintext_apns_device_tokens=%d\n", report.APNSDeviceTokens)
+	fmt.Printf("plaintext_user_profile_secret_vaults=%d\n", report.UserProfileSecretVaults)
+	fmt.Printf("plaintext_total=%d\n", report.PlaintextTotal())
 }

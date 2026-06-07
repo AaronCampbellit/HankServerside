@@ -27,7 +27,8 @@ const (
 )
 
 const (
-	CommandSystemPing = "system.ping"
+	CommandSystemPing    = "system.ping"
+	CommandSystemRestart = "system.restart"
 )
 
 type Envelope struct {
@@ -104,6 +105,16 @@ type SystemPingRequest struct {
 type SystemPingResponse struct {
 	Message string    `json:"message"`
 	Time    time.Time `json:"time"`
+}
+
+type SystemRestartRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+type SystemRestartResponse struct {
+	OK        bool      `json:"ok"`
+	Message   string    `json:"message"`
+	RestartAt time.Time `json:"restart_at"`
 }
 
 func NewEnvelope(messageType string, requestID string, agentID string, homeID string, payload any) (Envelope, error) {

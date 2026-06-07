@@ -16,6 +16,7 @@ These documents stay in the repo root because common tooling expects them there.
 - [deployment.md](deployment.md)
 - [roadmap.md](roadmap.md)
 - [backend-production-repair-plan.md](backend-production-repair-plan.md)
+- [project-cleanup-audit-2026-06-06.md](project-cleanup-audit-2026-06-06.md): dated cleanup audit with 2026-06-06 repair status, remaining follow-up tests, and stale-doc context.
 - [backend-architecture-audit.md](backend-architecture-audit.md): dated 2026-05-30 point-in-time audit; use the repair plan, deployment guide, and runbooks for current operator actions.
 - [legacy-code-audit.md](legacy-code-audit.md): dated 2026-06-01 cleanup audit with implementation resolution status.
 

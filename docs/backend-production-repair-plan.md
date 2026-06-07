@@ -262,7 +262,7 @@ Add `CHECK` constraints for:
 - `home_memberships.role IN ('admin', 'member')`
 - `home_invitations.role IN ('admin', 'member')`
 - `agents.status IN ('online', 'offline')`
-- `home_service_profiles.service_type IN ('homeassistant', 'smb')`
+- `home_service_profiles.service_type IN ('homeassistant', 'smb', 'hermes')`
 - `home_permissions.feature IN ('homeassistant', 'files', 'notes')`
 - `home_member_permissions.feature IN ('homeassistant', 'files', 'notes')`
 - `user_notes.page_type IN ('text', 'board')`
@@ -282,6 +282,8 @@ Acceptance:
 
 - Insert/update invalid enum values fails.
 - Domain constants and constraints stay synchronized through tests.
+
+Status note as of 2026-06-06: `internal/migrations/sql/000008_home_service_profiles_hermes.up.sql` reconciles the service-profile constraint with the current Home Assistant, SMB, and Hermes service types. Keep extending the migration contract tests when new enum-like values are added.
 
 ### R1.4 Complete foreign keys and delete semantics
 

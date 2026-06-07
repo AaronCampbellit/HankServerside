@@ -1456,6 +1456,27 @@ func TestSettingsIncludesSMBShareRootOptions(t *testing.T) {
 	}
 }
 
+func TestMediaDestinationSourceIDsIncludesConfiguredAndAllSMBShares(t *testing.T) {
+	t.Parallel()
+
+	files := agentfiles.NewWithConfig(agentfiles.Config{
+		Shares: []agentfiles.SMBConfig{
+			{ID: "media", Name: "Media", Host: "nas.local", Share: "media"},
+			{ID: "archive", Name: "Archive", Host: "nas.local", Share: "archive"},
+		},
+	})
+
+	ids := mediaDestinationSourceIDs("archive", files)
+	if strings.Join(ids, ",") != "archive,media" {
+		t.Fatalf("source IDs with configured archive = %#v, want archive, media", ids)
+	}
+
+	ids = mediaDestinationSourceIDs("", files)
+	if strings.Join(ids, ",") != "media,archive" {
+		t.Fatalf("source IDs with default source = %#v, want media, archive", ids)
+	}
+}
+
 func TestMediaDestinationFilePathSortsMoviesAndTVShows(t *testing.T) {
 	t.Parallel()
 

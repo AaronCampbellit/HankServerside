@@ -91,6 +91,40 @@ type QueryTelemetryRow struct {
 	Query       string
 }
 
+type LifecyclePruneSummary struct {
+	AppSessionsDeleted          int64
+	AgentTokensDeleted          int64
+	HomeInvitationsDeleted      int64
+	AppWebSocketTicketsDeleted  int64
+	FileTransfersExpired        int64
+	FileTransfersDeleted        int64
+	RateLimitEventsDeleted      int64
+	RelayRequestsDeleted        int64
+	AppConnectionsDeleted       int64
+	AgentConnectionsDeleted     int64
+	AuditEventsDeleted          int64
+	LoginBackoffDeleted         int64
+	AssistantAttachmentsDeleted int64
+	NoteAttachmentRowsDeleted   int64
+}
+
+func (s LifecyclePruneSummary) Empty() bool {
+	return s.AppSessionsDeleted == 0 &&
+		s.AgentTokensDeleted == 0 &&
+		s.HomeInvitationsDeleted == 0 &&
+		s.AppWebSocketTicketsDeleted == 0 &&
+		s.FileTransfersExpired == 0 &&
+		s.FileTransfersDeleted == 0 &&
+		s.RateLimitEventsDeleted == 0 &&
+		s.RelayRequestsDeleted == 0 &&
+		s.AppConnectionsDeleted == 0 &&
+		s.AgentConnectionsDeleted == 0 &&
+		s.AuditEventsDeleted == 0 &&
+		s.LoginBackoffDeleted == 0 &&
+		s.AssistantAttachmentsDeleted == 0 &&
+		s.NoteAttachmentRowsDeleted == 0
+}
+
 func (s *Store) UpsertCloudRuntime(ctx context.Context, runtimeID string, version string) error {
 	now := time.Now().UTC()
 	_, err := s.exec(ctx, `INSERT INTO cloud_runtime (deployment_id, runtime_id, version, started_at, heartbeat_at, shutdown_at)
@@ -556,38 +590,75 @@ func (s *Store) RecordLoginSuccess(ctx context.Context, email string) error {
 }
 
 func (s *Store) PruneLifecycle(ctx context.Context, now time.Time, retention time.Duration) error {
+	_, err := s.PruneLifecycleWithSummary(ctx, now, retention)
+	return err
+}
+
+func (s *Store) PruneLifecycleWithSummary(ctx context.Context, now time.Time, retention time.Duration) (LifecyclePruneSummary, error) {
 	if retention <= 0 {
 		retention = 30 * 24 * time.Hour
 	}
 	cutoff := now.Add(-retention)
-	statements := []string{
-		`DELETE FROM app_sessions WHERE expires_at < ? OR revoked_at < ?`,
-		`DELETE FROM agent_tokens WHERE expires_at < ? OR revoked_at < ?`,
-		`DELETE FROM home_invitations WHERE expires_at < ? OR accepted_at < ?`,
-		`DELETE FROM app_ws_tickets WHERE expires_at < ? OR consumed_at < ?`,
-		`UPDATE file_transfers SET status = 'expired' WHERE status IN ('pending', 'active') AND expires_at < ?`,
-		`DELETE FROM rate_limit_events WHERE occurred_at < ?`,
-		`DELETE FROM relay_requests WHERE completed_at < ?`,
-		`DELETE FROM app_connections WHERE disconnected_at < ?`,
-		`DELETE FROM agent_connections WHERE disconnected_at < ?`,
+	type pruneStatement struct {
+		name string
+		sql  string
+		args []any
 	}
-	args := [][]any{
-		{now, cutoff},
-		{now, cutoff},
-		{now, cutoff},
-		{now, cutoff},
-		{now},
-		{cutoff},
-		{cutoff},
-		{cutoff},
-		{cutoff},
+	statements := []pruneStatement{
+		{"app_sessions", `DELETE FROM app_sessions WHERE expires_at < ? OR revoked_at < ?`, []any{now, cutoff}},
+		{"agent_tokens", `DELETE FROM agent_tokens WHERE expires_at < ? OR revoked_at < ?`, []any{now, cutoff}},
+		{"home_invitations", `DELETE FROM home_invitations WHERE expires_at < ? OR accepted_at < ?`, []any{now, cutoff}},
+		{"app_ws_tickets", `DELETE FROM app_ws_tickets WHERE expires_at < ? OR consumed_at < ?`, []any{now, cutoff}},
+		{"file_transfers_expired", `UPDATE file_transfers SET status = 'expired' WHERE status IN ('pending', 'active') AND expires_at < ?`, []any{now}},
+		{"file_transfers_deleted", `DELETE FROM file_transfers WHERE status IN ('completed', 'failed', 'expired') AND (completed_at < ? OR expires_at < ?)`, []any{cutoff, cutoff}},
+		{"rate_limit_events", `DELETE FROM rate_limit_events WHERE occurred_at < ?`, []any{cutoff}},
+		{"relay_requests", `DELETE FROM relay_requests WHERE completed_at < ?`, []any{cutoff}},
+		{"app_connections", `DELETE FROM app_connections WHERE disconnected_at < ?`, []any{cutoff}},
+		{"agent_connections", `DELETE FROM agent_connections WHERE disconnected_at < ?`, []any{cutoff}},
+		{"audit_events", `DELETE FROM audit_events WHERE occurred_at < ?`, []any{cutoff}},
+		{"login_backoff", `DELETE FROM login_backoff WHERE updated_at < ? AND (blocked_until IS NULL OR blocked_until < ?)`, []any{cutoff, now}},
+		{"assistant_attachments", `DELETE FROM assistant_attachments WHERE status IN ('expired', 'staged') AND updated_at < ?`, []any{cutoff}},
+		{"note_attachments", `DELETE FROM note_attachments WHERE deleted_at < ?`, []any{cutoff}},
 	}
-	for i, statement := range statements {
-		if _, err := s.exec(ctx, statement, args[i]...); err != nil {
-			return err
+	var summary LifecyclePruneSummary
+	for _, statement := range statements {
+		result, err := s.exec(ctx, statement.sql, statement.args...)
+		if err != nil {
+			return summary, err
+		}
+		affected, _ := result.RowsAffected()
+		switch statement.name {
+		case "app_sessions":
+			summary.AppSessionsDeleted = affected
+		case "agent_tokens":
+			summary.AgentTokensDeleted = affected
+		case "home_invitations":
+			summary.HomeInvitationsDeleted = affected
+		case "app_ws_tickets":
+			summary.AppWebSocketTicketsDeleted = affected
+		case "file_transfers_expired":
+			summary.FileTransfersExpired = affected
+		case "file_transfers_deleted":
+			summary.FileTransfersDeleted = affected
+		case "rate_limit_events":
+			summary.RateLimitEventsDeleted = affected
+		case "relay_requests":
+			summary.RelayRequestsDeleted = affected
+		case "app_connections":
+			summary.AppConnectionsDeleted = affected
+		case "agent_connections":
+			summary.AgentConnectionsDeleted = affected
+		case "audit_events":
+			summary.AuditEventsDeleted = affected
+		case "login_backoff":
+			summary.LoginBackoffDeleted = affected
+		case "assistant_attachments":
+			summary.AssistantAttachmentsDeleted = affected
+		case "note_attachments":
+			summary.NoteAttachmentRowsDeleted = affected
 		}
 	}
-	return nil
+	return summary, nil
 }
 
 func scanAppWebSocketTicket(scanner interface{ Scan(dest ...any) error }) (AppWebSocketTicketRecord, error) {

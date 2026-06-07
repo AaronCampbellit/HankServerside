@@ -41,6 +41,9 @@ const state = {
   pendingRequests: new Map(),
   requestCounter: 0,
   browseRequestID: 0,
+  fileJobsRefreshTimerID: 0,
+  fileJobsRefreshInFlight: false,
+  fileJobsRefreshPending: false,
   moveInProgress: false,
   fileJobsPollID: 0,
 };
@@ -452,8 +455,29 @@ function handleAppEvent(envelope) {
   state.fileJobs = [job, ...state.fileJobs.filter((entry) => entry.id !== job.id)].slice(0, 10);
   renderFileJobs();
   if (job.status === "completed") {
-    refreshCurrentView().catch(() => {});
+    scheduleFileJobViewRefresh();
   }
+}
+
+function scheduleFileJobViewRefresh(delayMS = 750) {
+  if (state.fileJobsRefreshInFlight) {
+    state.fileJobsRefreshPending = true;
+    return;
+  }
+  if (state.fileJobsRefreshTimerID) return;
+  state.fileJobsRefreshTimerID = window.setTimeout(() => {
+    state.fileJobsRefreshTimerID = 0;
+    state.fileJobsRefreshInFlight = true;
+    state.fileJobsRefreshPending = false;
+    refreshCurrentView()
+      .catch(() => {})
+      .finally(() => {
+        state.fileJobsRefreshInFlight = false;
+        if (state.fileJobsRefreshPending) {
+          scheduleFileJobViewRefresh();
+        }
+      });
+  }, delayMS);
 }
 
 function commandTimeoutMS(command) {
@@ -2011,7 +2035,8 @@ function renderFileJobs() {
       : job.bytes_total > 0
         ? `${formatBytes(job.bytes_done)} / ${formatBytes(job.bytes_total)}`
         : job.status;
-    const canRetry = ["failed", "rollback_required", "cancelled"].includes(job.status);
+    const canRetry = ["failed", "cancelled"].includes(job.status);
+    const canRollback = job.status === "rollback_required";
     const canCancel = ["queued", "running"].includes(job.status);
     return `
       <article class="card split-card">
@@ -2030,6 +2055,7 @@ function renderFileJobs() {
         </div>
         <div class="actions wrap compact">
           ${canRetry ? `<button type="button" class="secondary" data-file-job-action="retry" data-file-job-id="${escapeHTML(job.id)}">Retry</button>` : ""}
+          ${canRollback ? `<button type="button" class="secondary" data-file-job-action="rollback" data-file-job-id="${escapeHTML(job.id)}">Roll Back</button>` : ""}
           ${canCancel ? `<button type="button" class="ghost" data-file-job-action="cancel" data-file-job-id="${escapeHTML(job.id)}">Cancel</button>` : ""}
         </div>
       </article>

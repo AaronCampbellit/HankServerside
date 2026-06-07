@@ -2,8 +2,11 @@ package migrations
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/dropfile/hankremote/internal/domain"
 )
 
 func TestCheckStatusesAcceptsLegacyVersionOneBaselineChecksum(t *testing.T) {
@@ -17,5 +20,32 @@ func TestCheckStatusesAcceptsLegacyVersionOneBaselineChecksum(t *testing.T) {
 		DurationMS: 0,
 	}}); !errors.Is(err, ErrPendingMigrations) {
 		t.Fatalf("CheckStatuses legacy baseline = %v, want ErrPendingMigrations for later migrations only", err)
+	}
+}
+
+func TestHomeServiceProfileConstraintIncludesSupportedServiceTypes(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	var constraintText strings.Builder
+	for _, migration := range migrations {
+		for _, statement := range migration.Statements {
+			if strings.Contains(statement, "home_service_profiles_service_type_check") {
+				constraintText.WriteString(statement)
+				constraintText.WriteByte('\n')
+			}
+		}
+	}
+	body := constraintText.String()
+	if body == "" {
+		t.Fatal("home_service_profiles_service_type_check migration statement missing")
+	}
+	for _, serviceType := range []string{domain.ServiceTypeHomeAssistant, domain.ServiceTypeSMB, domain.ServiceTypeHermes} {
+		if !strings.Contains(body, "'"+serviceType+"'") {
+			t.Fatalf("home_service_profiles_service_type_check missing %q in:\n%s", serviceType, body)
+		}
 	}
 }

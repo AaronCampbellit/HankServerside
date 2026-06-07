@@ -33,41 +33,43 @@ const maxHTTPBodyBytes = 1 << 20
 const maxWSMessageBytes = 2 << 20
 
 type Server struct {
-	addr                  string
-	store                 *store.Store
-	router                *Router
-	logger                *slog.Logger
-	http                  *http.Server
-	metrics               *observability.Metrics
-	limiter               *rateLimiter
-	transfers             *transferRegistry
-	appTickets            *appWebSocketTicketRegistry
-	notes                 *cloudNotesService
-	collaboration         *noteCollaborationHub
-	agentRequests         *agentRequestRegistry
-	syncs                 *homeSyncController
-	storage               *storageops.Service
-	storageEvents         map[string]struct{}
-	storageEventsMu       sync.Mutex
-	notificationEvents    map[string]time.Time
-	notificationEventsMu  sync.Mutex
-	pushSender            PushSender
-	realtimeCancel        context.CancelFunc
-	sessionTTL            time.Duration
-	requestTimeout        time.Duration
-	assistantAI           AssistantAIConfig
-	chatGPTDeviceAuths    *chatGPTDeviceAuthRegistry
-	noteAttachmentRoot    string
-	assistantTrace        *assistantTraceLog
-	loginBackoff          *loginBackoffRegistry
-	adminActionTokens     *adminActionTokenRegistry
-	quickLinkHTTPClient   *http.Client
-	quickLinkCheckTimeout time.Duration
-	runtimeID             string
-	runtimeVersion        string
-	runtimeCancel         context.CancelFunc
-	maintenanceCancel     context.CancelFunc
-	httpBaseCancel        context.CancelFunc
+	addr                       string
+	store                      *store.Store
+	router                     *Router
+	logger                     *slog.Logger
+	http                       *http.Server
+	metrics                    *observability.Metrics
+	limiter                    *rateLimiter
+	transfers                  *transferRegistry
+	appTickets                 *appWebSocketTicketRegistry
+	notes                      *cloudNotesService
+	collaboration              *noteCollaborationHub
+	agentRequests              *agentRequestRegistry
+	syncs                      *homeSyncController
+	storage                    *storageops.Service
+	storageEvents              map[string]struct{}
+	storageEventsMu            sync.Mutex
+	notificationEvents         map[string]time.Time
+	notificationEventsMu       sync.Mutex
+	pushSender                 PushSender
+	realtimeCancel             context.CancelFunc
+	sessionTTL                 time.Duration
+	requestTimeout             time.Duration
+	assistantAI                AssistantAIConfig
+	chatGPTDeviceAuths         *chatGPTDeviceAuthRegistry
+	noteAttachmentRoot         string
+	assistantTrace             *assistantTraceLog
+	loginBackoff               *loginBackoffRegistry
+	adminActionTokens          *adminActionTokenRegistry
+	quickLinkHTTPClient        *http.Client
+	quickLinkCheckTimeout      time.Duration
+	secretEncryptionConfigured bool
+	plaintextSecretsAllowed    bool
+	runtimeID                  string
+	runtimeVersion             string
+	runtimeCancel              context.CancelFunc
+	maintenanceCancel          context.CancelFunc
+	httpBaseCancel             context.CancelFunc
 }
 
 type authContext struct {
@@ -200,6 +202,11 @@ func (s *Server) ConfigureAPNS(cfg APNSConfig) {
 	s.pushSender = NewAPNSSender(cfg, s.logger)
 }
 
+func (s *Server) ConfigureSecretStorageStatus(encrypted bool, plaintextAllowed bool) {
+	s.secretEncryptionConfigured = encrypted
+	s.plaintextSecretsAllowed = plaintextAllowed
+}
+
 func (s *Server) StartRuntime(ctx context.Context, version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -242,7 +249,14 @@ func (s *Server) StartMaintenance(interval time.Duration, retention time.Duratio
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.maintenanceCancel = cancel
-	jobs := maintenance.Jobs{Store: s.store, Retention: retention, Logger: s.logger}
+	jobs := maintenance.Jobs{
+		Store:     s.store,
+		Retention: retention,
+		Logger:    s.logger,
+		AfterPrune: func(ctx context.Context, now time.Time, retention time.Duration) error {
+			return s.pruneNoteAttachmentFiles(ctx, now, retention)
+		},
+	}
 	go func() {
 		if err := jobs.Run(ctx, interval); err != nil && ctx.Err() == nil {
 			s.logger.Warn("maintenance loop stopped", "error", err)
@@ -297,6 +311,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		"online_agents":    s.router.AgentCount(),
 		"online_apps":      s.router.AppCount(),
 		"pending_requests": s.router.PendingCount(),
+		"secret_storage": map[string]any{
+			"encrypted":         s.secretEncryptionConfigured,
+			"plaintext_allowed": s.plaintextSecretsAllowed,
+		},
 	}
 	if status, err := s.store.GetCloudRuntime(r.Context()); err == nil {
 		payload["runtime"] = map[string]any{

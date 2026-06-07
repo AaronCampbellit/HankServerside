@@ -144,6 +144,55 @@ func TestMoveFailureBeforeDeleteKeepsSourceAndChecksumMismatchFails(t *testing.T
 	}
 }
 
+func TestMoveRejectsSameLocationAndNestedDirectoryDestination(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	ctx := context.Background()
+	payload := base64.StdEncoding.EncodeToString([]byte("source"))
+	if err := service.Upload(ctx, "/folder/source.txt", payload); err != nil {
+		t.Fatalf("Upload source: %v", err)
+	}
+	if err := service.CreateDirectory(ctx, "/folder/subdir"); err != nil {
+		t.Fatalf("CreateDirectory: %v", err)
+	}
+
+	if err := service.MoveBetweenSources(ctx, LocalSourceID, LocalSourceID, "/folder/source.txt", "/folder/source.txt", false); err == nil || !strings.Contains(err.Error(), "already at destination") {
+		t.Fatalf("same-location file move error = %v, want already at destination", err)
+	}
+	if err := service.MoveBetweenSources(ctx, LocalSourceID, LocalSourceID, "/folder", "/folder/subdir/folder", true); err == nil || !strings.Contains(err.Error(), "inside itself") {
+		t.Fatalf("nested directory move error = %v, want inside itself", err)
+	}
+	downloaded, err := service.Download(ctx, "/folder/source.txt")
+	if err != nil {
+		t.Fatalf("Download source after rejected move: %v", err)
+	}
+	if downloaded != payload {
+		t.Fatalf("source after rejected move = %q, want original payload", downloaded)
+	}
+}
+
+func TestRollbackMoveDestinationDeletesCopiedDestination(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	ctx := context.Background()
+	payload := base64.StdEncoding.EncodeToString([]byte("copied"))
+	if err := service.Upload(ctx, "/dest/copied.txt", payload); err != nil {
+		t.Fatalf("Upload copied destination: %v", err)
+	}
+
+	if err := service.RollbackMoveDestination(ctx, LocalSourceID, "/dest/copied.txt", false); err != nil {
+		t.Fatalf("RollbackMoveDestination: %v", err)
+	}
+	if _, err := service.Download(ctx, "/dest/copied.txt"); err == nil {
+		t.Fatal("destination still downloads after rollback")
+	}
+	if err := service.RollbackMoveDestination(ctx, LocalSourceID, "/dest/copied.txt", false); err != nil {
+		t.Fatalf("RollbackMoveDestination second pass should be idempotent: %v", err)
+	}
+}
+
 func TestSearchFindsNestedFiles(t *testing.T) {
 	t.Parallel()
 

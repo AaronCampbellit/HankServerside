@@ -283,11 +283,10 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 	seen := map[string]struct{}{sourcePathKey(sourceID, ""): {}}
 
 	if s.files != nil && s.files.Enabled() {
-		rootSourceIDs := []string{sourceID}
-		queueSourceIDs := []string{sourceID}
-		if sourceID == "" {
-			rootSourceIDs = mediaSMBSourceIDs(s.files.SMBConfigs())
-			queueSourceIDs = []string{""}
+		rootSourceIDs := mediaDestinationSourceIDs(sourceID, s.files)
+		queueSourceIDs := rootSourceIDs
+		if len(queueSourceIDs) == 0 {
+			queueSourceIDs = []string{sourceID}
 		}
 		type queueItem struct {
 			sourceID string
@@ -369,6 +368,30 @@ func (s *Service) destinationOptions(ctx context.Context) []protocol.MediaDestin
 		return left.Label < right.Label
 	})
 	return options
+}
+
+func mediaDestinationSourceIDs(configuredSourceID string, files *agentfiles.Service) []string {
+	configuredSourceID = strings.TrimSpace(configuredSourceID)
+	ids := make([]string, 0)
+	seen := map[string]struct{}{}
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	add(configuredSourceID)
+	if files != nil {
+		for _, id := range mediaSMBSourceIDs(files.SMBConfigs()) {
+			add(id)
+		}
+	}
+	return ids
 }
 
 func mediaSMBSourceIDs(configs []agentfiles.SMBConfig) []string {

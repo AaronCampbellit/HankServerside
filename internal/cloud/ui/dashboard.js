@@ -11,6 +11,8 @@ const state = {
   quickLinks: [],
   quickLinksCanEdit: false,
   quickLinksEditMode: false,
+  canRestartAgent: false,
+  agentRestartInProgress: false,
   tokensByHome: new Map(),
   refreshTimer: 0,
   quickLinksRefreshTimer: 0,
@@ -214,10 +216,37 @@ function renderAgents() {
       </div>
       <div class="meta">Connector ID: ${escapeHTML(agent.agent_id || agent.id || "unknown")}</div>
       <div class="meta">Last online: ${formatDate(agent.last_seen_at)}</div>
+      <div class="item-actions">
+        <button type="button" class="secondary" data-agent-action="restart" ${!isOnline || !state.canRestartAgent || state.agentRestartInProgress ? "disabled" : ""}>${state.agentRestartInProgress ? "Restarting..." : "Restart Connector"}</button>
+      </div>
     `;
     els.agentList.appendChild(card);
   });
   renderSetupChecklist();
+}
+
+async function restartAgent() {
+  if (state.agentRestartInProgress || !state.canRestartAgent) return;
+  const agent = state.agents[0] || {};
+  if (String(agent.status || "").toLowerCase() !== "online") {
+    showToast("The home connector is offline. Restart it from the host, then refresh status.", true);
+    return;
+  }
+  if (!window.confirm("Restart the home connector now? Home Assistant, files, media, and notes may be unavailable for a few seconds.")) {
+    return;
+  }
+  state.agentRestartInProgress = true;
+  renderAgents();
+  try {
+    await api("/v1/home/agent/restart", { method: "POST" });
+    showToast("Connector restart requested.");
+    window.setTimeout(() => loadAgents().catch((error) => showToast(error.message, true)), 3000);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    state.agentRestartInProgress = false;
+    renderAgents();
+  }
 }
 
 function quickLinkHost(value) {
@@ -618,6 +647,7 @@ async function loadHomes() {
 async function loadAgents() {
   const payload = await api("/v1/home/agent");
   state.agents = payload.agent ? [payload.agent] : [];
+  state.canRestartAgent = Boolean(payload.can_restart);
   renderAgents();
 }
 
@@ -852,6 +882,13 @@ els.quickLinksEditMode.addEventListener("click", toggleQuickLinksEditMode);
 els.quickLinkAdd.addEventListener("click", toggleQuickLinkForm);
 els.quickLinkForm.addEventListener("submit", saveQuickLink);
 els.quickLinkCancel.addEventListener("click", hideQuickLinkForm);
+els.agentList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-agent-action]");
+  if (!button) return;
+  if (button.dataset.agentAction === "restart") {
+    restartAgent().catch((error) => showToast(error.message, true));
+  }
+});
 els.tokenForm.addEventListener("submit", (event) => issueToken(event).catch((error) => showToast(error.message, true)));
 els.tokenCreated.addEventListener("click", async (event) => {
   if (!event.target.closest("[data-copy-agent-env]") || !state.lastAgentEnvFile) {

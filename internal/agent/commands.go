@@ -140,6 +140,16 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		filesDone := int64(1)
 		return protocol.FileOperationJobResponse{OK: true, JobID: request.JobID, Status: "completed", FilesDone: filesDone}, nil
 
+	case "files.move_rollback":
+		request, err := decodeBody[protocol.FilesMoveRollbackRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_file_request", err)
+		}
+		if err := d.files.RollbackMoveDestination(ctx, request.DestinationSourceID, request.To, request.IsDirectory); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.FileOperationJobResponse{OK: true, JobID: request.JobID, Status: "rolled_back"}, nil
+
 	case "files.delete":
 		request, err := decodeBody[protocol.FilesDeleteRequest](command.Body)
 		if err != nil {

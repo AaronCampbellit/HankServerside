@@ -267,6 +267,24 @@ func (s *Store) ListNoteAttachments(ctx context.Context, noteID string) ([]domai
 	return attachments, rows.Err()
 }
 
+func (s *Store) ListLiveNoteAttachmentStorageKeys(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.query(ctx, `SELECT storage_key FROM note_attachments WHERE deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := map[string]struct{}{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys[key] = struct{}{}
+	}
+	return keys, rows.Err()
+}
+
 func (s *Store) GetNoteAttachment(ctx context.Context, noteID string, attachmentID string) (domain.NoteAttachment, error) {
 	row := s.queryRow(ctx, `SELECT id, note_id, home_id, owner_user_id, filename, content_type,
 			size_bytes, checksum_sha256, storage_key, deleted_at, created_at, updated_at

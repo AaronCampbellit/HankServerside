@@ -7,6 +7,7 @@ Scope: full repo scan for legacy code, compatibility paths, stale docs, and old 
 ## Resolution Status
 
 Status as of 2026-06-01: resolved in one cleanup pass. The findings below are retained as historical evidence, not as open work.
+For the next cleanup snapshot and the 2026-06-06 repair status, see [project-cleanup-audit-2026-06-06.md](project-cleanup-audit-2026-06-06.md).
 
 - Schema startup mutation was replaced by embedded versioned migrations under `internal/migrations/sql`; normal read-only startup now checks migration status and `migrate up` applies pending migrations explicitly.
 - Legacy cleanup migrations cover current baseline creation, `board` to `kanban`, `user_notes.body_markdown` canonicalization, `home_notes` archival/drop, browser-redirect OpenAI OAuth state removal, and pgvector column setup when the extension exists.

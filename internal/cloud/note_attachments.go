@@ -301,6 +301,60 @@ func (s *Server) noteAttachmentPathForWrite(storageKey string) (string, error) {
 	return s.resolveNoteAttachmentPath(storageKey, true)
 }
 
+func (s *Server) pruneNoteAttachmentFiles(ctx context.Context, now time.Time, retention time.Duration) error {
+	if retention <= 0 {
+		retention = 30 * 24 * time.Hour
+	}
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.noteAttachmentRoot))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	liveKeys, err := s.store.ListLiveNoteAttachmentStorageKeys(ctx)
+	if err != nil {
+		return err
+	}
+	cutoff := now.Add(-retention)
+	removed := 0
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		storageKey := filepath.ToSlash(relative)
+		if _, ok := liveKeys[storageKey]; ok {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(cutoff) {
+			return nil
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		removed++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if removed > 0 {
+		s.logger.Info("pruned orphaned note attachment files", "count", removed, "root", root)
+	}
+	return nil
+}
+
 func (s *Server) resolveNoteAttachmentPath(storageKey string, forWrite bool) (string, error) {
 	cleaned := filepath.Clean(strings.TrimSpace(storageKey))
 	if cleaned == "." || filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || cleaned == ".." {

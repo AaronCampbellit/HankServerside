@@ -748,7 +748,7 @@ func TestDashboardHomePanelKeepsNameEditingInSettingsPane(t *testing.T) {
 		t.Fatalf("dashboard.js read: %v", err)
 	}
 	scriptBody := string(script)
-	for _, expected := range []string{`isSettingsHomePane ? "Home Name" : "Current Home"`, `els.homeForm.hidden = !isSettingsHomePane`, `els.homeCount.hidden = !isSettingsHomePane`, `Manage People`, `href="/dashboard/settings#people"`, `Connections`, `href="/dashboard/settings#connections"`} {
+	for _, expected := range []string{`isSettingsHomePane ? "Home Name" : "Current Home"`, `els.homeForm.hidden = !isSettingsHomePane`, `els.homeCount.hidden = !isSettingsHomePane`, `Manage People`, `href="/dashboard/settings#people"`, `Connections`, `href="/dashboard/settings#connections"`, `data-agent-action="restart"`, `/v1/home/agent/restart`} {
 		if !strings.Contains(scriptBody, expected) {
 			t.Fatalf("dashboard home panel script missing %q", expected)
 		}
@@ -796,6 +796,21 @@ func TestDashboardQuickLinksPanelIsOperatorFriendly(t *testing.T) {
 	for _, expected := range []string{`data-settings-page-tab="quick-links"`, `data-settings-page-panel="quick-links"`, `#quick-links-panel`} {
 		if !strings.Contains(settingsBody, expected) {
 			t.Fatalf("settings quick links target missing %q", expected)
+		}
+	}
+}
+
+func TestFileServerUIOffersManagedJobRollback(t *testing.T) {
+	t.Parallel()
+
+	script, err := fs.ReadFile(uiAssets, "ui/file-server.js")
+	if err != nil {
+		t.Fatalf("file-server.js read: %v", err)
+	}
+	body := string(script)
+	for _, expected := range []string{`data-file-job-action="rollback"`, `Roll Back`, `rollback_required`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("file-server rollback script missing %q", expected)
 		}
 	}
 }
@@ -1530,6 +1545,56 @@ func TestDeleteAgentTokenCanPurgeDisabledSetupFile(t *testing.T) {
 	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/home/agent/tokens", nil, &listPayload)
 	if len(listPayload.Tokens) != 0 {
 		t.Fatalf("token count after purge = %d, want 0", len(listPayload.Tokens))
+	}
+}
+
+func TestHomeAgentRestartEndpointRoutesSystemRestart(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	errCh := make(chan error, 1)
+	commandCh := make(chan protocol.RoutedCommand, 1)
+	go func() {
+		var envelope protocol.Envelope
+		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+			errCh <- err
+			return
+		}
+		command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		commandCh <- command
+		response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.SystemRestartResponse{
+			OK:        true,
+			Message:   "agent restart scheduled",
+			RestartAt: time.Now().UTC().Add(time.Second),
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- wsjson.Write(ctx, agentConn, response)
+	}()
+
+	var payload map[string]any
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/agent/restart", nil, &payload)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	command := <-commandCh
+	if command.Command != protocol.CommandSystemRestart {
+		t.Fatalf("restart command = %q, want %q", command.Command, protocol.CommandSystemRestart)
+	}
+	if payload["ok"] != true || payload["message"] == "" {
+		t.Fatalf("restart payload = %#v", payload)
 	}
 }
 

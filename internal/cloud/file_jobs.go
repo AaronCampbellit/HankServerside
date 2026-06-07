@@ -98,6 +98,19 @@ func (s *Server) handleHomeFileJobs(w http.ResponseWriter, r *http.Request, home
 		writeJSON(w, http.StatusOK, fileOperationJobSnapshot(job))
 		return true
 	}
+	if len(parts) == 3 && parts[2] == "rollback" && r.Method == http.MethodPost {
+		job, err := s.rollbackFileOperationJob(r.Context(), home, auth, jobID)
+		if errors.Is(err, store.ErrNotFound) || err == nil && job.HomeID != home.ID {
+			http.NotFound(w, r)
+			return true
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return true
+		}
+		writeJSON(w, http.StatusOK, fileOperationJobSnapshot(job))
+		return true
+	}
 
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	return true
@@ -296,7 +309,7 @@ func (s *Server) retryFileOperationJob(ctx context.Context, home domain.Home, au
 	if job.Operation != protocol.FileOperationMove {
 		return store.FileOperationJob{}, errors.New("only move jobs can be retried")
 	}
-	if job.Status != "failed" && job.Status != "rollback_required" && job.Status != "cancelled" {
+	if job.Status != "failed" && job.Status != "cancelled" {
 		return job, nil
 	}
 	if err := s.store.UpdateFileOperationJob(ctx, job.ID, "running", job.BytesDone, job.FilesDone, "", nil); err != nil {
@@ -331,6 +344,47 @@ func (s *Server) retryFileOperationJob(ctx context.Context, home domain.Home, au
 		return store.FileOperationJob{}, err
 	}
 	s.audit(ctx, "file_operation.retried", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(ctx), "file_operation_job", job.ID, map[string]any{"status": payload.Status})
+	return s.store.GetFileOperationJob(ctx, job.ID)
+}
+
+func (s *Server) rollbackFileOperationJob(ctx context.Context, home domain.Home, auth authContext, jobID string) (store.FileOperationJob, error) {
+	job, err := s.store.GetFileOperationJob(ctx, jobID)
+	if err != nil {
+		return store.FileOperationJob{}, err
+	}
+	if job.HomeID != home.ID {
+		return job, nil
+	}
+	if job.Operation != protocol.FileOperationMove {
+		return store.FileOperationJob{}, errors.New("only move jobs can be rolled back")
+	}
+	if job.Status != "rollback_required" {
+		return job, nil
+	}
+	request := protocol.FilesMoveRollbackRequest{
+		JobID:               job.ID,
+		DestinationSourceID: job.DestinationSourceID,
+		To:                  job.ToPath,
+		IsDirectory:         job.IsDirectory,
+	}
+	response, err := s.sendAgentCommand(ctx, home.ID, "files.move_rollback", request)
+	if err != nil {
+		return job, err
+	}
+	if response.Error != nil {
+		return job, errors.New(response.Error.Message)
+	}
+	payload := protocol.FileOperationJobResponse{OK: true, JobID: job.ID, Status: "rolled_back"}
+	_ = json.Unmarshal(response.Payload, &payload)
+	if payload.Status == "" {
+		payload.Status = "rolled_back"
+	}
+	now := time.Now().UTC()
+	if err := s.store.UpdateFileOperationJob(ctx, job.ID, payload.Status, job.BytesDone, job.FilesDone, "", &now); err != nil {
+		return store.FileOperationJob{}, err
+	}
+	s.audit(ctx, "file_operation.rolled_back", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(ctx), "file_operation_job", job.ID, map[string]any{"status": payload.Status})
+	s.broadcastFileJobChanged(ctx, home.ID, job.ID)
 	return s.store.GetFileOperationJob(ctx, job.ID)
 }
 

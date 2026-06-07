@@ -101,6 +101,13 @@ type FilesMoveCancelRequest struct {
 	JobID string `json:"job_id"`
 }
 
+type FilesMoveRollbackRequest struct {
+	JobID               string `json:"job_id"`
+	DestinationSourceID string `json:"destination_source_id,omitempty"`
+	To                  string `json:"to"`
+	IsDirectory         bool   `json:"is_directory"`
+}
+
 type FilesDeleteRequest struct {
 	SourceID    string `json:"source_id,omitempty"`
 	Path        string `json:"path"`

@@ -10,8 +10,11 @@ func TestLoadCloudDefaults(t *testing.T) {
 	t.Setenv("HANK_REMOTE_CLOUD_ADDR", "")
 	t.Setenv("HANK_REMOTE_CLOUD_DATABASE_URL", "")
 	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
+	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "test-secret-encryption-key")
 	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "")
 	t.Setenv("HANK_REMOTE_REQUEST_TIMEOUT_SECONDS", "")
+	t.Setenv("HANK_REMOTE_MAINTENANCE_INTERVAL_SECONDS", "")
+	t.Setenv("HANK_REMOTE_MAINTENANCE_RETENTION_DAYS", "")
 	t.Setenv("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", "")
 	t.Setenv("HANK_REMOTE_CHATGPT_AUTH_ISSUER", "")
 	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", "")
@@ -36,6 +39,12 @@ func TestLoadCloudDefaults(t *testing.T) {
 	if cfg.RequestTimeout != 120*time.Second {
 		t.Fatalf("RequestTimeout = %s, want %s", cfg.RequestTimeout, 120*time.Second)
 	}
+	if cfg.MaintenanceInterval != time.Hour {
+		t.Fatalf("MaintenanceInterval = %s, want %s", cfg.MaintenanceInterval, time.Hour)
+	}
+	if cfg.MaintenanceRetention != 30*24*time.Hour {
+		t.Fatalf("MaintenanceRetention = %s, want %s", cfg.MaintenanceRetention, 30*24*time.Hour)
+	}
 	if cfg.AssistantAI.ChatGPTOAuthEnabled {
 		t.Fatal("ChatGPTOAuthEnabled = true, want false by default")
 	}
@@ -58,6 +67,7 @@ func TestLoadCloudDefaults(t *testing.T) {
 
 func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
 	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
+	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "test-secret-encryption-key")
 	t.Setenv("HANK_REMOTE_CHATGPT_OAUTH_ENABLED", "true")
 	t.Setenv("HANK_REMOTE_CHATGPT_AUTH_ISSUER", " https://auth.example.com/ ")
 	t.Setenv("HANK_REMOTE_CHATGPT_BACKEND_BASE_URL", " https://chatgpt.example.com/backend-api/codex/ ")
@@ -91,11 +101,23 @@ func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
 
 func TestLoadCloudRejectsInvalidDuration(t *testing.T) {
 	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
+	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "test-secret-encryption-key")
 	t.Setenv("HANK_REMOTE_SESSION_TTL_SECONDS", "0")
 
 	_, err := LoadCloud()
 	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_SESSION_TTL_SECONDS") {
 		t.Fatalf("LoadCloud error = %v, want session ttl validation error", err)
+	}
+}
+
+func TestLoadCloudRejectsInvalidMaintenanceRetention(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
+	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "test-secret-encryption-key")
+	t.Setenv("HANK_REMOTE_MAINTENANCE_RETENTION_DAYS", "0")
+
+	_, err := LoadCloud()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_MAINTENANCE_RETENTION_DAYS") {
+		t.Fatalf("LoadCloud error = %v, want maintenance retention validation error", err)
 	}
 }
 
@@ -105,6 +127,26 @@ func TestLoadCloudRequiresDBOpsIntentSecret(t *testing.T) {
 	_, err := LoadCloud()
 	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_DB_OPS_INTENT_SECRET") {
 		t.Fatalf("LoadCloud error = %v, want missing db ops intent secret error", err)
+	}
+}
+
+func TestLoadCloudRequiresSecretEncryptionKeyUnlessPlaintextOptOut(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
+	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "")
+	t.Setenv("HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS", "")
+
+	_, err := LoadCloud()
+	if err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_SECRET_ENCRYPTION_KEY") {
+		t.Fatalf("LoadCloud error = %v, want missing secret encryption key error", err)
+	}
+
+	t.Setenv("HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS", "true")
+	cfg, err := LoadCloud()
+	if err != nil {
+		t.Fatalf("LoadCloud with plaintext opt-out error: %v", err)
+	}
+	if !cfg.AllowPlaintextSecrets {
+		t.Fatal("AllowPlaintextSecrets = false, want true for explicit dev opt-out")
 	}
 }
 

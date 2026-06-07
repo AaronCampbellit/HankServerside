@@ -91,6 +91,12 @@ func fileCommandPolicyChecks(command protocol.RoutedCommand) ([]filePolicyCheck,
 		}
 		_ = json.Unmarshal(command.Body, &request)
 		return []filePolicyCheck{{action: "delete", path: request.From}, {action: "write", path: request.To}}, 0, nil
+	case "files.move_rollback":
+		var request struct {
+			To string `json:"to"`
+		}
+		_ = json.Unmarshal(command.Body, &request)
+		return []filePolicyCheck{{action: "delete", path: request.To}}, 0, nil
 	case "files.delete":
 		var request struct {
 			Path string `json:"path"`

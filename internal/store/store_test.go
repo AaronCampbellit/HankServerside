@@ -211,6 +211,119 @@ func TestLoginBackoffPersistsAndClears(t *testing.T) {
 	}
 }
 
+func TestPruneLifecycleRemovesExpiredOperationalRows(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	old := now.Add(-45 * 24 * time.Hour)
+	retention := 30 * 24 * time.Hour
+
+	user := domain.User{ID: "usr_prune", Email: "prune@example.com", PasswordHash: "hash", CreatedAt: old, UpdatedAt: old}
+	home := domain.Home{ID: "home_prune", UserID: user.ID, Name: "Prune Home", CreatedAt: old, UpdatedAt: old}
+	session := domain.AppSession{ID: "sess_prune", UserID: user.ID, TokenHash: "session-prune", ExpiresAt: now.Add(time.Hour), CreatedAt: old}
+	note := domain.UserNote{
+		ID:            "note_prune",
+		NoteID:        "prune.md",
+		OwnerUserID:   user.ID,
+		HomeID:        home.ID,
+		Title:         "Prune",
+		BodyMarkdown:  "body",
+		BodyFormat:    "markdown",
+		PageType:      "text",
+		Revision:      "rev",
+		Checksum:      "sum",
+		CRDTStateJSON: "{}",
+		CreatedAt:     old,
+		UpdatedAt:     old,
+		UpdatedBy:     user.ID,
+	}
+	mustStore(t, db.CreateUser(ctx, user))
+	mustStore(t, db.CreateHome(ctx, home))
+	mustStore(t, db.CreateSession(ctx, session))
+	mustStore(t, db.UpsertUserNote(ctx, note))
+	mustStore(t, db.CreateFileTransfer(ctx, FileTransferRecord{
+		ID:          "xfer_old_done",
+		TokenHash:   "xfer-hash",
+		HomeID:      home.ID,
+		UserID:      user.ID,
+		AgentID:     "agent_prune",
+		Operation:   "download",
+		SourceID:    "local",
+		Path:        "/done.txt",
+		Status:      "completed",
+		CreatedAt:   old,
+		ExpiresAt:   old,
+		CompletedAt: &old,
+	}))
+	mustStore(t, db.CreateAuditEvent(ctx, AuditEvent{
+		ID:           "audit_old",
+		OccurredAt:   old,
+		ActorUserID:  &user.ID,
+		HomeID:       &home.ID,
+		EventType:    "test.old",
+		Severity:     "info",
+		MetadataJSON: "{}",
+	}))
+	mustStore(t, db.CreateNoteAttachment(ctx, domain.NoteAttachment{
+		ID:             "natt_old",
+		NoteID:         note.ID,
+		HomeID:         home.ID,
+		OwnerUserID:    user.ID,
+		Filename:       "old.txt",
+		ContentType:    "text/plain",
+		SizeBytes:      3,
+		ChecksumSHA256: "sum",
+		StorageKey:     "note_prune/natt_old.txt",
+		DeletedAt:      &old,
+		CreatedAt:      old,
+		UpdatedAt:      old,
+	}))
+	mustStore(t, db.UpsertAssistantAttachments(ctx, []domain.AssistantAttachment{{
+		ID:                 "att_old",
+		SessionID:          session.ID,
+		UserID:             user.ID,
+		ClientAttachmentID: "client_old",
+		Filename:           "old.pdf",
+		ContentType:        "application/pdf",
+		Kind:               "file",
+		Status:             "expired",
+		CreatedAt:          old,
+		UpdatedAt:          old,
+	}}))
+	if _, err := db.exec(ctx, `INSERT INTO login_backoff (email_hash, failures, blocked_until, updated_at) VALUES (?, 6, ?, ?)`, stableHash("old@example.com"), old, old); err != nil {
+		t.Fatalf("insert login_backoff: %v", err)
+	}
+
+	if err := db.PruneLifecycle(ctx, now, retention); err != nil {
+		t.Fatalf("PruneLifecycle: %v", err)
+	}
+	assertNoRowsStore(t, db, ctx, "file transfer", `SELECT 1 FROM file_transfers WHERE id = ?`, "xfer_old_done")
+	assertNoRowsStore(t, db, ctx, "audit event", `SELECT 1 FROM audit_events WHERE id = ?`, "audit_old")
+	assertNoRowsStore(t, db, ctx, "login backoff", `SELECT 1 FROM login_backoff WHERE email_hash = ?`, stableHash("old@example.com"))
+	assertNoRowsStore(t, db, ctx, "assistant attachment", `SELECT 1 FROM assistant_attachments WHERE id = ?`, "att_old")
+	assertNoRowsStore(t, db, ctx, "note attachment row", `SELECT 1 FROM note_attachments WHERE id = ?`, "natt_old")
+}
+
+func mustStore(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertNoRowsStore(t *testing.T, db *Store, ctx context.Context, label string, query string, args ...any) {
+	t.Helper()
+	var value int
+	err := db.queryRow(ctx, query, args...).Scan(&value)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("%s query error = %v, want sql.ErrNoRows", label, err)
+	}
+}
+
 func TestSecretEncryptionProtectsStoredTokens(t *testing.T) {
 	t.Parallel()
 
@@ -289,6 +402,84 @@ func TestSecretEncryptionProtectsStoredTokens(t *testing.T) {
 	}
 	if string(vault.Vault) != `{"password":"vault-secret"}` {
 		t.Fatalf("decrypted vault = %s", vault.Vault)
+	}
+}
+
+func TestReencryptPlaintextSecrets(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_secret_reencrypt", Email: "secret-reencrypt@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	session := domain.AppSession{ID: "sess_secret_reencrypt", UserID: user.ID, TokenHash: "session-hash", ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := db.CreateSession(ctx, session); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := db.UpsertOpenAIAccount(ctx, domain.OpenAIAccount{
+		UserID:       user.ID,
+		AccessToken:  "plain-openai-access",
+		RefreshToken: "plain-openai-refresh",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		t.Fatalf("UpsertOpenAIAccount: %v", err)
+	}
+	if _, err := db.UpsertAPNSDevice(ctx, domain.APNSDevice{
+		UserID:            user.ID,
+		SessionID:         session.ID,
+		DeviceID:          "device-reencrypt",
+		Token:             "plain-apns-token",
+		Environment:       "sandbox",
+		BundleID:          "com.dropfile.Hank",
+		EnabledCategories: json.RawMessage(`[]`),
+	}); err != nil {
+		t.Fatalf("UpsertAPNSDevice: %v", err)
+	}
+	if _, err := db.SaveUserProfileSecretVault(ctx, user.ID, nil, "local", json.RawMessage(`{"password":"plain-vault-secret"}`)); err != nil {
+		t.Fatalf("SaveUserProfileSecretVault: %v", err)
+	}
+
+	report, err := db.SecretStorageReport(ctx)
+	if err != nil {
+		t.Fatalf("SecretStorageReport: %v", err)
+	}
+	if report.PlaintextTotal() != 4 {
+		t.Fatalf("plaintext total = %d, want 4: %#v", report.PlaintextTotal(), report)
+	}
+	if err := db.ConfigureSecretEncryption("test-secret-encryption-key"); err != nil {
+		t.Fatalf("ConfigureSecretEncryption: %v", err)
+	}
+	report, err = db.ReencryptPlaintextSecrets(ctx)
+	if err != nil {
+		t.Fatalf("ReencryptPlaintextSecrets: %v", err)
+	}
+	if report.PlaintextTotal() != 0 || report.ReencryptedSecretColumns != 4 {
+		t.Fatalf("reencrypt report = %#v, want zero plaintext and four updated columns", report)
+	}
+
+	var storedAccess, storedRefresh, storedAPNS, storedVault string
+	if err := db.queryRow(ctx, `SELECT access_token, refresh_token FROM openai_accounts WHERE user_id = ?`, user.ID).Scan(&storedAccess, &storedRefresh); err != nil {
+		t.Fatalf("raw openai query: %v", err)
+	}
+	if err := db.queryRow(ctx, `SELECT token FROM apns_devices WHERE user_id = ? AND device_id = ?`, user.ID, "device-reencrypt").Scan(&storedAPNS); err != nil {
+		t.Fatalf("raw apns query: %v", err)
+	}
+	if err := db.queryRow(ctx, `SELECT vault_json::text FROM user_profile_secret_vaults WHERE user_id = ?`, user.ID).Scan(&storedVault); err != nil {
+		t.Fatalf("raw vault query: %v", err)
+	}
+	for label, value := range map[string]string{"access": storedAccess, "refresh": storedRefresh, "apns": storedAPNS, "vault": storedVault} {
+		if !strings.Contains(value, encryptedSecretPrefix) {
+			t.Fatalf("%s stored value = %q, want encrypted prefix", label, value)
+		}
+		if strings.Contains(value, "plain-") {
+			t.Fatalf("%s stored plaintext secret after reencrypt: %s", label, value)
+		}
 	}
 }
 
