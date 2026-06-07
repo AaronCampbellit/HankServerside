@@ -253,6 +253,80 @@ func TestAssistantMediaStartsImmediatelyWhenConfirmationDisabled(t *testing.T) {
 	}
 }
 
+func TestAssistantMediaSelectionPlansDownloadAfterSearchResults(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSearch, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaSearchRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaSearchResponse{
+				Query: request.Query,
+				Results: []protocol.MediaSearchResult{
+					{ID: "movies/5950-the-italian-job", Title: "The Italian Job", Year: 2003, Type: protocol.MediaTypeMovie, PagePath: "/movies/5950-the-italian-job"},
+					{ID: "movies/12123-the-italian-job", Title: "The Italian Job", Year: 1969, Type: protocol.MediaTypeMovie, PagePath: "/movies/12123-the-italian-job"},
+				},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			if request.Selection.ID != "movies/5950-the-italian-job" {
+				return nil, fmt.Errorf("planned selection id = %q, want movies/5950-the-italian-job", request.Selection.ID)
+			}
+			return protocol.MediaPlanDownloadResponse{
+				Plan: protocol.MediaDownloadPlan{
+					Selection:             request.Selection,
+					Items:                 []protocol.MediaDownloadItem{{Title: "The Italian Job", MediaType: protocol.MediaTypeMovie, Quality: "1080p", Filename: "The Italian Job.mp4", DownloadOK: true}},
+					ItemCount:             1,
+					PreferredQualityCount: 1,
+					DestinationPath:       "SMB share/Movies",
+				},
+			}, nil
+		})
+	}()
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var first assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/gramaton the italian job",
+	}, &first)
+	if first.AssistantMessage == nil || len(first.AssistantMessage.Cards) != 2 {
+		t.Fatalf("first response cards = %#v", first.AssistantMessage)
+	}
+
+	var second assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "The Italian Job (2003)",
+	}, &second)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("media selection did not send a plan download command")
+	}
+	if !second.RequiresConfirmation || second.PendingActionSummary == nil || second.PendingActionSummary.Kind != "media_download" {
+		t.Fatalf("selection should prepare a media download confirmation: %#v", second)
+	}
+}
+
 func TestResolvePreviousMediaSelection(t *testing.T) {
 	t.Parallel()
 

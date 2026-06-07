@@ -511,9 +511,6 @@ func executeAssistantMediaSearchTool(ctx context.Context, server *Server, runtim
 	if !runtime.Settings.FilesEnabled {
 		return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
 	}
-	if strings.TrimSpace(intent.Query) == "" {
-		return assistantMessageContent{Text: "Send `/gramaton` followed by a movie or TV show title."}, nil
-	}
 	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
 			return assistantMessageContent{Text: "File access is disabled for your Home membership right now."}, nil
@@ -525,6 +522,9 @@ func executeAssistantMediaSearchTool(ctx context.Context, server *Server, runtim
 			return assistantMessageContent{Text: "I need a media option number or title from the last result list."}, nil
 		}
 		return server.answerMediaSelection(ctx, runtime.Home, *intent.MediaSelection)
+	}
+	if strings.TrimSpace(intent.Query) == "" {
+		return assistantMessageContent{Text: "Send `/gramaton` followed by a movie or TV show title."}, nil
 	}
 	return server.answerMediaSearch(ctx, runtime.Home, intent.Query)
 }
