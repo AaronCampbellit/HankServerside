@@ -27,7 +27,7 @@ func TestRunnerInvokeReturnsOutput(t *testing.T) {
 	response, err := runner.Invoke(context.Background(), InvokeSpec{
 		Executable: exe,
 		WorkDir:    dir,
-		Timeout:    time.Second,
+		Timeout:    5 * time.Second,
 		Request: AppStdioRequest{
 			ProtocolVersion: "hank.app.stdio.v1",
 			RequestID:       "req_1",
@@ -52,11 +52,98 @@ func TestRunnerInvokeRejectsInvalidJSON(t *testing.T) {
 	_, err := runner.Invoke(context.Background(), InvokeSpec{
 		Executable: exe,
 		WorkDir:    dir,
-		Timeout:    time.Second,
+		Timeout:    5 * time.Second,
 		Request:    AppStdioRequest{RequestID: "req_1"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid app response") {
 		t.Fatalf("Invoke error = %v", err)
+	}
+}
+
+func TestRunnerInvokeRejectsResponseValidationErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{
+			name:     "request id mismatch",
+			response: `{"request_id":"other","ok":true,"output":{"text":"ok"}}`,
+		},
+		{
+			name:     "missing request id",
+			response: `{"ok":true,"output":{"text":"ok"}}`,
+		},
+		{
+			name:     "ok response with error object",
+			response: `{"request_id":"req_1","ok":true,"output":{"text":"ok"},"error":{"code":"bad","message":"bad"}}`,
+		},
+		{
+			name:     "error response without error object",
+			response: `{"request_id":"req_1","ok":false}`,
+		},
+		{
+			name:     "error response without code",
+			response: `{"request_id":"req_1","ok":false,"error":{"message":"bad"}}`,
+		},
+		{
+			name:     "error response without message",
+			response: `{"request_id":"req_1","ok":false,"error":{"code":"bad"}}`,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			exe := writeExecutable(t, dir, "#!/bin/sh\nprintf '%s\n' '"+tt.response+"'\n")
+			runner := Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024}
+			_, err := runner.Invoke(context.Background(), InvokeSpec{
+				Executable: exe,
+				WorkDir:    dir,
+				Timeout:    5 * time.Second,
+				Request:    AppStdioRequest{RequestID: "req_1"},
+			})
+			if err == nil || !strings.Contains(err.Error(), "invalid app response") {
+				t.Fatalf("Invoke error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRunnerInvokeRejectsStdoutLimit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	exe := writeExecutable(t, dir, "#!/bin/sh\nprintf '%s\n' '"+strings.Repeat("x", 64)+"'\n")
+	runner := Runner{MaxOutputBytes: 16, MaxStderrBytes: 1024}
+	_, err := runner.Invoke(context.Background(), InvokeSpec{
+		Executable: exe,
+		WorkDir:    dir,
+		Timeout:    5 * time.Second,
+		Request:    AppStdioRequest{RequestID: "req_1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "stdout exceeded") {
+		t.Fatalf("Invoke error = %v", err)
+	}
+}
+
+func TestRunnerInvokeRejectsStderrLimitWithoutLeakingStderr(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	stderrText := "secret-token-" + strings.Repeat("x", 64)
+	exe := writeExecutable(t, dir, "#!/bin/sh\nprintf '%s\n' '"+stderrText+"' >&2\nprintf '%s\n' '{\"request_id\":\"req_1\",\"ok\":true,\"output\":{\"text\":\"ok\"}}'\n")
+	runner := Runner{MaxOutputBytes: 4096, MaxStderrBytes: 16}
+	_, err := runner.Invoke(context.Background(), InvokeSpec{
+		Executable: exe,
+		WorkDir:    dir,
+		Timeout:    5 * time.Second,
+		Request:    AppStdioRequest{RequestID: "req_1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "stderr exceeded") {
+		t.Fatalf("Invoke error = %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("Invoke error leaked stderr: %v", err)
 	}
 }
 

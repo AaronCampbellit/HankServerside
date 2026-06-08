@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"syscall"
 	"time"
 )
 
@@ -52,11 +51,6 @@ type Runner struct {
 	MaxStderrBytes int64
 }
 
-type captureResult struct {
-	data []byte
-	err  error
-}
-
 func (r Runner) Invoke(ctx context.Context, spec InvokeSpec) (AppStdioResponse, error) {
 	requestLine, err := json.Marshal(spec.Request)
 	if err != nil {
@@ -76,83 +70,80 @@ func (r Runner) Invoke(ctx context.Context, spec InvokeSpec) (AppStdioResponse, 
 	cmd := exec.CommandContext(runCtx, spec.Executable, spec.Args...)
 	cmd.Dir = spec.WorkDir
 	cmd.Stdin = bytes.NewReader(requestLine)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			return err
-		}
-		return nil
+
+	stdout := newBoundedBuffer("stdout", byteLimit(r.MaxOutputBytes, defaultMaxOutputBytes), cancel)
+	stderr := newBoundedBuffer("stderr", byteLimit(r.MaxStderrBytes, defaultMaxStderrBytes), cancel)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+
+	if err := stdout.Err(); err != nil {
+		return AppStdioResponse{}, err
 	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return AppStdioResponse{}, fmt.Errorf("open app stdout: %w", err)
+	if err := stderr.Err(); err != nil {
+		return AppStdioResponse{}, err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return AppStdioResponse{}, fmt.Errorf("open app stderr: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return AppStdioResponse{}, fmt.Errorf("start app: %w", err)
-	}
-
-	stdoutCh := make(chan captureResult, 1)
-	stderrCh := make(chan captureResult, 1)
-	go func() {
-		stdoutCh <- readLimited(stdout, byteLimit(r.MaxOutputBytes, defaultMaxOutputBytes), "stdout", cancel)
-	}()
-	go func() {
-		stderrCh <- readLimited(stderr, byteLimit(r.MaxStderrBytes, defaultMaxStderrBytes), "stderr", cancel)
-	}()
-
-	waitErr := cmd.Wait()
-	stdoutResult := <-stdoutCh
-	stderrResult := <-stderrCh
-
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		return AppStdioResponse{}, fmt.Errorf("app invocation timed out after %s", spec.Timeout)
 	}
-	if stdoutResult.err != nil {
-		return AppStdioResponse{}, stdoutResult.err
-	}
-	if stderrResult.err != nil {
-		return AppStdioResponse{}, stderrResult.err
-	}
-	if errors.Is(runCtx.Err(), context.Canceled) && waitErr != nil {
+	if errors.Is(runCtx.Err(), context.Canceled) && runErr != nil {
 		return AppStdioResponse{}, fmt.Errorf("app invocation canceled: %w", runCtx.Err())
 	}
-	if waitErr != nil {
-		return AppStdioResponse{}, fmt.Errorf("app invocation failed: %w", waitErr)
+	if runErr != nil {
+		return AppStdioResponse{}, fmt.Errorf("app invocation failed: %w", runErr)
 	}
 
-	return decodeAppResponse(stdoutResult.data)
+	return decodeAppResponse(stdout.Bytes(), spec.Request.RequestID)
 }
 
-func readLimited(reader io.Reader, maxBytes int64, streamName string, cancel context.CancelFunc) captureResult {
-	var buf bytes.Buffer
-	_, err := io.CopyN(&buf, reader, maxBytes+1)
-	if err == nil {
-		cancel()
-		data := buf.Bytes()
-		if int64(len(data)) > maxBytes {
-			data = data[:maxBytes]
+type boundedBuffer struct {
+	name     string
+	maxBytes int64
+	buf      bytes.Buffer
+	err      error
+	cancel   context.CancelFunc
+}
+
+func newBoundedBuffer(name string, maxBytes int64, cancel context.CancelFunc) *boundedBuffer {
+	return &boundedBuffer{
+		name:     name,
+		maxBytes: maxBytes,
+		cancel:   cancel,
+	}
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.err != nil {
+		return 0, b.err
+	}
+
+	remaining := b.maxBytes - int64(b.buf.Len())
+	if remaining > 0 {
+		toWrite := int64(len(p))
+		if toWrite > remaining {
+			toWrite = remaining
 		}
-		return captureResult{
-			data: data,
-			err:  fmt.Errorf("app %s exceeded %d bytes", streamName, maxBytes),
+		if toWrite > 0 {
+			_, _ = b.buf.Write(p[:toWrite])
 		}
 	}
-	if errors.Is(err, io.EOF) {
-		return captureResult{data: buf.Bytes()}
+
+	if int64(len(p)) > remaining {
+		b.err = fmt.Errorf("app %s exceeded %d bytes", b.name, b.maxBytes)
+		b.cancel()
+		return len(p), b.err
 	}
-	return captureResult{
-		data: buf.Bytes(),
-		err:  fmt.Errorf("read app %s: %w", streamName, err),
-	}
+
+	return len(p), nil
+}
+
+func (b *boundedBuffer) Bytes() []byte {
+	return b.buf.Bytes()
+}
+
+func (b *boundedBuffer) Err() error {
+	return b.err
 }
 
 func byteLimit(configured int64, fallback int64) int64 {
@@ -162,7 +153,7 @@ func byteLimit(configured int64, fallback int64) int64 {
 	return fallback
 }
 
-func decodeAppResponse(data []byte) (AppStdioResponse, error) {
+func decodeAppResponse(data []byte, requestID string) (AppStdioResponse, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 
 	var response AppStdioResponse
@@ -175,8 +166,24 @@ func decodeAppResponse(data []byte) (AppStdioResponse, error) {
 	case err == nil:
 		return AppStdioResponse{}, fmt.Errorf("invalid app response: trailing JSON token after app response")
 	case errors.Is(err, io.EOF):
-		return response, nil
+		return validateAppResponse(response, requestID)
 	default:
 		return AppStdioResponse{}, fmt.Errorf("invalid app response: %w", err)
 	}
+}
+
+func validateAppResponse(response AppStdioResponse, requestID string) (AppStdioResponse, error) {
+	if requestID != "" && response.RequestID != requestID {
+		return AppStdioResponse{}, fmt.Errorf("invalid app response: request_id %q does not match request %q", response.RequestID, requestID)
+	}
+	if response.OK && response.Error != nil {
+		return AppStdioResponse{}, fmt.Errorf("invalid app response: ok response must not include error")
+	}
+	if !response.OK && response.Error == nil {
+		return AppStdioResponse{}, fmt.Errorf("invalid app response: error response must include error")
+	}
+	if response.Error != nil && (response.Error.Code == "" || response.Error.Message == "") {
+		return AppStdioResponse{}, fmt.Errorf("invalid app response: error code and message are required")
+	}
+	return response, nil
 }
