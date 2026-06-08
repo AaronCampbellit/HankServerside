@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dropfile/hankremote/internal/agent"
+	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
@@ -57,8 +58,15 @@ func main() {
 		Model:   cfg.Hermes.Model,
 		Timeout: cfg.Hermes.Timeout,
 	})
+	appManager := agentapps.NewManager(cfg.AppsDir, cfg.AppStagingDir, agentapps.Runner{
+		MaxOutputBytes: 1 << 20,
+		MaxStderrBytes: 16 << 10,
+	})
+	if err := appManager.Load(context.Background()); err != nil {
+		logger.Warn("failed to load agent apps", "error", err)
+	}
 
-	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, media, notes, hermes, logger)
+	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, media, notes, hermes, appManager, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

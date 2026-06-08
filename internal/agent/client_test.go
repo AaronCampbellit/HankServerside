@@ -28,7 +28,7 @@ func TestClientSystemRestartAcknowledgesBeforeRestartHook(t *testing.T) {
 	defer cancel()
 
 	restarted := make(chan struct{}, 1)
-	client := NewClient("ws://example.invalid", "agent_1", "token", "Home", "", nil, nil, nil, nil, nil, slog.New(discardHandler{}))
+	client := NewClient("ws://example.invalid", "agent_1", "token", "Home", "", nil, nil, nil, nil, nil, nil, slog.New(discardHandler{}))
 	client.restartFn = func() {
 		restarted <- struct{}{}
 	}
