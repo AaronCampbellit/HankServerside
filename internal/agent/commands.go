@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
@@ -22,6 +23,7 @@ type commandDispatcher struct {
 	media  *agentmedia.Service
 	notes  *agentnotes.Service
 	hermes *agenthermes.Service
+	apps   *agentapps.Manager
 	config *configManager
 }
 
@@ -302,6 +304,67 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		}
 		return response, nil
 
+	case protocol.CommandAppsList:
+		if _, err := decodeBody[protocol.AppsListRequest](command.Body); err != nil {
+			return nil, badRequest("invalid_app_request", err)
+		}
+		return d.apps.List(ctx), nil
+
+	case protocol.CommandAppsPackagePreview:
+		request, err := decodeBody[protocol.AppsPackagePreviewRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_app_request", err)
+		}
+		response, err := d.apps.PreviewPackage(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
+	case protocol.CommandAppsPackageActivate:
+		request, err := decodeBody[protocol.AppsPackageActivateRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_app_request", err)
+		}
+		response, err := d.apps.ActivatePackage(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
+	case protocol.CommandAppsConfigStatus:
+		request, err := decodeBody[protocol.AppsConfigStatusRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_app_request", err)
+		}
+		response, err := d.apps.ConfigStatus(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
+	case protocol.CommandAppsConfigApply:
+		request, err := decodeBody[protocol.AppsConfigApplyRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_app_request", err)
+		}
+		response, err := d.apps.ConfigApply(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
+	case protocol.CommandAppsInvoke:
+		request, err := decodeBody[protocol.AppsInvokeRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_app_request", err)
+		}
+		response, err := d.apps.Invoke(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
 	case "notes.list":
 		notes, err := d.notes.List(ctx)
 		if err != nil {
@@ -445,6 +508,20 @@ func mapError(err error) *protocol.ErrorPayload {
 		return &protocol.ErrorPayload{Code: "notes_not_configured", Message: err.Error()}
 	case errors.Is(err, agenthermes.ErrDisabled):
 		return &protocol.ErrorPayload{Code: "hermes_not_configured", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrUnknownApp):
+		return &protocol.ErrorPayload{Code: "app_not_found", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrDisabledApp):
+		return &protocol.ErrorPayload{Code: "app_disabled", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrMissingStagingPackage):
+		return &protocol.ErrorPayload{Code: "app_staging_missing", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrPackageValidation):
+		return &protocol.ErrorPayload{Code: "app_package_invalid", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrPermissionRefused):
+		return &protocol.ErrorPayload{Code: "app_permission_refused", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrUnknownCommand):
+		return &protocol.ErrorPayload{Code: "app_command_not_found", Message: err.Error()}
+	case errors.Is(err, agentapps.ErrAppInvocationFailed):
+		return &protocol.ErrorPayload{Code: "app_invocation_failed", Message: err.Error()}
 	case errors.Is(err, errUnsupportedServiceType):
 		return &protocol.ErrorPayload{Code: "unsupported_service_type", Message: err.Error()}
 	case errors.Is(err, agentnotes.ErrConflict):

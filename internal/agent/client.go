@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
@@ -40,7 +41,7 @@ type Client struct {
 	restartFn  func()
 }
 
-func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, hermes *agenthermes.Service, logger *slog.Logger) *Client {
+func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, hermes *agenthermes.Service, apps *agentapps.Manager, logger *slog.Logger) *Client {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -59,6 +60,9 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 	if hermes == nil {
 		hermes = agenthermes.New(agenthermes.Config{})
 	}
+	if apps == nil {
+		apps = agentapps.NewManager("", "", agentapps.Runner{})
+	}
 
 	return &Client{
 		cloudURL:   cloudURL,
@@ -73,6 +77,7 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 			media:  media,
 			notes:  notes,
 			hermes: hermes,
+			apps:   apps,
 			config: newConfigManager(configPath, ha, files, hermes),
 		},
 		uploads:   make(map[string]*uploadTransfer),
@@ -397,6 +402,17 @@ func (c *Client) capabilities() []string {
 	}
 	if c.dispatcher.hermes != nil && c.dispatcher.hermes.Enabled() {
 		capabilities = append(capabilities, protocol.CommandHermesChat)
+	}
+	if c.dispatcher.apps != nil {
+		capabilities = append(capabilities,
+			protocol.CommandAppsList,
+			protocol.CommandAppsPackagePreview,
+			protocol.CommandAppsPackageActivate,
+			protocol.CommandAppsConfigStatus,
+			protocol.CommandAppsConfigApply,
+			protocol.CommandAppsInvoke,
+		)
+		capabilities = append(capabilities, c.dispatcher.apps.Capabilities()...)
 	}
 	capabilities = append(capabilities, "config.status", "config.apply")
 	return capabilities
