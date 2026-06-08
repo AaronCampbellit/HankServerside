@@ -2186,6 +2186,59 @@ func (s *Server) answerHermesChatPrompt(ctx context.Context, home domain.Home, a
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
+	return assistantContentFromHermesResponse(payload), nil
+}
+
+func (s *Server) answerHermesAppPrompt(ctx context.Context, home domain.Home, auth authContext, session *domain.AssistantSession, prompt string) (assistantMessageContent, error) {
+	input, err := json.Marshal(protocol.HermesChatRequest{
+		Prompt:         strings.TrimSpace(prompt),
+		ConversationID: assistantHermesConversationID(home.ID, auth.User.ID, session),
+		SessionKey:     assistantHermesSessionKey(home.ID, auth.User.ID, session),
+	})
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandAppsInvoke, protocol.AppsInvokeRequest{
+		AppID:     "hermes",
+		CommandID: "chat",
+		Input:     input,
+	})
+	if err != nil {
+		return assistantMessageContent{
+			Text: "I couldn't reach Hermes through the home agent right now.",
+		}, nil
+	}
+	if envelope.Error != nil {
+		switch envelope.Error.Code {
+		case "app_not_found", "app_disabled", "app_command_not_found", "unsupported_command":
+			return assistantMessageContent{
+				Text: "Hermes chat is not configured on the home agent yet.",
+			}, nil
+		case "request_timeout":
+			return assistantMessageContent{
+				Text: "Hermes did not respond before the request timed out.",
+			}, nil
+		default:
+			return assistantMessageContent{
+				Text: "Hermes returned an error before it could answer.",
+			}, nil
+		}
+	}
+	payload, err := protocol.DecodePayload[protocol.AppsInvokeResponse](envelope)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	if len(payload.Output) == 0 {
+		return assistantMessageContent{Text: "Hermes returned an empty response."}, nil
+	}
+	var hermesResponse protocol.HermesChatResponse
+	if err := json.Unmarshal(payload.Output, &hermesResponse); err != nil {
+		return assistantMessageContent{}, err
+	}
+	return assistantContentFromHermesResponse(hermesResponse), nil
+}
+
+func assistantContentFromHermesResponse(payload protocol.HermesChatResponse) assistantMessageContent {
 	text := strings.TrimSpace(payload.Text)
 	if text == "" {
 		text = "Hermes returned an empty response."
@@ -2199,7 +2252,7 @@ func (s *Server) answerHermesChatPrompt(ctx context.Context, home domain.Home, a
 				"conversation_id": payload.ConversationID,
 			},
 		},
-	}, nil
+	}
 }
 
 func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {

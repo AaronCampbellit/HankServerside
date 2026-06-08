@@ -595,7 +595,14 @@ func executeAssistantHermesChatTool(ctx context.Context, server *Server, runtime
 	if strings.TrimSpace(intent.Query) == "" {
 		return assistantMessageContent{Text: "Send `/Hermes` followed by the message you want Hermes to handle."}, nil
 	}
+	if server.agentHasCapability(runtime.Home.ID, "apps.hermes.chat") {
+		return server.answerHermesAppPrompt(ctx, runtime.Home, runtime.Auth, runtime.Session, intent.Query)
+	}
 	return server.answerHermesChatPrompt(ctx, runtime.Home, runtime.Auth, runtime.Session, intent.Query)
+}
+
+func (s *Server) agentHasCapability(homeID string, capability string) bool {
+	return hasCapabilities(s.agentCapabilities(homeID), capability)
 }
 
 func executeAssistantProjectDocsTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {

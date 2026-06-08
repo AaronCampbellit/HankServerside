@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["text"],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "response_id": {
+      "type": "string"
+    },
+    "conversation_id": {
+      "type": "string"
+    }
+  }
+}

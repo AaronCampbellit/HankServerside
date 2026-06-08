@@ -1,0 +1,43 @@
+{
+  "schema_version": "hank.app.v1",
+  "id": "hermes",
+  "name": "Hermes",
+  "version": "1.0.0",
+  "publisher": "Hank",
+  "description": "Route explicit /Hermes prompts to a local Hermes API server.",
+  "runtime": {
+    "type": "stdio",
+    "command": "bin/hank-app-hermes"
+  },
+  "assistant": {
+    "slash_commands": [
+      {
+        "command": "/Hermes",
+        "command_id": "chat",
+        "description": "Send a prompt to Hermes."
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "chat",
+      "mode": "request_response",
+      "input_schema": "schemas/chat.input.schema.json",
+      "output_schema": "schemas/chat.output.schema.json",
+      "timeout_seconds": 120,
+      "admin_only": true
+    }
+  ],
+  "config": {
+    "schema": "schemas/config.schema.json",
+    "secret_fields": ["api_key"]
+  },
+  "permissions": {
+    "network": [
+      {
+        "kind": "configured_base_url",
+        "field": "api_base_url"
+      }
+    ]
+  }
+}

@@ -1401,6 +1401,71 @@ func TestAssistantHermesCommandRoutesThroughAgent(t *testing.T) {
 	}
 }
 
+func TestAssistantHermesCommandPrefersInstalledApp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	heartbeat, err := protocol.NewEnvelope(protocol.TypeAgentHeartbeat, "", agentID, homeID, protocol.AgentHeartbeat{
+		AgentID:      agentID,
+		SentAt:       time.Now().UTC(),
+		Capabilities: []string{"apps.hermes.chat"},
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope heartbeat: %v", err)
+	}
+	if err := wsjson.Write(ctx, agentConn, heartbeat); err != nil {
+		t.Fatalf("heartbeat write: %v", err)
+	}
+	waitForAgentCapability(t, testServer, sessionToken, "apps.hermes.chat")
+
+	requests := make(chan assistantHermesCommandCapture, 1)
+	go serveAssistantHermesAppInvoke(ctx, t, agentConn, agentID, homeID, requests)
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/Hermes what should I check next?",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &run)
+	if run.AssistantMessage == nil {
+		t.Fatalf("missing assistant message: %#v", run)
+	}
+	if run.AssistantMessage.Text != "Hermes app says check the package runtime." {
+		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != protocol.CommandAppsInvoke {
+			t.Fatalf("command = %q, want %q", request.Command, protocol.CommandAppsInvoke)
+		}
+		if request.AppInvoke.AppID != "hermes" || request.AppInvoke.CommandID != "chat" {
+			t.Fatalf("apps.invoke request = %#v", request.AppInvoke)
+		}
+		var input protocol.HermesChatRequest
+		if err := json.Unmarshal(request.AppInvoke.Input, &input); err != nil {
+			t.Fatalf("Decode app input: %v", err)
+		}
+		if input.Prompt != "what should I check next?" {
+			t.Fatalf("app prompt = %q", input.Prompt)
+		}
+		if !strings.Contains(input.ConversationID, session.ID) || !strings.Contains(input.SessionKey, session.ID) {
+			t.Fatalf("app scope = conversation %q session key %q", input.ConversationID, input.SessionKey)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for app invoke command")
+	}
+}
+
 func assistantTraceHasEvent(events []assistantTraceEvent, eventName string) bool {
 	for _, event := range events {
 		if event.Event == eventName {
@@ -1435,6 +1500,92 @@ func assistantSummaryDetailsContain(details []assistantPendingActionDetail, labe
 		}
 	}
 	return false
+}
+
+func waitForAgentCapability(t *testing.T, testServer *httptest.Server, sessionToken string, capability string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var payload struct {
+			Agent struct {
+				Capabilities []string `json:"capabilities"`
+			} `json:"agent"`
+		}
+		requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/agent", nil, &payload)
+		if hasCapabilities(payload.Agent.Capabilities, capability) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("agent capability %q not advertised, got %#v", capability, payload.Agent.Capabilities)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+type assistantHermesCommandCapture struct {
+	Command   string
+	AppInvoke protocol.AppsInvokeRequest
+}
+
+func serveAssistantHermesAppInvoke(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, requests chan<- assistantHermesCommandCapture) {
+	t.Helper()
+
+	for {
+		var envelope protocol.Envelope
+		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+			return
+		}
+		if envelope.Type != protocol.TypeCloudCommand {
+			continue
+		}
+		command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+		if err != nil {
+			return
+		}
+		capture := assistantHermesCommandCapture{Command: command.Command}
+		if command.Command == protocol.CommandAppsInvoke {
+			request, err := decodeProtocolBody[protocol.AppsInvokeRequest](command.Body)
+			if err != nil {
+				return
+			}
+			capture.AppInvoke = request
+			select {
+			case requests <- capture:
+			default:
+			}
+			output, err := json.Marshal(protocol.HermesChatResponse{
+				Text:           "Hermes app says check the package runtime.",
+				Model:          "hermes-agent",
+				ResponseID:     "resp_app",
+				ConversationID: "conv_app",
+			})
+			if err != nil {
+				return
+			}
+			response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.AppsInvokeResponse{
+				Output: output,
+			})
+			if err != nil {
+				return
+			}
+			_ = wsjson.Write(ctx, agentConn, response)
+			continue
+		}
+		select {
+		case requests <- capture:
+		default:
+		}
+		if command.Command == protocol.CommandHermesChat {
+			response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.HermesChatResponse{
+				Text: "compiled fallback should not run",
+			})
+			if err != nil {
+				return
+			}
+			_ = wsjson.Write(ctx, agentConn, response)
+		}
+	}
 }
 
 func serveAssistantHomeAssistantStates(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, states []protocol.HomeAssistantState) {
