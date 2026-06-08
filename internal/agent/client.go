@@ -63,6 +63,7 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 	if apps == nil {
 		apps = agentapps.NewManager("", "", agentapps.Runner{})
 	}
+	apps.SetPackageDownloadAuth(agentID, token)
 
 	return &Client{
 		cloudURL:   cloudURL,

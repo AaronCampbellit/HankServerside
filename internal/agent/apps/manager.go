@@ -43,6 +43,8 @@ type Manager struct {
 	mu         sync.RWMutex
 	apps       map[string]*InstalledApp
 	staged     map[string]PackagePreview
+	agentID    string
+	agentToken string
 }
 
 type InstalledApp struct {
@@ -64,6 +66,13 @@ func NewManager(appsDir string, stagingDir string, runner Runner) *Manager {
 		apps:       make(map[string]*InstalledApp),
 		staged:     make(map[string]PackagePreview),
 	}
+}
+
+func (m *Manager) SetPackageDownloadAuth(agentID string, token string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agentID = strings.TrimSpace(agentID)
+	m.agentToken = strings.TrimSpace(token)
 }
 
 func (m *Manager) Load(ctx context.Context) error {
@@ -127,7 +136,8 @@ func (m *Manager) PreviewPackage(ctx context.Context, request protocol.AppsPacka
 	if err := os.MkdirAll(m.stagingDir, 0o700); err != nil {
 		return protocol.AppsPackagePreviewResponse{}, err
 	}
-	if err := downloadPackage(ctx, request, stagePath); err != nil {
+	agentID, agentToken := m.packageDownloadAuth()
+	if err := downloadPackage(ctx, request, stagePath, agentID, agentToken); err != nil {
 		return protocol.AppsPackagePreviewResponse{}, err
 	}
 	preview, err := PreviewArchive(stagePath)
@@ -325,6 +335,12 @@ func (m *Manager) stagingPath(stagingID string) (string, error) {
 	return containedPath(m.stagingDir, stagingID+".hankapp")
 }
 
+func (m *Manager) packageDownloadAuth() (string, string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.agentID, m.agentToken
+}
+
 func (m *Manager) setLastError(appID string, message string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -350,7 +366,7 @@ func readInstalledManifest(appPath string) (Manifest, error) {
 	return manifest, nil
 }
 
-func downloadPackage(ctx context.Context, request protocol.AppsPackagePreviewRequest, destination string) error {
+func downloadPackage(ctx context.Context, request protocol.AppsPackagePreviewRequest, destination string, agentID string, agentToken string) error {
 	parsed, err := url.Parse(request.DownloadURL)
 	if err != nil {
 		return err
@@ -383,8 +399,14 @@ func downloadPackage(ctx context.Context, request protocol.AppsPackagePreviewReq
 		if err != nil {
 			return err
 		}
+		if agentToken != "" {
+			httpRequest.Header.Set("Authorization", "Bearer "+agentToken)
+		}
+		if agentID != "" {
+			httpRequest.Header.Set("X-Hank-Agent-ID", agentID)
+		}
 		if request.DownloadToken != "" {
-			httpRequest.Header.Set("Authorization", "Bearer "+request.DownloadToken)
+			httpRequest.Header.Set("X-Hank-App-Package-Token", request.DownloadToken)
 		}
 		response, err := http.DefaultClient.Do(httpRequest)
 		if err != nil {

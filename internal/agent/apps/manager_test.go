@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -80,6 +82,44 @@ func TestManagerPreviewRejectsOversizedPackage(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "app package exceeds") {
 		t.Fatalf("PreviewPackage error = %v, want package size limit", err)
+	}
+}
+
+func TestManagerPreviewHTTPDownloadUsesAgentAndPackageTokens(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	archivePath := writeManagerHermesPackage(t, t.TempDir(), hermesRuntimeScript(`{"installed":true}`))
+	archive, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer agent-secret" {
+			t.Fatalf("Authorization = %q, want agent bearer token", got)
+		}
+		if got := r.Header.Get("X-Hank-Agent-ID"); got != "agent_1" {
+			t.Fatalf("X-Hank-Agent-ID = %q", got)
+		}
+		if got := r.Header.Get("X-Hank-App-Package-Token"); got != "package-secret" {
+			t.Fatalf("X-Hank-App-Package-Token = %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	manager := NewManager(filepath.Join(t.TempDir(), "apps"), filepath.Join(t.TempDir(), "staging"), Runner{})
+	manager.SetPackageDownloadAuth("agent_1", "agent-secret")
+	preview, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:     "stage_1",
+		DownloadURL:   server.URL + "/hermes.hankapp",
+		DownloadToken: "package-secret",
+	})
+	if err != nil {
+		t.Fatalf("PreviewPackage error: %v", err)
+	}
+	if preview.App.ID != "hermes" {
+		t.Fatalf("preview = %#v", preview)
 	}
 }
 
