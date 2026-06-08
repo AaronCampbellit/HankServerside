@@ -42,6 +42,7 @@
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="connections">Connections</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="ai">AI</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="backups" data-admin-only="true" hidden>Backups</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="recovery" data-admin-only="true" hidden>Recovery</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="join-home">Join Home</button>
           </div>
         </section>
@@ -63,6 +64,9 @@
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="backups" data-admin-only="true" hidden>
           <iframe class="settings-pane-frame" title="Backup settings" data-src="/dashboard/settings/backups-pane?embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="recovery" data-admin-only="true" hidden>
+          <iframe class="settings-pane-frame" title="Recovery settings" data-src="/dashboard/settings/recovery-pane?embedded=1"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="join-home" hidden>
           <iframe class="settings-pane-frame" title="Join home" data-src="/dashboard/settings/join-home-pane?embedded=1"></iframe>

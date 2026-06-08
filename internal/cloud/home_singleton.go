@@ -114,6 +114,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeServiceProfiles(w, r, home, auth, membership, parts) {
 		return
 	}
+	if s.handleHomeRecovery(w, r, home, auth, membership, parts) {
+		return
+	}
 	if s.handleHomeStorage(w, r, home, auth, membership, parts) {
 		return
 	}

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Hank Remote Recovery Settings</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260606-mobile-responsive">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+  </head>
+  <body>
+    <div class="shell dashboard-shell">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Recovery</h1>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
+
+      <main class="grid">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Export Settings</h2>
+            <span class="pill">Redacted</span>
+          </div>
+          <p class="hint">Download a rebuild profile with settings and connection details. Tokens, passwords, API keys, encryption keys, and agent setup tokens are left blank.</p>
+          <div class="actions wrap">
+            <button type="button" id="export-button">Export Recovery Bundle</button>
+          </div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Import Settings</h2>
+            <span id="preview-state" class="pill">No Bundle</span>
+          </div>
+          <form id="import-form" class="stack">
+            <label class="setting-field">
+              <span>Recovery Bundle</span>
+              <input id="bundle-file" type="file" accept="application/json,.json">
+            </label>
+            <div class="actions wrap">
+              <button type="submit" class="secondary">Preview Import</button>
+              <button type="button" id="apply-button" disabled>Apply Non-Secret Settings</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Import Preview</h2>
+            <span id="change-count" class="pill">0 changes</span>
+          </div>
+          <div id="changes-list" class="card-list empty-state">Upload a recovery bundle to preview changes.</div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Missing Secrets</h2>
+            <span id="secret-count" class="pill">0 secrets</span>
+          </div>
+          <div id="secrets-list" class="card-list empty-state">Missing tokens and passwords will appear here after preview.</div>
+          <div class="actions wrap">
+            <a class="button-link secondary" href="/dashboard/settings#connections" target="_top">Open Connections</a>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/recovery.js?v=20260608-redacted-settings" defer></script>
+    <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
+  </body>
+</html>

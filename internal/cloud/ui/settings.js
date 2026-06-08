@@ -20,6 +20,8 @@ const tabAliases = {
   quicklinks: "quick-links",
   backup: "backups",
   storage: "backups",
+  restore: "recovery",
+  recovery: "recovery",
   openai: "ai",
   assistant: "ai",
   invitations: "join-home",
@@ -51,7 +53,7 @@ function normalizeTab(value) {
 }
 
 function tabIsAllowed(tab) {
-  return tab !== "backups" || state.canViewBackups;
+  return (tab !== "backups" && tab !== "recovery") || state.canViewBackups;
 }
 
 function frameURL(frame, tab) {
@@ -167,7 +169,7 @@ function applyAdminVisibility(isVisible) {
   document.querySelectorAll('[data-admin-only="true"]').forEach((element) => {
     element.hidden = !isVisible;
   });
-  if (!isVisible && state.activeTab === "backups") {
+  if (!isVisible && (state.activeTab === "backups" || state.activeTab === "recovery")) {
     setActiveTab("home");
   }
 }
