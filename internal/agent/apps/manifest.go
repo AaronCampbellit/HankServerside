@@ -103,10 +103,15 @@ func ValidateManifest(manifest Manifest) error {
 		}
 	}
 
+	slashCommands := make(map[string]struct{}, len(manifest.Assistant.SlashCommands))
 	for i, slashCommand := range manifest.Assistant.SlashCommands {
 		if !slashCommandPattern.MatchString(slashCommand.Command) {
 			return fmt.Errorf("slash command %q must match %s", slashCommand.Command, slashCommandPattern.String())
 		}
+		if _, ok := slashCommands[slashCommand.Command]; ok {
+			return fmt.Errorf("duplicate slash command %q", slashCommand.Command)
+		}
+		slashCommands[slashCommand.Command] = struct{}{}
 		if _, ok := commandIDs[slashCommand.CommandID]; !ok {
 			return fmt.Errorf("slash command %d references unknown command id %q", i, slashCommand.CommandID)
 		}

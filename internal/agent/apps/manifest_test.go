@@ -81,6 +81,20 @@ func TestValidateManifestRejectsUnsafeIDsAndPaths(t *testing.T) {
 	}
 }
 
+func TestValidateManifestRejectsDuplicateSlashCommands(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	manifest.Assistant.SlashCommands = append(manifest.Assistant.SlashCommands, SlashCommand{
+		Command:     "/Hermes",
+		CommandID:   "chat",
+		Description: "Duplicate route.",
+	})
+	err := ValidateManifest(manifest)
+	if err == nil || !strings.Contains(err.Error(), "duplicate slash command") {
+		t.Fatalf("ValidateManifest error = %v, want duplicate slash command", err)
+	}
+}
+
 func TestPreviewArchiveRejectsTraversal(t *testing.T) {
 	t.Parallel()
 	archivePath := filepath.Join(t.TempDir(), "bad.hankapp")
@@ -108,6 +122,38 @@ func TestPreviewArchiveRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestPreviewArchiveRejectsTrailingManifestJSON(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "trailing-json.hankapp")
+	writeArchiveEntries(t, archivePath, hermesPackageEntries(string(rawManifest)+"\n{}"))
+
+	_, err = PreviewArchive(archivePath)
+	if err == nil || !strings.Contains(err.Error(), "trailing JSON") {
+		t.Fatalf("PreviewArchive error = %v, want trailing JSON", err)
+	}
+}
+
+func TestPreviewArchiveRejectsOversizedManifest(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "oversized-manifest.hankapp")
+	writeArchiveEntries(t, archivePath, hermesPackageEntries(string(rawManifest)+strings.Repeat(" ", 128*1024)))
+
+	_, err = PreviewArchive(archivePath)
+	if err == nil || !strings.Contains(err.Error(), "app.json too large") {
+		t.Fatalf("PreviewArchive error = %v, want app.json too large", err)
+	}
+}
+
 func TestPreviewArchiveAcceptsHermesPackage(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -117,32 +163,7 @@ func TestPreviewArchiveAcceptsHermesPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	archivePath := filepath.Join(dir, "hermes.hankapp")
-	file, err := os.Create(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zw := zip.NewWriter(file)
-	for name, body := range map[string]string{
-		"app.json":                        string(rawManifest),
-		"bin/hermes-app":                  "#!/bin/sh\n",
-		"schemas/config.schema.json":      `{"type":"object"}`,
-		"schemas/chat.input.schema.json":  `{"type":"object"}`,
-		"schemas/chat.output.schema.json": `{"type":"object"}`,
-	} {
-		writer, err := zw.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := writer.Write([]byte(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
+	writeArchiveEntries(t, archivePath, hermesPackageEntries(string(rawManifest)))
 
 	preview, err := PreviewArchive(archivePath)
 	if err != nil {
@@ -150,6 +171,69 @@ func TestPreviewArchiveAcceptsHermesPackage(t *testing.T) {
 	}
 	if preview.Manifest.ID != "hermes" || preview.Manifest.Commands[0].ID != "chat" {
 		t.Fatalf("preview = %#v", preview)
+	}
+}
+
+func TestPreviewArchiveRejectsUnsafeArchivePaths(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validEntries := func() []archiveEntry {
+		return archiveEntriesFromMap(hermesPackageEntries(string(rawManifest)))
+	}
+	tests := []struct {
+		name    string
+		entries []archiveEntry
+		want    string
+	}{
+		{
+			name:    "absolute POSIX path",
+			entries: []archiveEntry{{Name: "/tmp/escape", Body: "bad"}},
+			want:    "unsafe archive path",
+		},
+		{
+			name:    "Windows volume path",
+			entries: []archiveEntry{{Name: "C:/tmp/escape", Body: "bad"}},
+			want:    "unsafe archive path",
+		},
+		{
+			name:    "backslash path",
+			entries: []archiveEntry{{Name: `dir\file`, Body: "bad"}},
+			want:    "unsafe archive path",
+		},
+		{
+			name:    "dot relative path",
+			entries: []archiveEntry{{Name: "./app.json", Body: "bad"}},
+			want:    "unsafe archive path",
+		},
+		{
+			name:    "double slash path",
+			entries: []archiveEntry{{Name: "dir//file", Body: "bad"}},
+			want:    "unsafe archive path",
+		},
+		{
+			name:    "directory and file same path",
+			entries: []archiveEntry{{Name: "dir/", Body: ""}, {Name: "dir", Body: "bad"}},
+			want:    "duplicate archive path",
+		},
+		{
+			name:    "file contains child path",
+			entries: append(validEntries(), archiveEntry{Name: "bin", Body: "not a directory"}),
+			want:    "archive path collision",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			archivePath := filepath.Join(t.TempDir(), strings.ReplaceAll(tt.name, " ", "-")+".hankapp")
+			writeArchiveEntryList(t, archivePath, tt.entries)
+			_, err := PreviewArchive(archivePath)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("PreviewArchive error = %v, want containing %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -257,19 +341,47 @@ func TestPreviewArchiveRequiresReferencedFiles(t *testing.T) {
 	}
 }
 
+type archiveEntry struct {
+	Name string
+	Body string
+}
+
+func hermesPackageEntries(rawManifest string) map[string]string {
+	return map[string]string{
+		"app.json":                        rawManifest,
+		"bin/hermes-app":                  "#!/bin/sh\n",
+		"schemas/config.schema.json":      `{"type":"object"}`,
+		"schemas/chat.input.schema.json":  `{"type":"object"}`,
+		"schemas/chat.output.schema.json": `{"type":"object"}`,
+	}
+}
+
+func archiveEntriesFromMap(entries map[string]string) []archiveEntry {
+	list := make([]archiveEntry, 0, len(entries))
+	for name, body := range entries {
+		list = append(list, archiveEntry{Name: name, Body: body})
+	}
+	return list
+}
+
 func writeArchiveEntries(t *testing.T, archivePath string, entries map[string]string) {
+	t.Helper()
+	writeArchiveEntryList(t, archivePath, archiveEntriesFromMap(entries))
+}
+
+func writeArchiveEntryList(t *testing.T, archivePath string, entries []archiveEntry) {
 	t.Helper()
 	file, err := os.Create(archivePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	zw := zip.NewWriter(file)
-	for name, body := range entries {
-		writer, err := zw.Create(name)
+	for _, entry := range entries {
+		writer, err := zw.Create(entry.Name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := writer.Write([]byte(body)); err != nil {
+		if _, err := writer.Write([]byte(entry.Body)); err != nil {
 			t.Fatal(err)
 		}
 	}

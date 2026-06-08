@@ -4,9 +4,12 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
+
+const maxManifestBytes = 64 * 1024
 
 type PackagePreview struct {
 	Manifest Manifest
@@ -20,7 +23,7 @@ func PreviewArchive(path string) (PackagePreview, error) {
 	}
 	defer reader.Close()
 
-	seen := make(map[string]struct{}, len(reader.File))
+	paths := make(map[string]bool, len(reader.File))
 	files := make(map[string]*zip.File, len(reader.File))
 	for _, file := range reader.File {
 		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
@@ -33,10 +36,13 @@ func PreviewArchive(path string) (PackagePreview, error) {
 		if file.FileInfo().IsDir() {
 			isDir = true
 		}
-		if _, ok := seen[cleaned]; ok {
+		if _, ok := paths[cleaned]; ok {
 			return PackagePreview{}, fmt.Errorf("duplicate archive path %q", cleaned)
 		}
-		seen[cleaned] = struct{}{}
+		if err := validateArchivePathCollision(paths, cleaned, isDir); err != nil {
+			return PackagePreview{}, err
+		}
+		paths[cleaned] = isDir
 		if !isDir {
 			files[cleaned] = file
 		}
@@ -67,6 +73,22 @@ func PreviewArchive(path string) (PackagePreview, error) {
 	return PackagePreview{Manifest: manifest}, nil
 }
 
+func validateArchivePathCollision(paths map[string]bool, cleaned string, isDir bool) error {
+	for existing, existingIsDir := range paths {
+		if !existingIsDir && archivePathHasParent(cleaned, existing) {
+			return fmt.Errorf("archive path collision: %q is inside file path %q", cleaned, existing)
+		}
+		if !isDir && archivePathHasParent(existing, cleaned) {
+			return fmt.Errorf("archive path collision: %q contains existing path %q", cleaned, existing)
+		}
+	}
+	return nil
+}
+
+func archivePathHasParent(value string, parent string) bool {
+	return strings.HasPrefix(value, parent+"/")
+}
+
 func cleanArchivePath(value string) (string, bool, error) {
 	trimmed := strings.TrimSuffix(value, "/")
 	cleaned, ok := cleanPackagePath(trimmed)
@@ -77,6 +99,9 @@ func cleanArchivePath(value string) (string, bool, error) {
 }
 
 func decodeManifest(file *zip.File) (Manifest, error) {
+	if file.UncompressedSize64 > maxManifestBytes {
+		return Manifest{}, manifestTooLargeError(file.UncompressedSize64)
+	}
 	reader, err := file.Open()
 	if err != nil {
 		return Manifest{}, fmt.Errorf("open app.json: %w", err)
@@ -84,8 +109,34 @@ func decodeManifest(file *zip.File) (Manifest, error) {
 	defer reader.Close()
 
 	var manifest Manifest
-	if err := json.NewDecoder(reader).Decode(&manifest); err != nil {
+	limited := &io.LimitedReader{R: reader, N: maxManifestBytes + 1}
+	decoder := json.NewDecoder(limited)
+	if err := decoder.Decode(&manifest); err != nil {
+		if limited.N == 0 {
+			return Manifest{}, manifestTooLargeError(0)
+		}
 		return Manifest{}, fmt.Errorf("decode app.json: %w", err)
 	}
-	return manifest, nil
+	var trailing json.RawMessage
+	switch err := decoder.Decode(&trailing); {
+	case err == nil:
+		return Manifest{}, fmt.Errorf("decode app.json: trailing JSON token after manifest object")
+	case err == io.EOF:
+		if limited.N == 0 {
+			return Manifest{}, manifestTooLargeError(0)
+		}
+		return manifest, nil
+	default:
+		if limited.N == 0 {
+			return Manifest{}, manifestTooLargeError(0)
+		}
+		return Manifest{}, fmt.Errorf("decode app.json: %w", err)
+	}
+}
+
+func manifestTooLargeError(size uint64) error {
+	if size > 0 {
+		return fmt.Errorf("app.json too large: %d bytes exceeds %d", size, maxManifestBytes)
+	}
+	return fmt.Errorf("app.json too large: exceeds %d bytes", maxManifestBytes)
 }
