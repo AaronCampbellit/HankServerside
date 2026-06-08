@@ -219,8 +219,9 @@ func (m *Manager) ConfigApply(ctx context.Context, request protocol.AppsConfigAp
 		app.PublicConfig = cloneRawMessage(request.PublicConfig)
 	}
 	if len(request.Secrets) > 0 {
-		app.Secrets = cloneRawMessage(request.Secrets)
-		mergeSecretSet(app.SecretSet, app.Manifest, request.Secrets)
+		if err := applySecrets(app, request.Secrets); err != nil {
+			return protocol.AppsConfigApplyResponse{}, err
+		}
 	}
 	if request.Enable != nil {
 		app.Enabled = *request.Enable
@@ -285,6 +286,9 @@ func (m *Manager) Capabilities() []string {
 	defer m.mu.RUnlock()
 	capabilities := make([]string, 0)
 	for _, app := range m.apps {
+		if !app.Enabled {
+			continue
+		}
 		for _, command := range app.Manifest.Commands {
 			capabilities = append(capabilities, appCapability(app.Manifest.ID, command.ID))
 		}
@@ -602,21 +606,53 @@ func cloneSecretSet(secretSet map[string]bool) map[string]bool {
 	return clone
 }
 
-func mergeSecretSet(secretSet map[string]bool, manifest Manifest, secrets json.RawMessage) {
-	if secretSet == nil {
-		return
+func applySecrets(app *InstalledApp, secrets json.RawMessage) error {
+	values, err := decodeSecretObject(secrets)
+	if err != nil {
+		return err
 	}
-	var values map[string]json.RawMessage
-	if err := json.Unmarshal(secrets, &values); err != nil {
-		return
+	stored, err := decodeSecretObject(app.Secrets)
+	if err != nil {
+		return err
 	}
-	for _, field := range manifest.Config.SecretFields {
+	for _, field := range app.Manifest.Config.SecretFields {
 		raw, ok := values[field]
 		if !ok || isEmptySecretValue(raw) {
 			continue
 		}
-		secretSet[field] = true
+		stored[field] = cloneRawMessage(raw)
+		if app.SecretSet != nil {
+			app.SecretSet[field] = true
+		}
 	}
+	encoded, err := encodeSecretObject(stored)
+	if err != nil {
+		return err
+	}
+	app.Secrets = encoded
+	return nil
+}
+
+func decodeSecretObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(raw) == 0 {
+		return make(map[string]json.RawMessage), nil
+	}
+	values := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, fmt.Errorf("decode app secrets: %w", err)
+	}
+	return values, nil
+}
+
+func encodeSecretObject(values map[string]json.RawMessage) (json.RawMessage, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("encode app secrets: %w", err)
+	}
+	return encoded, nil
 }
 
 func isEmptySecretValue(raw json.RawMessage) bool {
