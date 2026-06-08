@@ -83,6 +83,84 @@ func TestManagerConfigApplyEnablesAppAndTracksSecrets(t *testing.T) {
 	}
 }
 
+func TestManagerCapabilitiesOnlyIncludesEnabledApps(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	manager := installManagerHermesPackage(t, false)
+
+	if capabilities := manager.Capabilities(); len(capabilities) != 0 {
+		t.Fatalf("Capabilities = %#v, want none for disabled app", capabilities)
+	}
+
+	enable := true
+	if _, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:  "hermes",
+		Enable: &enable,
+	}); err != nil {
+		t.Fatalf("ConfigApply error: %v", err)
+	}
+	capabilities := manager.Capabilities()
+	if len(capabilities) != 1 || capabilities[0] != "apps.hermes.chat" {
+		t.Fatalf("Capabilities = %#v, want enabled hermes chat capability", capabilities)
+	}
+}
+
+func TestManagerConfigApplyPreservesExistingSecrets(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	manager := installManagerHermesPackageWithScript(t, true, hermesSecretEchoScript())
+
+	response, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:   "hermes",
+		Secrets: json.RawMessage(`{"api_key":"original-secret"}`),
+	})
+	if err != nil {
+		t.Fatalf("ConfigApply initial secret error: %v", err)
+	}
+	if !response.App.SecretFieldsSet["api_key"] {
+		t.Fatalf("SecretFieldsSet = %#v, want api_key set", response.App.SecretFieldsSet)
+	}
+	assertHermesReceivesAPIKey(t, manager, "original-secret")
+
+	for _, secrets := range []json.RawMessage{
+		json.RawMessage(`{"api_key":""}`),
+		json.RawMessage(`{"api_key":null}`),
+	} {
+		response, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+			AppID:   "hermes",
+			Secrets: secrets,
+		})
+		if err != nil {
+			t.Fatalf("ConfigApply preserving secret %s error: %v", secrets, err)
+		}
+		if !response.App.SecretFieldsSet["api_key"] {
+			t.Fatalf("SecretFieldsSet after %s = %#v, want api_key preserved", secrets, response.App.SecretFieldsSet)
+		}
+		assertHermesReceivesAPIKey(t, manager, "original-secret")
+	}
+}
+
+func TestManagerConfigApplyEmptySecretWithoutExistingValueDoesNotSetMetadata(t *testing.T) {
+	t.Parallel()
+	manager := installManagerHermesPackage(t, false)
+
+	for _, secrets := range []json.RawMessage{
+		json.RawMessage(`{"api_key":""}`),
+		json.RawMessage(`{"api_key":null}`),
+	} {
+		response, err := manager.ConfigApply(context.Background(), protocol.AppsConfigApplyRequest{
+			AppID:   "hermes",
+			Secrets: secrets,
+		})
+		if err != nil {
+			t.Fatalf("ConfigApply empty secret %s error: %v", secrets, err)
+		}
+		if response.App.SecretFieldsSet["api_key"] {
+			t.Fatalf("SecretFieldsSet after %s = %#v, want api_key unset", secrets, response.App.SecretFieldsSet)
+		}
+	}
+}
+
 func TestManagerInvokeRefusesDisabledApp(t *testing.T) {
 	t.Parallel()
 	manager := installManagerHermesPackage(t, false)
@@ -117,10 +195,15 @@ func TestManagerInvokeRunsEnabledApp(t *testing.T) {
 
 func installManagerHermesPackage(t *testing.T, enable bool) *Manager {
 	t.Helper()
+	return installManagerHermesPackageWithScript(t, enable, hermesRuntimeScript(`{"text":"hello from hermes"}`))
+}
+
+func installManagerHermesPackageWithScript(t *testing.T, enable bool, script string) *Manager {
+	t.Helper()
 	ctx := context.Background()
 	appsDir := filepath.Join(t.TempDir(), "apps")
 	stagingDir := filepath.Join(t.TempDir(), "staging")
-	archivePath := writeManagerHermesPackage(t, t.TempDir(), hermesRuntimeScript(`{"text":"hello from hermes"}`))
+	archivePath := writeManagerHermesPackage(t, t.TempDir(), script)
 	manager := NewManager(appsDir, stagingDir, Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024})
 	preview, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
 		StagingID:   "stage_1",
@@ -139,6 +222,21 @@ func installManagerHermesPackage(t *testing.T, enable bool) *Manager {
 		t.Fatalf("ActivatePackage error: %v", err)
 	}
 	return manager
+}
+
+func assertHermesReceivesAPIKey(t *testing.T, manager *Manager, want string) {
+	t.Helper()
+	response, err := manager.Invoke(context.Background(), protocol.AppsInvokeRequest{
+		AppID:     "hermes",
+		CommandID: "chat",
+		Input:     json.RawMessage(`{"prompt":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("Invoke error: %v", err)
+	}
+	if string(response.Output) != `{"api_key":"`+want+`"}` {
+		t.Fatalf("Output = %s, want api_key %q", response.Output, want)
+	}
 }
 
 func fileURL(t *testing.T, path string) string {
@@ -188,4 +286,8 @@ func writeZipEntry(t *testing.T, zw *zip.Writer, name string, body string, mode 
 
 func hermesRuntimeScript(output string) string {
 	return "#!/bin/sh\nread line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":true,\"output\":" + output + "}'\n"
+}
+
+func hermesSecretEchoScript() string {
+	return "#!/bin/sh\nread line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\napi_key=$(printf '%s' \"$line\" | sed -n 's/.*\"api_key\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":true,\"output\":{\"api_key\":\"'\"$api_key\"'\"}}'\n"
 }
