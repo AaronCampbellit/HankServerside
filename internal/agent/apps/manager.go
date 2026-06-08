@@ -20,7 +20,10 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
-const appStdioProtocolVersion = "hank.app.stdio.v1"
+const (
+	appStdioProtocolVersion = "hank.app.stdio.v1"
+	maxPackageBytes         = 32 << 20
+)
 
 var (
 	ErrUnknownApp            = errors.New("unknown app")
@@ -372,7 +375,7 @@ func downloadPackage(ctx context.Context, request protocol.AppsPackagePreviewReq
 			return err
 		}
 		defer source.Close()
-		if _, err := io.Copy(file, source); err != nil {
+		if err := copyPackageBytes(file, source); err != nil {
 			return err
 		}
 	case "http", "https":
@@ -391,7 +394,7 @@ func downloadPackage(ctx context.Context, request protocol.AppsPackagePreviewReq
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			return fmt.Errorf("download package: unexpected status %s", response.Status)
 		}
-		if _, err := io.Copy(file, response.Body); err != nil {
+		if err := copyPackageBytes(file, response.Body); err != nil {
 			return err
 		}
 	default:
@@ -401,6 +404,18 @@ func downloadPackage(ctx context.Context, request protocol.AppsPackagePreviewReq
 		return err
 	}
 	return os.Rename(tempPath, destination)
+}
+
+func copyPackageBytes(destination io.Writer, source io.Reader) error {
+	limited := io.LimitReader(source, maxPackageBytes+1)
+	written, err := io.Copy(destination, limited)
+	if err != nil {
+		return err
+	}
+	if written > maxPackageBytes {
+		return fmt.Errorf("app package exceeds %d bytes", maxPackageBytes)
+	}
+	return nil
 }
 
 func installArchive(appsDir string, appID string, archivePath string) (string, error) {

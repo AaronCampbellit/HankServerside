@@ -57,6 +57,32 @@ func TestManagerPreviewAndActivateHermesPackage(t *testing.T) {
 	}
 }
 
+func TestManagerPreviewRejectsOversizedPackage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "oversized.hankapp")
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxPackageBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(filepath.Join(t.TempDir(), "apps"), filepath.Join(t.TempDir(), "staging"), Runner{})
+
+	_, err = manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:   "stage_1",
+		DownloadURL: fileURL(t, archivePath),
+	})
+	if err == nil || !strings.Contains(err.Error(), "app package exceeds") {
+		t.Fatalf("PreviewPackage error = %v, want package size limit", err)
+	}
+}
+
 func TestManagerConfigApplyEnablesAppAndTracksSecrets(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
