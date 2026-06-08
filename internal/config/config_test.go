@@ -242,6 +242,44 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	}
 }
 
+func TestLoadAgentParsesAppRuntimePaths(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_CLOUD_URL", "ws://cloud.example/ws/agent")
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_AGENT_APPS_DIR", " /srv/hank/apps ")
+	t.Setenv("HANK_REMOTE_AGENT_APP_STAGING_DIR", " /srv/hank/app-staging ")
+
+	cfg, err := LoadAgent()
+	if err != nil {
+		t.Fatalf("LoadAgent error: %v", err)
+	}
+	if cfg.AppsDir != "/srv/hank/apps" {
+		t.Fatalf("AppsDir = %q", cfg.AppsDir)
+	}
+	if cfg.AppStagingDir != "/srv/hank/app-staging" {
+		t.Fatalf("AppStagingDir = %q", cfg.AppStagingDir)
+	}
+}
+
+func TestLoadAgentAppRuntimePathDefaults(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_CLOUD_URL", "ws://cloud.example/ws/agent")
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_AGENT_APPS_DIR", "")
+	t.Setenv("HANK_REMOTE_AGENT_APP_STAGING_DIR", "")
+
+	cfg, err := LoadAgent()
+	if err != nil {
+		t.Fatalf("LoadAgent error: %v", err)
+	}
+	if cfg.AppsDir != "/var/lib/hank/apps" {
+		t.Fatalf("AppsDir = %q", cfg.AppsDir)
+	}
+	if cfg.AppStagingDir != "/var/lib/hank/app-staging" {
+		t.Fatalf("AppStagingDir = %q", cfg.AppStagingDir)
+	}
+}
+
 func TestLoadAgentIgnoresLegacySingleShareSMBEnv(t *testing.T) {
 	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
 	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
