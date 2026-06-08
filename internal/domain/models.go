@@ -181,6 +181,20 @@ type HomeServiceProfile struct {
 	LastError        string     `json:"last_error,omitempty"`
 }
 
+type HomeAgentApp struct {
+	HomeID              string    `json:"home_id"`
+	AppID               string    `json:"app_id"`
+	Name                string    `json:"name"`
+	Version             string    `json:"version"`
+	Enabled             bool      `json:"enabled"`
+	PublicConfigJSON    string    `json:"public_config_json,omitempty"`
+	SecretFieldsSetJSON string    `json:"secret_fields_set_json,omitempty"`
+	Status              string    `json:"status"`
+	LastError           string    `json:"last_error,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	UpdatedBy           string    `json:"updated_by"`
+}
+
 type HomeQuickLink struct {
 	ID                 string     `json:"id"`
 	HomeID             string     `json:"home_id"`

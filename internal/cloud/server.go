@@ -42,6 +42,7 @@ type Server struct {
 	limiter                    *rateLimiter
 	transfers                  *transferRegistry
 	appTickets                 *appWebSocketTicketRegistry
+	appPackages                *appPackageStagingRegistry
 	notes                      *cloudNotesService
 	collaboration              *noteCollaborationHub
 	agentRequests              *agentRequestRegistry
@@ -99,6 +100,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		limiter:               newRateLimiter(),
 		transfers:             newTransferRegistry(),
 		appTickets:            newAppWebSocketTicketRegistry(),
+		appPackages:           newAppPackageStagingRegistry(),
 		notes:                 newCloudNotesService(db),
 		collaboration:         newNoteCollaborationHub(db),
 		agentRequests:         newAgentRequestRegistry(),
