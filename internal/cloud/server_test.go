@@ -368,6 +368,7 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/settings/ai-pane",
 		"/dashboard/settings/backups-pane",
 		"/dashboard/settings/recovery-pane",
+		"/dashboard/settings/apps-pane",
 		"/dashboard/settings/join-home-pane",
 	}
 
@@ -498,6 +499,14 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		t.Fatalf("member recovery status = %d, want %d body=%s", recoveryResponse.StatusCode, http.StatusForbidden, string(data))
 	}
 	recoveryResponse.Body.Close()
+
+	appsResponse := requestDashboardPage(t, testServer, "/dashboard/settings/apps-pane", "member-token")
+	if appsResponse.StatusCode != http.StatusForbidden {
+		data, _ := io.ReadAll(appsResponse.Body)
+		appsResponse.Body.Close()
+		t.Fatalf("member apps status = %d, want %d body=%s", appsResponse.StatusCode, http.StatusForbidden, string(data))
+	}
+	appsResponse.Body.Close()
 }
 
 func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
@@ -509,6 +518,7 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 		"home-assistant.html",
 		"settings.html",
 		"settings-connections.html",
+		"apps.html",
 		"profile-notes.html",
 		"file-server.html",
 	}
@@ -554,6 +564,9 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	if !strings.Contains(navBody, `href: "/dashboard/settings#recovery"`) || !strings.Contains(navBody, `adminOnly: true`) {
 		t.Fatal("admin nav must expose recovery settings as an admin-only search result")
 	}
+	if !strings.Contains(navBody, `href: "/dashboard/settings#apps"`) || !strings.Contains(navBody, `adminOnly: true`) {
+		t.Fatal("admin nav must expose app settings as an admin-only search result")
+	}
 	if strings.Contains(navBody, `<span>Search Settings</span>`) || strings.Contains(navBody, `placeholder="Search settings"`) || !strings.Contains(navBody, `aria-label="Search"`) {
 		t.Fatal("admin nav search should use a short placeholder and aria label without a visible title")
 	}
@@ -571,7 +584,7 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	}
 }
 
-func TestSettingsPageIncludesAdminRecoveryTab(t *testing.T) {
+func TestSettingsPageIncludesAdminRecoveryAndAppsTabs(t *testing.T) {
 	t.Parallel()
 
 	data, err := fs.ReadFile(uiAssets, "ui/settings.html")
@@ -586,17 +599,26 @@ func TestSettingsPageIncludesAdminRecoveryTab(t *testing.T) {
 		!strings.Contains(body, `data-src="/dashboard/settings/recovery-pane?embedded=1"`) {
 		t.Fatal("settings page must include the recovery pane iframe")
 	}
+	if !strings.Contains(body, `data-settings-page-tab="apps" data-admin-only="true" hidden`) {
+		t.Fatal("settings page must include an admin-only Apps tab")
+	}
+	if !strings.Contains(body, `data-settings-page-panel="apps" data-admin-only="true" hidden`) ||
+		!strings.Contains(body, `data-src="/dashboard/settings/apps-pane?embedded=1"`) {
+		t.Fatal("settings page must include the apps pane iframe")
+	}
 
-	for _, asset := range []string{"recovery.html", "recovery.js"} {
+	for _, asset := range []string{"recovery.html", "recovery.js", "apps.html", "apps.js"} {
 		if _, err := fs.ReadFile(uiAssets, "ui/"+asset); err != nil {
 			t.Fatalf("%s read: %v", asset, err)
 		}
 	}
-	request := httptest.NewRequest(http.MethodGet, "/assets/recovery.js", nil)
-	response := httptest.NewRecorder()
-	serveUIAsset(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("recovery.js asset status = %d, want %d", response.Code, http.StatusOK)
+	for _, assetPath := range []string{"/assets/recovery.js", "/assets/apps.js"} {
+		request := httptest.NewRequest(http.MethodGet, assetPath, nil)
+		response := httptest.NewRecorder()
+		serveUIAsset(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s asset status = %d, want %d", assetPath, response.Code, http.StatusOK)
+		}
 	}
 }
 

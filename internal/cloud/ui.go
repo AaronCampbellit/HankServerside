@@ -85,6 +85,10 @@ func (s *Server) handleSettingsRecoveryPane(w http.ResponseWriter, r *http.Reque
 	s.serveAdminUIPage(w, r, "/dashboard/settings/recovery-pane", "recovery.html")
 }
 
+func (s *Server) handleSettingsAppsPane(w http.ResponseWriter, r *http.Request) {
+	s.serveAdminUIPage(w, r, "/dashboard/settings/apps-pane", "apps.html")
+}
+
 func (s *Server) handleSettingsJoinHomePane(w http.ResponseWriter, r *http.Request) {
 	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings/join-home-pane", "accept-invitation.html")
 }
@@ -110,7 +114,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "api-client.js", "login.js", "join.js", "password-change.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "recovery.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
+	case "api-client.js", "login.js", "join.js", "password-change.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "recovery.js", "apps.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "favicon.ico", "favicon.png", "hank-icon.png", "hank-icon-192.png", "hank-icon-512.png", "apple-touch-icon.png":
 		serveUIFile(w, r, name, "image/png")

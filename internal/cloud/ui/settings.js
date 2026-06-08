@@ -24,6 +24,9 @@ const tabAliases = {
   recovery: "recovery",
   openai: "ai",
   assistant: "ai",
+  apps: "apps",
+  app: "apps",
+  packages: "apps",
   invitations: "join-home",
   invite: "join-home",
 };

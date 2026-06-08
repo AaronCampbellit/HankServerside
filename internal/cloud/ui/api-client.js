@@ -25,5 +25,5 @@
     return payload;
   }
 
-  window.HankAPI = { request };
+  window.HankAPI = { request, csrfToken };
 })();

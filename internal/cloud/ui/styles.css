@@ -730,6 +730,12 @@ h3 {
   gap: 10px;
 }
 
+.app-permission-list,
+.app-command-list {
+  display: grid;
+  gap: 8px;
+}
+
 .tool-setting-card {
   display: grid;
   gap: 8px;

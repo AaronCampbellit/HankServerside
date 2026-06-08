@@ -86,6 +86,14 @@
       searchOnly: true,
     },
     {
+      href: "/dashboard/settings#apps",
+      label: "App Settings",
+      detail: "Import, configure, enable, and disable installed Hank agent apps.",
+      keywords: ["apps", "app packages", "install app", "import app", "hankapp", "hermes", "workflows", "tools"],
+      adminOnly: true,
+      searchOnly: true,
+    },
+    {
       href: "/dashboard/settings#backups",
       label: "Backup Settings",
       detail: "Backups, restore tests, checksum checks, and backup schedules.",
