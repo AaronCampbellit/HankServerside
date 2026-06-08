@@ -2,7 +2,7 @@
 
 Date: 2026-06-08
 
-Status: Approved design, pending implementation plan.
+Status: Runtime and Hermes implementation complete; Gramaton extraction pending follow-up implementation plan.
 
 ## Decision
 
