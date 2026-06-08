@@ -125,6 +125,7 @@ func TestManagerConfigApplyPreservesExistingSecrets(t *testing.T) {
 	for _, secrets := range []json.RawMessage{
 		json.RawMessage(`{"api_key":""}`),
 		json.RawMessage(`{"api_key":null}`),
+		json.RawMessage(`{}`),
 	} {
 		response, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
 			AppID:   "hermes",
@@ -147,6 +148,7 @@ func TestManagerConfigApplyEmptySecretWithoutExistingValueDoesNotSetMetadata(t *
 	for _, secrets := range []json.RawMessage{
 		json.RawMessage(`{"api_key":""}`),
 		json.RawMessage(`{"api_key":null}`),
+		json.RawMessage(`{}`),
 	} {
 		response, err := manager.ConfigApply(context.Background(), protocol.AppsConfigApplyRequest{
 			AppID:   "hermes",
