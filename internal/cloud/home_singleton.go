@@ -77,6 +77,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeNotesWithNotesAuth(w, r, parts) {
 		return
 	}
+	if s.handleHomeAppPackageDownload(w, r, parts) {
+		return
+	}
 
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
@@ -115,6 +118,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.handleHomeServiceProfiles(w, r, home, auth, membership, parts) {
+		return
+	}
+	if s.handleHomeApps(w, r, home, auth, membership, parts) {
 		return
 	}
 	if s.handleHomeRecovery(w, r, home, auth, membership, parts) {
