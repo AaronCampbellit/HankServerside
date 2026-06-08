@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Hank Remote Apps</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260608-apps">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+  </head>
+  <body>
+    <div class="shell dashboard-shell">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Apps</h1>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
+
+      <main class="grid">
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <h2>Installed Apps</h2>
+            <span id="apps-count" class="pill">Loading</span>
+          </div>
+          <div id="apps-list" class="card-list empty-state">Loading apps.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Import App</h2>
+            <span class="pill">.hankapp</span>
+          </div>
+          <form id="app-import-form" class="stack">
+            <label class="setting-field">
+              <span>Package</span>
+              <input id="app-package-input" type="file" accept=".hankapp,application/zip,application/octet-stream">
+            </label>
+            <div class="actions wrap">
+              <button type="submit">Preview Package</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel" id="app-preview" hidden>
+          <div class="panel-head">
+            <h2>Package Preview</h2>
+            <span id="app-preview-status" class="pill">Ready</span>
+          </div>
+          <div id="app-preview-body" class="stack"></div>
+          <div class="actions wrap">
+            <button id="app-install-button" type="button" disabled>Install</button>
+          </div>
+        </section>
+
+        <section class="panel wide-panel" id="app-config-panel" hidden>
+          <div class="panel-head">
+            <h2 id="app-config-title">App Configuration</h2>
+            <span id="app-config-status" class="pill">Selected</span>
+          </div>
+          <form id="app-config-form" class="settings-form">
+            <label class="toggle-field">
+              <input id="app-enabled" type="checkbox">
+              <span>Enabled</span>
+            </label>
+            <label class="setting-field">
+              <span>Public Config JSON</span>
+              <textarea id="app-public-config" rows="8" spellcheck="false" autocomplete="off"></textarea>
+            </label>
+            <div id="app-secret-fields" class="settings-grid"></div>
+            <div class="actions wrap">
+              <button type="submit">Save App</button>
+            </div>
+          </form>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/apps.js?v=20260608-apps" defer></script>
+    <script src="/assets/admin-nav.js?v=20260608-apps" defer></script>
+  </body>
+</html>

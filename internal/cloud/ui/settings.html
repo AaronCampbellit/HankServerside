@@ -41,6 +41,7 @@
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="people">People</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="connections">Connections</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="ai">AI</button>
+            <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="apps" data-admin-only="true" hidden>Apps</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="backups" data-admin-only="true" hidden>Backups</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="recovery" data-admin-only="true" hidden>Recovery</button>
             <button type="button" class="settings-page-tab" role="tab" aria-selected="false" data-settings-page-tab="join-home">Join Home</button>
@@ -61,6 +62,9 @@
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="ai" hidden>
           <iframe class="settings-pane-frame" title="AI settings" data-src="/dashboard/settings/ai-pane?embedded=1"></iframe>
+        </section>
+        <section class="settings-frame-panel" data-settings-page-panel="apps" data-admin-only="true" hidden>
+          <iframe class="settings-pane-frame" title="App settings" data-src="/dashboard/settings/apps-pane?embedded=1"></iframe>
         </section>
         <section class="settings-frame-panel" data-settings-page-panel="backups" data-admin-only="true" hidden>
           <iframe class="settings-pane-frame" title="Backup settings" data-src="/dashboard/settings/backups-pane?embedded=1"></iframe>

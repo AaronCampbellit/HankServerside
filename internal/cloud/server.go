@@ -139,6 +139,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/settings/ai-pane", server.handleSettingsAIPane)
 	mux.HandleFunc("/dashboard/settings/backups-pane", server.handleSettingsBackupsPane)
 	mux.HandleFunc("/dashboard/settings/recovery-pane", server.handleSettingsRecoveryPane)
+	mux.HandleFunc("/dashboard/settings/apps-pane", server.handleSettingsAppsPane)
 	mux.HandleFunc("/dashboard/settings/join-home-pane", server.handleSettingsJoinHomePane)
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)
 	mux.HandleFunc("/favicon.ico", serveUIFavicon)
