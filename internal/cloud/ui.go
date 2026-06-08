@@ -18,11 +18,27 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := s.appAuthFromRequest(r); err == nil {
+	if auth, err := s.appAuthFromRequest(r); err == nil {
+		if auth.User.PasswordChangeRequired {
+			http.Redirect(w, r, "/password-change", http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 		return
 	}
 	serveUIFile(w, r, "login.html", "text/html; charset=utf-8")
+}
+
+func (s *Server) handleJoinPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/join" {
+		http.NotFound(w, r)
+		return
+	}
+	serveUIFile(w, r, "join.html", "text/html; charset=utf-8")
+}
+
+func (s *Server) handlePasswordChangePage(w http.ResponseWriter, r *http.Request) {
+	s.serveAuthenticatedUIPage(w, r, "/password-change", "password-change.html")
 }
 
 func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +106,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "api-client.js", "login.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
+	case "api-client.js", "login.js", "join.js", "password-change.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "favicon.ico", "favicon.png", "hank-icon.png", "hank-icon-192.png", "hank-icon-512.png", "apple-touch-icon.png":
 		serveUIFile(w, r, name, "image/png")
@@ -104,8 +120,13 @@ func (s *Server) serveAuthenticatedUIPage(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := s.appAuthFromRequest(r); err != nil {
+	auth, err := s.appAuthFromRequest(r)
+	if err != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if r.URL.Path != "/password-change" && auth.User.PasswordChangeRequired {
+		http.Redirect(w, r, "/password-change", http.StatusSeeOther)
 		return
 	}
 	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
@@ -119,6 +140,10 @@ func (s *Server) serveHomeMemberUIPage(w http.ResponseWriter, r *http.Request, e
 	auth, err := s.appAuthFromRequest(r)
 	if err != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if auth.User.PasswordChangeRequired {
+		http.Redirect(w, r, "/password-change", http.StatusSeeOther)
 		return
 	}
 	if _, _, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID); err != nil {
@@ -136,6 +161,10 @@ func (s *Server) serveAdminUIPage(w http.ResponseWriter, r *http.Request, expect
 	auth, err := s.appAuthFromRequest(r)
 	if err != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if auth.User.PasswordChangeRequired {
+		http.Redirect(w, r, "/password-change", http.StatusSeeOther)
 		return
 	}
 	_, membership, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID)

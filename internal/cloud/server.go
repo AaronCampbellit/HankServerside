@@ -124,6 +124,8 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.handleLoginPage)
+	mux.HandleFunc("/join", server.handleJoinPage)
+	mux.HandleFunc("/password-change", server.handlePasswordChangePage)
 	mux.HandleFunc("/dashboard", server.handleDashboardPage)
 	mux.HandleFunc("/dashboard/hank", server.handleHankPage)
 	mux.HandleFunc("/dashboard/home-assistant", server.handleHomeAssistantPage)
@@ -144,6 +146,9 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/register", server.handleAuthRegister)
 	mux.HandleFunc("/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("/v1/auth/logout", server.handleAuthLogout)
+	mux.HandleFunc("/v1/auth/change-password", server.handleAuthChangePassword)
+	mux.HandleFunc("/v1/auth/invitations/preview", server.handleAuthInvitationPreview)
+	mux.HandleFunc("/v1/auth/invitations/signup", server.handleAuthInvitationSignup)
 	mux.HandleFunc("/v1/me", server.handleMe)
 	mux.HandleFunc("/v1/me/devices/apns", server.handleAPNSDeviceRegistration)
 	mux.HandleFunc("/v1/me/devices/", server.handleAPNSDevice)
@@ -570,6 +575,138 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := parseJSON(w, r, &body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(body.NewPassword) < 8 {
+		http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(auth.User.PasswordHash), []byte(body.CurrentPassword)); err != nil {
+		http.Error(w, "invalid current password", http.StatusUnauthorized)
+		return
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.UpdateUserPassword(r.Context(), auth.User.ID, string(passwordHash), false, "", true, auth.Session.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	user, err := s.store.GetUserByID(r.Context(), auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.audit(r.Context(), "password.changed", auditSeverityInfo, auth.User.ID, "", "", requestIDFromContext(r.Context()), "user", auth.User.ID, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": sanitizeUser(user)})
+}
+
+func (s *Server) handleAuthInvitationPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := parseJSON(w, r, &body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	invitation, ok := s.loadUsableInvitation(w, r, body.Token)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"email":      invitation.Email,
+		"role":       invitation.Role,
+		"expires_at": invitation.ExpiresAt,
+	})
+}
+
+func (s *Server) handleAuthInvitationSignup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Token    string `json:"token"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := parseJSON(w, r, &body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
+	if len(body.Password) < 8 {
+		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	invitation, ok := s.loadUsableInvitation(w, r, body.Token)
+	if !ok {
+		return
+	}
+	if !strings.EqualFold(invitation.Email, body.Email) {
+		http.Error(w, "invitation email does not match signup email", http.StatusForbidden)
+		return
+	}
+	if _, err := s.store.GetUserByEmail(r.Context(), body.Email); err == nil {
+		http.Error(w, "user already exists; sign in to accept this invite", http.StatusConflict)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	user := domain.User{
+		ID:           newID("usr"),
+		Email:        body.Email,
+		PasswordHash: string(passwordHash),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.store.CreateUserAndAcceptHomeInvitation(r.Context(), invitation.ID, user, invitation.Role); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	session, rawToken, err := s.createSession(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.audit(r.Context(), "invitation.signup", auditSeverityInfo, user.ID, "", invitation.HomeID, requestIDFromContext(r.Context()), "invitation", invitation.ID, map[string]any{"email_hash": stableAuditTarget(user.Email)})
+	setSessionCookie(w, r, rawToken, session.ExpiresAt)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"user":          sanitizeUser(user),
+		"session_id":    session.ID,
+		"session_token": rawToken,
+		"expires_at":    session.ExpiresAt,
+	})
+}
+
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -806,6 +943,10 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.metrics.IncAuthFailure("app_ws_unauthorized")
 		s.logger.Warn("app websocket unauthorized", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r))
 		http.Error(w, "unauthorized app session", http.StatusUnauthorized)
+		return
+	}
+	if auth.User.PasswordChangeRequired {
+		http.Error(w, "password_change_required", http.StatusForbidden)
 		return
 	}
 
@@ -1617,6 +1758,10 @@ func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (authContex
 		http.Error(w, "invalid csrf token", http.StatusForbidden)
 		return authContext{}, false
 	}
+	if auth.User.PasswordChangeRequired && !passwordChangeAllowedPath(r.URL.Path) {
+		http.Error(w, "password_change_required", http.StatusForbidden)
+		return authContext{}, false
+	}
 	return auth, true
 }
 
@@ -1685,11 +1830,49 @@ func (s *Server) writePeerError(ctx context.Context, peer *wsPeer, messageType s
 
 func sanitizeUser(user domain.User) map[string]any {
 	return map[string]any{
-		"id":         user.ID,
-		"email":      user.Email,
-		"created_at": user.CreatedAt,
-		"updated_at": user.UpdatedAt,
+		"id":                       user.ID,
+		"email":                    user.Email,
+		"password_change_required": user.PasswordChangeRequired,
+		"password_changed_at":      user.PasswordChangedAt,
+		"password_reset_at":        user.PasswordResetAt,
+		"created_at":               user.CreatedAt,
+		"updated_at":               user.UpdatedAt,
 	}
+}
+
+func passwordChangeAllowedPath(path string) bool {
+	switch path {
+	case "/v1/me", "/v1/auth/change-password", "/v1/auth/logout":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) loadUsableInvitation(w http.ResponseWriter, r *http.Request, token string) (domain.HomeInvitation, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		http.Error(w, "token is required", http.StatusBadRequest)
+		return domain.HomeInvitation{}, false
+	}
+	invitation, err := s.store.GetHomeInvitationByTokenHash(r.Context(), hashToken(token))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.NotFound(w, r)
+			return domain.HomeInvitation{}, false
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return domain.HomeInvitation{}, false
+	}
+	if invitation.AcceptedAt != nil {
+		http.Error(w, "invitation already accepted", http.StatusConflict)
+		return domain.HomeInvitation{}, false
+	}
+	if invitation.ExpiresAt != nil && invitation.ExpiresAt.Before(time.Now().UTC()) {
+		http.Error(w, "invitation expired", http.StatusGone)
+		return domain.HomeInvitation{}, false
+	}
+	return invitation, true
 }
 
 func parseJSON(w http.ResponseWriter, r *http.Request, out any) error {

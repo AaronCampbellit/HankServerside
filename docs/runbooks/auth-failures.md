@@ -10,12 +10,42 @@ Check:
 2. `/ws/app` is opened with a fresh `app_ticket` from `POST /v1/ws/app-ticket`
 3. the session has not expired
 4. the session was not revoked by logout
+5. the account is not blocked by `password_change_required`
 
 Recovery:
 
 1. log in again with `POST /v1/auth/login`
 2. verify `GET /v1/me` works with the new session token
-3. request a fresh app ticket and reconnect `/ws/app`
+3. if `GET /v1/me` reports `password_change_required`, call `POST /v1/auth/change-password`
+4. request a fresh app ticket and reconnect `/ws/app`
+
+## Password Reset
+
+Dashboard recovery:
+
+1. sign in as a home admin
+2. open Settings > People
+3. use Reset Password for the target member
+4. leave Require password change on next login enabled unless there is a specific reason not to
+5. share the temporary password manually; it is not stored raw and existing sessions are revoked
+
+CLI break-glass recovery:
+
+```bash
+hank-remote-cloud users reset-password --email user@example.com --force-change
+```
+
+To provide the temporary password without putting it in shell history:
+
+```bash
+printf '%s' "$TEMP_PASSWORD" | hank-remote-cloud users reset-password --email user@example.com --stdin --force-change
+```
+
+For scripts that should only recover admins:
+
+```bash
+hank-remote-cloud users reset-password --email admin@example.com --force-change --admin-only
+```
 
 ## Agent Auth
 

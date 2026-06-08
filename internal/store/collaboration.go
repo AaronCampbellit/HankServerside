@@ -179,6 +179,61 @@ func (s *Store) AcceptHomeInvitation(ctx context.Context, invitationID string, u
 	return tx.Commit()
 }
 
+func (s *Store) CreateUserAndAcceptHomeInvitation(ctx context.Context, invitationID string, user domain.User, role string) error {
+	now := time.Now().UTC()
+	if user.CreatedAt.IsZero() {
+		user.CreatedAt = now
+	}
+	if user.UpdatedAt.IsZero() {
+		user.UpdatedAt = now
+	}
+	tx, err := s.beginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (
+			id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		user.ID,
+		user.Email,
+		user.PasswordHash,
+		user.PasswordChangeRequired,
+		user.PasswordChangedAt,
+		user.PasswordResetAt,
+		user.PasswordResetBy,
+		user.CreatedAt,
+		user.UpdatedAt,
+	); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE home_invitations SET accepted_at = ? WHERE id = ? AND accepted_at IS NULL`, now, invitationID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO home_memberships (home_id, user_id, role, created_at, updated_at)
+		SELECT home_id, ?, ?, ?, ?
+		FROM home_invitations
+		WHERE id = ?`,
+		user.ID,
+		role,
+		now,
+		now,
+		invitationID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) GetHomePermissions(ctx context.Context, homeID string) (domain.HomePermissions, error) {
 	row := s.queryRow(ctx, `SELECT home_id, homeassistant_enabled, files_enabled, notes_enabled, updated_at, updated_by
 		FROM home_permissions WHERE home_id = ?`, homeID)

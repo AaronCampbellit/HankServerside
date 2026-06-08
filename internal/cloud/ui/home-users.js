@@ -23,8 +23,18 @@ const els = {
   memberList: document.getElementById("member-list"),
   invitationCount: document.getElementById("invitation-count"),
   invitationList: document.getElementById("invitation-list"),
+  passwordResetDialog: document.getElementById("password-reset-dialog"),
+  passwordResetForm: document.getElementById("password-reset-form"),
+  passwordResetTarget: document.getElementById("password-reset-target"),
+  temporaryPassword: document.getElementById("temporary-password"),
+  requirePasswordChange: document.getElementById("require-password-change"),
+  passwordResetOutput: document.getElementById("password-reset-output"),
+  generatePasswordButton: document.getElementById("generate-password-button"),
+  cancelPasswordResetButton: document.getElementById("cancel-password-reset-button"),
   toast: document.getElementById("toast"),
 };
+
+let passwordResetMember = null;
 
 
 function showToast(message, isError = false) {
@@ -147,6 +157,12 @@ function renderMembers() {
       removeButton.className = "ghost";
       removeButton.textContent = "Remove Person";
       removeButton.addEventListener("click", () => removeMember(member));
+      const resetButton = document.createElement("button");
+      resetButton.type = "button";
+      resetButton.className = "secondary";
+      resetButton.textContent = "Reset Password";
+      resetButton.addEventListener("click", () => openPasswordReset(member));
+      actions.appendChild(resetButton);
       actions.appendChild(removeButton);
       card.appendChild(actions);
     }
@@ -255,9 +271,56 @@ async function createInvitation(event) {
     els.inviteEmail.value = "";
     els.inviteRole.value = "member";
     els.inviteOutput.hidden = false;
-    els.inviteOutput.innerHTML = `<strong>Invite created for ${escapeHTML(payload.email)}</strong><div class="token-meta">This code is only shown once. Share it with this person so they can join.</div><code>${escapeHTML(payload.token)}</code>`;
+    els.inviteOutput.innerHTML = `<strong>Invite created for ${escapeHTML(payload.email)}</strong><div class="token-meta">This code is only shown once. Share this link or code with the person joining.</div><code>${escapeHTML(payload.join_url || payload.token)}</code><code>${escapeHTML(payload.token)}</code>`;
     await loadInvitations();
     showToast("Invite created.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function generatedPassword() {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function openPasswordReset(member) {
+  passwordResetMember = member;
+  els.passwordResetTarget.textContent = `Reset ${member.email}. All current sessions for this user will be revoked.`;
+  els.temporaryPassword.value = generatedPassword();
+  els.requirePasswordChange.checked = true;
+  els.passwordResetOutput.hidden = true;
+  if (els.passwordResetDialog.showModal) {
+    els.passwordResetDialog.showModal();
+  } else {
+    els.passwordResetDialog.hidden = false;
+  }
+}
+
+function closePasswordReset() {
+  passwordResetMember = null;
+  if (els.passwordResetDialog.open) {
+    els.passwordResetDialog.close();
+  } else {
+    els.passwordResetDialog.hidden = true;
+  }
+}
+
+async function resetPassword(event) {
+  event.preventDefault();
+  if (!passwordResetMember) return;
+  try {
+    await api(`/v1/home/members/${encodeURIComponent(passwordResetMember.user_id)}/password`, {
+      method: "PUT",
+      body: JSON.stringify({
+        temporary_password: els.temporaryPassword.value,
+        password_change_required: els.requirePasswordChange.checked,
+      }),
+    });
+    els.passwordResetOutput.hidden = false;
+    els.passwordResetOutput.innerHTML = `<strong>Temporary password</strong><div class="token-meta">Shown here only. Share it manually.</div><code>${escapeHTML(els.temporaryPassword.value)}</code>`;
+    showToast("Password reset. Existing sessions revoked.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -320,5 +383,10 @@ els.homeSelect.addEventListener("change", async () => {
   await refreshHomeUsers();
 });
 els.inviteForm.addEventListener("submit", createInvitation);
+els.passwordResetForm.addEventListener("submit", resetPassword);
+els.generatePasswordButton.addEventListener("click", () => {
+  els.temporaryPassword.value = generatedPassword();
+});
+els.cancelPasswordResetButton.addEventListener("click", closePasswordReset);
 
 hydrate();

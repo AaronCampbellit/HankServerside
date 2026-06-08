@@ -35,10 +35,14 @@ async function submit(mode) {
     return;
   }
   try {
-    await api(`/v1/auth/${mode}`, {
+    const payload = await api(`/v1/auth/${mode}`, {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
+    if (payload.user?.password_change_required) {
+      window.location.replace("/password-change");
+      return;
+    }
     window.location.replace("/dashboard");
   } catch (error) {
     showToast(error.message, true);

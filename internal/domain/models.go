@@ -36,11 +36,15 @@ const (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                     string     `json:"id"`
+	Email                  string     `json:"email"`
+	PasswordHash           string     `json:"-"`
+	PasswordChangeRequired bool       `json:"password_change_required"`
+	PasswordChangedAt      *time.Time `json:"password_changed_at,omitempty"`
+	PasswordResetAt        *time.Time `json:"password_reset_at,omitempty"`
+	PasswordResetBy        string     `json:"password_reset_by,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 type Home struct {

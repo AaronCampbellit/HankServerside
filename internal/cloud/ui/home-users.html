@@ -85,6 +85,27 @@
         </section>
       </main>
 
+      <dialog id="password-reset-dialog" class="file-dialog">
+        <form id="password-reset-form" method="dialog">
+          <h3>Reset Password</h3>
+          <div id="password-reset-target" class="dialog-copy"></div>
+          <label>
+            <span>Temporary Password</span>
+            <input id="temporary-password" type="text" autocomplete="off" required>
+          </label>
+          <label class="toggle-field">
+            <input id="require-password-change" type="checkbox" checked>
+            <span>Require password change on next login</span>
+          </label>
+          <div id="password-reset-output" class="token-output" hidden></div>
+          <div class="actions wrap">
+            <button id="generate-password-button" type="button" class="secondary">Generate</button>
+            <button type="submit">Reset Password</button>
+            <button id="cancel-password-reset-button" type="button" class="ghost">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
       <div id="toast" class="toast" hidden></div>
     </div>
 

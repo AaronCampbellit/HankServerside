@@ -2,16 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/dropfile/hankremote/internal/cloud"
 	"github.com/dropfile/hankremote/internal/config"
+	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/store"
 )
 
@@ -38,6 +46,13 @@ func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "secrets" {
 		if err := runSecretsCommand(ctx, cfg, os.Args[2:]); err != nil {
 			logger.Error("secret storage command failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "users" {
+		if err := runUsersCommand(ctx, cfg, os.Args[2:]); err != nil {
+			logger.Error("user command failed", "error", err)
 			os.Exit(1)
 		}
 		return
@@ -116,6 +131,128 @@ func main() {
 		logger.Error("cloud shutdown failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runUsersCommand(ctx context.Context, cfg config.Cloud, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: hank-remote-cloud users reset-password --email user@example.com [--force-change] [--stdin] [--admin-only]")
+	}
+	switch args[0] {
+	case "reset-password":
+		return runResetPasswordCommand(ctx, cfg, args[1:])
+	default:
+		return errors.New("unknown users command")
+	}
+}
+
+func runResetPasswordCommand(ctx context.Context, cfg config.Cloud, args []string) error {
+	var email string
+	forceChange := false
+	useStdin := false
+	adminOnly := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--email":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--email requires a value")
+			}
+			email = strings.TrimSpace(strings.ToLower(args[i+1]))
+			i++
+		case "--force-change":
+			forceChange = true
+		case "--stdin":
+			useStdin = true
+		case "--admin-only":
+			adminOnly = true
+		default:
+			return fmt.Errorf("unknown reset-password option %s", args[i])
+		}
+	}
+	if email == "" {
+		return fmt.Errorf("--email is required")
+	}
+
+	db, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	user, err := db.GetUserByEmail(ctx, email)
+	if err != nil {
+		return err
+	}
+	if adminOnly {
+		home, err := db.GetSingletonHomeForUser(ctx, user.ID)
+		if err != nil {
+			return fmt.Errorf("admin-only membership check: %w", err)
+		}
+		membership, err := db.GetHomeMembership(ctx, home.ID, user.ID)
+		if err != nil {
+			return fmt.Errorf("admin-only role check: %w", err)
+		}
+		if membership.Role != domain.HomeRoleAdmin {
+			return fmt.Errorf("user is not a home admin")
+		}
+	}
+
+	password := ""
+	generated := false
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		password = strings.TrimRight(string(data), "\r\n")
+	} else {
+		password = randomCLISecret(18)
+		generated = true
+	}
+	if len(password) < 8 {
+		return fmt.Errorf("temporary password must be at least 8 characters")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := db.UpdateUserPassword(ctx, user.ID, string(hash), forceChange, "cli", true, ""); err != nil {
+		return err
+	}
+	_ = db.CreateAuditEvent(ctx, store.AuditEvent{
+		ID:         "audit_" + randomCLISecret(12),
+		OccurredAt: time.Now().UTC(),
+		EventType:  "password.reset",
+		Severity:   "warning",
+		TargetType: "user",
+		TargetID:   user.ID,
+		MetadataJSON: fmt.Sprintf(`{"actor":"cli","email_hash":"%s","password_change_required":%t,"generated":%t}`,
+			stableCLIHash(email),
+			forceChange,
+			generated,
+		),
+	})
+
+	fmt.Printf("user_id=%s\n", user.ID)
+	fmt.Printf("email=%s\n", user.Email)
+	fmt.Printf("password_change_required=%t\n", forceChange)
+	fmt.Println("sessions_revoked=true")
+	if generated {
+		fmt.Printf("temporary_password=%s\n", password)
+	}
+	return nil
+}
+
+func randomCLISecret(size int) string {
+	data := make([]byte, size)
+	if _, err := rand.Read(data); err != nil {
+		panic(fmt.Sprintf("random generation failed: %v", err))
+	}
+	return hex.EncodeToString(data)
+}
+
+func stableCLIHash(value string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(value))))
+	return hex.EncodeToString(sum[:12])
 }
 
 func runMigrateCommand(ctx context.Context, cfg config.Cloud, args []string) error {

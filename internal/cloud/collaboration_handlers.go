@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
@@ -210,6 +212,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			"email":         invitation.Email,
 			"role":          invitation.Role,
 			"token":         inviteToken,
+			"join_url":      invitationJoinURL(r, inviteToken),
 			"expires_at":    invitation.ExpiresAt,
 		})
 		return true
@@ -331,6 +334,73 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 		return true
 	}
 
+	if len(parts) == 3 && parts[0] == "members" && parts[2] == "password" && r.Method == http.MethodPut {
+		if membership.Role != domain.HomeRoleAdmin {
+			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+			return true
+		}
+		targetUserID := parts[1]
+		if targetUserID == membership.UserID {
+			http.Error(w, "use change password for your own account", http.StatusBadRequest)
+			return true
+		}
+		if _, err := s.store.GetHomeMembership(r.Context(), home.ID, targetUserID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return true
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		var body struct {
+			TemporaryPassword      string `json:"temporary_password"`
+			Generate               bool   `json:"generate"`
+			PasswordChangeRequired bool   `json:"password_change_required"`
+		}
+		if err := parseJSON(w, r, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		temporaryPassword := strings.TrimSpace(body.TemporaryPassword)
+		generated := false
+		if body.Generate {
+			temporaryPassword = newToken()
+			generated = true
+		}
+		if len(temporaryPassword) < 8 {
+			http.Error(w, "temporary password must be at least 8 characters", http.StatusBadRequest)
+			return true
+		}
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(temporaryPassword), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		if err := s.store.UpdateUserPassword(r.Context(), targetUserID, string(passwordHash), body.PasswordChangeRequired, membership.UserID, true, ""); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return true
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		s.audit(r.Context(), "password.reset", auditSeverityWarning, membership.UserID, "", home.ID, requestIDFromContext(r.Context()), "user", targetUserID, map[string]any{
+			"password_change_required": body.PasswordChangeRequired,
+			"generated":                generated,
+		})
+		response := map[string]any{
+			"ok":                       true,
+			"user_id":                  targetUserID,
+			"password_change_required": body.PasswordChangeRequired,
+			"sessions_revoked":         true,
+		}
+		if generated {
+			response["temporary_password"] = temporaryPassword
+		}
+		writeJSON(w, http.StatusOK, response)
+		return true
+	}
+
 	if len(parts) == 1 && parts[0] == "permissions" {
 		return s.handleHomePermissions(w, r, home, membership)
 	}
@@ -340,6 +410,14 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 	}
 
 	return false
+}
+
+func invitationJoinURL(r *http.Request, token string) string {
+	scheme := "http"
+	if requestIsHTTPS(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + "/join#token=" + token
 }
 
 func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, auth authContext, parts []string) bool {

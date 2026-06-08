@@ -10,6 +10,9 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `POST /v1/auth/register`
   - `POST /v1/auth/login`
   - `POST /v1/auth/logout`
+  - `POST /v1/auth/change-password`
+  - `POST /v1/auth/invitations/preview`
+  - `POST /v1/auth/invitations/signup`
   - `GET /v1/me`
   - `POST /v1/me/devices/apns`
   - `DELETE /v1/me/devices/{deviceID}/apns`
@@ -39,6 +42,7 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `DELETE /v1/home/members/invitations/{invitationID}`
   - `DELETE /v1/home/members/{userID}`
   - `PUT /v1/home/members/{userID}/role`
+  - `PUT /v1/home/members/{userID}/password`
   - `GET /v1/home/permissions`
   - `PUT /v1/home/permissions`
   - `GET /v1/home/members/{userID}/permissions`
@@ -229,6 +233,17 @@ For throwaway local-only experiments, `HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true`
 curl -s http://127.0.0.1:8080/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"aaron@example.com","password":"change-me-123"}'
+```
+
+After first setup, additional users join through admin-created invitations.
+Create an invite from Settings > People, share the one-time join URL or invite
+code, and have the invitee open `/join` to create their own account and set
+their permanent password. Admins can reset an existing member password from
+Settings > People; reset actions revoke that user's active sessions and can
+require a password change on next login. Break-glass CLI reset is available as:
+
+```bash
+hank-remote-cloud users reset-password --email user@example.com --force-change
 ```
 
 Then issue an agent token:

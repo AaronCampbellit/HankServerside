@@ -180,10 +180,16 @@ func (s *Store) migrate(ctx context.Context) error {
 func (s *Store) CreateUser(ctx context.Context, user domain.User) error {
 	_, err := s.exec(
 		ctx,
-		`INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO users (
+			id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.ID,
 		user.Email,
 		user.PasswordHash,
+		user.PasswordChangeRequired,
+		user.PasswordChangedAt,
+		user.PasswordResetAt,
+		user.PasswordResetBy,
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
@@ -194,13 +200,70 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User) error {
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT id, email, password_hash, created_at, updated_at FROM users WHERE email = ?`, email)
+	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE email = ?`, email)
 	return scanUser(row)
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT id, email, password_hash, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE id = ?`, id)
 	return scanUser(row)
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, userID string, passwordHash string, passwordChangeRequired bool, resetBy string, revokeSessions bool, keepSessionID string) error {
+	now := time.Now().UTC()
+	tx, err := s.beginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `UPDATE users
+		SET password_hash = ?,
+			password_change_required = ?,
+			password_changed_at = CASE WHEN ? THEN password_changed_at ELSE ? END,
+			password_reset_at = CASE WHEN ? THEN ? ELSE password_reset_at END,
+			password_reset_by = CASE WHEN ? THEN ? ELSE password_reset_by END,
+			updated_at = ?
+		WHERE id = ?`,
+		passwordHash,
+		passwordChangeRequired,
+		resetBy != "",
+		now,
+		resetBy != "",
+		now,
+		resetBy != "",
+		resetBy,
+		now,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	if revokeSessions {
+		if keepSessionID != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE app_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL AND id <> ?`, now, userID, keepSessionID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM apns_devices WHERE user_id = ? AND session_id <> ?`, userID, keepSessionID); err != nil {
+				return err
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, `UPDATE app_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, userID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM apns_devices WHERE user_id = ?`, userID); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateHome(ctx context.Context, home domain.Home) error {
@@ -565,9 +628,29 @@ func (s *Store) RevokeSession(ctx context.Context, sessionID string) error {
 	return err
 }
 
+func (s *Store) RevokeSessionsForUser(ctx context.Context, userID string, keepSessionID string) error {
+	now := time.Now().UTC()
+	if keepSessionID != "" {
+		_, err := s.exec(ctx, `UPDATE app_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL AND id <> ?`, now, userID, keepSessionID)
+		return err
+	}
+	_, err := s.exec(ctx, `UPDATE app_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, userID)
+	return err
+}
+
 func scanUser(scanner interface{ Scan(dest ...any) error }) (domain.User, error) {
 	var user domain.User
-	err := scanner.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+	err := scanner.Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.PasswordChangeRequired,
+		&user.PasswordChangedAt,
+		&user.PasswordResetAt,
+		&user.PasswordResetBy,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
