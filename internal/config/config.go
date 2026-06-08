@@ -68,17 +68,19 @@ type DBOps struct {
 }
 
 type Agent struct {
-	CloudURL   string
-	AgentID    string
-	Token      string
-	HomeName   string
-	ConfigPath string
-	HA         HomeAssistant
-	SMBShares  []SMB
-	FilesRoot  string
-	NotesRoot  string
-	Media      Media
-	Hermes     Hermes
+	CloudURL      string
+	AgentID       string
+	Token         string
+	HomeName      string
+	ConfigPath    string
+	AppsDir       string
+	AppStagingDir string
+	HA            HomeAssistant
+	SMBShares     []SMB
+	FilesRoot     string
+	NotesRoot     string
+	Media         Media
+	Hermes        Hermes
 }
 
 type HomeAssistant struct {
@@ -246,13 +248,15 @@ func LoadAgent() (Agent, error) {
 	}
 
 	cfg := Agent{
-		CloudURL:   envOrDefault("HANK_REMOTE_AGENT_CLOUD_URL", "ws://127.0.0.1:8080/ws/agent"),
-		AgentID:    strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_ID")),
-		Token:      strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_TOKEN")),
-		HomeName:   strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_HOME_NAME")),
-		ConfigPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_CONFIG_PATH")),
-		FilesRoot:  strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
-		NotesRoot:  strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
+		CloudURL:      envOrDefault("HANK_REMOTE_AGENT_CLOUD_URL", "ws://127.0.0.1:8080/ws/agent"),
+		AgentID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_ID")),
+		Token:         strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_TOKEN")),
+		HomeName:      strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_HOME_NAME")),
+		ConfigPath:    strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_CONFIG_PATH")),
+		AppsDir:       envOrDefault("HANK_REMOTE_AGENT_APPS_DIR", "/var/lib/hank/apps"),
+		AppStagingDir: envOrDefault("HANK_REMOTE_AGENT_APP_STAGING_DIR", "/var/lib/hank/app-staging"),
+		FilesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
+		NotesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
 		Media: Media{
 			GramatonEnabled:      boolEnvOrDefault("HANK_REMOTE_MEDIA_GRAMATON_ENABLED", false),
 			GramatonBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL", "https://gramaton.io"), "/"),
