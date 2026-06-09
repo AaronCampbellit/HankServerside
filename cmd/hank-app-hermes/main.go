@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/agent/apps"
-	"github.com/dropfile/hankremote/internal/protocol"
 )
 
 const (
@@ -58,6 +57,19 @@ type hermesOutputContent struct {
 	Text string `json:"text"`
 }
 
+type hermesChatInput struct {
+	Prompt         string `json:"prompt"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	SessionKey     string `json:"session_key,omitempty"`
+}
+
+type hermesChatOutput struct {
+	Text           string `json:"text"`
+	Model          string `json:"model,omitempty"`
+	ResponseID     string `json:"response_id,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+}
+
 func main() {
 	os.Exit(run(context.Background(), os.Stdin, os.Stdout, os.Stderr, http.DefaultClient))
 }
@@ -99,18 +111,18 @@ func (e appError) Error() string {
 	return e.code + ": " + e.message
 }
 
-func runChat(ctx context.Context, request apps.AppStdioRequest, client *http.Client) (protocol.HermesChatResponse, error) {
+func runChat(ctx context.Context, request apps.AppStdioRequest, client *http.Client) (hermesChatOutput, error) {
 	var cfg hermesConfig
 	if err := decodeRaw(request.Config, &cfg); err != nil {
-		return protocol.HermesChatResponse{}, appError{"invalid_request", "invalid Hermes config"}
+		return hermesChatOutput{}, appError{"invalid_request", "invalid Hermes config"}
 	}
 	var secrets hermesSecrets
 	if err := decodeRaw(request.Secrets, &secrets); err != nil {
-		return protocol.HermesChatResponse{}, appError{"invalid_request", "invalid Hermes secrets"}
+		return hermesChatOutput{}, appError{"invalid_request", "invalid Hermes secrets"}
 	}
-	var chat protocol.HermesChatRequest
+	var chat hermesChatInput
 	if err := decodeRaw(request.Input, &chat); err != nil {
-		return protocol.HermesChatResponse{}, appError{"invalid_request", "invalid Hermes chat input"}
+		return hermesChatOutput{}, appError{"invalid_request", "invalid Hermes chat input"}
 	}
 
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/")
@@ -118,10 +130,10 @@ func runChat(ctx context.Context, request apps.AppStdioRequest, client *http.Cli
 	model := defaultString(strings.TrimSpace(cfg.Model), defaultHermesModel)
 	prompt := strings.TrimSpace(chat.Prompt)
 	if baseURL == "" || apiKey == "" {
-		return protocol.HermesChatResponse{}, appError{"invalid_request", "Hermes API base URL and API key are required"}
+		return hermesChatOutput{}, appError{"invalid_request", "Hermes API base URL and API key are required"}
 	}
 	if prompt == "" {
-		return protocol.HermesChatResponse{}, appError{"invalid_request", "Hermes prompt is required"}
+		return hermesChatOutput{}, appError{"invalid_request", "Hermes prompt is required"}
 	}
 
 	timeoutSeconds := cfg.TimeoutSeconds
@@ -139,11 +151,11 @@ func runChat(ctx context.Context, request apps.AppStdioRequest, client *http.Cli
 		Instructions: "You are being reached from Hank chat through the home Hank Remote agent. Answer the user directly and keep responses practical.",
 	})
 	if err != nil {
-		return protocol.HermesChatResponse{}, err
+		return hermesChatOutput{}, err
 	}
 	httpRequest, err := http.NewRequestWithContext(requestCtx, http.MethodPost, responsesURL(baseURL), bytes.NewReader(body))
 	if err != nil {
-		return protocol.HermesChatResponse{}, appError{"invalid_request", "invalid Hermes API base URL"}
+		return hermesChatOutput{}, appError{"invalid_request", "invalid Hermes API base URL"}
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
@@ -156,30 +168,30 @@ func runChat(ctx context.Context, request apps.AppStdioRequest, client *http.Cli
 	}
 	httpResponse, err := client.Do(httpRequest)
 	if err != nil {
-		return protocol.HermesChatResponse{}, appError{"upstream_error", "Hermes request failed"}
+		return hermesChatOutput{}, appError{"upstream_error", "Hermes request failed"}
 	}
 	defer httpResponse.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(httpResponse.Body, maxHermesBodyBytes))
 	if err != nil {
-		return protocol.HermesChatResponse{}, appError{"upstream_error", "failed to read Hermes response"}
+		return hermesChatOutput{}, appError{"upstream_error", "failed to read Hermes response"}
 	}
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-		return protocol.HermesChatResponse{}, appError{"upstream_error", fmt.Sprintf("Hermes returned status %d", httpResponse.StatusCode)}
+		return hermesChatOutput{}, appError{"upstream_error", fmt.Sprintf("Hermes returned status %d", httpResponse.StatusCode)}
 	}
 
 	var decoded hermesResponsesResponse
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		return protocol.HermesChatResponse{}, appError{"upstream_error", "invalid Hermes response"}
+		return hermesChatOutput{}, appError{"upstream_error", "invalid Hermes response"}
 	}
 	text := strings.TrimSpace(decoded.OutputText)
 	if text == "" {
 		text = strings.TrimSpace(decodedTextOutput(decoded.Output))
 	}
 	if text == "" {
-		return protocol.HermesChatResponse{}, appError{"upstream_error", "Hermes returned no text"}
+		return hermesChatOutput{}, appError{"upstream_error", "Hermes returned no text"}
 	}
-	return protocol.HermesChatResponse{
+	return hermesChatOutput{
 		Text:           text,
 		Model:          decoded.Model,
 		ResponseID:     decoded.ID,

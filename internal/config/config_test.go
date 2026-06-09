@@ -211,9 +211,6 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	t.Setenv("HANK_REMOTE_SMB_SHARES_JSON", `[{"id":"media","host":"192.168.1.20","share":"media","username":"aaron","password":"secret","domain":"WORKGROUP"}]`)
 	t.Setenv("HANK_REMOTE_AGENT_FILES_ROOT", "/srv/hank/files")
 	t.Setenv("HANK_REMOTE_AGENT_NOTES_ROOT", "/srv/hank/notes")
-	t.Setenv("HANK_REMOTE_MEDIA_SOURCE_ID", "archive")
-	t.Setenv("HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION", "false")
-
 	cfg, err := LoadAgent()
 	if err != nil {
 		t.Fatalf("LoadAgent error: %v", err)
@@ -233,12 +230,6 @@ func TestLoadAgentParsesValidConfig(t *testing.T) {
 	}
 	if cfg.FilesRoot != "/srv/hank/files" || cfg.NotesRoot != "/srv/hank/notes" {
 		t.Fatalf("roots = files:%q notes:%q", cfg.FilesRoot, cfg.NotesRoot)
-	}
-	if cfg.Media.RequireConfirmation {
-		t.Fatal("Media.RequireConfirmation = true, want false")
-	}
-	if cfg.Media.SourceID != "archive" {
-		t.Fatalf("Media.SourceID = %q, want archive", cfg.Media.SourceID)
 	}
 }
 

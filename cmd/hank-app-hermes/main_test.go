@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/agent/apps"
-	"github.com/dropfile/hankremote/internal/protocol"
 )
 
 func TestHermesAppRunChatSuccess(t *testing.T) {
@@ -54,7 +53,7 @@ func TestHermesAppRunChatSuccess(t *testing.T) {
 	if !response.OK {
 		t.Fatalf("response = %#v stderr=%s", response, stderr)
 	}
-	var output protocol.HermesChatResponse
+	var output hermesChatOutput
 	if err := json.Unmarshal(response.Output, &output); err != nil {
 		t.Fatalf("Decode output: %v", err)
 	}

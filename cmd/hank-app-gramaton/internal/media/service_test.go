@@ -1278,7 +1278,7 @@ func TestSeriesPlanUsesDynamicEpisodeLink(t *testing.T) {
 	}
 }
 
-func TestApplySettingsPersistsMediaEnv(t *testing.T) {
+func TestApplySettingsDoesNotPersistLegacyMediaEnv(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1336,21 +1336,8 @@ func TestApplySettingsPersistsMediaEnv(t *testing.T) {
 		t.Fatalf("read env: %v", err)
 	}
 	env := string(data)
-	for _, want := range []string{
-		"HANK_REMOTE_AGENT_ID=agent_1",
-		"HANK_REMOTE_MEDIA_GRAMATON_ENABLED=true",
-		"HANK_REMOTE_MEDIA_GRAMATON_BASE_URL=" + source.URL,
-		"HANK_REMOTE_MEDIA_GRAMATON_USERNAME=media@example.com",
-		"HANK_REMOTE_MEDIA_GRAMATON_PASSWORD=test-password",
-		"HANK_REMOTE_MEDIA_SOURCE_ID=local",
-		"HANK_REMOTE_MEDIA_DESTINATION_PATH=Media",
-		"HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH=Movies",
-		"HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION=false",
-		"HANK_REMOTE_MEDIA_TV_DESTINATION_PATH=Shows/Fixture",
-	} {
-		if !strings.Contains(env, want) {
-			t.Fatalf("env file missing %q:\n%s", want, env)
-		}
+	if env != "HANK_REMOTE_AGENT_ID=agent_1\n" {
+		t.Fatalf("env file changed by app settings apply:\n%s", env)
 	}
 }
 

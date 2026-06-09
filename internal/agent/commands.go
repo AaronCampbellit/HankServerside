@@ -10,9 +10,7 @@ import (
 
 	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
-	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
-	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -20,9 +18,7 @@ import (
 type commandDispatcher struct {
 	ha     *agentha.Client
 	files  *agentfiles.Service
-	media  *agentmedia.Service
 	notes  *agentnotes.Service
-	hermes *agenthermes.Service
 	apps   *agentapps.Manager
 	config *configManager
 }
@@ -182,127 +178,6 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 			return nil, mapError(err)
 		}
 		return protocol.EmptyResponse{OK: true}, nil
-
-	case protocol.CommandMediaSearch:
-		if d.media == nil || !d.media.Enabled() {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaSearchRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_request", err)
-		}
-		response, err := d.media.Search(ctx, request.Query, request.Limit)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandMediaPlanDownload:
-		if d.media == nil || !d.media.Enabled() {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaPlanDownloadRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_request", err)
-		}
-		response, err := d.media.PlanDownload(ctx, request)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandMediaDownloadStart:
-		if d.media == nil || !d.media.Enabled() {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaDownloadStartRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_request", err)
-		}
-		response, err := d.media.StartDownload(ctx, request)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandMediaDownloadStatus:
-		if d.media == nil || !d.media.Enabled() {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaDownloadStatusRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_request", err)
-		}
-		response, err := d.media.Status(ctx, request.JobID)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandMediaImageFetch:
-		if d.media == nil || !d.media.Enabled() {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaImageFetchRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_image_request", err)
-		}
-		response, err := d.media.FetchImage(ctx, request.URL)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandMediaSettingsStatus:
-		if d.media == nil {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		return d.media.Settings(ctx), nil
-
-	case protocol.CommandMediaSettingsApply:
-		if d.media == nil {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaSettingsApplyRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_settings_request", err)
-		}
-		response, err := d.media.ApplySettings(ctx, request)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandMediaDownloadJobs:
-		if d.media == nil {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		return d.media.Jobs(ctx), nil
-
-	case protocol.CommandMediaDownloadCancel:
-		if d.media == nil {
-			return nil, mapError(fmt.Errorf("media source is not configured"))
-		}
-		request, err := decodeBody[protocol.MediaDownloadCancelRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_media_cancel_request", err)
-		}
-		response, err := d.media.Cancel(ctx, request.JobID)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
-
-	case protocol.CommandHermesChat:
-		request, err := decodeBody[protocol.HermesChatRequest](command.Body)
-		if err != nil {
-			return nil, badRequest("invalid_hermes_request", err)
-		}
-		response, err := d.hermes.Chat(ctx, request)
-		if err != nil {
-			return nil, mapError(err)
-		}
-		return response, nil
 
 	case protocol.CommandAppsList:
 		if _, err := decodeBody[protocol.AppsListRequest](command.Body); err != nil {
@@ -506,8 +381,6 @@ func mapError(err error) *protocol.ErrorPayload {
 		return &protocol.ErrorPayload{Code: "files_not_configured", Message: err.Error()}
 	case errors.Is(err, agentnotes.ErrDisabled):
 		return &protocol.ErrorPayload{Code: "notes_not_configured", Message: err.Error()}
-	case errors.Is(err, agenthermes.ErrDisabled):
-		return &protocol.ErrorPayload{Code: "hermes_not_configured", Message: err.Error()}
 	case errors.Is(err, agentapps.ErrUnknownApp):
 		return &protocol.ErrorPayload{Code: "app_not_found", Message: err.Error()}
 	case errors.Is(err, agentapps.ErrDisabledApp):

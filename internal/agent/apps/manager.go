@@ -23,6 +23,7 @@ import (
 const (
 	appStdioProtocolVersion = "hank.app.stdio.v1"
 	maxPackageBytes         = 32 << 20
+	appStateFilename        = ".hank-app-state.json"
 )
 
 var (
@@ -59,6 +60,15 @@ type InstalledApp struct {
 	SecretSet    map[string]bool
 	Status       string
 	LastError    string
+}
+
+type persistedAppState struct {
+	Enabled      bool            `json:"enabled"`
+	PublicConfig json.RawMessage `json:"public_config,omitempty"`
+	Secrets      json.RawMessage `json:"secrets,omitempty"`
+	SecretSet    map[string]bool `json:"secret_fields_set,omitempty"`
+	Status       string          `json:"status,omitempty"`
+	LastError    string          `json:"last_error,omitempty"`
 }
 
 func NewManager(appsDir string, stagingDir string, runner Runner) *Manager {
@@ -112,12 +122,27 @@ func (m *Manager) Load(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		state, err := readPersistedAppState(appPath)
+		if err != nil {
+			return err
+		}
+		secretSet := secretSetDefaults(manifest)
+		for field, set := range state.SecretSet {
+			secretSet[field] = set
+		}
+		status := strings.TrimSpace(state.Status)
+		if status == "" {
+			status = "installed"
+		}
 		m.apps[manifest.ID] = &InstalledApp{
-			Manifest:  manifest,
-			Path:      appPath,
-			Enabled:   false,
-			SecretSet: secretSetDefaults(manifest),
-			Status:    "installed",
+			Manifest:     manifest,
+			Path:         appPath,
+			Enabled:      state.Enabled,
+			PublicConfig: cloneRawMessage(state.PublicConfig),
+			Secrets:      cloneRawMessage(state.Secrets),
+			SecretSet:    secretSet,
+			Status:       status,
+			LastError:    strings.TrimSpace(state.LastError),
 		}
 	}
 	return nil
@@ -208,6 +233,9 @@ func (m *Manager) ActivatePackage(ctx context.Context, request protocol.AppsPack
 		SecretSet: secretSetDefaults(preview.Manifest),
 		Status:    "installed",
 	}
+	if err := writePersistedAppState(installed); err != nil {
+		return protocol.AppsPackageActivateResponse{}, err
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -247,6 +275,9 @@ func (m *Manager) ConfigApply(ctx context.Context, request protocol.AppsConfigAp
 	}
 	if request.Enable != nil {
 		app.Enabled = *request.Enable
+	}
+	if err := writePersistedAppState(app); err != nil {
+		return protocol.AppsConfigApplyResponse{}, err
 	}
 	return protocol.AppsConfigApplyResponse{App: appSummary(app)}, nil
 }
@@ -357,6 +388,7 @@ func (m *Manager) setLastError(appID string, message string) {
 	defer m.mu.Unlock()
 	if app, ok := m.apps[appID]; ok {
 		app.LastError = message
+		_ = writePersistedAppState(app)
 	}
 }
 
@@ -644,6 +676,49 @@ func cloneInstalledApp(app *InstalledApp) InstalledApp {
 		Status:       app.Status,
 		LastError:    app.LastError,
 	}
+}
+
+func readPersistedAppState(appPath string) (persistedAppState, error) {
+	statePath, err := containedPath(appPath, appStateFilename)
+	if err != nil {
+		return persistedAppState{}, err
+	}
+	data, err := os.ReadFile(statePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return persistedAppState{}, nil
+	}
+	if err != nil {
+		return persistedAppState{}, err
+	}
+	var state persistedAppState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return persistedAppState{}, fmt.Errorf("read app state: %w", err)
+	}
+	return state, nil
+}
+
+func writePersistedAppState(app *InstalledApp) error {
+	if app == nil || app.Path == "" {
+		return nil
+	}
+	statePath, err := containedPath(app.Path, appStateFilename)
+	if err != nil {
+		return err
+	}
+	state := persistedAppState{
+		Enabled:      app.Enabled,
+		PublicConfig: cloneRawMessage(app.PublicConfig),
+		Secrets:      cloneRawMessage(app.Secrets),
+		SecretSet:    cloneSecretSet(app.SecretSet),
+		Status:       app.Status,
+		LastError:    app.LastError,
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(statePath, data, 0o600)
 }
 
 func cloneRawMessage(raw json.RawMessage) json.RawMessage {

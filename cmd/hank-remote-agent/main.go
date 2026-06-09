@@ -10,9 +10,7 @@ import (
 	"github.com/dropfile/hankremote/internal/agent"
 	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
-	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
-	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
 	"github.com/dropfile/hankremote/internal/config"
 )
@@ -38,26 +36,7 @@ func main() {
 		Root:   cfg.FilesRoot,
 		Shares: agentSMBShares(cfg.SMBShares),
 	})
-	media := agentmedia.New(agentmedia.Config{
-		Enabled:                       cfg.Media.GramatonEnabled,
-		BaseURL:                       cfg.Media.GramatonBaseURL,
-		Username:                      cfg.Media.Username,
-		Password:                      cfg.Media.Password,
-		SourceID:                      cfg.Media.SourceID,
-		DestinationPath:               cfg.Media.DestinationPath,
-		MovieDestinationPath:          cfg.Media.MovieDestinationPath,
-		TVDestinationPath:             cfg.Media.TVDestinationPath,
-		RequireConfirmation:           cfg.Media.RequireConfirmation,
-		RequireConfirmationConfigured: true,
-		EnvPath:                       cfg.ConfigPath,
-	}, files, logger)
 	notes := agentnotes.New(cfg.NotesRoot)
-	hermes := agenthermes.New(agenthermes.Config{
-		BaseURL: cfg.Hermes.APIBaseURL,
-		APIKey:  cfg.Hermes.APIKey,
-		Model:   cfg.Hermes.Model,
-		Timeout: cfg.Hermes.Timeout,
-	})
 	appManager := agentapps.NewManager(cfg.AppsDir, cfg.AppStagingDir, agentapps.Runner{
 		MaxOutputBytes: 1 << 20,
 		MaxStderrBytes: 16 << 10,
@@ -66,7 +45,7 @@ func main() {
 		logger.Warn("failed to load agent apps", "error", err)
 	}
 
-	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, media, notes, hermes, appManager, logger)
+	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, notes, appManager, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
