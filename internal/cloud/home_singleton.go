@@ -68,6 +68,16 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/home/"), "/")
+	if path == "" {
+		http.NotFound(w, r)
+		return
+	}
+	parts := strings.Split(path, "/")
+	if s.handleHomeNotesWithNotesAuth(w, r, parts) {
+		return
+	}
+
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
@@ -82,13 +92,6 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/home/"), "/")
-	if path == "" {
-		http.NotFound(w, r)
-		return
-	}
-	parts := strings.Split(path, "/")
 
 	if len(parts) == 1 && parts[0] == "sync" && r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, s.syncResponse(r.Context(), home))
@@ -108,7 +111,7 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeAssistant(w, r, home, membership, auth, parts) {
 		return
 	}
-	if s.handleHomeNotesHTTP(w, r, home, membership, auth, parts) {
+	if s.handleHomeNotesAPITokens(w, r, home, auth, membership, parts) {
 		return
 	}
 	if s.handleHomeServiceProfiles(w, r, home, auth, membership, parts) {

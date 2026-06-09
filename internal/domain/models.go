@@ -112,6 +112,33 @@ type AppSession struct {
 }
 
 const (
+	NotesAPIScopeRead   = "notes:read"
+	NotesAPIScopeAppend = "notes:append"
+	NotesAPIScopeWrite  = "notes:write"
+	NotesAPIScopeDelete = "notes:delete"
+)
+
+type NotesAPIToken struct {
+	ID                    string     `json:"id"`
+	HomeID                string     `json:"home_id"`
+	UserID                string     `json:"user_id"`
+	Name                  string     `json:"name"`
+	TokenHash             string     `json:"-"`
+	Scopes                []string   `json:"scopes"`
+	AllowHomeNotes        bool       `json:"allow_home_notes"`
+	ExpiresAt             *time.Time `json:"expires_at,omitempty"`
+	RevokedAt             *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt            *time.Time `json:"last_used_at,omitempty"`
+	LastUsedRoute         string     `json:"last_used_route,omitempty"`
+	LastUsedIPHash        string     `json:"last_used_ip_hash,omitempty"`
+	LastUsedUserAgentHash string     `json:"last_used_user_agent_hash,omitempty"`
+	RequestCount          int64      `json:"request_count"`
+	CreatedAt             time.Time  `json:"created_at"`
+	CreatedBy             string     `json:"created_by"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+}
+
+const (
 	NotificationCategoryStorage           = "storage"
 	NotificationCategoryNotes             = "notes"
 	NotificationCategoryDashboardEntities = "dashboard_entities"
@@ -179,6 +206,20 @@ type HomeServiceProfile struct {
 	UpdatedBy        string     `json:"updated_by"`
 	LastBackupAt     *time.Time `json:"last_backup_at,omitempty"`
 	LastError        string     `json:"last_error,omitempty"`
+}
+
+type HomeAgentApp struct {
+	HomeID              string    `json:"home_id"`
+	AppID               string    `json:"app_id"`
+	Name                string    `json:"name"`
+	Version             string    `json:"version"`
+	Enabled             bool      `json:"enabled"`
+	PublicConfigJSON    string    `json:"public_config_json,omitempty"`
+	SecretFieldsSetJSON string    `json:"secret_fields_set_json,omitempty"`
+	Status              string    `json:"status"`
+	LastError           string    `json:"last_error,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	UpdatedBy           string    `json:"updated_by"`
 }
 
 type HomeQuickLink struct {

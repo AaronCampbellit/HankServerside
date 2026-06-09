@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -420,9 +421,57 @@ func invitationJoinURL(r *http.Request, token string) string {
 	return scheme + "://" + r.Host + "/join#token=" + token
 }
 
-func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, auth authContext, parts []string) bool {
+func notesSearchQuery(r *http.Request) (string, int, error) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		query = strings.TrimSpace(r.URL.Query().Get("query"))
+	}
+	limit := 0
+	rawLimit := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 0 {
+			return "", 0, errors.New("limit must be a non-negative integer")
+		}
+		if parsed > 200 {
+			parsed = 200
+		}
+		limit = parsed
+	}
+	return query, limit, nil
+}
+
+func notesTagQuery(r *http.Request) string {
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	if tag == "" {
+		tag = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
+	return tag
+}
+
+func writeNoteHTTPError(w http.ResponseWriter, r *http.Request, err error) {
+	conflict := &noteConflictError{}
+	switch {
+	case errors.As(err, &conflict):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "note_conflict", "current": conflict.Current})
+	case errors.Is(err, errNoteAppendContentRequired):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, errNoteAppendUnsupportedPageType):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "note_append_unsupported", "message": err.Error()})
+	case errors.Is(err, store.ErrNotFound):
+		http.NotFound(w, r)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, home domain.Home, membership domain.HomeMembership, auth notesAuthContext, parts []string) bool {
 	if len(parts) == 0 || parts[0] != "notes" {
 		return false
+	}
+	if auth.isAPIToken() && !auth.APIToken.AllowHomeNotes {
+		http.Error(w, "notes api token is not allowed for home notes", http.StatusForbidden)
+		return true
 	}
 	if err := s.requireHomeFeature(r.Context(), home, membership, auth.User.ID, domain.HomePermissionFeatureNotes); err != nil {
 		if errors.Is(err, errFeaturePermissionDenied) {
@@ -434,6 +483,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 	}
 
 	if len(parts) == 1 && r.Method == http.MethodGet {
+		if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+			return true
+		}
 		notes, err := s.notes.ListHome(r.Context(), home.ID, auth.User.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -443,9 +495,55 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 		return true
 	}
 
+	if len(parts) == 2 && r.Method == http.MethodGet {
+		switch parts[1] {
+		case "search":
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return true
+			}
+			query, limit, err := notesSearchQuery(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return true
+			}
+			results, err := s.notes.SearchHome(r.Context(), home.ID, auth.User.ID, query, limit)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return true
+			}
+			writeJSON(w, http.StatusOK, protocol.NotesSearchResponse{Results: results})
+			return true
+		case "tags":
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return true
+			}
+			tags, err := s.notes.TagsHome(r.Context(), home.ID, auth.User.ID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return true
+			}
+			writeJSON(w, http.StatusOK, protocol.NotesTagsResponse{Tags: tags})
+			return true
+		case "tag-rollup":
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return true
+			}
+			items, err := s.notes.TagRollupHome(r.Context(), home.ID, auth.User.ID, notesTagQuery(r))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return true
+			}
+			writeJSON(w, http.StatusOK, protocol.NotesTagRollupResponse{Items: items})
+			return true
+		}
+	}
+
 	if len(parts) >= 2 {
 		if noteID, attachmentID, ok := splitNoteAttachmentRoute(parts); ok {
-			s.handleHomeNoteAttachmentsHTTP(w, r, home, auth, noteID, attachmentID)
+			if s.rejectNotesAPIToken(w, r, auth) {
+				return true
+			}
+			s.handleHomeNoteAttachmentsHTTP(w, r, home, auth.authContext, noteID, attachmentID)
 			return true
 		}
 		noteID := strings.Join(parts[1:], "/")
@@ -453,6 +551,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			baseNoteID := strings.Join(parts[1:len(parts)-2], "/")
 			switch r.Method {
 			case http.MethodGet:
+				if s.rejectNotesAPIToken(w, r, auth) {
+					return true
+				}
 				shares, err := s.notes.ListShares(r.Context(), home.ID, baseNoteID, auth.User.ID)
 				if err != nil {
 					if errors.Is(err, store.ErrNotFound) {
@@ -465,6 +566,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				writeJSON(w, http.StatusOK, protocol.NotesSharesResponse{Shares: shares})
 				return true
 			case http.MethodDelete:
+				if s.rejectNotesAPIToken(w, r, auth) {
+					return true
+				}
 				targetUserID := parts[len(parts)-1]
 				note, removedLast, err := s.notes.RevokeShare(r.Context(), home.ID, baseNoteID, auth.User.ID, targetUserID)
 				if err != nil {
@@ -486,6 +590,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 		}
 		if len(parts) >= 3 && parts[len(parts)-1] == "shares" && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
 			baseNoteID := strings.Join(parts[1:len(parts)-1], "/")
+			if s.rejectNotesAPIToken(w, r, auth) {
+				return true
+			}
 			if r.Method == http.MethodGet {
 				shares, err := s.notes.ListShares(r.Context(), home.ID, baseNoteID, auth.User.ID)
 				if err != nil {
@@ -520,9 +627,36 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "note_id": note.NoteID})
 			return true
 		}
+		if len(parts) >= 3 && parts[len(parts)-1] == "append" && r.Method == http.MethodPost {
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeAppend, domain.NotesAPIScopeWrite) {
+				return true
+			}
+			noteID := strings.Join(parts[1:len(parts)-1], "/")
+			if strings.TrimSpace(noteID) == "" {
+				http.Error(w, "note id is required", http.StatusBadRequest)
+				return true
+			}
+			var body protocol.NotesAppendRequest
+			if err := parseJSON(w, r, &body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return true
+			}
+			response, err := s.notes.AppendHome(r.Context(), home.ID, auth.User.ID, noteID, body)
+			if err != nil {
+				writeNoteHTTPError(w, r, err)
+				return true
+			}
+			s.markHomeNotesDirty(r.Context(), home.ID, "")
+			s.emitHomeNotesChanged(r.Context(), "notes.changed", map[string]any{"home_id": home.ID, "note_id": noteID})
+			writeJSON(w, http.StatusOK, response)
+			return true
+		}
 
 		switch r.Method {
 		case http.MethodGet:
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return true
+			}
 			note, err := s.notes.FetchHome(r.Context(), home.ID, auth.User.ID, noteID)
 			if err != nil {
 				if errors.Is(err, store.ErrNotFound) {
@@ -539,6 +673,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			return true
 
 		case http.MethodPut:
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeWrite) {
+				return true
+			}
 			var body protocol.NotesSaveRequest
 			if err := parseJSON(w, r, &body); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -561,6 +698,9 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			return true
 
 		case http.MethodDelete:
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeDelete) {
+				return true
+			}
 			if err := s.notes.DeleteHome(r.Context(), home.ID, auth.User.ID, noteID); err != nil {
 				if errors.Is(err, store.ErrNotFound) {
 					http.NotFound(w, r)
@@ -580,7 +720,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 }
 
 func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireNotesAuth(w, r)
 	if !ok {
 		return
 	}
@@ -591,6 +731,9 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 	if path == "" {
 		switch r.Method {
 		case http.MethodGet:
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return
+			}
 			notes, err := s.notes.ListProfile(r.Context(), auth.User.ID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -600,6 +743,9 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 			return
 		case http.MethodPost:
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeWrite) {
+				return
+			}
 			var body protocol.NotesSaveRequest
 			if err := parseJSON(w, r, &body); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -625,9 +771,80 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if r.Method == http.MethodGet {
+		switch path {
+		case "search":
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return
+			}
+			query, limit, err := notesSearchQuery(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			results, err := s.notes.SearchProfile(r.Context(), auth.User.ID, query, limit)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, protocol.NotesSearchResponse{Results: results})
+			return
+		case "tags":
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return
+			}
+			tags, err := s.notes.TagsProfile(r.Context(), auth.User.ID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, protocol.NotesTagsResponse{Tags: tags})
+			return
+		case "tag-rollup":
+			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+				return
+			}
+			items, err := s.notes.TagRollupProfile(r.Context(), auth.User.ID, notesTagQuery(r))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, protocol.NotesTagRollupResponse{Items: items})
+			return
+		}
+	}
+
+	if strings.HasSuffix(path, "/append") && r.Method == http.MethodPost {
+		if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeAppend, domain.NotesAPIScopeWrite) {
+			return
+		}
+		noteID := strings.TrimSuffix(path, "/append")
+		if strings.TrimSpace(noteID) == "" {
+			http.Error(w, "note id is required", http.StatusBadRequest)
+			return
+		}
+		var body protocol.NotesAppendRequest
+		if err := parseJSON(w, r, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		response, err := s.notes.AppendProfile(r.Context(), auth.User.ID, noteID, body)
+		if err != nil {
+			writeNoteHTTPError(w, r, err)
+			return
+		}
+		s.logger.Info("profile note appended via http", "user_id", auth.User.ID, "note_id", response.NoteID, "revision", response.Revision)
+		s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+
 	if parts := strings.Split(path, "/"); len(parts) >= 2 {
 		if noteID, attachmentID, ok := splitNoteAttachmentRoute(append([]string{"notes"}, parts...)); ok {
-			s.handleProfileNoteAttachmentsHTTP(w, r, auth, noteID, attachmentID)
+			if s.rejectNotesAPIToken(w, r, auth) {
+				return
+			}
+			s.handleProfileNoteAttachmentsHTTP(w, r, auth.authContext, noteID, attachmentID)
 			return
 		}
 	}
@@ -635,6 +852,9 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 	noteID := path
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead) {
+			return
+		}
 		note, err := s.notes.FetchProfile(r.Context(), auth.User.ID, noteID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -650,6 +870,9 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 		s.logger.Info("profile note fetched", "user_id", auth.User.ID, "note_id", noteID, "revision", note.Revision)
 		writeJSON(w, http.StatusOK, note)
 	case http.MethodPut:
+		if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeWrite) {
+			return
+		}
 		var body protocol.NotesSaveRequest
 		if err := parseJSON(w, r, &body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -670,6 +893,9 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 		s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodDelete:
+		if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeDelete) {
+			return
+		}
 		if err := s.notes.DeleteProfile(r.Context(), auth.User.ID, noteID); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				http.NotFound(w, r)

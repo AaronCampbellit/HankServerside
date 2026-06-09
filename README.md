@@ -20,8 +20,12 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `PUT /v1/me/notification-settings`
   - `GET /v1/me/notes`
   - `POST /v1/me/notes`
+  - `GET /v1/me/notes/search`
+  - `GET /v1/me/notes/tags`
+  - `GET /v1/me/notes/tag-rollup`
   - `GET /v1/me/notes/{noteID}`
   - `PUT /v1/me/notes/{noteID}`
+  - `POST /v1/me/notes/{noteID}/append`
   - `DELETE /v1/me/notes/{noteID}`
   - `GET /v1/me/profile`
   - `PUT /v1/me/profile`
@@ -58,12 +62,22 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `GET /v1/home/agent/tokens`
   - `POST /v1/home/agent/tokens`
   - `DELETE /v1/home/agent/tokens/{tokenID}`
+  - `GET /v1/home/notes-api-tokens`
+  - `POST /v1/home/notes-api-tokens`
+  - `DELETE /v1/home/notes-api-tokens/{tokenID}`
   - `POST /v1/home/files/downloads`
   - `POST /v1/home/files/uploads`
   - `GET /v1/home/notes`
+  - `GET /v1/home/notes/search`
+  - `GET /v1/home/notes/tags`
+  - `GET /v1/home/notes/tag-rollup`
   - `GET /v1/home/notes/{noteID}`
   - `PUT /v1/home/notes/{noteID}`
+  - `POST /v1/home/notes/{noteID}/append`
   - `DELETE /v1/home/notes/{noteID}`
+  - `GET /v1/home/notes-api-tokens`
+  - `POST /v1/home/notes-api-tokens`
+  - `DELETE /v1/home/notes-api-tokens/{tokenID}`
   - `GET /v1/home/sync`
   - `GET /v1/home/service-profiles`
   - `PUT /v1/home/service-profiles/{serviceType}`

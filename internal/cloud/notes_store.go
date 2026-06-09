@@ -23,6 +23,11 @@ type noteConflictError struct {
 
 func (e *noteConflictError) Error() string { return "note conflict" }
 
+var (
+	errNoteAppendContentRequired     = errors.New("append content is required")
+	errNoteAppendUnsupportedPageType = errors.New("append is only supported for text notes")
+)
+
 type collabScalar struct {
 	Value   string `json:"value"`
 	Version int64  `json:"version"`
@@ -68,6 +73,30 @@ func (s *cloudNotesService) ListHome(ctx context.Context, homeID string, userID 
 	return noteSummaries(notes), nil
 }
 
+func (s *cloudNotesService) SearchProfile(ctx context.Context, userID string, query string, limit int) ([]protocol.NoteSearchResult, error) {
+	notes, err := s.store.ListProfileNotes(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	return searchNotes(notes, query, limit), nil
+}
+
+func (s *cloudNotesService) TagsProfile(ctx context.Context, userID string) ([]protocol.NoteTagCount, error) {
+	notes, err := s.store.ListProfileNotes(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	return noteTags(notes), nil
+}
+
+func (s *cloudNotesService) TagRollupProfile(ctx context.Context, userID string, tag string) ([]protocol.TaggedLineRollupItem, error) {
+	notes, err := s.store.ListProfileNotes(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	return noteTagRollup(notes, tag), nil
+}
+
 func (s *cloudNotesService) FetchProfile(ctx context.Context, userID string, noteID string) (protocol.NotesFetchResponse, error) {
 	note, err := s.store.GetProfileNote(ctx, userID, noteID)
 	if err != nil {
@@ -96,6 +125,36 @@ func (s *cloudNotesService) SaveProfile(ctx context.Context, userID string, note
 
 func (s *cloudNotesService) SaveHome(ctx context.Context, homeID string, userID string, noteID string, request protocol.NotesSaveRequest) (protocol.NotesSaveResponse, error) {
 	return s.save(ctx, homeID, userID, userID, noteID, request)
+}
+
+func (s *cloudNotesService) AppendProfile(ctx context.Context, userID string, noteID string, request protocol.NotesAppendRequest) (protocol.NotesSaveResponse, error) {
+	note, err := s.store.GetProfileNote(ctx, userID, noteID)
+	if err != nil {
+		return protocol.NotesSaveResponse{}, err
+	}
+	if note.DeletedAt != nil {
+		return protocol.NotesSaveResponse{}, store.ErrNotFound
+	}
+	saveRequest, err := appendRequestForNote(note, request)
+	if err != nil {
+		return protocol.NotesSaveResponse{}, err
+	}
+	return s.SaveProfile(ctx, userID, noteID, saveRequest)
+}
+
+func (s *cloudNotesService) AppendHome(ctx context.Context, homeID string, userID string, noteID string, request protocol.NotesAppendRequest) (protocol.NotesSaveResponse, error) {
+	note, err := s.store.GetHomeNoteVisibleToUser(ctx, homeID, userID, noteID)
+	if err != nil {
+		return protocol.NotesSaveResponse{}, err
+	}
+	if note.DeletedAt != nil {
+		return protocol.NotesSaveResponse{}, store.ErrNotFound
+	}
+	saveRequest, err := appendRequestForNote(note, request)
+	if err != nil {
+		return protocol.NotesSaveResponse{}, err
+	}
+	return s.SaveHome(ctx, homeID, userID, noteID, saveRequest)
 }
 
 func (s *cloudNotesService) RenameHome(ctx context.Context, homeID string, userID string, noteID string, title string) error {
@@ -550,6 +609,43 @@ func noteBodyFormat(note domain.UserNote) string {
 		return note.BodyFormat
 	}
 	return "markdown"
+}
+
+func appendRequestForNote(note domain.UserNote, request protocol.NotesAppendRequest) (protocol.NotesSaveRequest, error) {
+	if normalizePageType(note.PageType) != protocol.NotePageTypeText {
+		return protocol.NotesSaveRequest{}, errNoteAppendUnsupportedPageType
+	}
+	content, err := appendNoteContent(noteBodyText(note), request)
+	if err != nil {
+		return protocol.NotesSaveRequest{}, err
+	}
+	return protocol.NotesSaveRequest{
+		NoteID:           note.NoteID,
+		Title:            note.Title,
+		Content:          content,
+		BodyMarkdown:     content,
+		BodyFormat:       noteBodyFormat(note),
+		ExpectedRevision: request.ExpectedRevision,
+		PageType:         protocol.NotePageTypeText,
+	}, nil
+}
+
+func appendNoteContent(existing string, request protocol.NotesAppendRequest) (string, error) {
+	addition := request.BodyMarkdown
+	if addition == "" {
+		addition = request.Content
+	}
+	if addition == "" {
+		return "", errNoteAppendContentRequired
+	}
+	separator := "\n"
+	if request.Separator != nil {
+		separator = *request.Separator
+	}
+	if existing == "" {
+		separator = ""
+	}
+	return existing + separator + addition, nil
 }
 
 func decodeCollabState(note domain.UserNote) (collabState, error) {

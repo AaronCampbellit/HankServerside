@@ -63,9 +63,17 @@ migration history.
   - `DELETE /v1/home/agent/tokens/{tokenID}`
 - Shared Home notes:
   - `GET /v1/home/notes`
+  - `GET /v1/home/notes/search`
+  - `GET /v1/home/notes/tags`
+  - `GET /v1/home/notes/tag-rollup`
   - `GET /v1/home/notes/{noteID}`
   - `PUT /v1/home/notes/{noteID}`
+  - `POST /v1/home/notes/{noteID}/append`
   - `DELETE /v1/home/notes/{noteID}`
+- External notes API tokens:
+  - `GET /v1/home/notes-api-tokens`
+  - `POST /v1/home/notes-api-tokens`
+  - `DELETE /v1/home/notes-api-tokens/{tokenID}`
 - Files:
   - `POST /v1/home/files/downloads`
   - `POST /v1/home/files/uploads`
@@ -112,8 +120,12 @@ migration history.
 - Profile notes:
   - `GET /v1/me/notes`
   - `POST /v1/me/notes`
+  - `GET /v1/me/notes/search`
+  - `GET /v1/me/notes/tags`
+  - `GET /v1/me/notes/tag-rollup`
   - `GET /v1/me/notes/{noteID}`
   - `PUT /v1/me/notes/{noteID}`
+  - `POST /v1/me/notes/{noteID}/append`
   - `DELETE /v1/me/notes/{noteID}`
 - Profile sync:
   - `GET /v1/me/profile`
@@ -611,8 +623,12 @@ Shared Home notes, sync health, and integration settings are still the Remote co
 
 - Shared Home notes:
   - `GET /v1/home/notes`
+  - `GET /v1/home/notes/search`
+  - `GET /v1/home/notes/tags`
+  - `GET /v1/home/notes/tag-rollup`
   - `GET /v1/home/notes/{noteID}`
   - `PUT /v1/home/notes/{noteID}`
+  - `POST /v1/home/notes/{noteID}/append`
   - `DELETE /v1/home/notes/{noteID}`
 - Sync health:
   - `GET /v1/home/sync`
@@ -624,11 +640,15 @@ Shared Home notes, sync health, and integration settings are still the Remote co
   - `board`
   - `expected_revision`
   - HTTP conflict responses
-- Profile notes remain separate and unchanged:
+- Profile notes remain separate:
   - `GET /v1/me/notes`
   - `POST /v1/me/notes`
+  - `GET /v1/me/notes/search`
+  - `GET /v1/me/notes/tags`
+  - `GET /v1/me/notes/tag-rollup`
   - `GET /v1/me/notes/{noteID}`
   - `PUT /v1/me/notes/{noteID}`
+  - `POST /v1/me/notes/{noteID}/append`
   - `DELETE /v1/me/notes/{noteID}`
 - Profile sync and backup routes:
   - `GET /v1/me/profile`

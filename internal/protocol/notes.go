@@ -114,6 +114,13 @@ type NotesSaveResponse struct {
 	PageType  string    `json:"page_type,omitempty"`
 }
 
+type NotesAppendRequest struct {
+	Content          string  `json:"content"`
+	BodyMarkdown     string  `json:"body_markdown,omitempty"`
+	Separator        *string `json:"separator,omitempty"`
+	ExpectedRevision string  `json:"expected_revision,omitempty"`
+}
+
 type NotesRenameRequest struct {
 	NoteID string `json:"note_id"`
 	Title  string `json:"title"`
