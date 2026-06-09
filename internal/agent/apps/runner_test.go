@@ -44,6 +44,36 @@ func TestRunnerInvokeReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestRunnerInvokeCarriesContextAndDecodesEvents(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	exe := writeExecutable(t, dir, "#!/bin/sh\nread line\ncase \"$line\" in *'\"trace_id\":\"trace_1\"'*) ;; *) printf '%s\n' '{\"request_id\":\"req_1\",\"ok\":false,\"error\":{\"code\":\"missing_context\",\"message\":\"missing context\"}}'; exit 0 ;; esac\nprintf '%s\n' '{\"request_id\":\"req_1\",\"ok\":true,\"output\":{\"text\":\"ok\"},\"events\":[{\"event\":\"media.download_progress\",\"topic\":\"media.downloads\",\"body\":{\"job_id\":\"job_1\",\"status\":\"running\"}}]}'\n")
+	runner := Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024}
+	response, err := runner.Invoke(context.Background(), InvokeSpec{
+		Executable: exe,
+		WorkDir:    dir,
+		Timeout:    5 * time.Second,
+		Request: AppStdioRequest{
+			ProtocolVersion: "hank.app.stdio.v1",
+			RequestID:       "req_1",
+			AppID:           "gramaton",
+			CommandID:       "download_status",
+			Context:         json.RawMessage(`{"trace_id":"trace_1"}`),
+			Input:           json.RawMessage(`{"job_id":"job_1"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke error: %v", err)
+	}
+	if !response.OK || len(response.Events) != 1 {
+		t.Fatalf("response = %#v", response)
+	}
+	event := response.Events[0]
+	if event.Event != "media.download_progress" || event.Topic != "media.downloads" || string(event.Body) != `{"job_id":"job_1","status":"running"}` {
+		t.Fatalf("event = %#v", event)
+	}
+}
+
 func TestRunnerInvokeRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

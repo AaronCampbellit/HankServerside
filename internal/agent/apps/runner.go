@@ -24,13 +24,21 @@ type AppStdioRequest struct {
 	Config          json.RawMessage `json:"config,omitempty"`
 	Secrets         json.RawMessage `json:"secrets,omitempty"`
 	Input           json.RawMessage `json:"input,omitempty"`
+	Context         json.RawMessage `json:"context,omitempty"`
 }
 
 type AppStdioResponse struct {
 	RequestID string          `json:"request_id"`
 	OK        bool            `json:"ok"`
 	Output    json.RawMessage `json:"output,omitempty"`
+	Events    []AppStdioEvent `json:"events,omitempty"`
 	Error     *AppError       `json:"error,omitempty"`
+}
+
+type AppStdioEvent struct {
+	Event string          `json:"event"`
+	Topic string          `json:"topic,omitempty"`
+	Body  json.RawMessage `json:"body,omitempty"`
 }
 
 type AppError struct {
@@ -184,6 +192,11 @@ func validateAppResponse(response AppStdioResponse, requestID string) (AppStdioR
 	}
 	if response.Error != nil && (response.Error.Code == "" || response.Error.Message == "") {
 		return AppStdioResponse{}, fmt.Errorf("invalid app response: error code and message are required")
+	}
+	for index, event := range response.Events {
+		if event.Event == "" {
+			return AppStdioResponse{}, fmt.Errorf("invalid app response: event %d is missing event name", index)
+		}
 	}
 	return response, nil
 }
