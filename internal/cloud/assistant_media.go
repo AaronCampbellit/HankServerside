@@ -212,7 +212,7 @@ func (s *Server) answerMediaSearch(ctx context.Context, home domain.Home, query 
 			"limit": 10,
 		}),
 	})
-	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandMediaSearch, protocol.MediaSearchRequest{Query: query, Limit: 10})
+	envelope, err := s.sendMediaCommand(ctx, home.ID, protocol.CommandMediaSearch, protocol.MediaSearchRequest{Query: query, Limit: 10})
 	if err != nil || envelope.Error != nil {
 		errorMessage := ""
 		if err != nil {
@@ -388,7 +388,7 @@ func mediaPlanRequiresConfirmation(plan protocol.MediaDownloadPlan) bool {
 }
 
 func (s *Server) planMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, error) {
-	envelope, err := s.sendAgentCommand(ctx, homeID, protocol.CommandMediaPlanDownload, protocol.MediaPlanDownloadRequest{Selection: selection})
+	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaPlanDownload, protocol.MediaPlanDownloadRequest{Selection: selection})
 	if err != nil {
 		return protocol.MediaDownloadPlan{}, err
 	}
@@ -403,7 +403,7 @@ func (s *Server) planMediaDownload(ctx context.Context, homeID string, selection
 }
 
 func (s *Server) startMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult) (protocol.MediaDownloadStartResponse, error) {
-	envelope, err := s.sendAgentCommand(ctx, homeID, protocol.CommandMediaDownloadStart, protocol.MediaDownloadStartRequest{Selection: selection})
+	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaDownloadStart, protocol.MediaDownloadStartRequest{Selection: selection})
 	if err != nil {
 		return protocol.MediaDownloadStartResponse{}, err
 	}

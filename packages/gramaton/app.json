@@ -1,0 +1,107 @@
+{
+  "schema_version": "hank.app.v1",
+  "id": "gramaton",
+  "name": "Gramaton",
+  "version": "1.0.0",
+  "publisher": "Hank",
+  "description": "Search Gramaton and manage source-aware media downloads from HankAI.",
+  "runtime": {
+    "type": "stdio",
+    "command": "bin/hank-app-gramaton"
+  },
+  "assistant": {
+    "slash_commands": [
+      {
+        "command": "/gramaton",
+        "command_id": "search",
+        "description": "Search for a movie or TV show on Gramaton."
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "settings_status",
+      "mode": "request_response",
+      "input_schema": "schemas/empty.schema.json",
+      "output_schema": "schemas/media.settings_status.response.schema.json",
+      "timeout_seconds": 30,
+      "admin_only": true
+    },
+    {
+      "id": "settings_apply",
+      "mode": "request_response",
+      "input_schema": "schemas/media.settings_apply.input.schema.json",
+      "output_schema": "schemas/media.settings_apply.response.schema.json",
+      "timeout_seconds": 60,
+      "admin_only": true
+    },
+    {
+      "id": "search",
+      "mode": "request_response",
+      "input_schema": "schemas/media.search.input.schema.json",
+      "output_schema": "schemas/media.search.response.schema.json",
+      "timeout_seconds": 120,
+      "admin_only": false
+    },
+    {
+      "id": "plan_download",
+      "mode": "request_response",
+      "input_schema": "schemas/media.plan_download.input.schema.json",
+      "output_schema": "schemas/media.plan_download.response.schema.json",
+      "timeout_seconds": 180,
+      "admin_only": false
+    },
+    {
+      "id": "download_start",
+      "mode": "request_response",
+      "input_schema": "schemas/media.download_start.input.schema.json",
+      "output_schema": "schemas/media.download_start.response.schema.json",
+      "timeout_seconds": 180,
+      "admin_only": true
+    },
+    {
+      "id": "download_status",
+      "mode": "request_response",
+      "input_schema": "schemas/media.download_status.input.schema.json",
+      "output_schema": "schemas/media.download_status.response.schema.json",
+      "timeout_seconds": 30,
+      "admin_only": false
+    },
+    {
+      "id": "download_jobs",
+      "mode": "request_response",
+      "input_schema": "schemas/empty.schema.json",
+      "output_schema": "schemas/media.download_jobs.response.schema.json",
+      "timeout_seconds": 30,
+      "admin_only": false
+    },
+    {
+      "id": "download_cancel",
+      "mode": "request_response",
+      "input_schema": "schemas/media.download_cancel.input.schema.json",
+      "output_schema": "schemas/media.download_cancel.response.schema.json",
+      "timeout_seconds": 30,
+      "admin_only": true
+    },
+    {
+      "id": "image_fetch",
+      "mode": "request_response",
+      "input_schema": "schemas/media.image_fetch.input.schema.json",
+      "output_schema": "schemas/media.image_fetch.response.schema.json",
+      "timeout_seconds": 30,
+      "admin_only": false
+    }
+  ],
+  "config": {
+    "schema": "schemas/config.schema.json",
+    "secret_fields": ["password"]
+  },
+  "permissions": {
+    "network": [
+      {
+        "kind": "configured_base_url",
+        "field": "base_url"
+      }
+    ]
+  }
+}
