@@ -45,7 +45,10 @@ type Manager struct {
 	staged     map[string]PackagePreview
 	agentID    string
 	agentToken string
+	eventSink  EventSink
 }
+
+type EventSink func(ctx context.Context, event string, topic string, payload any) error
 
 type InstalledApp struct {
 	Manifest     Manifest
@@ -73,6 +76,12 @@ func (m *Manager) SetPackageDownloadAuth(agentID string, token string) {
 	defer m.mu.Unlock()
 	m.agentID = strings.TrimSpace(agentID)
 	m.agentToken = strings.TrimSpace(token)
+}
+
+func (m *Manager) SetEventSink(sink EventSink) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.eventSink = sink
 }
 
 func (m *Manager) Load(ctx context.Context) error {
@@ -276,6 +285,7 @@ func (m *Manager) Invoke(ctx context.Context, request protocol.AppsInvokeRequest
 			Config:          snapshot.PublicConfig,
 			Secrets:         snapshot.Secrets,
 			Input:           request.Input,
+			Context:         request.Context,
 		},
 	})
 	if err != nil {
@@ -291,6 +301,7 @@ func (m *Manager) Invoke(ctx context.Context, request protocol.AppsInvokeRequest
 		return protocol.AppsInvokeResponse{}, fmt.Errorf("%w: %s", ErrAppInvocationFailed, message)
 	}
 	m.setLastError(request.AppID, "")
+	m.emitEvents(ctx, response.Events)
 	return protocol.AppsInvokeResponse{Output: cloneRawMessage(response.Output)}, nil
 }
 
@@ -346,6 +357,24 @@ func (m *Manager) setLastError(appID string, message string) {
 	defer m.mu.Unlock()
 	if app, ok := m.apps[appID]; ok {
 		app.LastError = message
+	}
+}
+
+func (m *Manager) emitEvents(ctx context.Context, events []AppStdioEvent) {
+	if len(events) == 0 {
+		return
+	}
+	m.mu.RLock()
+	sink := m.eventSink
+	m.mu.RUnlock()
+	if sink == nil {
+		return
+	}
+	for _, event := range events {
+		if event.Event == "" {
+			continue
+		}
+		_ = sink(ctx, event.Event, event.Topic, cloneRawMessage(event.Body))
 	}
 }
 

@@ -158,6 +158,12 @@ func (c *Client) runOnce(ctx context.Context) error {
 		})
 		defer c.dispatcher.media.SetEventSink(nil)
 	}
+	if c.dispatcher.apps != nil {
+		c.dispatcher.apps.SetEventSink(func(ctx context.Context, event string, topic string, payload any) error {
+			return c.sendAgentEvent(ctx, conn, event, topic, payload)
+		})
+		defer c.dispatcher.apps.SetEventSink(nil)
+	}
 
 	for {
 		select {

@@ -261,6 +261,40 @@ func TestManagerInvokeRunsEnabledApp(t *testing.T) {
 	}
 }
 
+func TestManagerInvokePassesContextAndEmitsEvents(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	manager := installManagerHermesPackageWithScript(t, true, hermesRuntimeScriptWithEvent(`{"text":"hello from hermes"}`))
+	var events []AppStdioEvent
+	manager.SetEventSink(func(ctx context.Context, event string, topic string, payload any) error {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		events = append(events, AppStdioEvent{Event: event, Topic: topic, Body: raw})
+		return nil
+	})
+
+	response, err := manager.Invoke(ctx, protocol.AppsInvokeRequest{
+		AppID:     "hermes",
+		CommandID: "chat",
+		Input:     json.RawMessage(`{"prompt":"hello"}`),
+		Context:   json.RawMessage(`{"trace_id":"trace_1"}`),
+	})
+	if err != nil {
+		t.Fatalf("Invoke error: %v", err)
+	}
+	if string(response.Output) != `{"text":"hello from hermes"}` {
+		t.Fatalf("Output = %s", response.Output)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one event", events)
+	}
+	if events[0].Event != "media.download_progress" || events[0].Topic != "media.downloads" || string(events[0].Body) != `{"job_id":"job_1","status":"running"}` {
+		t.Fatalf("event = %#v", events[0])
+	}
+}
+
 func installManagerHermesPackage(t *testing.T, enable bool) *Manager {
 	t.Helper()
 	return installManagerHermesPackageWithScript(t, enable, hermesRuntimeScript(`{"text":"hello from hermes"}`))
@@ -354,6 +388,10 @@ func writeZipEntry(t *testing.T, zw *zip.Writer, name string, body string, mode 
 
 func hermesRuntimeScript(output string) string {
 	return "#!/bin/sh\nread line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":true,\"output\":" + output + "}'\n"
+}
+
+func hermesRuntimeScriptWithEvent(output string) string {
+	return "#!/bin/sh\nread line\ncase \"$line\" in *'\"trace_id\":\"trace_1\"'*) ;; *) printf '%s\\n' '{\"request_id\":\"req_1\",\"ok\":false,\"error\":{\"code\":\"missing_context\",\"message\":\"missing context\"}}'; exit 0 ;; esac\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":true,\"output\":" + output + ",\"events\":[{\"event\":\"media.download_progress\",\"topic\":\"media.downloads\",\"body\":{\"job_id\":\"job_1\",\"status\":\"running\"}}]}'\n"
 }
 
 func hermesSecretEchoScript() string {
