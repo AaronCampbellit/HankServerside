@@ -33,27 +33,36 @@ func gramatonAppCommandID(command string) (string, bool) {
 }
 
 func (s *Server) sendMediaCommand(ctx context.Context, homeID string, command string, body any) (protocol.Envelope, error) {
-	if commandID, ok := gramatonAppCommandID(command); ok && s.agentHasCapability(homeID, "apps.gramaton."+commandID) {
-		input, err := protocol.EncodeBody(body)
-		if err != nil {
-			return protocol.Envelope{}, err
-		}
-		envelope, err := s.sendAgentCommand(ctx, homeID, protocol.CommandAppsInvoke, protocol.AppsInvokeRequest{
-			AppID:     "gramaton",
-			CommandID: commandID,
-			Input:     input,
-		})
-		if err != nil || envelope.Error != nil {
-			return envelope, err
-		}
-		response, err := protocol.DecodePayload[protocol.AppsInvokeResponse](envelope)
-		if err != nil {
-			return protocol.Envelope{}, fmt.Errorf("decode Gramaton app response: %w", err)
-		}
-		envelope.Payload = cloneMediaCommandPayload(response.Output)
-		return envelope, nil
+	commandID, ok := gramatonAppCommandID(command)
+	if !ok {
+		return protocol.Envelope{}, fmt.Errorf("unsupported Gramaton command %q", command)
 	}
-	return s.sendAgentCommand(ctx, homeID, command, body)
+	if !s.agentHasCapability(homeID, "apps.gramaton."+commandID) {
+		return protocol.Envelope{
+			Error: &protocol.ErrorPayload{
+				Code:    "app_not_configured",
+				Message: "Gramaton app is not installed or enabled on the home agent.",
+			},
+		}, nil
+	}
+	input, err := protocol.EncodeBody(body)
+	if err != nil {
+		return protocol.Envelope{}, err
+	}
+	envelope, err := s.sendAgentCommand(ctx, homeID, protocol.CommandAppsInvoke, protocol.AppsInvokeRequest{
+		AppID:     "gramaton",
+		CommandID: commandID,
+		Input:     input,
+	})
+	if err != nil || envelope.Error != nil {
+		return envelope, err
+	}
+	response, err := protocol.DecodePayload[protocol.AppsInvokeResponse](envelope)
+	if err != nil {
+		return protocol.Envelope{}, fmt.Errorf("decode Gramaton app response: %w", err)
+	}
+	envelope.Payload = cloneMediaCommandPayload(response.Output)
+	return envelope, nil
 }
 
 func cloneMediaCommandPayload(raw []byte) []byte {

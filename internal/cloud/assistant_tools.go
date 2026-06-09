@@ -598,7 +598,7 @@ func executeAssistantHermesChatTool(ctx context.Context, server *Server, runtime
 	if server.agentHasCapability(runtime.Home.ID, "apps.hermes.chat") {
 		return server.answerHermesAppPrompt(ctx, runtime.Home, runtime.Auth, runtime.Session, intent.Query)
 	}
-	return server.answerHermesChatPrompt(ctx, runtime.Home, runtime.Auth, runtime.Session, intent.Query)
+	return assistantMessageContent{Text: "Hermes chat is not configured on the home agent yet."}, nil
 }
 
 func (s *Server) agentHasCapability(homeID string, capability string) bool {

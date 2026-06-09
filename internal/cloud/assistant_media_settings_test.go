@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ func TestAssistantMediaSettingsEndpointAppliesThroughAgent(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	requestCh := make(chan protocol.MediaSettingsApplyRequest, 1)
 	errCh := make(chan error, 1)
@@ -75,6 +77,7 @@ func TestAssistantMediaSettingsEndpointReturnsDestinationOptions(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -127,6 +130,7 @@ func TestAssistantMediaJobCancelEndpointRoutesToAgent(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	requestCh := make(chan protocol.MediaDownloadCancelRequest, 1)
 	errCh := make(chan error, 1)
@@ -168,6 +172,7 @@ func TestAssistantMediaJobStatusEndpointRoutesToAgent(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	requestCh := make(chan protocol.MediaDownloadStatusRequest, 1)
 	errCh := make(chan error, 1)
@@ -213,6 +218,7 @@ func TestAssistantMediaImageEndpointProxiesThroughAgent(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	imageBytes := []byte{0x89, 'P', 'N', 'G'}
 	errCh := make(chan error, 1)
@@ -256,6 +262,10 @@ func TestAssistantMediaImageEndpointProxiesThroughAgent(t *testing.T) {
 }
 
 func serveOneMediaAgentCommand(ctx context.Context, agentConn *websocket.Conn, agentID string, homeID string, wantCommand string, handler func(json.RawMessage) (any, error)) error {
+	wantCommandID, ok := gramatonAppCommandID(wantCommand)
+	if !ok {
+		return fmt.Errorf("unsupported Gramaton test command %q", wantCommand)
+	}
 	for {
 		var envelope protocol.Envelope
 		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
@@ -268,17 +278,55 @@ func serveOneMediaAgentCommand(ctx context.Context, agentConn *websocket.Conn, a
 		if err != nil {
 			return err
 		}
-		if command.Command != wantCommand {
-			return fmt.Errorf("command = %q, want %q", command.Command, wantCommand)
+		if command.Command != protocol.CommandAppsInvoke {
+			return fmt.Errorf("command = %q, want %q", command.Command, protocol.CommandAppsInvoke)
 		}
-		responsePayload, err := handler(command.Body)
+		invoke, err := decodeProtocolBody[protocol.AppsInvokeRequest](command.Body)
 		if err != nil {
 			return err
 		}
-		response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, responsePayload)
+		if invoke.AppID != "gramaton" || invoke.CommandID != wantCommandID {
+			return fmt.Errorf("apps.invoke = %s/%s, want gramaton/%s", invoke.AppID, invoke.CommandID, wantCommandID)
+		}
+		responsePayload, err := handler(invoke.Input)
+		if err != nil {
+			return err
+		}
+		output, err := protocol.EncodeBody(responsePayload)
+		if err != nil {
+			return err
+		}
+		response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.AppsInvokeResponse{Output: output})
 		if err != nil {
 			return err
 		}
 		return wsjson.Write(ctx, agentConn, response)
 	}
+}
+
+func advertiseGramatonAppCapabilities(t *testing.T, ctx context.Context, testServer *httptest.Server, sessionToken string, agentConn *websocket.Conn, agentID string, homeID string) {
+	t.Helper()
+
+	heartbeat, err := protocol.NewEnvelope(protocol.TypeAgentHeartbeat, "", agentID, homeID, protocol.AgentHeartbeat{
+		AgentID: agentID,
+		SentAt:  time.Now().UTC(),
+		Capabilities: []string{
+			"apps.gramaton.settings_status",
+			"apps.gramaton.settings_apply",
+			"apps.gramaton.search",
+			"apps.gramaton.plan_download",
+			"apps.gramaton.download_start",
+			"apps.gramaton.download_status",
+			"apps.gramaton.download_jobs",
+			"apps.gramaton.download_cancel",
+			"apps.gramaton.image_fetch",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope heartbeat: %v", err)
+	}
+	if err := wsjson.Write(ctx, agentConn, heartbeat); err != nil {
+		t.Fatalf("heartbeat write: %v", err)
+	}
+	waitForAgentCapability(t, testServer, sessionToken, "apps.gramaton.search")
 }

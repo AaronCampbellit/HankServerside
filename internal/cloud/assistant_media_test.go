@@ -102,6 +102,7 @@ func TestAssistantMediaConfirmationCarriesPosterCard(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	const posterURL = "https://image.example/fixture-movie.jpg"
 	errCh := make(chan error, 1)
@@ -178,6 +179,7 @@ func TestAssistantMediaStartsImmediatelyWhenConfirmationDisabled(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	requireConfirmation := false
 	errCh := make(chan error, 1)
@@ -260,6 +262,7 @@ func TestAssistantMediaSelectionPlansDownloadAfterSearchResults(t *testing.T) {
 	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
 
 	errCh := make(chan error, 1)
 	go func() {

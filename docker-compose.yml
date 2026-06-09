@@ -160,6 +160,8 @@ services:
       - cloud
     volumes:
       - ./.env.agent:/app/.env.agent
+      - hank_agent_apps:/var/lib/hank/apps
+      - hank_agent_app_staging:/var/lib/hank/app-staging
       - hank_agent_files:/srv/hank/files
       - hank_agent_notes:/srv/hank/notes
     command: ["/usr/local/bin/hank-remote-agent"]
@@ -176,6 +178,8 @@ volumes:
   hank_db_ops_logs:
   hank_note_attachments:
   hank_note_attachments_restore:
+  hank_agent_apps:
+  hank_agent_app_staging:
   hank_agent_files:
   hank_agent_notes:
 

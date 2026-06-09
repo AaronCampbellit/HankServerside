@@ -15,9 +15,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
-	agenthermes "github.com/dropfile/hankremote/internal/agent/hermes"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
-	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -41,7 +39,7 @@ type Client struct {
 	restartFn  func()
 }
 
-func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, media *agentmedia.Service, notes *agentnotes.Service, hermes *agenthermes.Service, apps *agentapps.Manager, logger *slog.Logger) *Client {
+func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, notes *agentnotes.Service, apps *agentapps.Manager, logger *slog.Logger) *Client {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -51,14 +49,8 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 	if files == nil {
 		files = agentfiles.New("")
 	}
-	if media == nil {
-		media = agentmedia.New(agentmedia.Config{}, files, logger)
-	}
 	if notes == nil {
 		notes = agentnotes.New("")
-	}
-	if hermes == nil {
-		hermes = agenthermes.New(agenthermes.Config{})
 	}
 	if apps == nil {
 		apps = agentapps.NewManager("", "", agentapps.Runner{})
@@ -75,11 +67,9 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 		dispatcher: commandDispatcher{
 			ha:     ha,
 			files:  files,
-			media:  media,
 			notes:  notes,
-			hermes: hermes,
 			apps:   apps,
-			config: newConfigManager(configPath, ha, files, hermes),
+			config: newConfigManager(configPath, ha, files),
 		},
 		uploads:   make(map[string]*uploadTransfer),
 		moves:     make(map[string]context.CancelFunc),
@@ -152,12 +142,6 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}()
 	go c.emitHomeAssistantChanges(monitorCtx, conn)
 	go c.emitFileDirectoryChanges(monitorCtx, conn, "/")
-	if c.dispatcher.media != nil {
-		c.dispatcher.media.SetEventSink(func(ctx context.Context, event string, topic string, payload any) error {
-			return c.sendAgentEvent(ctx, conn, event, topic, payload)
-		})
-		defer c.dispatcher.media.SetEventSink(nil)
-	}
 	if c.dispatcher.apps != nil {
 		c.dispatcher.apps.SetEventSink(func(ctx context.Context, event string, topic string, payload any) error {
 			return c.sendAgentEvent(ctx, conn, event, topic, payload)
@@ -389,26 +373,6 @@ func (c *Client) capabilities() []string {
 			"notes.tags",
 			"notes.tag_rollup",
 		)
-	}
-	if c.dispatcher.media != nil {
-		capabilities = append(capabilities,
-			protocol.CommandMediaSettingsStatus,
-			protocol.CommandMediaSettingsApply,
-			protocol.CommandMediaDownloadJobs,
-			protocol.CommandMediaDownloadCancel,
-		)
-	}
-	if c.dispatcher.media != nil && c.dispatcher.media.Enabled() {
-		capabilities = append(capabilities,
-			protocol.CommandMediaSearch,
-			protocol.CommandMediaPlanDownload,
-			protocol.CommandMediaDownloadStart,
-			protocol.CommandMediaDownloadStatus,
-			protocol.CommandMediaImageFetch,
-		)
-	}
-	if c.dispatcher.hermes != nil && c.dispatcher.hermes.Enabled() {
-		capabilities = append(capabilities, protocol.CommandHermesChat)
 	}
 	if c.dispatcher.apps != nil {
 		capabilities = append(capabilities,

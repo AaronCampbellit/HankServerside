@@ -79,8 +79,6 @@ type Agent struct {
 	SMBShares     []SMB
 	FilesRoot     string
 	NotesRoot     string
-	Media         Media
-	Hermes        Hermes
 }
 
 type HomeAssistant struct {
@@ -107,25 +105,6 @@ type FileAccessPolicy struct {
 	AllowedPrefixes []string `json:"allowed_prefixes,omitempty"`
 	BlockedPrefixes []string `json:"blocked_prefixes,omitempty"`
 	MaxUploadBytes  int64    `json:"max_upload_bytes,omitempty"`
-}
-
-type Media struct {
-	GramatonEnabled      bool
-	GramatonBaseURL      string
-	Username             string
-	Password             string
-	SourceID             string
-	DestinationPath      string
-	MovieDestinationPath string
-	TVDestinationPath    string
-	RequireConfirmation  bool
-}
-
-type Hermes struct {
-	APIBaseURL string
-	APIKey     string
-	Model      string
-	Timeout    time.Duration
 }
 
 func LoadCloud() (Cloud, error) {
@@ -238,10 +217,6 @@ func LoadAgent() (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
-	hermesTimeout, err := durationSeconds("HANK_REMOTE_HERMES_TIMEOUT_SECONDS", 120)
-	if err != nil {
-		return Agent{}, err
-	}
 	smbShares, err := loadSMBShares(os.Getenv("HANK_REMOTE_SMB_SHARES_JSON"))
 	if err != nil {
 		return Agent{}, err
@@ -257,23 +232,6 @@ func LoadAgent() (Agent, error) {
 		AppStagingDir: envOrDefault("HANK_REMOTE_AGENT_APP_STAGING_DIR", "/var/lib/hank/app-staging"),
 		FilesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
 		NotesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
-		Media: Media{
-			GramatonEnabled:      boolEnvOrDefault("HANK_REMOTE_MEDIA_GRAMATON_ENABLED", false),
-			GramatonBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_MEDIA_GRAMATON_BASE_URL", "https://gramaton.io"), "/"),
-			Username:             strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_USERNAME")),
-			Password:             os.Getenv("HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"),
-			SourceID:             strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_SOURCE_ID")),
-			DestinationPath:      strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_DESTINATION_PATH")),
-			MovieDestinationPath: strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH")),
-			TVDestinationPath:    strings.TrimSpace(os.Getenv("HANK_REMOTE_MEDIA_TV_DESTINATION_PATH")),
-			RequireConfirmation:  boolEnvOrDefault("HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION", true),
-		},
-		Hermes: Hermes{
-			APIBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("HANK_REMOTE_HERMES_API_BASE_URL")), "/"),
-			APIKey:     strings.TrimSpace(os.Getenv("HANK_REMOTE_HERMES_API_KEY")),
-			Model:      envOrDefault("HANK_REMOTE_HERMES_MODEL", "hermes-agent"),
-			Timeout:    hermesTimeout,
-		},
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),
 			Token:   strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_TOKEN")),

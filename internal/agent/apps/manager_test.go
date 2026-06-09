@@ -149,6 +149,53 @@ func TestManagerConfigApplyEnablesAppAndTracksSecrets(t *testing.T) {
 	}
 }
 
+func TestManagerLoadRestoresPersistedAppState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	appsDir := filepath.Join(t.TempDir(), "apps")
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	archivePath := writeManagerHermesPackage(t, t.TempDir(), hermesSecretEchoScript())
+	manager := NewManager(appsDir, stagingDir, Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024})
+	if _, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:   "stage_1",
+		DownloadURL: fileURL(t, archivePath),
+	}); err != nil {
+		t.Fatalf("PreviewPackage error: %v", err)
+	}
+	if _, err := manager.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{
+		StagingID: "stage_1",
+		Enable:    true,
+	}); err != nil {
+		t.Fatalf("ActivatePackage error: %v", err)
+	}
+	if _, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:        "hermes",
+		PublicConfig: json.RawMessage(`{"api_base_url":"https://hermes.local"}`),
+		Secrets:      json.RawMessage(`{"api_key":"persisted-secret"}`),
+	}); err != nil {
+		t.Fatalf("ConfigApply error: %v", err)
+	}
+
+	reloaded := NewManager(appsDir, stagingDir, Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024})
+	if err := reloaded.Load(ctx); err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if capabilities := reloaded.Capabilities(); len(capabilities) != 1 || capabilities[0] != "apps.hermes.chat" {
+		t.Fatalf("Capabilities = %#v, want persisted hermes capability", capabilities)
+	}
+	response, err := reloaded.Invoke(ctx, protocol.AppsInvokeRequest{
+		AppID:     "hermes",
+		CommandID: "chat",
+		Input:     json.RawMessage(`{"prompt":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("Invoke after reload error: %v", err)
+	}
+	if string(response.Output) != `{"api_key":"persisted-secret"}` {
+		t.Fatalf("Output = %s, want persisted secret", response.Output)
+	}
+}
+
 func TestManagerCapabilitiesOnlyIncludesEnabledApps(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -1356,7 +1356,7 @@ func TestAssistantHomeAssistantQueryUsesLiveStates(t *testing.T) {
 	}
 }
 
-func TestAssistantHermesCommandRoutesThroughAgent(t *testing.T) {
+func TestAssistantHermesCommandRequiresInstalledApp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -1364,8 +1364,8 @@ func TestAssistantHermesCommandRoutesThroughAgent(t *testing.T) {
 	defer testServer.Close()
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
 
-	requests := make(chan protocol.HermesChatRequest, 1)
-	go serveAssistantHermesChat(ctx, t, agentConn, agentID, homeID, requests)
+	_ = homeID
+	_ = agentID
 
 	var session assistantAPISession
 	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
@@ -1381,23 +1381,11 @@ func TestAssistantHermesCommandRoutesThroughAgent(t *testing.T) {
 	if run.AssistantMessage == nil {
 		t.Fatalf("missing assistant message: %#v", run)
 	}
-	if run.AssistantMessage.Text != "Hermes says check the API server." {
+	if run.AssistantMessage.Text != "Hermes chat is not configured on the home agent yet." {
 		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
 	}
 	if run.Diagnostics == nil || run.Diagnostics.ToolKind != string(assistantIntentHermesChat) || run.Diagnostics.Query != "what should I check next?" {
 		t.Fatalf("diagnostics = %#v", run.Diagnostics)
-	}
-
-	select {
-	case request := <-requests:
-		if request.Prompt != "what should I check next?" {
-			t.Fatalf("Hermes prompt = %q", request.Prompt)
-		}
-		if !strings.Contains(request.ConversationID, session.ID) || !strings.Contains(request.SessionKey, session.ID) {
-			t.Fatalf("Hermes scope = conversation %q session key %q", request.ConversationID, request.SessionKey)
-		}
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for Hermes command")
 	}
 }
 
@@ -1451,7 +1439,7 @@ func TestAssistantHermesCommandPrefersInstalledApp(t *testing.T) {
 		if request.AppInvoke.AppID != "hermes" || request.AppInvoke.CommandID != "chat" {
 			t.Fatalf("apps.invoke request = %#v", request.AppInvoke)
 		}
-		var input protocol.HermesChatRequest
+		var input hermesChatAppRequest
 		if err := json.Unmarshal(request.AppInvoke.Input, &input); err != nil {
 			t.Fatalf("Decode app input: %v", err)
 		}
@@ -1554,7 +1542,7 @@ func serveAssistantHermesAppInvoke(ctx context.Context, t *testing.T, agentConn 
 			case requests <- capture:
 			default:
 			}
-			output, err := json.Marshal(protocol.HermesChatResponse{
+			output, err := json.Marshal(hermesChatAppResponse{
 				Text:           "Hermes app says check the package runtime.",
 				Model:          "hermes-agent",
 				ResponseID:     "resp_app",
@@ -1575,15 +1563,6 @@ func serveAssistantHermesAppInvoke(ctx context.Context, t *testing.T, agentConn 
 		select {
 		case requests <- capture:
 		default:
-		}
-		if command.Command == protocol.CommandHermesChat {
-			response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.HermesChatResponse{
-				Text: "compiled fallback should not run",
-			})
-			if err != nil {
-				return
-			}
-			_ = wsjson.Write(ctx, agentConn, response)
 		}
 	}
 }
@@ -1607,45 +1586,6 @@ func serveAssistantHomeAssistantStates(ctx context.Context, t *testing.T, agentC
 			continue
 		}
 		response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.HomeAssistantFetchStatesResponse{States: states})
-		if err != nil {
-			return
-		}
-		_ = wsjson.Write(ctx, agentConn, response)
-	}
-}
-
-func serveAssistantHermesChat(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, requests chan<- protocol.HermesChatRequest) {
-	t.Helper()
-
-	for {
-		var envelope protocol.Envelope
-		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
-			return
-		}
-		if envelope.Type != protocol.TypeCloudCommand {
-			continue
-		}
-		command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
-		if err != nil {
-			return
-		}
-		if command.Command != protocol.CommandHermesChat {
-			continue
-		}
-		request, err := decodeProtocolBody[protocol.HermesChatRequest](command.Body)
-		if err != nil {
-			return
-		}
-		select {
-		case requests <- request:
-		default:
-		}
-		response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.HermesChatResponse{
-			Text:           "Hermes says check the API server.",
-			Model:          "hermes-agent",
-			ResponseID:     "resp_test",
-			ConversationID: request.ConversationID,
-		})
 		if err != nil {
 			return
 		}

@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
 	"path"
 	"regexp"
 	"sort"
@@ -1752,61 +1751,7 @@ func (s *Service) destinationLabel() string {
 }
 
 func (s *Service) persistSettings(cfg Config) error {
-	cfg.EnvPath = strings.TrimSpace(cfg.EnvPath)
-	if cfg.EnvPath == "" {
-		return nil
-	}
-	env, err := readEnvFile(cfg.EnvPath)
-	if err != nil {
-		return err
-	}
-	env["HANK_REMOTE_MEDIA_GRAMATON_ENABLED"] = strconv.FormatBool(cfg.Enabled)
-	env["HANK_REMOTE_MEDIA_GRAMATON_BASE_URL"] = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	env["HANK_REMOTE_MEDIA_GRAMATON_USERNAME"] = strings.TrimSpace(cfg.Username)
-	env["HANK_REMOTE_MEDIA_GRAMATON_PASSWORD"] = cfg.Password
-	env["HANK_REMOTE_MEDIA_SOURCE_ID"] = strings.TrimSpace(cfg.SourceID)
-	env["HANK_REMOTE_MEDIA_DESTINATION_PATH"] = cleanSharePath(cfg.DestinationPath)
-	env["HANK_REMOTE_MEDIA_MOVIE_DESTINATION_PATH"] = cleanSharePath(cfg.MovieDestinationPath)
-	env["HANK_REMOTE_MEDIA_REQUIRE_CONFIRMATION"] = strconv.FormatBool(cfg.RequireConfirmation)
-	env["HANK_REMOTE_MEDIA_TV_DESTINATION_PATH"] = cleanSharePath(cfg.TVDestinationPath)
-	return writeEnvFile(cfg.EnvPath, env)
-}
-
-func readEnvFile(envPath string) (map[string]string, error) {
-	env := map[string]string{}
-	data, err := os.ReadFile(envPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return env, nil
-		}
-		return nil, err
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		env[strings.TrimSpace(key)] = value
-	}
-	return env, nil
-}
-
-func writeEnvFile(envPath string, env map[string]string) error {
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	lines := make([]string, 0, len(keys)+1)
-	for _, key := range keys {
-		lines = append(lines, key+"="+env[key])
-	}
-	lines = append(lines, "")
-	return os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0o600)
+	return nil
 }
 
 func parseLoginForm(body string) (string, url.Values) {

@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
+	gramatonmedia "github.com/dropfile/hankremote/cmd/hank-app-gramaton/internal/media"
 	"github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
-	agentmedia "github.com/dropfile/hankremote/internal/agent/media"
 	"github.com/dropfile/hankremote/internal/config"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -195,7 +195,7 @@ func dispatch(ctx context.Context, request apps.AppStdioRequest, stderr io.Write
 	}
 }
 
-func newMediaService(rawConfig json.RawMessage, rawSecrets json.RawMessage, stderr io.Writer) (*agentmedia.Service, error) {
+func newMediaService(rawConfig json.RawMessage, rawSecrets json.RawMessage, stderr io.Writer) (*gramatonmedia.Service, error) {
 	agentCfg, err := config.LoadAgent()
 	if err != nil {
 		return nil, appError{"invalid_environment", "agent environment is not available"}
@@ -213,29 +213,28 @@ func newMediaService(rawConfig json.RawMessage, rawSecrets json.RawMessage, stde
 		Root:   filesRoot,
 		Shares: agentSMBShares(agentCfg.SMBShares),
 	})
-	requireConfirmation := agentCfg.Media.RequireConfirmation
+	requireConfirmation := true
 	if appCfg.RequireConfirmation != nil {
 		requireConfirmation = *appCfg.RequireConfirmation
 	}
-	enabled := agentCfg.Media.GramatonEnabled
+	enabled := true
 	if appCfg.Enabled != nil {
 		enabled = *appCfg.Enabled
 	}
-	mediaCfg := agentmedia.Config{
+	mediaCfg := gramatonmedia.Config{
 		Enabled:                       enabled,
-		BaseURL:                       firstNonBlank(strings.TrimSpace(appCfg.BaseURL), agentCfg.Media.GramatonBaseURL, "https://gramaton.io"),
-		Username:                      firstNonBlank(strings.TrimSpace(appCfg.Username), agentCfg.Media.Username),
-		Password:                      firstNonBlank(secrets.Password, agentCfg.Media.Password),
-		SourceID:                      firstNonBlank(strings.TrimSpace(appCfg.SourceID), agentCfg.Media.SourceID),
-		DestinationPath:               firstNonBlank(strings.TrimSpace(appCfg.DestinationPath), agentCfg.Media.DestinationPath),
-		MovieDestinationPath:          firstNonBlank(strings.TrimSpace(appCfg.MovieDestinationPath), agentCfg.Media.MovieDestinationPath),
-		TVDestinationPath:             firstNonBlank(strings.TrimSpace(appCfg.TVDestinationPath), agentCfg.Media.TVDestinationPath),
+		BaseURL:                       firstNonBlank(strings.TrimSpace(appCfg.BaseURL), "https://gramaton.io"),
+		Username:                      strings.TrimSpace(appCfg.Username),
+		Password:                      secrets.Password,
+		SourceID:                      strings.TrimSpace(appCfg.SourceID),
+		DestinationPath:               strings.TrimSpace(appCfg.DestinationPath),
+		MovieDestinationPath:          strings.TrimSpace(appCfg.MovieDestinationPath),
+		TVDestinationPath:             strings.TrimSpace(appCfg.TVDestinationPath),
 		RequireConfirmation:           requireConfirmation,
 		RequireConfirmationConfigured: true,
-		EnvPath:                       agentCfg.ConfigPath,
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return agentmedia.New(mediaCfg, files, logger), nil
+	return gramatonmedia.New(mediaCfg, files, logger), nil
 }
 
 func startDownloadWorker(ctx context.Context, request apps.AppStdioRequest, body protocol.MediaDownloadStartRequest) (commandResponse, error) {
