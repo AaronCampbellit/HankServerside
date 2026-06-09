@@ -57,7 +57,7 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 			return
 		}
 		request.Persist = true
-		envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandMediaSettingsApply, request)
+		envelope, err := s.sendMediaCommand(r.Context(), home.ID, protocol.CommandMediaSettingsApply, request)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -85,7 +85,7 @@ func (s *Server) handleAssistantMediaSettings(w http.ResponseWriter, r *http.Req
 func (s *Server) fetchAssistantMediaSettings(r *http.Request, home domain.Home, membership domain.HomeMembership) (assistantMediaSettingsResponse, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), assistantMediaSettingsStatusTimeout)
 	defer cancel()
-	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandMediaSettingsStatus, protocol.MediaSettingsStatusRequest{})
+	envelope, err := s.sendMediaCommand(ctx, home.ID, protocol.CommandMediaSettingsStatus, protocol.MediaSettingsStatusRequest{})
 	if err != nil {
 		return assistantMediaSettingsResponse{}, err
 	}
@@ -110,7 +110,7 @@ func (s *Server) handleAssistantMediaJobStatus(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandMediaDownloadStatus, protocol.MediaDownloadStatusRequest{JobID: jobID})
+	envelope, err := s.sendMediaCommand(r.Context(), home.ID, protocol.CommandMediaDownloadStatus, protocol.MediaDownloadStatusRequest{JobID: jobID})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -143,7 +143,7 @@ func (s *Server) handleAssistantMediaImage(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), assistantMediaImageFetchTimeout)
 	defer cancel()
-	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandMediaImageFetch, protocol.MediaImageFetchRequest{URL: rawURL})
+	envelope, err := s.sendMediaCommand(ctx, home.ID, protocol.CommandMediaImageFetch, protocol.MediaImageFetchRequest{URL: rawURL})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -182,7 +182,7 @@ func (s *Server) handleAssistantMediaJobCancel(w http.ResponseWriter, r *http.Re
 		http.Error(w, "admin role required", http.StatusForbidden)
 		return
 	}
-	envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandMediaDownloadCancel, protocol.MediaDownloadCancelRequest{JobID: jobID})
+	envelope, err := s.sendMediaCommand(r.Context(), home.ID, protocol.CommandMediaDownloadCancel, protocol.MediaDownloadCancelRequest{JobID: jobID})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
