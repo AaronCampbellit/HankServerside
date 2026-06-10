@@ -149,6 +149,32 @@ func TestManagerConfigApplyEnablesAppAndTracksSecrets(t *testing.T) {
 	}
 }
 
+func TestManagerConfigApplyClearsLastError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	manager := installManagerHermesPackage(t, true)
+
+	manager.setLastError("hermes", "previous failure")
+	status, err := manager.ConfigStatus(ctx, protocol.AppsConfigStatusRequest{AppID: "hermes"})
+	if err != nil {
+		t.Fatalf("ConfigStatus with stale error: %v", err)
+	}
+	if len(status.Apps) != 1 || status.Apps[0].LastError == "" {
+		t.Fatalf("LastError before ConfigApply = %#v, want populated", status.Apps)
+	}
+
+	response, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:        "hermes",
+		PublicConfig: json.RawMessage(`{"api_base_url":"https://hermes.local"}`),
+	})
+	if err != nil {
+		t.Fatalf("ConfigApply error: %v", err)
+	}
+	if response.App.LastError != "" {
+		t.Fatalf("LastError after ConfigApply = %q, want empty", response.App.LastError)
+	}
+}
+
 func TestManagerLoadRestoresPersistedAppState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

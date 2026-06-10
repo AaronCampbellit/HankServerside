@@ -276,6 +276,7 @@ func (m *Manager) ConfigApply(ctx context.Context, request protocol.AppsConfigAp
 	if request.Enable != nil {
 		app.Enabled = *request.Enable
 	}
+	app.LastError = ""
 	if err := writePersistedAppState(app); err != nil {
 		return protocol.AppsConfigApplyResponse{}, err
 	}
