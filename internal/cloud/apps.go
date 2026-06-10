@@ -263,6 +263,14 @@ func (s *Server) persistAgentApp(r *http.Request, homeID string, updatedBy strin
 		}
 		secretFieldsSet = string(raw)
 	}
+	settingsSchema := "{}"
+	if len(app.SettingsSchema.Fields) > 0 {
+		raw, err := json.Marshal(app.SettingsSchema)
+		if err != nil {
+			return err
+		}
+		settingsSchema = string(raw)
+	}
 	status := strings.TrimSpace(app.Status)
 	if status == "" {
 		status = domain.SyncStatusPending
@@ -275,6 +283,7 @@ func (s *Server) persistAgentApp(r *http.Request, homeID string, updatedBy strin
 		Enabled:             app.Enabled,
 		PublicConfigJSON:    publicConfig,
 		SecretFieldsSetJSON: secretFieldsSet,
+		SettingsSchemaJSON:  settingsSchema,
 		Status:              status,
 		LastError:           app.LastError,
 		UpdatedAt:           now,

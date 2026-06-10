@@ -128,7 +128,27 @@ The initial package schema is `hank.app.v1`.
   ],
   "config": {
     "schema": "schemas/config.schema.json",
-    "secret_fields": ["api_key"]
+    "secret_fields": ["api_key"],
+    "settings_schema": {
+      "fields": [
+        {
+          "key": "api_base_url",
+          "label": "Hermes URL",
+          "type": "url",
+          "required": true,
+          "order": 10
+        },
+        {
+          "key": "api_key",
+          "label": "API key",
+          "type": "password",
+          "secret": true,
+          "secret_key": "api_key",
+          "help": "Leave blank to keep the current key.",
+          "order": 20
+        }
+      ]
+    }
   },
   "permissions": {
     "network": [
@@ -154,6 +174,50 @@ Manifest validation should reject:
 - slash commands that collide with built-in Hank commands or another enabled app
 - schema references that escape the app directory
 - archives with absolute paths, parent-directory paths, symlinks, or unsafe file modes
+
+## Typed Settings Schema
+
+Apps declare GUI-editable settings in `config.settings_schema.fields`. This schema is for Hank Settings rendering; the app still receives public values through `config` and sensitive values through `secrets` in the stdio request.
+
+Supported field types are:
+
+- `text`
+- `url`
+- `number`
+- `boolean`
+- `password`
+- `select`
+- `path`
+
+Field keys write to app public config unless `secret: true` is set. Secret fields write to `secrets[secret_key || key]`, are marked as set/unset in the GUI, and blank values preserve the existing secret.
+
+Apps can request Hank-owned resources as selectable bindings. V1 supports `source: "file_sources"` for a `select` field, which Hank renders from configured SMB/local file sources. Apps that use this must also declare a matching file permission:
+
+```json
+{
+  "config": {
+    "settings_schema": {
+      "fields": [
+        {
+          "key": "source_id",
+          "label": "Media source",
+          "type": "select",
+          "source": "file_sources"
+        }
+      ]
+    }
+  },
+  "permissions": {
+    "files": [
+      {
+        "kind": "configured_source",
+        "field": "source_id",
+        "label": "Media source"
+      }
+    ]
+  }
+}
+```
 
 ## Stdio App Protocol
 

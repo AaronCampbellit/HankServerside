@@ -14,6 +14,25 @@ var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 var slashCommandPattern = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_-]*$`)
 
 const networkPermissionConfiguredBaseURL = "configured_base_url"
+const filePermissionConfiguredSource = "configured_source"
+
+var allowedSettingsFieldTypes = map[string]struct{}{
+	"boolean":  {},
+	"number":   {},
+	"password": {},
+	"path":     {},
+	"select":   {},
+	"text":     {},
+	"url":      {},
+}
+
+var allowedSettingsFieldSources = map[string]struct{}{
+	"file_sources": {},
+}
+
+type SettingsSchema = protocol.AppSettingsSchema
+type SettingsField = protocol.AppSettingsField
+type SettingsOption = protocol.AppSettingsOption
 
 type Manifest struct {
 	SchemaVersion string      `json:"schema_version"`
@@ -54,19 +73,26 @@ type Command struct {
 }
 
 type Config struct {
-	Schema       string   `json:"schema,omitempty"`
-	SecretFields []string `json:"secret_fields,omitempty"`
+	Schema       string         `json:"schema,omitempty"`
+	SecretFields []string       `json:"secret_fields,omitempty"`
+	Settings     SettingsSchema `json:"settings_schema,omitempty"`
 }
 
 type Permissions struct {
 	Network []NetworkPermission `json:"network,omitempty"`
-	Files   []json.RawMessage   `json:"files,omitempty"`
+	Files   []FilePermission    `json:"files,omitempty"`
 	Events  []json.RawMessage   `json:"events,omitempty"`
 }
 
 type NetworkPermission struct {
 	Kind  string `json:"kind"`
 	Field string `json:"field,omitempty"`
+}
+
+type FilePermission struct {
+	Kind  string `json:"kind"`
+	Field string `json:"field,omitempty"`
+	Label string `json:"label,omitempty"`
 }
 
 func ValidateManifest(manifest Manifest) error {
@@ -120,13 +146,42 @@ func ValidateManifest(manifest Manifest) error {
 	if err := validatePackagePath("schema path", manifest.Config.Schema, false); err != nil {
 		return fmt.Errorf("config %w", err)
 	}
+	for i, field := range manifest.Config.Settings.Fields {
+		if !identifierPattern.MatchString(field.Key) {
+			return fmt.Errorf("settings field %d key %q must match %s", i, field.Key, identifierPattern.String())
+		}
+		if _, ok := allowedSettingsFieldTypes[field.Type]; !ok {
+			return fmt.Errorf("settings field %d type %q is not supported", i, field.Type)
+		}
+		if field.Secret && field.SecretKey != "" && !identifierPattern.MatchString(field.SecretKey) {
+			return fmt.Errorf("settings field %d secret_key %q must match %s", i, field.SecretKey, identifierPattern.String())
+		}
+		if field.Source != "" {
+			if _, ok := allowedSettingsFieldSources[field.Source]; !ok {
+				return fmt.Errorf("settings field %d source %q is not supported", i, field.Source)
+			}
+			if field.Type != "select" {
+				return fmt.Errorf("settings field %d source requires select type", i)
+			}
+		}
+		for optionIndex, option := range field.Options {
+			if strings.TrimSpace(option.Value) == "" {
+				return fmt.Errorf("settings field %d option %d value is required", i, optionIndex)
+			}
+		}
+	}
 	for i, permission := range manifest.Permissions.Network {
 		if permission.Kind != networkPermissionConfiguredBaseURL {
 			return fmt.Errorf("network permission %d kind %q is not supported", i, permission.Kind)
 		}
 	}
-	if len(manifest.Permissions.Files) > 0 {
-		return fmt.Errorf("file permission entries are not supported")
+	for i, permission := range manifest.Permissions.Files {
+		if permission.Kind != filePermissionConfiguredSource {
+			return fmt.Errorf("file permission %d kind %q is not supported", i, permission.Kind)
+		}
+		if !identifierPattern.MatchString(permission.Field) {
+			return fmt.Errorf("file permission %d field %q must match %s", i, permission.Field, identifierPattern.String())
+		}
 	}
 	if len(manifest.Permissions.Events) > 0 {
 		return fmt.Errorf("event permission entries are not supported")

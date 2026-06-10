@@ -29,6 +29,7 @@ func TestAppMetadataStoreRoundTrip(t *testing.T) {
 		Enabled:             true,
 		PublicConfigJSON:    `{"api_base_url":"https://hermes.local"}`,
 		SecretFieldsSetJSON: `{"api_key":true}`,
+		SettingsSchemaJSON:  `{"fields":[{"key":"api_base_url","label":"Hermes URL","type":"url"}]}`,
 		Status:              "installed",
 		LastError:           "",
 		UpdatedAt:           now,
@@ -47,6 +48,7 @@ func TestAppMetadataStoreRoundTrip(t *testing.T) {
 	updated.Enabled = false
 	updated.PublicConfigJSON = `{"api_base_url":"https://new-hermes.local"}`
 	updated.SecretFieldsSetJSON = `{"api_key":true,"other":false}`
+	updated.SettingsSchemaJSON = `{"fields":[{"key":"api_base_url","label":"Hermes URL","type":"url"},{"key":"api_key","type":"password","secret":true}]}`
 	updated.Status = "degraded"
 	updated.LastError = "agent offline"
 	updated.UpdatedAt = now.Add(time.Minute)
@@ -108,6 +110,7 @@ func assertHomeAgentAppEqual(t *testing.T, got domain.HomeAgentApp, want domain.
 		got.Enabled != want.Enabled ||
 		got.PublicConfigJSON != want.PublicConfigJSON ||
 		got.SecretFieldsSetJSON != want.SecretFieldsSetJSON ||
+		got.SettingsSchemaJSON != want.SettingsSchemaJSON ||
 		got.Status != want.Status ||
 		got.LastError != want.LastError ||
 		got.UpdatedBy != want.UpdatedBy ||

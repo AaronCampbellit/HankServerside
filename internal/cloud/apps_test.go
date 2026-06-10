@@ -137,6 +137,13 @@ func TestAppsActivatePersistsReturnedAppMetadata(t *testing.T) {
 			Status:          "installed",
 			PublicConfig:    json.RawMessage(`{"api_base_url":"https://hermes.local"}`),
 			SecretFieldsSet: map[string]bool{"api_key": true},
+			SettingsSchema: protocol.AppSettingsSchema{
+				Fields: []protocol.AppSettingsField{{
+					Key:   "api_base_url",
+					Label: "Hermes URL",
+					Type:  "url",
+				}},
+			},
 		},
 	})
 	result := <-resultCh
@@ -147,7 +154,7 @@ func TestAppsActivatePersistsReturnedAppMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHomeApp: %v", err)
 	}
-	if !app.Enabled || app.PublicConfigJSON != `{"api_base_url":"https://hermes.local"}` || app.SecretFieldsSetJSON != `{"api_key":true}` {
+	if !app.Enabled || app.PublicConfigJSON != `{"api_base_url":"https://hermes.local"}` || app.SecretFieldsSetJSON != `{"api_key":true}` || app.SettingsSchemaJSON == "" {
 		t.Fatalf("persisted app = %#v", app)
 	}
 }

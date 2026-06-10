@@ -216,6 +216,7 @@ type HomeAgentApp struct {
 	Enabled             bool      `json:"enabled"`
 	PublicConfigJSON    string    `json:"public_config_json,omitempty"`
 	SecretFieldsSetJSON string    `json:"secret_fields_set_json,omitempty"`
+	SettingsSchemaJSON  string    `json:"settings_schema_json,omitempty"`
 	Status              string    `json:"status"`
 	LastError           string    `json:"last_error,omitempty"`
 	UpdatedAt           time.Time `json:"updated_at"`

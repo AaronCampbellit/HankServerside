@@ -631,6 +631,7 @@ func summaryFromManifest(manifest Manifest) protocol.AppSummary {
 		Capabilities:    make([]string, 0, len(manifest.Commands)),
 		SlashCommands:   make([]protocol.AppSlashCommand, 0, len(manifest.Assistant.SlashCommands)),
 		Commands:        make([]protocol.AppCommandSummary, 0, len(manifest.Commands)),
+		SettingsSchema:  manifest.Config.Settings,
 		SecretFieldsSet: secretSetDefaults(manifest),
 	}
 	for _, command := range manifest.Commands {
