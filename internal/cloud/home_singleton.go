@@ -135,6 +135,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeQueryTelemetry(w, r, home, auth, membership, parts) {
 		return
 	}
+	if s.handleHomePostgresExtensions(w, r, home, auth, membership, parts) {
+		return
+	}
 	if s.handleHomeFileJobs(w, r, home, auth, membership, parts) {
 		return
 	}

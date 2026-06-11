@@ -159,7 +159,7 @@ docker compose --env-file .env.cloud run -T --rm --entrypoint /usr/local/bin/han
 `secrets status` prints only counts for plaintext OpenAI OAuth tokens, APNs device tokens, and profile secret vault rows. `secrets reencrypt` rewrites those known plaintext rows using the configured `HANK_REMOTE_SECRET_ENCRYPTION_KEY`.
 
 `HANK_REMOTE_AI_PROVIDER=openai` still means the supported OpenAI API-key path using `HANK_REMOTE_OPENAI_API_KEY`. `HANK_REMOTE_AI_PROVIDER=chatgpt_codex` uses the experimental ChatGPT/Codex device-code link for chat only. Browser-redirect OpenAI OAuth is not supported. Embeddings continue to use Ollama, the OpenAI API key, or Hank Remote's local fallback; ChatGPT subscription OAuth is not used as an embeddings credential.
-Production should run with pgvector available through the bundled Postgres image. The JSON embedding fallback exists only for local development or degraded local testing when pgvector is not available. The production vector schema is fixed at 768 dimensions. Do not set `HANK_REMOTE_AI_EMBEDDING_DIMENSION` in production unless a future migration explicitly changes the vector dimension.
+Production requires pgvector through the bundled Postgres image. The production vector schema is fixed at 768 dimensions, and Hank Remote refuses startup when the pgvector schema is unavailable. Do not set `HANK_REMOTE_AI_EMBEDDING_DIMENSION` in production unless a future migration explicitly changes the vector dimension.
 
 After signing in to the dashboard, open `AI Settings` to manage the HankAI harness. Those settings are stored in the database and apply immediately to the next HankAI message:
 - which Hank sources can be sent to the active provider
@@ -175,7 +175,7 @@ The dashboard model controls do not replace server secrets. Keep OpenAI API keys
 - the server-owned maximum context window used for provider requests
 
 `Project docs` is one of those sources. By default the Docker image makes `README.md`, `AGENTS.md`, `SERVER_SYNC.md`, and every markdown file under `docs/` available from `/app`. For local runs, `HANK_REMOTE_PROJECT_DOCS_DIR=.` points HankAI at the checkout root.
-The Hank dashboard and AI Settings page show the current index counts, embedding counts, and whether retrieval is using `pgvector` or the JSON embedding fallback.
+The Hank dashboard and AI Settings page show the current index counts, embedding counts, and pgvector retrieval status.
 
 If the server should only be reached by a local Cloudflare Tunnel or local reverse proxy, use:
 

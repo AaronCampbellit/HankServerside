@@ -558,7 +558,7 @@ function renderStatus(status) {
     ["Chat", status.chat_configured ? "Configured" : "Local fallback"],
     ["Embeddings", status.embedding_configured ? "Configured" : "Local fallback"],
     ["Vector Store", status.vector_store || "postgres"],
-    ["Vector Mode", index.vector_mode || "json_fallback"],
+    ["Vector Mode", index.vector_mode || "unavailable"],
     ["Memory", `${index.chunk_count || 0} chunks · ${index.conversation_count || 0} conversations`],
   ].map(([label, value]) => `
     <div class="kv-row">

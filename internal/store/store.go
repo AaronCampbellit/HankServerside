@@ -89,6 +89,10 @@ func open(ctx context.Context, databaseURL string, migrate bool) (*Store, error)
 			return nil, err
 		}
 		store.vectorAvailable = store.detectVectorExtension(ctx)
+		if !store.vectorAvailable {
+			_ = db.Close()
+			return nil, errors.New("required pgvector schema is not available")
+		}
 		return store, nil
 	}
 
@@ -96,6 +100,10 @@ func open(ctx context.Context, databaseURL string, migrate bool) (*Store, error)
 	if err := store.validateExisting(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if !store.vectorAvailable {
+		_ = db.Close()
+		return nil, errors.New("required pgvector schema is not available")
 	}
 
 	return store, nil
@@ -132,6 +140,10 @@ func (s *Store) CheckMigrations(ctx context.Context) error {
 	return migrations.CheckReadOnly(ctx, s.db)
 }
 
+func (s *Store) RequiredExtensionHealth(ctx context.Context) (migrations.ExtensionHealth, error) {
+	return migrations.RequiredExtensionHealth(ctx, s.db)
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
@@ -155,6 +167,9 @@ func (s *Store) validateExisting(ctx context.Context) error {
 	if err := migrations.CheckReadOnly(ctx, s.db); err != nil {
 		return fmt.Errorf("check schema migrations: %w", err)
 	}
+	if err := migrations.CheckRequiredExtensions(ctx, s.db); err != nil {
+		return fmt.Errorf("check required Postgres extensions: %w", err)
+	}
 	if err := s.validateSingletonHome(ctx); err != nil {
 		return err
 	}
@@ -164,6 +179,9 @@ func (s *Store) validateExisting(ctx context.Context) error {
 func (s *Store) migrate(ctx context.Context) error {
 	if err := migrations.ApplyPending(ctx, s.db); err != nil {
 		return fmt.Errorf("apply schema migrations: %w", err)
+	}
+	if err := migrations.CheckRequiredExtensions(ctx, s.db); err != nil {
+		return fmt.Errorf("check required Postgres extensions: %w", err)
 	}
 
 	if err := s.validateSingletonHome(ctx); err != nil {

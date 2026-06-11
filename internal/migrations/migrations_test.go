@@ -49,3 +49,40 @@ func TestHomeServiceProfileConstraintIncludesSupportedServiceTypes(t *testing.T)
 		}
 	}
 }
+
+func TestRequiredPostgresExtensionsAreCreatedByMigrations(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	var body strings.Builder
+	for _, migration := range migrations {
+		for _, statement := range migration.Statements {
+			body.WriteString(statement)
+			body.WriteByte('\n')
+		}
+	}
+	all := body.String()
+	for _, extension := range []string{
+		"vector",
+		"pg_trgm",
+		"pg_stat_statements",
+		"pg_buffercache",
+		"amcheck",
+	} {
+		if !strings.Contains(all, "CREATE EXTENSION IF NOT EXISTS "+extension) {
+			t.Fatalf("required extension %q is not created by migrations", extension)
+		}
+	}
+	for _, extension := range []string{
+		"pgaudit",
+		"pgmq",
+		"pg_partman",
+	} {
+		if strings.Contains(all, "CREATE EXTENSION IF NOT EXISTS "+extension) {
+			t.Fatalf("deferred extension %q should not be created by migrations", extension)
+		}
+	}
+}

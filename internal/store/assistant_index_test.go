@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,7 +228,7 @@ func TestAssistantPgvectorSearchRanksVectorMatches(t *testing.T) {
 	}
 }
 
-func TestAssistantIndexSearchFallsBackToEmbeddingJSON(t *testing.T) {
+func TestAssistantIndexSearchRequiresPgvectorForEmbeddingQueries(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -266,12 +267,9 @@ func TestAssistantIndexSearchFallsBackToEmbeddingJSON(t *testing.T) {
 		t.Fatalf("UpsertAssistantDocumentWithChunks: %v", err)
 	}
 
-	results, err := db.SearchAssistantContext(ctx, home.ID, user.ID, "absent phrase", []float64{0, 0, 1, 0}, 5)
-	if err != nil {
-		t.Fatalf("SearchAssistantContext: %v", err)
-	}
-	if len(results) == 0 || results[0].SourceID != "json_fallback" {
-		t.Fatalf("fallback results = %#v", results)
+	_, err := db.SearchAssistantContext(ctx, home.ID, user.ID, "absent phrase", []float64{0, 0, 1, 0}, 5)
+	if err == nil || !strings.Contains(err.Error(), "required pgvector search is unavailable") {
+		t.Fatalf("SearchAssistantContext error = %v, want required pgvector unavailable", err)
 	}
 }
 

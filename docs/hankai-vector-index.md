@@ -1,8 +1,8 @@
 # HankAI Vector Index
 
-HankAI stores assistant retrieval data in PostgreSQL. Production should use
-pgvector; the JSON embedding columns are retained only as a local or degraded
-fallback. Chat providers do not get raw database access. The cloud searches the
+HankAI stores assistant retrieval data in PostgreSQL. Production requires
+pgvector; JSON embedding columns are retained only as migration/backfill
+evidence and are not a production retrieval fallback. Chat providers do not get raw database access. The cloud searches the
 index server-side, filters by the user's HankAI settings and permissions, then
 sends selected snippets and cards to the configured model.
 
@@ -42,8 +42,8 @@ sends selected snippets and cards to the configured model.
 
 1. HankAI refreshes the enabled source indexes during relevant chat/tool flows.
 2. The prompt is embedded with the active embedding provider.
-3. The store searches pgvector when available, then merges lexical and fallback
-   embedding scores.
+3. The store searches pgvector, then merges lexical matches with vector-ranked
+   context.
 4. Retrieved items are filtered by HankAI settings and Hank permissions.
 5. The model receives only the selected context list, not database credentials,
    raw SQL, raw SMB access, or unfiltered source data.

@@ -159,7 +159,10 @@ func ApplyPending(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
-	return Check(ctx, db)
+	if err := Check(ctx, db); err != nil {
+		return err
+	}
+	return CheckRequiredExtensions(ctx, db)
 }
 
 func BaselineExisting(ctx context.Context, db *sql.DB, duration time.Duration) error {

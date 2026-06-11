@@ -322,7 +322,7 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		s.logger.Warn("assistant index stats unavailable", "home_id", home.ID, "user_id", auth.User.ID, "error", err)
 		indexStats = domain.AssistantIndexStats{
 			VectorAvailable: s.store.VectorAvailable(),
-			VectorMode:      "json_fallback",
+			VectorMode:      "unavailable",
 		}
 		if indexStats.VectorAvailable {
 			indexStats.VectorMode = "pgvector"

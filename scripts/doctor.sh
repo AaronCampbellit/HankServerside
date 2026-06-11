@@ -131,6 +131,22 @@ if [ "$failures" -eq 0 ]; then
   fi
   rm -f /tmp/hank-remote-migration-status.$$ /tmp/hank-remote-migration-status-err.$$
 
+  if compose exec -T postgres sh -ceu '
+    preload="$(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT current_setting('\''shared_preload_libraries'\'', true)")"
+    for lib in pg_stat_statements; do
+      case ",${preload}," in
+        *",${lib},"*) ;;
+        *) echo "missing preload library ${lib}" >&2; exit 1 ;;
+      esac
+    done
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT extname FROM pg_extension WHERE extname IN ('\''vector'\'','\''pg_trgm'\'','\''pg_stat_statements'\'','\''pg_buffercache'\'','\''amcheck'\'') ORDER BY extname" |
+      awk '\''BEGIN { expected["vector"]; expected["pg_trgm"]; expected["pg_stat_statements"]; expected["pg_buffercache"]; expected["amcheck"] } { found[$1]=1 } END { for (name in expected) if (!found[name]) { print "missing extension " name > "/dev/stderr"; missing=1 } exit missing }'\''
+  ' >/dev/null; then
+    pass "required Postgres extensions are installed and preload libraries are configured"
+  else
+    fail "required Postgres extension check failed"
+  fi
+
   running_services="$(compose ps --services --status running 2>/dev/null || true)"
   if printf '%s\n' "$running_services" | grep -qx "db-ops"; then
     if compose exec -T db-ops docker version >/dev/null 2>&1; then

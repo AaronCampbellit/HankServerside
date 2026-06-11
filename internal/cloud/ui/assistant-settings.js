@@ -426,7 +426,7 @@ function renderStatus() {
         <div class="meta">Chat model: ${escapeHTML(assistant.chat_model || "local fallback")}</div>
         <div class="meta">Embedding model: ${escapeHTML(assistant.embedding_model || "local fallback")}</div>
         <div class="meta">Vector store: ${escapeHTML(assistant.vector_store || "postgres")}</div>
-        <div class="meta">Vector mode: ${escapeHTML(assistant.index?.vector_mode || "json_fallback")}</div>
+        <div class="meta">Vector mode: ${escapeHTML(assistant.index?.vector_mode || "unavailable")}</div>
       </article>
     `;
     return;
@@ -439,7 +439,7 @@ function renderStatus() {
       <div class="meta">Chat: ${assistant.chat_configured ? "Configured" : "Using local fallback until Ollama or OpenAI is configured."}</div>
       <div class="meta">Embeddings: ${assistant.embedding_configured ? "Configured" : "Using local fallback embeddings."}</div>
       <div class="meta">Vector store: ${escapeHTML(assistant.vector_store || "postgres")}</div>
-      <div class="meta">Vector mode: ${escapeHTML(assistant.index?.vector_mode || "json_fallback")}</div>
+      <div class="meta">Vector mode: ${escapeHTML(assistant.index?.vector_mode || "unavailable")}</div>
     </article>
     <article class="card">
       <div class="card-title">Add these to <code>.env.cloud</code>, then restart the cloud service.</div>
@@ -490,7 +490,7 @@ function renderAssistantSettings() {
       <div class="meta">Embedding override: ${escapeHTML(settings.embedding_model || "Provider default")}</div>
       <div class="meta">Planner: ${settings.planner_enabled === false ? "Off" : escapeHTML(settings.planner_model || settings.chat_model || "Chat model")}</div>
       <div class="meta">Prompt profile: ${escapeHTML(settings.prompt_profile || "chatgpt")}</div>
-      <div class="meta">Vector mode: ${escapeHTML(index.vector_mode || "json_fallback")}</div>
+      <div class="meta">Vector mode: ${escapeHTML(index.vector_mode || "unavailable")}</div>
       <div class="meta">Context sent per request: ${escapeHTML(settings.max_context_items || defaults.max_context_items || 20)} items</div>
     </article>
     <article class="card">

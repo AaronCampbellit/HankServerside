@@ -142,6 +142,10 @@ services:
       - "-c"
       - "archive_mode=off"
       - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
       - "unix_socket_directories=/var/run/postgresql,/var/lib/postgresql/restore"
     restart: "no"
     networks:

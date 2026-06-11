@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"sort"
 	"strconv"
@@ -227,7 +228,10 @@ func (s *Store) SearchAssistantContext(ctx context.Context, homeID string, userI
 	resultIndex := map[string]int{}
 
 	vectorLiteral := vectorLiteralFromValues(queryEmbedding)
-	if s.vectorAvailable && vectorLiteral != "" {
+	if vectorLiteral != "" {
+		if !s.vectorAvailable {
+			return nil, errors.New("required pgvector search is unavailable")
+		}
 		vectorResults, err := s.searchAssistantVectorContext(ctx, homeID, userID, vectorLiteral, loweredQuery, terms, limit)
 		if err != nil {
 			return nil, err
@@ -310,10 +314,10 @@ func (s *Store) SearchAssistantContext(ctx context.Context, homeID string, userI
 func (s *Store) AssistantIndexStats(ctx context.Context, homeID string, userID string) (domain.AssistantIndexStats, error) {
 	stats := domain.AssistantIndexStats{
 		VectorAvailable: s.VectorAvailable(),
-		VectorMode:      "json_fallback",
+		VectorMode:      "pgvector",
 	}
-	if stats.VectorAvailable {
-		stats.VectorMode = "pgvector"
+	if !stats.VectorAvailable {
+		stats.VectorMode = "unavailable"
 	}
 
 	rows, err := s.query(ctx, `SELECT d.source_type,

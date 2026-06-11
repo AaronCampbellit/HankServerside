@@ -1,6 +1,6 @@
-FROM postgres:17-alpine AS pgvector-builder
+FROM postgres:17-alpine AS extension-builder
 
-ARG PGVECTOR_VERSION=v0.8.1
+ARG PGVECTOR_VERSION=v0.8.2
 
 RUN apk add --no-cache build-base git clang19 llvm19-dev \
 	&& git clone --branch "${PGVECTOR_VERSION}" --depth 1 https://github.com/pgvector/pgvector.git /tmp/pgvector \
@@ -11,8 +11,8 @@ FROM postgres:17-alpine
 
 RUN apk add --no-cache pgbackrest bash
 
-COPY --from=pgvector-builder /usr/local/lib/postgresql/vector.so /usr/local/lib/postgresql/vector.so
-COPY --from=pgvector-builder /usr/local/share/postgresql/extension/vector* /usr/local/share/postgresql/extension/
+COPY --from=extension-builder /usr/local/lib/postgresql/ /usr/local/lib/postgresql/
+COPY --from=extension-builder /usr/local/share/postgresql/extension/ /usr/local/share/postgresql/extension/
 
 COPY configs/pgbackrest.conf /etc/pgbackrest/pgbackrest.conf
 COPY docker/postgres/entrypoint.sh /usr/local/bin/hank-postgres-entrypoint
