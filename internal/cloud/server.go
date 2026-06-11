@@ -1277,6 +1277,231 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusCreated, payload)
 }
 
+type filePreviewRange struct {
+	HasRange bool
+	Start    int64
+	End      int64
+}
+
+func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
+	sourceID := strings.TrimSpace(r.URL.Query().Get("source_id"))
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	policyBody, _ := json.Marshal(map[string]string{"path": path, "source_id": sourceID})
+	if err := s.authorizeFileCommandPolicy(r.Context(), home.ID, protocol.RoutedCommand{Command: "files.download", Body: policyBody}); err != nil {
+		s.audit(r.Context(), "file_operation.denied", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_policy", "preview", map[string]any{"reason": err.Error()})
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	byteRange, err := parseFilePreviewRange(r.Header.Get("Range"))
+	if err != nil {
+		w.Header().Set("Content-Range", "bytes */*")
+		http.Error(w, err.Error(), http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	agentConn, ok := s.router.GetAgent(home.ID)
+	if !ok {
+		http.Error(w, "target home agent is offline", http.StatusBadGateway)
+		return
+	}
+
+	transfer, _ := s.transfers.Create(home.ID, agentConn.agent.ID, "", protocol.FileTransferOperationDownload, sourceID, path, 5*time.Minute)
+	attempt, err := s.transfers.BeginAttempt(transfer, byteRange.Start)
+	if err != nil {
+		s.writeTransferAttemptError(w, transfer, err)
+		return
+	}
+	defer s.transfers.EndAttempt(attempt.ID)
+
+	open, err := protocol.NewEnvelope(protocol.TypeFileTransferOpen, attempt.ID, agentConn.agent.ID, home.ID, protocol.FileTransferOpen{
+		Operation: protocol.FileTransferOperationDownload,
+		SourceID:  sourceID,
+		Path:      path,
+		Offset:    byteRange.Start,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := agentConn.peer.Write(r.Context(), open); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	ready, protocolErr, err := s.waitTransferReady(r.Context(), attempt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusGatewayTimeout)
+		return
+	}
+	if protocolErr != nil {
+		http.Error(w, protocolErr.Message, http.StatusBadGateway)
+		return
+	}
+	transfer.MarkReady(ready)
+	if byteRange.HasRange && byteRange.End < 0 {
+		byteRange.End = ready.Size - 1
+	}
+	if byteRange.Start >= ready.Size || (byteRange.HasRange && byteRange.End >= ready.Size) {
+		w.Header().Set("Content-Range", "bytes */"+int64ToString(ready.Size))
+		http.Error(w, "range not satisfiable", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	contentLength := ready.Size - byteRange.Start
+	status := http.StatusOK
+	if byteRange.HasRange {
+		status = http.StatusPartialContent
+		contentLength = byteRange.End - byteRange.Start + 1
+		w.Header().Set("Content-Range", "bytes "+int64ToString(byteRange.Start)+"-"+int64ToString(byteRange.End)+"/"+int64ToString(ready.Size))
+	}
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Type", previewContentType(path))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filepath.Base(path)}))
+	if contentLength >= 0 {
+		w.Header().Set("Content-Length", int64ToString(contentLength))
+	}
+	w.WriteHeader(status)
+
+	flusher, _ := w.(http.Flusher)
+	currentOffset := byteRange.Start
+	remaining := contentLength
+	for remaining > 0 {
+		select {
+		case <-r.Context().Done():
+			return
+		case frame := <-attempt.DataCh:
+			if frame.Error != nil {
+				return
+			}
+			if frame.Offset != currentOffset {
+				return
+			}
+			if len(frame.Data) == 0 {
+				continue
+			}
+			data := frame.Data
+			if int64(len(data)) > remaining {
+				data = data[:int(remaining)]
+			}
+			n, err := w.Write(data)
+			currentOffset += int64(n)
+			remaining -= int64(n)
+			if err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		case result := <-attempt.CompleteCh:
+			if result.Error != nil {
+				return
+			}
+			if remaining > 0 {
+				return
+			}
+		}
+	}
+}
+
+func parseFilePreviewRange(header string) (filePreviewRange, error) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return filePreviewRange{}, nil
+	}
+	if !strings.HasPrefix(header, "bytes=") {
+		return filePreviewRange{}, errors.New("unsupported range unit")
+	}
+	spec := strings.TrimPrefix(header, "bytes=")
+	if strings.Contains(spec, ",") {
+		return filePreviewRange{}, errors.New("multiple ranges are not supported")
+	}
+	parts := strings.SplitN(spec, "-", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+		return filePreviewRange{}, errors.New("range start is required")
+	}
+	start, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil || start < 0 {
+		return filePreviewRange{}, errors.New("range start is invalid")
+	}
+	end := int64(-1)
+	if strings.TrimSpace(parts[1]) != "" {
+		end, err = strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		if err != nil || end < start {
+			return filePreviewRange{}, errors.New("range end is invalid")
+		}
+	}
+	return filePreviewRange{HasRange: true, Start: start, End: end}, nil
+}
+
+func previewContentType(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".apng":
+		return "image/apng"
+	case ".avif":
+		return "image/avif"
+	case ".bmp":
+		return "image/bmp"
+	case ".gif":
+		return "image/gif"
+	case ".heic":
+		return "image/heic"
+	case ".heif":
+		return "image/heif"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".svg":
+		return "image/svg+xml"
+	case ".tif", ".tiff":
+		return "image/tiff"
+	case ".webp":
+		return "image/webp"
+	case ".m4v", ".mp4":
+		return "video/mp4"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".mov":
+		return "video/quicktime"
+	case ".mpeg", ".mpg":
+		return "video/mpeg"
+	case ".ogv":
+		return "video/ogg"
+	case ".webm":
+		return "video/webm"
+	case ".aac":
+		return "audio/aac"
+	case ".flac":
+		return "audio/flac"
+	case ".m4a":
+		return "audio/mp4"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".oga", ".ogg", ".opus":
+		return "audio/ogg"
+	case ".wav":
+		return "audio/wav"
+	case ".weba":
+		return "audio/webm"
+	case ".pdf":
+		return "application/pdf"
+	case ".htm", ".html":
+		return "text/html; charset=utf-8"
+	case ".json":
+		return "application/json"
+	case ".xml":
+		return "application/xml"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 	transferID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/file-transfers/"), "/")
 	statusOnly := false

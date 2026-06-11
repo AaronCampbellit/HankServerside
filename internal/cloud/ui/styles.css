@@ -2733,6 +2733,19 @@ body.kanban-note .kanban-board {
   justify-self: center;
 }
 
+.file-preview-media {
+  width: 100%;
+  max-height: 560px;
+  border-radius: 6px;
+  background: #000;
+  align-self: start;
+}
+
+.file-preview-audio {
+  width: 100%;
+  align-self: start;
+}
+
 .file-preview-frame {
   width: 100%;
   min-height: 470px;

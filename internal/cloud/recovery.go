@@ -160,7 +160,7 @@ func (s *Server) buildRecoveryBundle(r *http.Request, home domain.Home, userID s
 	}
 
 	if profile, err := s.store.GetUserProfileSettings(r.Context(), userID); err == nil {
-		bundle.Settings.Profile = cloneRawJSON(profile.Settings)
+		bundle.Settings.Profile = cloneRecoveryRawJSON(profile.Settings)
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return recoveryBundle{}, err
 	}
@@ -625,7 +625,7 @@ func cleanRecoveryID(value string) string {
 	return strings.Trim(builder.String(), "-")
 }
 
-func cloneRawJSON(raw json.RawMessage) json.RawMessage {
+func cloneRecoveryRawJSON(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return nil
 	}

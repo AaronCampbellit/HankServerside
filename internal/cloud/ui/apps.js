@@ -5,6 +5,7 @@ const state = {
   apps: [],
   preview: null,
   selectedApp: null,
+  fileSources: [],
 };
 
 const els = {
@@ -88,6 +89,64 @@ function appSecretFields(app) {
   return fields || {};
 }
 
+function appSettingsSchema(app) {
+  const schema = app.settings_schema_json ?? app.settings_schema ?? {};
+  if (typeof schema === "string") {
+    try {
+      return JSON.parse(schema || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+  return schema || {};
+}
+
+function sortedSettingsFields(app) {
+  const fields = appSettingsSchema(app).fields || [];
+  return Array.isArray(fields)
+    ? fields.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0) || String(a.key || "").localeCompare(String(b.key || "")))
+    : [];
+}
+
+function parseConfigValue(app) {
+  try {
+    return JSON.parse(appPublicConfig(app) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function configDefault(field) {
+  if (!Object.prototype.hasOwnProperty.call(field, "default")) return undefined;
+  return field.default;
+}
+
+function fieldValue(config, field) {
+  const key = field.key || "";
+  if (Object.prototype.hasOwnProperty.call(config, key)) return config[key];
+  return configDefault(field);
+}
+
+function fileSourceOptions(currentValue = "") {
+  const options = new Map();
+  state.fileSources.forEach((source) => {
+    const id = String(source.id || source.source_id || "").trim();
+    if (!id) return;
+    options.set(id, source.label || source.name || source.share || id);
+  });
+  if (currentValue && !options.has(currentValue)) {
+    options.set(currentValue, currentValue);
+  }
+  return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
+}
+
+function fieldOptions(field, currentValue = "") {
+  if (field.source === "file_sources") {
+    return fileSourceOptions(currentValue);
+  }
+  return Array.isArray(field.options) ? field.options : [];
+}
+
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
@@ -161,12 +220,29 @@ function selectApp(app) {
   state.selectedApp = app;
   els.configPanel.hidden = !app;
   if (!app) return;
+  els.configTitle.setAttribute("tabindex", "-1");
   els.configTitle.textContent = `${appName(app)} Configuration`;
   els.configStatus.textContent = appEnabled(app) ? "Enabled" : "Disabled";
   els.appEnabled.checked = appEnabled(app);
-  els.publicConfig.value = appPublicConfig(app);
-  const fields = appSecretFields(app);
+  const config = parseConfigValue(app);
+  els.publicConfig.value = JSON.stringify(config, null, 2);
   els.secretFields.innerHTML = "";
+  const settingsFields = sortedSettingsFields(app);
+  const rawConfigField = els.publicConfig.closest(".setting-field");
+  if (rawConfigField) {
+    rawConfigField.hidden = settingsFields.length > 0;
+    rawConfigField.style.display = settingsFields.length > 0 ? "none" : "";
+  }
+  if (settingsFields.length) {
+    renderSettingsFields(app, config, settingsFields);
+  } else {
+    renderLegacySecretFields(app);
+  }
+  revealConfigPanel();
+}
+
+function renderLegacySecretFields(app) {
+  const fields = appSecretFields(app);
   Object.keys(fields).sort().forEach((field) => {
     const label = document.createElement("label");
     label.className = "setting-field";
@@ -178,6 +254,69 @@ function selectApp(app) {
   });
 }
 
+function renderSettingsFields(app, config, fields) {
+  const secretState = appSecretFields(app);
+  fields.forEach((field) => {
+    if (!field?.key) return;
+    const key = String(field.key);
+    const value = fieldValue(config, field);
+    const label = document.createElement("label");
+    label.className = field.type === "boolean" ? "toggle-field" : "setting-field";
+    const labelText = field.label || key;
+    const help = field.help ? `<span class="meta">${escapeHTML(field.help)}</span>` : "";
+    if (field.type === "boolean") {
+      label.innerHTML = `
+        <input type="checkbox" data-config-field="${escapeHTML(key)}" ${Boolean(value) ? "checked" : ""}>
+        <span>${escapeHTML(labelText)}</span>
+        ${help}
+      `;
+    } else if (field.type === "select") {
+      const options = fieldOptions(field, String(value || ""));
+      label.innerHTML = `
+        <span>${escapeHTML(labelText)}</span>
+        <select data-config-field="${escapeHTML(key)}" ${field.required ? "required" : ""}>
+          <option value="">Default</option>
+          ${options.map((option) => `<option value="${escapeHTML(option.value)}" ${String(option.value) === String(value || "") ? "selected" : ""}>${escapeHTML(option.label || option.value)}</option>`).join("")}
+        </select>
+        ${help}
+      `;
+    } else {
+      const isSecret = Boolean(field.secret);
+      const inputType = isSecret ? "password" : field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
+      const attr = isSecret ? `data-secret-field="${escapeHTML(field.secret_key || key)}"` : `data-config-field="${escapeHTML(key)}"`;
+      const setLabel = isSecret ? ` ${secretState[field.secret_key || key] ? "(set)" : "(not set)"}` : "";
+      label.innerHTML = `
+        <span>${escapeHTML(labelText)}${escapeHTML(setLabel)}</span>
+        <input type="${inputType}" ${attr} ${field.required && !isSecret ? "required" : ""} placeholder="${escapeHTML(field.placeholder || "")}" autocomplete="${isSecret ? "new-password" : "off"}" value="${isSecret ? "" : escapeHTML(value ?? "")}">
+        ${help}
+      `;
+    }
+    els.secretFields.appendChild(label);
+  });
+}
+
+function revealConfigPanel() {
+  window.requestAnimationFrame(() => {
+    els.configPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    els.configTitle.focus({ preventScroll: true });
+    scrollContainingFramesIntoView();
+  });
+}
+
+function scrollContainingFramesIntoView() {
+  let currentWindow = window;
+  for (let depth = 0; depth < 3; depth += 1) {
+    try {
+      const frame = currentWindow.frameElement;
+      if (!frame) return;
+      frame.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      currentWindow = currentWindow.parent;
+    } catch (_) {
+      return;
+    }
+  }
+}
+
 async function loadApps() {
   const payload = await api("/v1/home/apps");
   state.apps = payload.apps || [];
@@ -185,6 +324,41 @@ async function loadApps() {
   if (state.selectedApp) {
     selectApp(state.apps.find((app) => appID(app) === appID(state.selectedApp)) || null);
   }
+}
+
+async function loadFileSources() {
+  try {
+    const payload = await api("/v1/home/service-profiles");
+    const profiles = payload.profiles || [];
+    const smb = profiles.find((profile) => profile.service_type === "smb");
+    const config = parseProfileConfig(smb);
+    const rawSources = Array.isArray(config.file_sources) ? config.file_sources
+      : Array.isArray(config.sources) ? config.sources
+        : [];
+    state.fileSources = rawSources.map((source, index) => normalizeFileSource(source, index)).filter(Boolean);
+  } catch (_) {
+    state.fileSources = [];
+  }
+}
+
+function parseProfileConfig(profile) {
+  if (!profile) return {};
+  const raw = profile.public_config_json ?? profile.public_config ?? {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+  return raw || {};
+}
+
+function normalizeFileSource(source, index) {
+  const id = String(source?.id || source?.source_id || source?.name || source?.share || `source_${index + 1}`).trim();
+  if (!id) return null;
+  const label = source?.label || source?.name || source?.share || id;
+  return { ...source, id, label };
 }
 
 async function previewPackage(event) {
@@ -242,13 +416,9 @@ async function saveSelectedApp(event) {
   event.preventDefault();
   const app = state.selectedApp;
   if (!app) return;
-  let publicConfig = {};
-  try {
-    publicConfig = els.publicConfig.value.trim() ? JSON.parse(els.publicConfig.value) : {};
-  } catch {
-    showToast("Public config must be valid JSON.", true);
-    return;
-  }
+  const settingsFields = sortedSettingsFields(app);
+  const publicConfig = settingsFields.length ? collectSettingsConfig() : parseRawPublicConfig();
+  if (!publicConfig) return;
   const secrets = {};
   els.secretFields.querySelectorAll("[data-secret-field]").forEach((input) => {
     const value = input.value.trim();
@@ -273,6 +443,33 @@ async function saveSelectedApp(event) {
   } catch (error) {
     showToast(error.message, true);
   }
+}
+
+function parseRawPublicConfig() {
+  try {
+    return els.publicConfig.value.trim() ? JSON.parse(els.publicConfig.value) : {};
+  } catch {
+    showToast("Public config must be valid JSON.", true);
+    return null;
+  }
+}
+
+function collectSettingsConfig() {
+  const config = {};
+  els.secretFields.querySelectorAll("[data-config-field]").forEach((input) => {
+    const key = input.dataset.configField;
+    if (!key) return;
+    if (input.type === "checkbox") {
+      config[key] = input.checked;
+    } else if (input.type === "number") {
+      const value = input.value.trim();
+      if (value !== "") config[key] = Number(value);
+    } else {
+      const value = input.value.trim();
+      if (value !== "") config[key] = value;
+    }
+  });
+  return config;
 }
 
 async function toggleApp(app) {
@@ -301,6 +498,7 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
+    await loadFileSources();
     await loadApps();
   } catch (_) {
     window.location.replace("/");

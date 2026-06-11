@@ -4,7 +4,7 @@
 
 **Goal:** Build the first installable agent-app runtime from `docs/superpowers/specs/2026-06-08-installable-agent-apps-design.md`, including `.hankapp` package validation, Settings import/install UI, and Hermes as the first package-backed app.
 
-**Architecture:** Add a generic app protocol and agent-side app runtime while keeping current compiled Hermes and Gramaton code as compatibility paths. The cloud exposes admin-only app management routes and relays package validation, activation, config, and invocation to the online home agent. Hermes proves the runtime with a simple stdio request/response app; Gramaton extraction stays in a follow-up plan after job/event support is proven.
+**Architecture:** Add a generic app protocol and agent-side app runtime. The cloud exposes admin-only app management routes and relays package validation, activation, config, and invocation to the online home agent. Hermes proves the runtime with a simple stdio request/response app; Gramaton uses the same package path for its media workflow commands.
 
 **Tech Stack:** Go HTTP handlers, WebSocket agent commands, PostgreSQL migrations/store methods, zip package validation, stdio process execution, embedded dashboard HTML/CSS/JS, existing HankAPI client and CSRF middleware.
 
@@ -18,7 +18,7 @@ This plan implements Phase 1 and Phase 2 from the design:
 - package upload/import preview in Settings
 - app install, enable/disable, config, and inspect flows
 - app invocation through `apps.invoke`
-- Hermes package and `/Hermes` routing through the app runtime with compiled fallback
+- Hermes package and `/Hermes` routing through the app runtime
 
 This plan does not extract Gramaton. It adds schema and runtime foundations that Gramaton will use, but the Gramaton package needs its own plan because it requires persistent jobs, progress events, file-write policies, cancellation, media-card compatibility, and current downloader verification behavior.
 
@@ -1210,14 +1210,14 @@ Set executable bit in the implementation task:
 chmod +x scripts/package-hermes-app.sh
 ```
 
-- [ ] **Step 5: Add app-backed assistant routing with fallback**
+- [ ] **Step 5: Add app-backed assistant routing**
 
 Modify `internal/cloud/assistant_tools.go`:
 
 - In `executeAssistantHermesChatTool`, first attempt installed app invocation when the online agent advertises `apps.hermes.chat`.
-- Send `protocol.CommandAppsInvoke` with `app_id: "hermes"`, `command_id: "chat"`, and the same prompt/conversation/session fields used by the compiled Hermes command.
+- Send `protocol.CommandAppsInvoke` with `app_id: "hermes"`, `command_id: "chat"`, and the prompt/conversation/session fields expected by the Hermes app package.
 - Decode output into `protocol.HermesChatResponse`.
-- If app capability is missing, keep current `server.answerHermesChatPrompt` fallback for the compatibility window.
+- If app capability is missing, report that Hermes is not configured on the home agent.
 
 Add helper:
 

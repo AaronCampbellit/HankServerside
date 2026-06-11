@@ -131,39 +131,6 @@
           </form>
         </section>
 
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>Hermes Agent</h2>
-            <span class="pill">HankAI Command</span>
-          </div>
-          <form id="hermes-form" class="stack">
-            <div class="settings-grid">
-              <label class="setting-field">
-                <span>API Base URL</span>
-                <input id="hermes-api-base-url" type="url" placeholder="http://hermes-vm:8642" autocomplete="url">
-              </label>
-              <label class="setting-field">
-                <span>Model</span>
-                <input id="hermes-model" type="text" placeholder="hermes-agent" autocomplete="off">
-              </label>
-              <label class="setting-field">
-                <span>Request Timeout</span>
-                <input id="hermes-timeout-seconds" type="number" min="1" max="300" step="1" placeholder="120">
-              </label>
-              <label class="setting-field">
-                <span>Hermes API Key</span>
-                <input id="hermes-api-key" type="password" autocomplete="new-password" placeholder="Paste API_SERVER_KEY">
-              </label>
-              <label class="toggle-field">
-                <input id="hermes-persist" type="checkbox" checked>
-                <span>Save on home connector</span>
-              </label>
-            </div>
-            <div class="actions wrap">
-              <button type="submit">Save Hermes</button>
-            </div>
-          </form>
-        </section>
       </main>
 
       <div id="toast" class="toast" hidden></div>

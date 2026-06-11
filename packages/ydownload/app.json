@@ -1,0 +1,177 @@
+{
+  "schema_version": "hank.app.v1",
+  "id": "ydownload",
+  "name": "YDownload",
+  "version": "1.0.0",
+  "publisher": "Hank",
+  "description": "Download YouTube videos with yt-dlp into a configured Hank file source.",
+  "runtime": {
+    "type": "stdio",
+    "command": "bin/hank-app-ydownload"
+  },
+  "assistant": {
+    "slash_commands": [
+      {
+        "command": "/ydownload",
+        "command_id": "download",
+        "description": "Download a YouTube video."
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "download",
+      "mode": "request_response",
+      "input_schema": "schemas/download.input.schema.json",
+      "output_schema": "schemas/download.output.schema.json",
+      "timeout_seconds": 900,
+      "admin_only": true
+    }
+  ],
+  "config": {
+    "schema": "schemas/config.schema.json",
+    "secret_fields": [],
+    "settings_schema": {
+      "fields": [
+        {
+          "key": "source_id",
+          "label": "Download source",
+          "type": "select",
+          "source": "file_sources",
+          "required": true,
+          "help": "SMB or local file source Hank should use for completed downloads.",
+          "order": 10
+        },
+        {
+          "key": "destination_path",
+          "label": "Destination path",
+          "type": "path",
+          "default": "YouTube",
+          "order": 20
+        },
+        {
+          "key": "format",
+          "label": "Format",
+          "type": "text",
+          "default": "bv*+ba/b",
+          "help": "yt-dlp format selector.",
+          "order": 30
+        },
+        {
+          "key": "output_template",
+          "label": "Output template",
+          "type": "text",
+          "default": "%(title).200B [%(id)s].%(ext)s",
+          "order": 40
+        },
+        {
+          "key": "write_subtitles",
+          "label": "Download subtitles",
+          "type": "boolean",
+          "default": false,
+          "order": 50
+        },
+        {
+          "key": "write_auto_subtitles",
+          "label": "Download auto subtitles",
+          "type": "boolean",
+          "default": false,
+          "order": 60
+        },
+        {
+          "key": "subtitle_languages",
+          "label": "Subtitle languages",
+          "type": "text",
+          "default": "en.*,all,-live_chat",
+          "help": "Comma-separated yt-dlp subtitle language patterns.",
+          "order": 70
+        },
+        {
+          "key": "subtitle_format",
+          "label": "Subtitle format",
+          "type": "text",
+          "default": "srt/best",
+          "order": 80
+        },
+        {
+          "key": "write_thumbnail",
+          "label": "Download thumbnail",
+          "type": "boolean",
+          "default": false,
+          "order": 90
+        },
+        {
+          "key": "write_info_json",
+          "label": "Download info JSON",
+          "type": "boolean",
+          "default": false,
+          "order": 100
+        },
+        {
+          "key": "download_playlist",
+          "label": "Allow playlists",
+          "type": "boolean",
+          "default": false,
+          "order": 110
+        },
+        {
+          "key": "restrict_filenames",
+          "label": "Restrict filenames",
+          "type": "boolean",
+          "default": true,
+          "order": 120
+        },
+        {
+          "key": "no_overwrite",
+          "label": "Skip existing files",
+          "type": "boolean",
+          "default": true,
+          "order": 130
+        },
+        {
+          "key": "rate_limit",
+          "label": "Rate limit",
+          "type": "text",
+          "placeholder": "5M",
+          "order": 140
+        },
+        {
+          "key": "proxy_url",
+          "label": "Proxy URL",
+          "type": "url",
+          "order": 150
+        },
+        {
+          "key": "cookies_file_path",
+          "label": "Cookies file",
+          "type": "path",
+          "help": "Agent-local cookies.txt path passed to yt-dlp.",
+          "order": 160
+        },
+        {
+          "key": "yt_dlp_path",
+          "label": "yt-dlp path",
+          "type": "path",
+          "default": "yt-dlp",
+          "order": 170
+        },
+        {
+          "key": "timeout_seconds",
+          "label": "Timeout seconds",
+          "type": "number",
+          "default": 900,
+          "order": 180
+        }
+      ]
+    }
+  },
+  "permissions": {
+    "files": [
+      {
+        "kind": "configured_source",
+        "field": "source_id",
+        "label": "Download source"
+      }
+    ]
+  }
+}

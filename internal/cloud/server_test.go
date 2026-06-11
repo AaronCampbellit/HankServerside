@@ -701,6 +701,39 @@ func TestHomeAssistantDashboardTilesUseProfileSettings(t *testing.T) {
 	}
 }
 
+func TestInstallableAppUIIsPackageDriven(t *testing.T) {
+	t.Parallel()
+
+	hankScript, err := fs.ReadFile(uiAssets, "ui/hank.js")
+	if err != nil {
+		t.Fatalf("read hank.js: %v", err)
+	}
+	hank := string(hankScript)
+	for _, expected := range []string{`api("/v1/home/apps")`, `appSlashCommands`, `builtinSlashCommands`} {
+		if !strings.Contains(hank, expected) {
+			t.Fatalf("hank.js missing package-driven slash command marker %q", expected)
+		}
+	}
+	for _, forbidden := range []string{`command: "/gramaton"`, `command: "/Hermes"`} {
+		if strings.Contains(hank, forbidden) {
+			t.Fatalf("hank.js should not hardcode installable app slash command %q", forbidden)
+		}
+	}
+
+	for _, asset := range []string{"ui/settings-connections.html", "ui/settings-connections.js", "ui/assistant-settings.html", "ui/assistant-settings.js"} {
+		data, err := fs.ReadFile(uiAssets, asset)
+		if err != nil {
+			t.Fatalf("read %s: %v", asset, err)
+		}
+		body := string(data)
+		for _, forbidden := range []string{"Hermes Agent", "hermes-form", "Save Hermes", "Enable Gramaton source", "media-gramaton"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s should not contain legacy installable app UI marker %q", asset, forbidden)
+			}
+		}
+	}
+}
+
 func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
 	t.Parallel()
 
@@ -874,6 +907,43 @@ func TestFileServerUIOffersManagedJobRollback(t *testing.T) {
 	for _, expected := range []string{`data-file-job-action="rollback"`, `Roll Back`, `rollback_required`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("file-server rollback script missing %q", expected)
+		}
+	}
+}
+
+func TestFileServerUIOffersBrowserMediaPreviews(t *testing.T) {
+	t.Parallel()
+
+	script, err := fs.ReadFile(uiAssets, "ui/file-server.js")
+	if err != nil {
+		t.Fatalf("file-server.js read: %v", err)
+	}
+	styles, err := fs.ReadFile(uiAssets, "ui/styles.css")
+	if err != nil {
+		t.Fatalf("styles.css read: %v", err)
+	}
+	scriptBody := string(script)
+	for _, expected := range []string{
+		`const videoExtensions = new Set(["m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm"])`,
+		`const audioExtensions = new Set(["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba"])`,
+		`const htmlExtensions = new Set(["htm", "html"])`,
+		`loadInlineStreamPreview(item, "image")`,
+		`loadInlineStreamPreview(item, "video")`,
+		`loadInlineStreamPreview(item, "audio")`,
+		`loadInlineStreamPreview(item, "html")`,
+		`/v1/home/files/preview?${params.toString()}`,
+		`<video class="file-preview-media"`,
+		`<audio class="file-preview-audio"`,
+		`sandbox=""`,
+	} {
+		if !strings.Contains(scriptBody, expected) {
+			t.Fatalf("file-server media preview script missing %q", expected)
+		}
+	}
+	styleBody := string(styles)
+	for _, expected := range []string{".file-preview-media", ".file-preview-audio"} {
+		if !strings.Contains(styleBody, expected) {
+			t.Fatalf("file-server media preview styles missing %q", expected)
 		}
 	}
 }
@@ -1839,6 +1909,97 @@ func TestFileDownloadTransferStreamsOverHTTP(t *testing.T) {
 	}
 	if string(body) != "hello world" {
 		t.Fatalf("download body = %q, want %q", string(body), "hello world")
+	}
+}
+
+func TestFilePreviewStreamsInlineRangeOverHTTP(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	go func() {
+		for {
+			var envelope protocol.Envelope
+			if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+				return
+			}
+
+			if envelope.Type != protocol.TypeFileTransferOpen {
+				continue
+			}
+
+			open, err := protocol.DecodePayload[protocol.FileTransferOpen](envelope)
+			if err != nil || open.Operation != protocol.FileTransferOperationDownload {
+				return
+			}
+			if open.SourceID != "media" || open.Path != "movies/demo.mp4" || open.Offset != 6 {
+				return
+			}
+
+			ready, _ := protocol.NewEnvelope(protocol.TypeFileTransferReady, envelope.RequestID, agentID, homeID, protocol.FileTransferReady{
+				Operation: open.Operation,
+				SourceID:  open.SourceID,
+				Path:      open.Path,
+				Offset:    open.Offset,
+				Size:      int64(len("hello world")),
+			})
+			_ = wsjson.Write(ctx, agentConn, ready)
+
+			chunk, _ := protocol.NewEnvelope(protocol.TypeFileTransferData, envelope.RequestID, agentID, homeID, protocol.FileTransferChunk{
+				Offset:        open.Offset,
+				ContentBase64: base64.StdEncoding.EncodeToString([]byte("world")),
+			})
+			_ = wsjson.Write(ctx, agentConn, chunk)
+
+			complete, _ := protocol.NewEnvelope(protocol.TypeFileTransferComplete, envelope.RequestID, agentID, homeID, protocol.FileTransferComplete{
+				Operation: open.Operation,
+				SourceID:  open.SourceID,
+				Path:      open.Path,
+				Offset:    int64(len("hello world")),
+				Size:      int64(len("hello world")),
+			})
+			_ = wsjson.Write(ctx, agentConn, complete)
+		}
+	}()
+
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+"/v1/home/files/preview?source_id=media&path=movies/demo.mp4", nil)
+	if err != nil {
+		t.Fatalf("preview request: %v", err)
+	}
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	request.Header.Set("Range", "bytes=6-10")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("preview GET: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusPartialContent {
+		t.Fatalf("preview status = %d, want 206", response.StatusCode)
+	}
+	if got := response.Header.Get("Content-Range"); got != "bytes 6-10/11" {
+		t.Fatalf("Content-Range = %q, want bytes 6-10/11", got)
+	}
+	if got := response.Header.Get("Accept-Ranges"); got != "bytes" {
+		t.Fatalf("Accept-Ranges = %q, want bytes", got)
+	}
+	if got := response.Header.Get("Content-Disposition"); got != `inline; filename="demo.mp4"` {
+		t.Fatalf("Content-Disposition = %q, want inline filename", got)
+	}
+	if got := response.Header.Get("Content-Type"); got != "video/mp4" {
+		t.Fatalf("Content-Type = %q, want video/mp4", got)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("preview body read: %v", err)
+	}
+	if string(body) != "world" {
+		t.Fatalf("preview body = %q, want %q", string(body), "world")
 	}
 }
 

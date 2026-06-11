@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["url"],
+  "properties": {
+    "url": {
+      "type": "string",
+      "minLength": 1,
+      "description": "YouTube or yt-dlp-supported video URL."
+    },
+    "destination_path": {
+      "type": "string",
+      "description": "Optional per-download destination path inside the configured file source."
+    },
+    "filename_prefix": {
+      "type": "string",
+      "description": "Optional filename prefix added before the configured output template."
+    }
+  }
+}

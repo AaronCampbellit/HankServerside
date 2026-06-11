@@ -4,7 +4,7 @@
 
 **Goal:** Ship `/gramaton` as a first-party installable `.hankapp` package and route HankAI media workflow commands through it when installed and enabled.
 
-**Architecture:** The Gramaton app is a stdio package that runs inside the home agent environment and reuses the existing `internal/agent/media` and `internal/agent/files` services, so file writes stay behind the current source-aware policy. Cloud media commands prefer `apps.gramaton.*` capabilities and fall back to compiled `media.*` commands until the package path is proven. The app runtime gains a small event extension so app commands can publish `media.downloads` status events through the existing agent event relay.
+**Architecture:** The Gramaton app is a stdio package that runs inside the home agent environment and reuses the existing media and file services, so file writes stay behind the current source-aware policy. Cloud media commands route through `apps.gramaton.*` capabilities and report the app as not configured when the package is missing or disabled. The app runtime includes an event extension so app commands can publish `media.downloads` status events through the existing agent event relay.
 
 **Tech Stack:** Go stdio app executable, existing media/file agent packages, `.hankapp` manifest/schema validation, app runtime events, cloud-to-agent `apps.invoke`, embedded dashboard import UI, demo server Docker Compose deployment.
 
@@ -15,7 +15,7 @@
 - Keep Hank auth, assistant shell, files, notes, Home Assistant, dashboard, storage, backup, and restore flows built into HankServerside.
 - Do not expose SMB or raw file paths to the public internet.
 - Keep app execution inside the home agent boundary.
-- Preserve compiled `media.*` fallback commands until app-backed search, plan, download, status, cancel, jobs, settings, and image fetch pass demo validation.
+- Do not preserve or add compiled Gramaton fallback commands; missing app capabilities should report that the app is not configured.
 
 ## File Structure
 
@@ -61,10 +61,10 @@
 
 ### Task 4: Cloud Routing
 
-- [ ] Add a `sendMediaCommand` helper that maps compiled `media.*` commands to installed app command IDs and uses `apps.invoke` when the agent advertises `apps.gramaton.<command_id>`.
+- [ ] Add a `sendMediaCommand` helper that maps media workflow commands to installed app command IDs and uses `apps.invoke` when the agent advertises `apps.gramaton.<command_id>`.
 - [ ] Update assistant media search, plan, start, settings, jobs, cancel, status, and image routes to use the helper.
-- [ ] Keep existing compiled media command fallback unchanged when app capability is absent.
-- [ ] Add tests proving `/gramaton` prefers `apps.invoke` and existing media fallback still works.
+- [ ] Return an app-not-configured error when the required app capability is absent.
+- [ ] Add tests proving `/gramaton` uses `apps.invoke` and missing app capabilities fail closed.
 
 ### Task 5: Validation And Demo
 

@@ -26,6 +26,7 @@ type AppSummary struct {
 	Capabilities    []string            `json:"capabilities,omitempty"`
 	SlashCommands   []AppSlashCommand   `json:"slash_commands,omitempty"`
 	Commands        []AppCommandSummary `json:"commands,omitempty"`
+	SettingsSchema  AppSettingsSchema   `json:"settings_schema,omitempty"`
 	PublicConfig    json.RawMessage     `json:"public_config,omitempty"`
 	SecretFieldsSet map[string]bool     `json:"secret_fields_set,omitempty"`
 }
@@ -41,6 +42,30 @@ type AppCommandSummary struct {
 	Mode           string `json:"mode"`
 	TimeoutSeconds int    `json:"timeout_seconds"`
 	AdminOnly      bool   `json:"admin_only"`
+}
+
+type AppSettingsSchema struct {
+	Fields []AppSettingsField `json:"fields,omitempty"`
+}
+
+type AppSettingsField struct {
+	Key         string              `json:"key"`
+	Label       string              `json:"label,omitempty"`
+	Type        string              `json:"type"`
+	Required    bool                `json:"required,omitempty"`
+	Secret      bool                `json:"secret,omitempty"`
+	SecretKey   string              `json:"secret_key,omitempty"`
+	Source      string              `json:"source,omitempty"`
+	Placeholder string              `json:"placeholder,omitempty"`
+	Help        string              `json:"help,omitempty"`
+	Default     json.RawMessage     `json:"default,omitempty"`
+	Order       int                 `json:"order,omitempty"`
+	Options     []AppSettingsOption `json:"options,omitempty"`
+}
+
+type AppSettingsOption struct {
+	Value string `json:"value"`
+	Label string `json:"label,omitempty"`
 }
 
 type AppsListRequest struct{}

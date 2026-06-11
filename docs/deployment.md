@@ -302,12 +302,6 @@ HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent
 
 HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files
 HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes
-
-# Optional Hermes Agent bridge for HankAI `/Hermes ...` chat.
-HANK_REMOTE_HERMES_API_BASE_URL=
-HANK_REMOTE_HERMES_API_KEY=
-HANK_REMOTE_HERMES_MODEL=hermes-agent
-HANK_REMOTE_HERMES_TIMEOUT_SECONDS=120
 ```
 
 Keep this value unchanged for the single-server Compose deployment:
@@ -320,7 +314,7 @@ After the agent is online, use Settings > Connections to save Home Assistant and
 
 When no SMB shares are configured, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
 
-For Hermes Agent chat from HankAI, run Hermes with its API server enabled on the Hermes VM, then open Settings > Connections and save the Hermes API base URL plus API key. The dashboard sends the settings to the online home agent, and the agent persists them into `.env.agent` when `Save on home connector` is enabled. `HANK_REMOTE_HERMES_API_BASE_URL` should be the agent-reachable base URL, for example `http://hermes-vm:8642` or `http://hermes-vm:8642/v1`, and `HANK_REMOTE_HERMES_API_KEY` should match the Hermes `API_SERVER_KEY`. HankAI routes only explicit `/Hermes ...` prompts to Hermes, and the Hermes key stays in `.env.agent`.
+For optional HankAI app workflows such as Hermes or Gramaton, build the app package with `scripts/package-hermes-app.sh` or `scripts/package-gramaton-app.sh`, then open Settings > Apps and import the generated `.hankapp` archive. Configure the installed app from its Apps-page Configure action; the fields come from the package `config.settings_schema`. Hermes needs an agent-reachable API base URL, model, timeout, and API key. Gramaton needs provider credentials plus its media source and destination fields. Secrets stay agent-side and are shown in the dashboard only as set/unset metadata. HankAI slash commands such as `/Hermes` and `/gramaton` appear from installed enabled app metadata, not from built-in dashboard command lists.
 
 If you have an older `.env.agent` with legacy single-share SMB keys, convert it before updating the agent:
 

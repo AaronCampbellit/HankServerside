@@ -20,6 +20,7 @@ const state = {
   visibleMediaJobIDs: new Set(),
   mediaJobPollTimer: null,
   mediaRealtimeSubscribed: false,
+  appSlashCommands: [],
 };
 
 const els = {
@@ -57,19 +58,7 @@ const els = {
 
 const maxChatAttachmentBytes = 100 * 1024 * 1024;
 
-const slashCommands = [
-  {
-    command: "/gramaton",
-    label: "Gramaton",
-    description: "Search media downloads and start the media workflow.",
-    placeholder: "title",
-  },
-  {
-    command: "/Hermes",
-    label: "Hermes",
-    description: "Send a prompt directly to the Hermes Agent workflow.",
-    placeholder: "prompt",
-  },
+const builtinSlashCommands = [
   {
     command: "/ha",
     label: "Home Assistant",
@@ -114,6 +103,15 @@ const slashCommands = [
   },
 ];
 
+function slashCommands() {
+  const seen = new Set();
+  return [...state.appSlashCommands, ...builtinSlashCommands].filter((item) => {
+    const command = String(item.command || "").toLowerCase();
+    if (!command || seen.has(command)) return false;
+    seen.add(command);
+    return true;
+  });
+}
 
 function escapeHTML(value) {
   return String(value || "")
@@ -249,7 +247,7 @@ function commandQuery(value) {
 function matchingSlashCommands(value) {
   const query = commandQuery(value);
   if (query === null) return [];
-  return slashCommands.filter((item) => item.command.toLowerCase().startsWith(query));
+  return slashCommands().filter((item) => item.command.toLowerCase().startsWith(query));
 }
 
 function hideCommandPalette() {
@@ -279,11 +277,37 @@ function renderCommandPalette() {
 }
 
 function selectSlashCommand(command) {
-  const selected = slashCommands.find((item) => item.command === command);
+  const selected = slashCommands().find((item) => item.command === command);
   if (!selected) return;
   els.messageInput.value = `${selected.command} `;
   hideCommandPalette();
   els.messageInput.focus();
+}
+
+async function loadAppSlashCommands() {
+  try {
+    const payload = await api("/v1/home/apps");
+    state.appSlashCommands = appSlashCommands(payload.apps || []);
+  } catch (_) {
+    state.appSlashCommands = [];
+  }
+}
+
+function appSlashCommands(apps) {
+  return (apps || []).flatMap((app) => {
+    if (app.enabled === false) return [];
+    const commands = app.slash_commands || [];
+    return commands.map((command) => {
+      const slash = String(command.command || "").trim();
+      if (!slash.startsWith("/")) return null;
+      return {
+        command: slash,
+        label: app.name || slash.replace(/^\/+/, ""),
+        description: command.description || app.description || "Run installed app workflow.",
+        placeholder: command.placeholder || "",
+      };
+    }).filter(Boolean);
+  });
 }
 
 function preferredAppSocketURL() {
@@ -1417,6 +1441,7 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
+    await loadAppSlashCommands();
     renderStatus(await api("/v1/home/assistant/status"));
     await loadSessions();
   } catch (_) {

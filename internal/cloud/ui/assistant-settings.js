@@ -29,17 +29,7 @@ const els = {
   assistantHarnessOutput: document.getElementById("assistant-harness-output"),
   assistantToolsOutput: document.getElementById("assistant-tools-output"),
   mediaWorkflowPill: document.getElementById("media-workflow-pill"),
-  mediaWorkflowEnabled: document.getElementById("media-workflow-enabled"),
-  mediaGramatonBaseURL: document.getElementById("media-gramaton-base-url"),
-  mediaGramatonUsername: document.getElementById("media-gramaton-username"),
-  mediaGramatonPassword: document.getElementById("media-gramaton-password"),
-  mediaSourceID: document.getElementById("media-source-id"),
-  mediaDestinationPath: document.getElementById("media-destination-path"),
-  mediaMovieDestinationPath: document.getElementById("media-movie-destination-path"),
-  mediaTVDestinationPath: document.getElementById("media-tv-destination-path"),
-  mediaConfirmationRequired: document.getElementById("media-confirmation-required"),
   mediaWorkflowMeta: document.getElementById("media-workflow-meta"),
-  saveMediaSettingsButton: document.getElementById("save-media-settings-button"),
   refreshMediaSettingsButton: document.getElementById("refresh-media-settings-button"),
   mediaJobsOutput: document.getElementById("media-jobs-output"),
   harnessProfileNotesEnabled: document.getElementById("harness-profile-notes-enabled"),
@@ -568,64 +558,28 @@ function renderMediaWorkflowSettings() {
   if (!state.media) {
     els.mediaWorkflowPill.textContent = "Checking";
     els.mediaWorkflowPill.className = "status-chip offline";
-    els.mediaWorkflowMeta.textContent = "Loading agent-backed media workflow settings.";
+    els.mediaWorkflowMeta.textContent = "Loading agent-backed media job state.";
     els.mediaJobsOutput.className = "card-list empty-state";
     els.mediaJobsOutput.textContent = "Checking media jobs.";
-    [
-      els.mediaWorkflowEnabled,
-      els.mediaGramatonBaseURL,
-      els.mediaGramatonUsername,
-      els.mediaGramatonPassword,
-      els.mediaSourceID,
-      els.mediaDestinationPath,
-      els.mediaMovieDestinationPath,
-      els.mediaTVDestinationPath,
-      els.mediaConfirmationRequired,
-      els.saveMediaSettingsButton,
-      els.refreshMediaSettingsButton,
-    ].forEach((element) => {
-      element.disabled = true;
-    });
+    els.refreshMediaSettingsButton.disabled = true;
     return;
   }
   const payload = state.media || {};
   const settings = payload.settings || {};
   const online = payload.online === true;
   const canEdit = payload.can_edit === true;
-  const hasPassword = settings.has_password === true;
   const enabled = settings.enabled === true;
-  const fieldsDisabled = !canEdit;
 
   els.mediaWorkflowPill.textContent = !canEdit ? "Admin Only" : online ? (enabled ? "Enabled" : "Configured Off") : "Agent Offline";
   els.mediaWorkflowPill.className = online && enabled ? "status-chip" : "status-chip offline";
-  els.mediaWorkflowEnabled.checked = enabled;
-  els.mediaGramatonBaseURL.value = settings.base_url || "https://gramaton.io";
-  els.mediaGramatonUsername.value = settings.username || "";
-  els.mediaConfirmationRequired.value = settings.require_confirmation === false ? "false" : "true";
-  renderMediaDestinationOptions(payload, settings);
-  els.mediaGramatonPassword.placeholder = hasPassword ? "Leave unchanged" : "Required to enable";
   if (!canEdit) {
-    els.mediaWorkflowMeta.textContent = "Only Home admins can change media workflow settings.";
+    els.mediaWorkflowMeta.textContent = "Only Home admins can view full media job controls.";
   } else if (!online) {
-    els.mediaWorkflowMeta.textContent = `${payload.error || "The home agent is offline."} You can prepare these fields, but saving requires the updated home agent to be online.`;
+    els.mediaWorkflowMeta.textContent = payload.error || "The home agent is offline.";
   } else {
-    els.mediaWorkflowMeta.textContent = `Movies save to ${mediaDestinationLabel(settings.movie_destination_path || settings.destination_path, "", settings.source_id)}. TV shows save to ${mediaDestinationLabel(settings.tv_destination_path || settings.destination_path, "", settings.source_id)} under a show-title folder.`;
+    els.mediaWorkflowMeta.textContent = "Media app configuration is managed from Apps.";
   }
 
-  [
-    els.mediaWorkflowEnabled,
-    els.mediaGramatonBaseURL,
-    els.mediaGramatonUsername,
-    els.mediaGramatonPassword,
-    els.mediaSourceID,
-    els.mediaDestinationPath,
-    els.mediaMovieDestinationPath,
-    els.mediaTVDestinationPath,
-    els.mediaConfirmationRequired,
-    els.saveMediaSettingsButton,
-  ].forEach((element) => {
-    element.disabled = fieldsDisabled;
-  });
   els.refreshMediaSettingsButton.disabled = !online;
   renderMediaJobs(payload.jobs || []);
 }
@@ -798,40 +752,6 @@ async function saveAssistantSettings(event) {
   }
 }
 
-async function saveMediaSettings() {
-  try {
-    if (!state.media?.online) {
-      showToast("Start or redeploy the updated home agent before saving media workflow settings.", true);
-      return;
-    }
-    const password = els.mediaGramatonPassword.value;
-    const payload = await api("/v1/home/assistant/media-settings", {
-      method: "PUT",
-      body: JSON.stringify({
-        settings: {
-          enabled: els.mediaWorkflowEnabled.checked,
-          base_url: els.mediaGramatonBaseURL.value,
-          username: els.mediaGramatonUsername.value,
-          source_id: els.mediaSourceID.value,
-          destination_path: normalizeMediaDestinationPath(els.mediaDestinationPath.value),
-          movie_destination_path: normalizeMediaDestinationPath(els.mediaMovieDestinationPath.value),
-          tv_destination_path: normalizeMediaDestinationPath(els.mediaTVDestinationPath.value),
-          preferred_quality: "1080p",
-          require_confirmation: els.mediaConfirmationRequired.value !== "false",
-        },
-        password,
-        persist: true,
-      }),
-    });
-    els.mediaGramatonPassword.value = "";
-    state.media = { ...state.media, ...payload, jobs: state.media?.jobs || [] };
-    await loadMediaStatus();
-    showToast("Media workflow settings saved.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
 async function cancelMediaJob(jobID) {
   try {
     await api(`/v1/home/assistant/media-jobs/${encodeURIComponent(jobID)}/cancel`, { method: "POST" });
@@ -885,26 +805,7 @@ async function hydrate() {
 els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
-els.saveMediaSettingsButton.addEventListener("click", saveMediaSettings);
 els.refreshMediaSettingsButton.addEventListener("click", () => loadMediaStatus().then(() => showToast("Media jobs refreshed.")).catch((error) => showToast(error.message, true)));
-els.mediaDestinationPath.addEventListener("change", () => {
-  const destination = els.mediaDestinationPath.value;
-  refreshScopedMediaDestinationOptions({
-    destination_path: destination,
-    movie_destination_path: destination,
-    tv_destination_path: destination,
-  });
-});
-els.mediaSourceID.addEventListener("change", () => {
-  refreshScopedMediaDestinationOptions({
-    source_id: els.mediaSourceID.value,
-    destination_path: "",
-    movie_destination_path: "",
-    tv_destination_path: "",
-  });
-});
-els.mediaMovieDestinationPath.addEventListener("change", refreshScopedMediaDestinationOptions);
-els.mediaTVDestinationPath.addEventListener("change", refreshScopedMediaDestinationOptions);
 els.mediaJobsOutput.addEventListener("click", (event) => {
   const button = event.target.closest("[data-cancel-media-job]");
   if (!button) return;

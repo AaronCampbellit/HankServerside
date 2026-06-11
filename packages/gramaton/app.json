@@ -94,13 +94,84 @@
   ],
   "config": {
     "schema": "schemas/config.schema.json",
-    "secret_fields": ["password"]
+    "secret_fields": ["password"],
+    "settings_schema": {
+      "fields": [
+        {
+          "key": "enabled",
+          "label": "Gramaton enabled",
+          "type": "boolean",
+          "default": true,
+          "order": 10
+        },
+        {
+          "key": "base_url",
+          "label": "Gramaton URL",
+          "type": "url",
+          "required": true,
+          "default": "https://gramaton.io",
+          "order": 20
+        },
+        {
+          "key": "username",
+          "label": "Username",
+          "type": "text",
+          "required": true,
+          "order": 30
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "type": "password",
+          "secret": true,
+          "secret_key": "password",
+          "help": "Leave blank to keep the current password.",
+          "order": 40
+        },
+        {
+          "key": "source_id",
+          "label": "Media source",
+          "type": "select",
+          "source": "file_sources",
+          "help": "SMB or local file source Hank should use for media downloads.",
+          "order": 50
+        },
+        {
+          "key": "movie_destination_path",
+          "label": "Movie destination",
+          "type": "path",
+          "placeholder": "Movies",
+          "order": 60
+        },
+        {
+          "key": "tv_destination_path",
+          "label": "TV destination",
+          "type": "path",
+          "placeholder": "Shows",
+          "order": 70
+        },
+        {
+          "key": "require_confirmation",
+          "label": "Require confirmation before download",
+          "type": "boolean",
+          "default": true,
+          "order": 80
+        }
+      ]
+    }
   },
   "permissions": {
     "network": [
       {
         "kind": "configured_base_url",
         "field": "base_url"
+      }
+    ],
+    "files": [
+      {
+        "kind": "configured_source",
+        "field": "source_id",
+        "label": "Media source"
       }
     ]
   }

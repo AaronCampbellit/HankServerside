@@ -113,62 +113,10 @@
               <div id="assistant-tools-output" class="tool-settings-grid"></div>
               <div class="settings-block">
                 <div class="settings-block-head">
-                  <h3>Media Download Workflow</h3>
+                  <h3>Media Download Jobs</h3>
                   <span id="media-workflow-pill" class="mini-pill">Checking</span>
                 </div>
-                <div class="toggle-list single-toggle-list">
-                  <label class="toggle-field">
-                    <input id="media-workflow-enabled" type="checkbox">
-                    <span>Enable Gramaton source</span>
-                  </label>
-                </div>
-                <div class="settings-grid media-settings-grid">
-                  <label class="setting-field" for="media-gramaton-base-url">
-                    <span>Gramaton URL</span>
-                    <input id="media-gramaton-base-url" type="url" autocomplete="off" placeholder="https://gramaton.io">
-                  </label>
-                  <label class="setting-field" for="media-gramaton-username">
-                    <span>Username</span>
-                    <input id="media-gramaton-username" type="email" autocomplete="username">
-                  </label>
-                  <label class="setting-field" for="media-gramaton-password">
-                    <span>Password</span>
-                    <input id="media-gramaton-password" type="password" autocomplete="new-password" placeholder="Leave unchanged">
-                  </label>
-                  <label class="setting-field" for="media-source-id">
-                    <span>SMB share</span>
-                    <select id="media-source-id">
-                      <option value="">Default SMB share</option>
-                    </select>
-                  </label>
-                  <label class="setting-field" for="media-destination-path">
-                    <span>Destination</span>
-                    <select id="media-destination-path">
-                      <option value="">SMB share root</option>
-                    </select>
-                  </label>
-                  <label class="setting-field" for="media-movie-destination-path">
-                    <span>Movie folder</span>
-                    <select id="media-movie-destination-path">
-                      <option value="">SMB share root</option>
-                    </select>
-                  </label>
-                  <label class="setting-field" for="media-tv-destination-path">
-                    <span>TV shows folder</span>
-                    <select id="media-tv-destination-path">
-                      <option value="">SMB share root</option>
-                    </select>
-                  </label>
-                  <label class="setting-field" for="media-confirmation-required">
-                    <span>Confirmation</span>
-                    <select id="media-confirmation-required">
-                      <option value="true">Required before downloads</option>
-                      <option value="false">Optional</option>
-                    </select>
-                  </label>
-                </div>
                 <div class="actions wrap">
-                  <button id="save-media-settings-button" type="button">Save</button>
                   <button id="refresh-media-settings-button" type="button" class="secondary">Refresh Jobs</button>
                 </div>
                 <div id="media-workflow-meta" class="meta"></div>

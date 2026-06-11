@@ -77,6 +77,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeAppPackageDownload(w, r, parts) {
 		return
 	}
+	if s.handleHomeNotesWithNotesAuth(w, r, parts) {
+		return
+	}
 
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
@@ -111,7 +114,7 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeAssistant(w, r, home, membership, auth, parts) {
 		return
 	}
-	if s.handleHomeNotesHTTP(w, r, home, membership, auth, parts) {
+	if s.handleHomeNotesAPITokens(w, r, home, auth, membership, parts) {
 		return
 	}
 	if s.handleHomeServiceProfiles(w, r, home, auth, membership, parts) {
@@ -139,6 +142,18 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 2 && parts[0] == "files" && parts[1] == "preview" && r.Method == http.MethodGet {
+		if err := s.requireHomeFeature(r.Context(), home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
+			if errors.Is(err, errFeaturePermissionDenied) {
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.handleFilePreviewStream(w, r, home, auth)
+		return
+	}
 	if len(parts) == 2 && parts[0] == "files" && parts[1] == "downloads" && r.Method == http.MethodPost {
 		if err := s.requireHomeFeature(r.Context(), home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 			if errors.Is(err, errFeaturePermissionDenied) {

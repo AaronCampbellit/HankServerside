@@ -128,7 +128,27 @@ The initial package schema is `hank.app.v1`.
   ],
   "config": {
     "schema": "schemas/config.schema.json",
-    "secret_fields": ["api_key"]
+    "secret_fields": ["api_key"],
+    "settings_schema": {
+      "fields": [
+        {
+          "key": "api_base_url",
+          "label": "Hermes URL",
+          "type": "url",
+          "required": true,
+          "order": 10
+        },
+        {
+          "key": "api_key",
+          "label": "API key",
+          "type": "password",
+          "secret": true,
+          "secret_key": "api_key",
+          "help": "Leave blank to keep the current key.",
+          "order": 20
+        }
+      ]
+    }
   },
   "permissions": {
     "network": [
@@ -154,6 +174,50 @@ Manifest validation should reject:
 - slash commands that collide with built-in Hank commands or another enabled app
 - schema references that escape the app directory
 - archives with absolute paths, parent-directory paths, symlinks, or unsafe file modes
+
+## Typed Settings Schema
+
+Apps declare GUI-editable settings in `config.settings_schema.fields`. This schema is for Hank Settings rendering; the app still receives public values through `config` and sensitive values through `secrets` in the stdio request.
+
+Supported field types are:
+
+- `text`
+- `url`
+- `number`
+- `boolean`
+- `password`
+- `select`
+- `path`
+
+Field keys write to app public config unless `secret: true` is set. Secret fields write to `secrets[secret_key || key]`, are marked as set/unset in the GUI, and blank values preserve the existing secret.
+
+Apps can request Hank-owned resources as selectable bindings. V1 supports `source: "file_sources"` for a `select` field, which Hank renders from configured SMB/local file sources. Apps that use this must also declare a matching file permission:
+
+```json
+{
+  "config": {
+    "settings_schema": {
+      "fields": [
+        {
+          "key": "source_id",
+          "label": "Media source",
+          "type": "select",
+          "source": "file_sources"
+        }
+      ]
+    }
+  },
+  "permissions": {
+    "files": [
+      {
+        "kind": "configured_source",
+        "field": "source_id",
+        "label": "Media source"
+      }
+    ]
+  }
+}
+```
 
 ## Stdio App Protocol
 
@@ -420,15 +484,23 @@ Installable apps must not crash the agent, leak credentials, expose local servic
 
 ### Phase 1: Runtime First
 
-Add the generic app runtime while keeping existing compiled Hermes and Gramaton behavior. The agent can discover apps, validate manifests, invoke stdio commands, expose app status, and advertise app capabilities. No user-facing workflow changes are required in this phase.
+Add the generic app runtime. The agent can discover apps, validate manifests,
+invoke stdio commands, expose app status, and advertise app capabilities.
 
 ### Phase 2: Hermes App
 
-Build `hermes.hankapp` and route `/Hermes` through the app runtime when installed and enabled. Keep the compiled `hermes.chat` path as a compatibility fallback for one release. After validation, remove the compiled Hermes service and Hermes service-profile special case.
+Build `hermes.hankapp`, import it through Settings > Apps, configure it from
+the app `settings_schema`, and route `/Hermes` through `apps.invoke` only when
+the home agent advertises `apps.hermes.chat`. The old Settings > Connections
+Hermes panel and service-profile configuration path are not the app
+configuration surface.
 
 ### Phase 3: Gramaton App
 
-Build `gramaton.hankapp` after job and event support is available in the app runtime. Move Gramaton search, planning, download jobs, progress, cancellation, image fetch, and media settings into the package. Keep compatibility fallback until app-based downloads are proven.
+Build `gramaton.hankapp`, import it through Settings > Apps, configure it from
+the app `settings_schema`, and route Gramaton search, planning, download jobs,
+progress, cancellation, image fetch, and media settings through `apps.invoke`
+only when the home agent advertises the matching `apps.gramaton.*` capability.
 
 ## Data Model
 
@@ -460,7 +532,7 @@ Agent-local storage should track:
 ## Security Requirements
 
 - Every app-management route is authenticated.
-- Import, install, replace, enable, disable, configure, and uninstall are admin-only.
+- Import, install, replace, enable, disable, and configure are admin-only.
 - Cookie-authenticated writes use CSRF protection.
 - Package upload size is bounded.
 - Archive extraction rejects absolute paths, parent-directory paths, symlinks, unsafe modes, duplicate paths, and unsupported file types.
@@ -488,9 +560,11 @@ Cloud/API tests:
 - App import rejects member access.
 - Upload preview does not activate a package.
 - Install activation records app metadata and emits settings changed events.
-- Assistant slash command registry includes installed app commands.
+- Assistant slash command UI reads installed enabled app slash commands from
+  `/v1/home/apps`; built-in Hank commands are appended after package commands.
 - `/Hermes` routes through `apps.invoke` when the Hermes app is installed and enabled.
-- Compatibility fallback still works during the migration window.
+- Missing or disabled app capabilities report that the app is not configured
+  instead of silently running a compiled legacy workflow.
 
 Settings UI tests/checks:
 
@@ -521,7 +595,7 @@ Gramaton app tests:
 ## Acceptance Criteria
 
 - Hank can install a new `.hankapp` package without rebuilding HankServerside.
-- Settings can import, preview, install, configure, enable, disable, inspect, and uninstall app packages.
+- Settings can import, preview, install, configure, enable, disable, and inspect app packages.
 - Hermes works entirely from an installed Hermes package.
 - Gramaton works entirely from an installed Gramaton package after the job/event runtime is complete.
 - App package validation blocks unsafe manifests and archives.

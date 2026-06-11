@@ -4,8 +4,11 @@ const TEXT_PREVIEW_LIMIT = 1024 * 1024;
 const RICH_PREVIEW_LIMIT = 25 * 1024 * 1024;
 const FILE_DRAG_TYPE = "application/x-hank-file-paths";
 
-const imageExtensions = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "webp"]);
-const textExtensions = new Set(["cfg", "conf", "css", "csv", "go", "htm", "html", "js", "json", "log", "md", "ps1", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "txt", "xml", "yaml", "yml"]);
+const imageExtensions = new Set(["apng", "avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
+const videoExtensions = new Set(["m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm"]);
+const audioExtensions = new Set(["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba"]);
+const htmlExtensions = new Set(["htm", "html"]);
+const textExtensions = new Set(["cfg", "conf", "css", "csv", "go", "js", "json", "log", "md", "ps1", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "txt", "xml", "yaml", "yml"]);
 
 const state = {
   user: null,
@@ -1751,20 +1754,19 @@ async function downloadSelected() {
   if (files.length > 1) showToast(`Started ${files.length} downloads.`);
 }
 
-function previewMimeForItem(item) {
-  const extension = extensionForItem(item);
-  if (imageExtensions.has(extension)) return extension === "svg" ? "image/svg+xml" : `image/${extension === "jpg" ? "jpeg" : extension}`;
-  if (extension === "pdf") return "application/pdf";
-  if (extension === "json") return "application/json";
-  if (extension === "html" || extension === "htm") return "text/html";
-  return "text/plain";
-}
-
 function cleanupPreviewURL() {
   if (state.previewObjectURL) {
     URL.revokeObjectURL(state.previewObjectURL);
     state.previewObjectURL = "";
   }
+}
+
+function previewStreamURL(item) {
+  const params = new URLSearchParams();
+  const sourceID = selectedSourceID();
+  if (sourceID) params.set("source_id", sourceID);
+  params.set("path", rawItemPath(item));
+  return `/v1/home/files/preview?${params.toString()}`;
 }
 
 function renderPreview() {
@@ -1810,12 +1812,28 @@ function renderPreview() {
 
   const size = Number(item.size || 0);
   const extension = extensionForItem(item);
-  if (imageExtensions.has(extension) && size <= RICH_PREVIEW_LIMIT) {
-    loadRichPreview(item, requestID, "image");
+  if (imageExtensions.has(extension)) {
+    loadInlineStreamPreview(item, "image");
     return;
   }
-  if (extension === "pdf" && size <= RICH_PREVIEW_LIMIT) {
-    loadRichPreview(item, requestID, "pdf");
+  if (videoExtensions.has(extension)) {
+    loadInlineStreamPreview(item, "video");
+    return;
+  }
+  if (audioExtensions.has(extension)) {
+    loadInlineStreamPreview(item, "audio");
+    return;
+  }
+  if (extension === "pdf") {
+    loadInlineStreamPreview(item, "pdf");
+    return;
+  }
+  if (htmlExtensions.has(extension)) {
+    loadInlineStreamPreview(item, "html");
+    return;
+  }
+  if (textExtensions.has(extension) && size > TEXT_PREVIEW_LIMIT) {
+    loadInlineStreamPreview(item, "text");
     return;
   }
   if (textExtensions.has(extension) && size <= TEXT_PREVIEW_LIMIT) {
@@ -1839,29 +1857,26 @@ function renderPreviewActions(item) {
   els.previewActions.appendChild(actionButton("Delete", () => openDeleteDialog([item]), "ghost"));
 }
 
-async function loadRichPreview(item, requestID, kind) {
-  els.previewBody.className = "file-preview-body empty-state";
-  els.previewBody.textContent = "Loading preview.";
-  try {
-    const { blob } = await fetchFileBlob(rawItemPath(item), `previewed ${itemName(item)}`);
-    if (requestID !== state.previewRequestID) return;
-    if (blob.size > RICH_PREVIEW_LIMIT) {
-      els.previewBody.textContent = "This file is too large for automatic preview.";
-      return;
-    }
-    const typedBlob = new Blob([blob], { type: previewMimeForItem(item) });
-    state.previewObjectURL = URL.createObjectURL(typedBlob);
-    els.previewBody.className = "file-preview-body";
-    if (kind === "image") {
-      els.previewBody.innerHTML = `<img class="file-preview-image" src="${state.previewObjectURL}" alt="">`;
-      return;
-    }
-    els.previewBody.innerHTML = `<iframe class="file-preview-frame" src="${state.previewObjectURL}" title="${escapeHTML(itemName(item))}"></iframe>`;
-  } catch (error) {
-    if (requestID !== state.previewRequestID) return;
-    els.previewBody.className = "file-preview-body empty-state";
-    els.previewBody.textContent = error.message;
+function loadInlineStreamPreview(item, kind) {
+  const src = previewStreamURL(item);
+  els.previewBody.className = "file-preview-body";
+  if (kind === "image") {
+    els.previewBody.innerHTML = `<img class="file-preview-image" src="${escapeHTML(src)}" alt="">`;
+    return;
   }
+  if (kind === "video") {
+    els.previewBody.innerHTML = `<video class="file-preview-media" src="${escapeHTML(src)}" controls preload="metadata"></video>`;
+    return;
+  }
+  if (kind === "audio") {
+    els.previewBody.innerHTML = `<audio class="file-preview-audio" src="${escapeHTML(src)}" controls preload="metadata"></audio>`;
+    return;
+  }
+  if (kind === "html") {
+    els.previewBody.innerHTML = `<iframe class="file-preview-frame" src="${escapeHTML(src)}" title="${escapeHTML(itemName(item))}" sandbox=""></iframe>`;
+    return;
+  }
+  els.previewBody.innerHTML = `<iframe class="file-preview-frame" src="${escapeHTML(src)}" title="${escapeHTML(itemName(item))}"></iframe>`;
 }
 
 async function loadTextPreview(item, requestID) {

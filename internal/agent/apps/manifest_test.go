@@ -56,6 +56,58 @@ func TestValidateManifestAcceptsHermesShape(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAcceptsTypedSettingsAndFileSourcePermission(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	manifest.Config.Settings = SettingsSchema{
+		Fields: []SettingsField{
+			{
+				Key:      "api_base_url",
+				Label:    "Hermes URL",
+				Type:     "url",
+				Required: true,
+			},
+			{
+				Key:       "api_key",
+				Label:     "API key",
+				Type:      "password",
+				Secret:    true,
+				SecretKey: "api_key",
+			},
+			{
+				Key:    "source_id",
+				Label:  "Media source",
+				Type:   "select",
+				Source: "file_sources",
+			},
+		},
+	}
+	manifest.Permissions.Files = []FilePermission{{
+		Kind:  "configured_source",
+		Field: "source_id",
+	}}
+
+	if err := ValidateManifest(manifest); err != nil {
+		t.Fatalf("ValidateManifest error: %v", err)
+	}
+}
+
+func TestValidateManifestRejectsInvalidSettingsFields(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	manifest.Config.Settings = SettingsSchema{
+		Fields: []SettingsField{{
+			Key:  "../bad",
+			Type: "text",
+		}},
+	}
+
+	err := ValidateManifest(manifest)
+	if err == nil || !strings.Contains(err.Error(), "settings field") {
+		t.Fatalf("ValidateManifest error = %v, want settings field", err)
+	}
+}
+
 func TestValidateManifestRejectsUnsafeIDsAndPaths(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -8,18 +8,19 @@ import (
 	"github.com/dropfile/hankremote/internal/domain"
 )
 
-const homeAgentAppColumns = `home_id, app_id, name, version, enabled, public_config_json, secret_fields_set_json, status, last_error, updated_at, updated_by`
+const homeAgentAppColumns = `home_id, app_id, name, version, enabled, public_config_json, secret_fields_set_json, settings_schema_json, status, last_error, updated_at, updated_by`
 
 func (s *Store) UpsertHomeApp(ctx context.Context, app domain.HomeAgentApp) error {
 	_, err := s.exec(ctx, `INSERT INTO home_agent_apps (
-			home_id, app_id, name, version, enabled, public_config_json, secret_fields_set_json, status, last_error, updated_at, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			home_id, app_id, name, version, enabled, public_config_json, secret_fields_set_json, settings_schema_json, status, last_error, updated_at, updated_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(home_id, app_id) DO UPDATE SET
 			name = excluded.name,
 			version = excluded.version,
 			enabled = excluded.enabled,
 			public_config_json = excluded.public_config_json,
 			secret_fields_set_json = excluded.secret_fields_set_json,
+			settings_schema_json = excluded.settings_schema_json,
 			status = excluded.status,
 			last_error = excluded.last_error,
 			updated_at = excluded.updated_at,
@@ -31,6 +32,7 @@ func (s *Store) UpsertHomeApp(ctx context.Context, app domain.HomeAgentApp) erro
 		app.Enabled,
 		app.PublicConfigJSON,
 		app.SecretFieldsSetJSON,
+		app.SettingsSchemaJSON,
 		app.Status,
 		app.LastError,
 		app.UpdatedAt,
@@ -77,6 +79,7 @@ func scanHomeAgentApp(scanner interface{ Scan(dest ...any) error }) (domain.Home
 		&app.Enabled,
 		&app.PublicConfigJSON,
 		&app.SecretFieldsSetJSON,
+		&app.SettingsSchemaJSON,
 		&app.Status,
 		&app.LastError,
 		&app.UpdatedAt,

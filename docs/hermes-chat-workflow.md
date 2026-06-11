@@ -37,39 +37,40 @@ Flow:
 
 1. Hank app posts a normal assistant message to
    `POST /v1/home/assistant/sessions/{sessionID}/messages`.
-2. Hank Cloud classifies `/Hermes <prompt>` as `hermes.chat`.
-3. Hank Cloud sends the typed `hermes.chat` command over the existing outbound
-   home-agent WebSocket.
-4. The Hank home agent posts to the Hermes API server on the private network.
-5. Hermes returns text, and Hank persists that text as the assistant reply in
+2. Hank Cloud classifies `/Hermes <prompt>` as the installed Hermes app chat
+   command when the home agent advertises `apps.hermes.chat`.
+3. Hank Cloud sends `apps.invoke` over the existing outbound home-agent
+   WebSocket with `app_id: "hermes"` and `command_id: "chat"`.
+4. The Hank home agent runs the installed Hermes package, and the package posts
+   to the Hermes API server on the private network.
+5. Hermes returns text through the package response, and Hank persists that text
+   as the assistant reply in
    the same HankAI session.
 
-The Hermes bearer key stays in `.env.agent`. It is not sent to the Hank app. The
-cloud stores only non-secret profile metadata such as the API base URL, model,
-timeout, status, and whether a key is set.
+The Hermes bearer key stays in the agent-side installed app config. It is not
+sent to the Hank app. The cloud stores only non-secret installed-app metadata
+such as the API base URL, model, timeout, status, and whether a key is set.
 
 ## Agent Configuration
 
-Use Settings > Connections to save Hermes Agent settings. The dashboard sends
-the settings to the online home agent and, when `Save on home connector` is
-enabled, the agent persists them into `.env.agent`.
+Build the Hermes app package and import it from Settings > Apps:
 
-The same values can be edited manually in `.env.agent` if the dashboard is not
-available:
-
-```env
-HANK_REMOTE_HERMES_API_BASE_URL=http://hermes-vm:8642
-HANK_REMOTE_HERMES_API_KEY=replace-with-hermes-api-server-key
-HANK_REMOTE_HERMES_MODEL=hermes-agent
-HANK_REMOTE_HERMES_TIMEOUT_SECONDS=120
+```bash
+scripts/package-hermes-app.sh
 ```
 
-`HANK_REMOTE_HERMES_API_BASE_URL` may include `/v1`; both
+Import `dist/hermes.hankapp`, then use the installed app's Configure action to
+set the Hermes API base URL, model, timeout, and API key. The Settings > Apps
+form is rendered from `packages/hermes/app.json` `config.settings_schema`; there
+is no separate Hermes form in Settings > Connections.
+
+The configured API base URL may include `/v1`; both
 `http://hermes-vm:8642` and `http://hermes-vm:8642/v1` are accepted.
 
 ## Current Guardrails
 
-- Hermes chat is explicit only: the command must start with `/Hermes`.
+- Hermes chat is explicit only: the command must start with `/Hermes`, which is
+  exposed from the installed enabled Hermes app manifest.
 - Empty `/Hermes` prompts return a usage hint instead of calling Hermes.
 - Hank Cloud routes this workflow through the home agent; it does not expose the
   Hermes API server publicly.
