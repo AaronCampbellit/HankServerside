@@ -1,4 +1,6 @@
 const api = window.HankAPI.request;
+const escapeHTML = window.HankUI.escapeHTML;
+const hankRenderers = window.HankRenderers;
 
 const state = {
   user: null,
@@ -113,23 +115,8 @@ function slashCommands() {
   });
 }
 
-function escapeHTML(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function showToast(message, isError = false) {
-  els.toast.hidden = false;
-  els.toast.textContent = message;
-  els.toast.style.background = isError ? "rgba(142, 45, 28, 0.94)" : "rgba(35, 27, 20, 0.92)";
-  clearTimeout(showToast.timeoutID);
-  showToast.timeoutID = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 3400);
+  window.HankUI.showToast(els.toast, message, isError);
 }
 
 function formatBytes(bytes) {
@@ -587,18 +574,11 @@ function renderSessions() {
 }
 
 function messageRoleLabel(role) {
-  return role === "assistant" ? "Hank" : role;
+  return hankRenderers.messageRoleLabel(role);
 }
 
 function formatMessageTimestamp(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  const now = new Date();
-  const isSameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  return isSameDay ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : date.toLocaleString();
+  return hankRenderers.formatMessageTimestamp(value);
 }
 
 function renderMessages(messages = [], options = {}) {
@@ -917,18 +897,11 @@ function scheduleMediaJobPoll(delay = 3000) {
 }
 
 function formatTraceTime(value) {
-  return value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+  return hankRenderers.formatTraceTime(value);
 }
 
 function renderTraceDetails(details = {}) {
-  const rows = Object.entries(details || {}).filter(([_, value]) => String(value || "").trim());
-  if (!rows.length) return "";
-  return `<dl class="hank-log-details">${rows.map(([key, value]) => `
-    <div>
-      <dt>${escapeHTML(key.replaceAll("_", " "))}</dt>
-      <dd>${escapeHTML(value)}</dd>
-    </div>
-  `).join("")}</dl>`;
+  return hankRenderers.renderTraceDetails(details, escapeHTML);
 }
 
 function renderLogs(payload = {}) {
@@ -1065,41 +1038,11 @@ async function toggleLogs() {
 async function copyLogs() {
   await loadLogs();
   const text = traceLogText();
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      showToast("Workflow logs copied.");
-      return;
-    }
-  } catch (_) {
-  }
-  if (copyTextFallback(text)) {
+  if (await window.HankUI.copyText(text)) {
     showToast("Workflow logs copied.");
     return;
   }
   showToast("Clipboard is blocked. The logs are selected; press Cmd+C to copy.", true);
-}
-
-function copyTextFallback(text) {
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "readonly");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  textarea.style.top = "0";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  let copied = false;
-  try {
-    copied = document.execCommand("copy");
-  } catch (_) {
-    copied = false;
-  }
-  if (copied) {
-    document.body.removeChild(textarea);
-  }
-  return copied;
 }
 
 async function clearLogs() {

@@ -1,4 +1,7 @@
 const api = window.HankAPI.request;
+const fileUtils = window.HankFileServerUtils;
+const filePreview = window.HankFileServerPreview;
+const escapeHTML = window.HankUI.escapeHTML;
 
 const TEXT_PREVIEW_LIMIT = 1024 * 1024;
 const RICH_PREVIEW_LIMIT = 25 * 1024 * 1024;
@@ -126,62 +129,27 @@ const els = {
 
 
 function showToast(message, isError = false) {
-  els.toast.hidden = false;
-  els.toast.textContent = message;
-  els.toast.style.background = isError ? "rgba(142, 45, 28, 0.94)" : "rgba(35, 27, 20, 0.92)";
-  clearTimeout(showToast.timeoutID);
-  showToast.timeoutID = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 3400);
-}
-
-function escapeHTML(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  window.HankUI.showToast(els.toast, message, isError);
 }
 
 function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : "Never";
+  return fileUtils.formatDate(value);
 }
 
 function formatBytes(value) {
-  const bytes = Number(value || 0);
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  return fileUtils.formatBytes(value);
 }
 
 function filenameFromContentDisposition(header) {
-  const value = String(header || "");
-  const filenameExt = value.match(/filename\*=UTF-8''([^;]+)/i);
-  if (filenameExt) {
-    try {
-      return decodeURIComponent(filenameExt[1].trim());
-    } catch (_) {
-      return filenameExt[1].trim();
-    }
-  }
-  const filename = value.match(/filename=(?:"([^"]+)"|([^;]+))/i);
-  return filename ? (filename[1] || filename[2] || "").trim() : "";
+  return fileUtils.filenameFromContentDisposition(header);
 }
 
 function normalizePath(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed || trimmed === "/") return "/";
-  const normalized = `/${trimmed.replace(/^\/+/, "").replace(/\/+/g, "/")}`;
-  return normalized.endsWith("/") && normalized !== "/" ? normalized.slice(0, -1) : normalized;
+  return fileUtils.normalizePath(value);
 }
 
 function joinPath(base, child) {
-  const normalizedBase = normalizePath(base);
-  const normalizedChild = String(child || "").trim().replace(/^\/+/, "");
-  if (!normalizedChild) return normalizedBase;
-  return normalizedBase === "/" ? `/${normalizedChild}` : `${normalizedBase}/${normalizedChild}`;
+  return fileUtils.joinPath(base, child);
 }
 
 function parentPath(path) {
@@ -211,19 +179,11 @@ function extensionForItem(item) {
 }
 
 function fileTypeLabel(item) {
-  if (item?.is_directory) return "Folder";
-  const extension = extensionForItem(item);
-  return extension ? extension.toUpperCase() : "File";
+  return filePreview.fileTypeLabel(itemName(item), Boolean(item?.is_directory));
 }
 
 function iconLabel(item) {
-  if (item?.is_directory) return "";
-  const extension = extensionForItem(item);
-  if (!extension) return "FILE";
-  if (imageExtensions.has(extension)) return "IMG";
-  if (extension === "pdf") return "PDF";
-  if (textExtensions.has(extension)) return "TXT";
-  return extension.slice(0, 4).toUpperCase();
+  return filePreview.iconLabel(itemName(item), Boolean(item?.is_directory));
 }
 
 function selectedHomeID() {
@@ -670,7 +630,7 @@ function renderSourceSummary() {
         <div class="kv-row"><div class="kv-label">Last Error</div><div>${escapeHTML(profile.last_error || "None")}</div></div>
       </div>
       <div class="item-actions">
-        <a class="ops-card manage-link" href="/dashboard/settings#connections">Edit Settings</a>
+        <a class="ops-card manage-link" href="/dashboard/settings/connections">Edit Settings</a>
       </div>
     </article>
   `).join("");
@@ -1722,21 +1682,37 @@ async function fetchFileBlob(path, resultLabel) {
   return { blob, filename: filenameFromContentDisposition(response.headers.get("Content-Disposition")) };
 }
 
+async function setupFileDownload(path) {
+  selectedHomeOrThrow();
+  return api("/v1/home/files/downloads", {
+    method: "POST",
+    body: JSON.stringify(withSourceID({ path })),
+  });
+}
+
+function startBrowserDownload(url, filename) {
+  const link = document.createElement("a");
+  link.href = url;
+  if (filename) link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 async function downloadFile(path, options = {}) {
   try {
     const normalized = normalizePath(path);
-    const { blob, filename } = await fetchFileBlob(normalized, `downloaded ${formatBytes(0)}`);
-    state.lastTransfer.result = `downloaded ${formatBytes(blob.size)}`;
+    const setup = await setupFileDownload(normalized);
+    state.lastTransfer = {
+      ...setup,
+      result: "download started in browser",
+      completed_at: "",
+    };
     renderLastTransfer();
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = href;
-    link.download = filename || normalized.split("/").pop() || "download";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(href), 30 * 1000);
-    if (options.toast !== false) showToast(`Downloaded ${link.download}.`);
+    const filename = normalized.split("/").pop() || "download";
+    startBrowserDownload(setup.url, filename);
+    if (options.toast !== false) showToast(`Started download for ${filename}.`);
   } catch (error) {
     showToast(error.message, true);
   }

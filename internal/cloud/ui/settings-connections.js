@@ -247,7 +247,7 @@ function renderSummary() {
   els.haForm.querySelectorAll("input, textarea, button").forEach((element) => {
     element.disabled = !admin;
   });
-  els.hermesForm.querySelectorAll("input, textarea, button").forEach((element) => {
+  els.hermesForm?.querySelectorAll("input, textarea, button").forEach((element) => {
     element.disabled = !admin;
   });
   els.smbForm.querySelectorAll("input, button").forEach((element) => {

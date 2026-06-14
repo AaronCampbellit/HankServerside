@@ -2,6 +2,8 @@
 
 Date: 2026-06-08
 
+Status: Implemented. Retained as design context for the admin recovery export/import surface and redacted settings bundle behavior.
+
 ## Decision
 
 Build an admin-only recovery workflow in the Hank Remote dashboard that exports as much rebuild-useful settings data as possible while leaving tokens, passwords, API keys, encryption keys, database credentials, and agent setup tokens blank. Importing the bundle should restore non-secret settings first, then prompt the operator for the missing secrets needed to activate each imported connection.

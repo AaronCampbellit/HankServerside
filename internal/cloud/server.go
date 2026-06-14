@@ -134,13 +134,22 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
 	mux.HandleFunc("/dashboard/file-server", server.handleFileServerPage)
 	mux.HandleFunc("/dashboard/settings", server.handleSettingsPage)
-	mux.HandleFunc("/dashboard/settings/people-pane", server.handleSettingsPeoplePane)
-	mux.HandleFunc("/dashboard/settings/connections-pane", server.handleSettingsConnectionsPane)
-	mux.HandleFunc("/dashboard/settings/ai-pane", server.handleSettingsAIPane)
-	mux.HandleFunc("/dashboard/settings/backups-pane", server.handleSettingsBackupsPane)
-	mux.HandleFunc("/dashboard/settings/recovery-pane", server.handleSettingsRecoveryPane)
-	mux.HandleFunc("/dashboard/settings/apps-pane", server.handleSettingsAppsPane)
-	mux.HandleFunc("/dashboard/settings/join-home-pane", server.handleSettingsJoinHomePane)
+	mux.HandleFunc("/dashboard/settings/home", server.handleSettingsHomePage)
+	mux.HandleFunc("/dashboard/settings/quick-links", server.handleSettingsQuickLinksPage)
+	mux.HandleFunc("/dashboard/settings/people", server.handleSettingsPeoplePage)
+	mux.HandleFunc("/dashboard/settings/connections", server.handleSettingsConnectionsPage)
+	mux.HandleFunc("/dashboard/settings/ai", server.handleSettingsAIPage)
+	mux.HandleFunc("/dashboard/settings/apps", server.handleSettingsAppsPage)
+	mux.HandleFunc("/dashboard/settings/backups", server.handleSettingsBackupsPage)
+	mux.HandleFunc("/dashboard/settings/recovery", server.handleSettingsRecoveryPage)
+	mux.HandleFunc("/dashboard/settings/join-home", server.handleSettingsJoinHomePage)
+	mux.HandleFunc("/dashboard/settings/people-pane", redirectToSettingsRoute("/dashboard/settings/people"))
+	mux.HandleFunc("/dashboard/settings/connections-pane", redirectToSettingsRoute("/dashboard/settings/connections"))
+	mux.HandleFunc("/dashboard/settings/ai-pane", redirectToSettingsRoute("/dashboard/settings/ai"))
+	mux.HandleFunc("/dashboard/settings/backups-pane", redirectToSettingsRoute("/dashboard/settings/backups"))
+	mux.HandleFunc("/dashboard/settings/recovery-pane", redirectToSettingsRoute("/dashboard/settings/recovery"))
+	mux.HandleFunc("/dashboard/settings/apps-pane", redirectToSettingsRoute("/dashboard/settings/apps"))
+	mux.HandleFunc("/dashboard/settings/join-home-pane", redirectToSettingsRoute("/dashboard/settings/join-home"))
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)
 	mux.HandleFunc("/favicon.ico", serveUIFavicon)
 	mux.HandleFunc("/assets/", serveUIAsset)
@@ -1048,6 +1057,20 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "permission_denied", errAdminRoleRequired.Error(), nil)
 			continue
 		}
+		if command.Command == protocol.CommandAppsInvoke {
+			if err := s.authorizeAppsInvokeCommand(ctx, home.ID, membership, command); err != nil {
+				code := "permission_denied"
+				if errors.Is(err, errAppInvokeBadPayload) {
+					code = "bad_command_payload"
+				} else if errors.Is(err, errAppInvokeUnavailable) {
+					code = "app_unavailable"
+				} else if !errors.Is(err, errAppInvokeAccessDenied) {
+					code = "permission_check_failed"
+				}
+				s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, code, err.Error(), nil)
+				continue
+			}
+		}
 
 		if strings.HasPrefix(command.Command, "notes.") {
 			if err := s.handleCloudNotesCommand(ctx, appPeer, envelope, auth, command); err != nil {
@@ -1274,6 +1297,9 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 	payload["transfer_token"] = rawToken
 	payload["method"] = method
 	payload["url"] = "/v1/file-transfers/" + transfer.ID
+	if operation == protocol.FileTransferOperationDownload {
+		setFileTransferCookie(w, r, transfer.ID, rawToken, transfer.ExpiresAt)
+	}
 	writeJSON(w, http.StatusCreated, payload)
 }
 
@@ -1517,6 +1543,8 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 	rawToken := ""
 	if headerToken, err := bearerToken(r.Header.Get("Authorization")); err == nil {
 		rawToken = headerToken
+	} else if r.Method == http.MethodGet {
+		rawToken = fileTransferTokenFromCookie(r, transferID)
 	}
 	if rawToken == "" {
 		http.Error(w, "transfer token is required", http.StatusUnauthorized)

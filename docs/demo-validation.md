@@ -7,7 +7,7 @@ This document keeps demo-server testing separate from production code. The valid
 These files are production-safe and should be committed with the backend repair work:
 
 - `tools/livevalidation/main.go`: end-to-end live app, agent, Home Assistant, and file-flow validation.
-- `tools/adminvalidation/main.go`: admin UI/API validation for audit events, file jobs, and query telemetry.
+- `tools/adminvalidation/main.go`: admin UI/API validation for current Settings > Backups audit/query telemetry, File Server file jobs, and query telemetry APIs.
 - `tools/loadtest/loadtest_test.go`: single-home target load scenarios and JSON report output.
 - `scripts/restart-validation.sh`: restart-recovery test wrapper.
 - `scripts/file-safety-validation.sh`: file policy and managed-job safety wrapper.
@@ -96,6 +96,10 @@ scripts/restore-proof.sh
 scripts/query-telemetry-report.sh
 scripts/metrics-assert.sh
 ```
+
+`tools/adminvalidation` follows current canonical dashboard routes. If a route
+split removes or renames an operator page, update this tool in the same change
+so demo validation does not silently test stale UI paths.
 
 If `promtool` is unavailable on the demo host, install Prometheus tooling on that host rather than editing the alert rules around the missing binary.
 

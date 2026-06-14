@@ -45,7 +45,7 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	if err := client.expectHTMLContains(ctx, "/dashboard/storage?pane=1", []string{"Audit Trail", "Query Telemetry", "audit-event-type", "query-refresh-button"}); err != nil {
+	if err := client.expectHTMLContains(ctx, "/dashboard/settings/backups", []string{"Audit Trail", "Query Telemetry", "audit-event-type", "query-refresh-button"}); err != nil {
 		return err
 	}
 	fmt.Println("PASS admin storage UI exposes audit and query telemetry panels")

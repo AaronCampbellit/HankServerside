@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Hank Remote Home Settings</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260606-mobile-responsive">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  </head>
+  <body>
+    <div class="shell dashboard-shell settings-page">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Home Settings</h1>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
+
+      <main class="grid">
+        <section class="panel settings-index-panel" aria-label="Settings sections">
+          <div data-settings-nav></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Home Name</h2>
+            <span id="home-count" class="pill">Loading</span>
+          </div>
+          <form id="home-form" class="inline-form">
+            <input id="home-name" type="text" placeholder="Home">
+            <button type="submit">Save Name</button>
+          </form>
+          <div id="home-list" class="card-list empty-state">Loading home.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Home Connector</h2>
+            <span id="agent-count" class="pill">0 online</span>
+          </div>
+          <div id="agent-list" class="card-list empty-state">Connector status appears here.</div>
+        </section>
+
+        <details id="setup-file-panel" class="panel collapsible-panel setup-file-panel" open data-mobile-keep-open="true">
+          <summary class="panel-head collapsible-panel-head">
+            <h2>Setup File</h2>
+            <span class="chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <form id="token-form" class="stack compact">
+              <label>
+                <span>Home</span>
+                <select id="token-home" required></select>
+              </label>
+              <label>
+                <span>Connector ID</span>
+                <input id="token-agent-id" type="text" placeholder="Auto-generated from home name" required>
+              </label>
+              <label>
+                <span>Connector Name</span>
+                <input id="token-name" type="text" placeholder="Auto-generated as Home Agent">
+              </label>
+              <label>
+                <span>Expires After</span>
+                <input id="token-expiry" type="number" min="0" step="1" placeholder="0 means no expiry">
+              </label>
+              <button type="submit">Create Setup File</button>
+            </form>
+            <div id="token-created" class="token-output" hidden></div>
+            <div id="token-list" class="card-list empty-state">No setup files created yet.</div>
+          </div>
+        </details>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/ui-helpers.js" defer></script>
+    <script src="/assets/settings-nav.js" defer></script>
+    <script src="/assets/settings-home.js" defer></script>
+    <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
+  </body>
+</html>

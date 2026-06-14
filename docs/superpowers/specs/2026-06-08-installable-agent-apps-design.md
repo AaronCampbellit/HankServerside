@@ -2,7 +2,7 @@
 
 Date: 2026-06-08
 
-Status: Runtime and Hermes implementation complete; Gramaton extraction pending follow-up implementation plan.
+Status: Implemented. Runtime package import/configuration, Hermes, Gramaton, app-backed assistant routing, and Settings > Apps package configuration are present in the current codebase.
 
 ## Decision
 
@@ -171,8 +171,9 @@ Manifest validation should reject:
 - command paths that escape the app directory
 - executable files that are missing or unsafe
 - unknown permission kinds
-- slash commands that collide with built-in Hank commands or another enabled app
+- slash commands that collide with reserved built-in HankAI commands or another enabled app
 - schema references that escape the app directory
+- settings defaults/options that do not match the declared field type
 - archives with absolute paths, parent-directory paths, symlinks, or unsafe file modes
 
 ## Typed Settings Schema
@@ -283,8 +284,8 @@ Assistant command flow:
 
 1. User sends `/Hermes check this` or `/gramaton Project Hail Mary`.
 2. Cloud resolves the slash command from the app registry.
-3. Cloud sends `apps.invoke` to the agent with `app_id`, `command_id`, and input JSON.
-4. Agent verifies the app is installed, enabled, healthy enough, and allowed for the user/action.
+3. Cloud sends `apps.invoke` to the agent with `app_id`, `command_id`, generic input JSON (`raw_text`, `slash_command`), and safe request context.
+4. Cloud and agent verify the app is installed, enabled, healthy enough, and allowed by the app-level access mode.
 5. Agent starts the app executable and sends a stdio JSON request.
 6. App returns a structured response or a job id for long-running work.
 7. Agent wraps the response in the normal Hank protocol response.
@@ -336,6 +337,7 @@ For V1, app config should be applied through the agent. The cloud may store reda
 - app id
 - app version
 - enabled state
+- app-level user access mode: `admins_only` or `home_members`
 - public config fields
 - whether each secret field is set
 - status, applied version, last error, and updated time
@@ -352,7 +354,8 @@ Initial permission kinds:
 - `files.read_source`: app may read from selected file source ids.
 - `files.write_destination`: app may write to selected file source ids and destination paths.
 - `events.publish`: app may publish declared event topics.
-- `assistant.admin_only`: app slash command requires home admin role.
+
+Assistant access is app-level, not command-level. Admins install and configure apps; the app's `user_access` setting controls whether all commands in that app are limited to admins (`admins_only`) or available to regular home members (`home_members`).
 
 The agent enforces permissions before launching an app where possible and constrains the request data sent to the app. Apps should not receive raw access to every SMB share unless the manifest and app settings explicitly allow it.
 
@@ -542,7 +545,7 @@ Agent-local storage should track:
 - Stderr excerpts are sanitized and bounded.
 - App commands run with bounded time, stdout, stderr, and memory where the platform allows.
 - Gramaton file writes remain source-aware and path-contained.
-- App slash commands are permission-checked server-side before routing and agent-side before launch.
+- App slash commands and direct `apps.invoke` requests are checked against the app-level access mode server-side before routing and agent-side before launch.
 
 ## Testing Plan
 
@@ -560,10 +563,16 @@ Cloud/API tests:
 - App import rejects member access.
 - Upload preview does not activate a package.
 - Install activation records app metadata and emits settings changed events.
+- App config can update `user_access`; members only see and invoke enabled `home_members` apps.
 - Assistant slash command UI reads installed enabled app slash commands from
   `/v1/home/apps`; built-in Hank commands are appended after package commands.
+- Cloud persists installed app capabilities, command summaries, and
+  `assistant.slash_commands` from agent `apps.list` responses so the chat `/`
+  palette still has package metadata after reloads and can refresh stale rows
+  from the online agent.
 - `/Hermes` routes through `apps.invoke` when the Hermes app is installed and enabled.
 - Missing or disabled app capabilities report that the app is not configured
+- Generic installed app slash commands route through `apps.invoke` without hard-coded HankServerside handlers when the package uses the existing app contract.
   instead of silently running a compiled legacy workflow.
 
 Settings UI tests/checks:
@@ -596,6 +605,7 @@ Gramaton app tests:
 
 - Hank can install a new `.hankapp` package without rebuilding HankServerside.
 - Settings can import, preview, install, configure, enable, disable, and inspect app packages.
+- Settings can switch each app between admin-only and home-member access.
 - Hermes works entirely from an installed Hermes package.
 - Gramaton works entirely from an installed Gramaton package after the job/event runtime is complete.
 - App package validation blocks unsafe manifests and archives.

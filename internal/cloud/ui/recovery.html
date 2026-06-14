@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Hank Remote Recovery Settings</title>
+    <title>Hank Remote Recovery</title>
     <link rel="stylesheet" href="/assets/styles.css?v=20260606-mobile-responsive">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
   </head>
@@ -32,6 +32,10 @@
       <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
       <main class="grid">
+        <section class="panel settings-index-panel" aria-label="Settings sections">
+          <div data-settings-nav></div>
+        </section>
+
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Export Settings</h2>
@@ -75,7 +79,7 @@
           </div>
           <div id="secrets-list" class="card-list empty-state">Missing tokens and passwords will appear here after preview.</div>
           <div class="actions wrap">
-            <a class="button-link secondary" href="/dashboard/settings#connections" target="_top">Open Connections</a>
+            <a class="button-link secondary" href="/dashboard/settings/connections" target="_top">Open Connections</a>
           </div>
         </section>
       </main>
@@ -84,6 +88,8 @@
     </div>
 
     <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/ui-helpers.js" defer></script>
+    <script src="/assets/settings-nav.js" defer></script>
     <script src="/assets/recovery.js?v=20260608-redacted-settings" defer></script>
     <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
   </body>

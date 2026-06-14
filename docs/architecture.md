@@ -62,11 +62,13 @@ Home Assistant     NAS / TrueNAS
 ## Operator Surfaces
 
 - `/` and `/dashboard` provide first admin setup, home/agent status, token lifecycle, and operator troubleshooting.
-- `/dashboard/settings/*` exposes people, connections, AI, backups, and join-home panes.
+- `/dashboard/settings/*` exposes Settings sections as direct authenticated routes. Dashboard navigation does not use iframe composition; only file preview content uses sandboxed iframes.
 - `/dashboard/file-server` exposes source browsing, uploads/downloads, file moves, cancellation, retry, and rollback for managed jobs.
 - `/dashboard/hank` exposes HankAI conversations, assistant model/provider settings, attachments, confirmations, media workflows, and client-tool result handling.
 - `/dashboard/profile-notes` exposes user notes, note sharing, collaboration, and note attachment handling.
 - `scripts/bootstrap-first-run.sh`, `scripts/doctor.sh`, `make migrate-status`, and `make schema-drift-check` are the setup and database-safety entry points.
+
+There is no standalone PWA surface at this time. The `/pwa` route family and web app manifest are intentionally not served; `docs/PWA/current-scope.md` records the current scope and the conditions for any future mobile-web product work.
 
 ## Security Notes
 

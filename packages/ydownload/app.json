@@ -45,23 +45,45 @@
         {
           "key": "destination_path",
           "label": "Destination path",
-          "type": "path",
+          "type": "select",
           "default": "YouTube",
+          "options": [
+            { "value": "YouTube", "label": "YouTube" },
+            { "value": "YouTube/Music", "label": "YouTube/Music" },
+            { "value": "YouTube/Videos", "label": "YouTube/Videos" },
+            { "value": "Downloads/YouTube", "label": "Downloads/YouTube" },
+            { "value": "Media/YouTube", "label": "Media/YouTube" }
+          ],
           "order": 20
         },
         {
           "key": "format",
           "label": "Format",
-          "type": "text",
-          "default": "bv*+ba/b",
+          "type": "select",
+          "default": "best",
+          "options": [
+            { "value": "best", "label": "Best single file" },
+            { "value": "bv*+ba/b", "label": "Best video + audio" },
+            { "value": "bv*[height<=2160]+ba/b[height<=2160]", "label": "Best up to 4K" },
+            { "value": "bv*[height<=1080]+ba/b[height<=1080]", "label": "Best up to 1080p" },
+            { "value": "bv*[height<=720]+ba/b[height<=720]", "label": "Best up to 720p" },
+            { "value": "ba/bestaudio", "label": "Audio only" }
+          ],
           "help": "yt-dlp format selector.",
           "order": 30
         },
         {
           "key": "output_template",
           "label": "Output template",
-          "type": "text",
+          "type": "select",
           "default": "%(title).200B [%(id)s].%(ext)s",
+          "options": [
+            { "value": "%(title).200B [%(id)s].%(ext)s", "label": "Title plus video ID" },
+            { "value": "%(upload_date>%Y-%m-%d)s - %(title).200B [%(id)s].%(ext)s", "label": "Date - title plus ID" },
+            { "value": "%(uploader).100B/%(title).200B [%(id)s].%(ext)s", "label": "Channel folder / title plus ID" },
+            { "value": "%(playlist_title).100B/%(playlist_index)03d - %(title).200B [%(id)s].%(ext)s", "label": "Playlist folder / indexed title" },
+            { "value": "%(id)s.%(ext)s", "label": "Video ID only" }
+          ],
           "order": 40
         },
         {
@@ -81,16 +103,29 @@
         {
           "key": "subtitle_languages",
           "label": "Subtitle languages",
-          "type": "text",
+          "type": "select",
           "default": "en.*,all,-live_chat",
+          "options": [
+            { "value": "en.*,all,-live_chat", "label": "English preferred, fallback all" },
+            { "value": "en.*,-live_chat", "label": "English only" },
+            { "value": "all,-live_chat", "label": "All languages" },
+            { "value": "en.*,es.*,-live_chat", "label": "English and Spanish" },
+            { "value": "en.*,fr.*,-live_chat", "label": "English and French" }
+          ],
           "help": "Comma-separated yt-dlp subtitle language patterns.",
           "order": 70
         },
         {
           "key": "subtitle_format",
           "label": "Subtitle format",
-          "type": "text",
+          "type": "select",
           "default": "srt/best",
+          "options": [
+            { "value": "srt/best", "label": "SRT preferred" },
+            { "value": "vtt/best", "label": "WebVTT preferred" },
+            { "value": "ass/srt/best", "label": "ASS, then SRT" },
+            { "value": "best", "label": "Best available" }
+          ],
           "order": 80
         },
         {
@@ -131,8 +166,14 @@
         {
           "key": "rate_limit",
           "label": "Rate limit",
-          "type": "text",
-          "placeholder": "5M",
+          "type": "select",
+          "options": [
+            { "value": "", "label": "No limit" },
+            { "value": "2M", "label": "2 MB/s" },
+            { "value": "5M", "label": "5 MB/s" },
+            { "value": "10M", "label": "10 MB/s" },
+            { "value": "20M", "label": "20 MB/s" }
+          ],
           "order": 140
         },
         {
@@ -144,22 +185,38 @@
         {
           "key": "cookies_file_path",
           "label": "Cookies file",
-          "type": "path",
+          "type": "select",
+          "options": [
+            { "value": "", "label": "None" },
+            { "value": "/srv/hank/config/yt-dlp/cookies.txt", "label": "Agent yt-dlp cookies" },
+            { "value": "/srv/hank/files/YouTube/cookies.txt", "label": "YouTube folder cookies" }
+          ],
           "help": "Agent-local cookies.txt path passed to yt-dlp.",
           "order": 160
         },
         {
           "key": "yt_dlp_path",
           "label": "yt-dlp path",
-          "type": "path",
+          "type": "select",
           "default": "yt-dlp",
+          "options": [
+            { "value": "yt-dlp", "label": "yt-dlp from PATH" },
+            { "value": "/usr/local/bin/yt-dlp", "label": "/usr/local/bin/yt-dlp" },
+            { "value": "/usr/bin/yt-dlp", "label": "/usr/bin/yt-dlp" }
+          ],
           "order": 170
         },
         {
           "key": "timeout_seconds",
           "label": "Timeout seconds",
-          "type": "number",
+          "type": "select",
           "default": 900,
+          "options": [
+            { "value": 300, "label": "5 minutes" },
+            { "value": 900, "label": "15 minutes" },
+            { "value": 1800, "label": "30 minutes" },
+            { "value": 3600, "label": "60 minutes" }
+          ],
           "order": 180
         }
       ]

@@ -29,8 +29,13 @@ func TestAppsListRequiresHomeMembership(t *testing.T) {
 		AppID:               "hermes",
 		Name:                "Hermes",
 		Version:             "1.0.0",
+		Enabled:             true,
 		PublicConfigJSON:    `{}`,
 		SecretFieldsSetJSON: `{}`,
+		CapabilitiesJSON:    `["apps.hermes.chat"]`,
+		SlashCommandsJSON:   `[{"command":"/Hermes","command_id":"chat","description":"Send a prompt to Hermes."}]`,
+		CommandsJSON:        `[{"id":"chat","mode":"request_response","timeout_seconds":120,"admin_only":true}]`,
+		UserAccess:          domain.HomeAgentAppUserAccessHomeMembers,
 		Status:              "installed",
 		UpdatedAt:           now,
 		UpdatedBy:           "usr_apps_admin",
@@ -38,18 +43,148 @@ func TestAppsListRequiresHomeMembership(t *testing.T) {
 
 	member := requestJSONStatus(t, testServer, tokens.member, http.MethodGet, "/v1/home/apps", nil, http.StatusOK)
 	defer member.Body.Close()
-	var payload struct {
-		Apps []domain.HomeAgentApp `json:"apps"`
-	}
+	var payload protocol.AppsListResponse
 	if err := json.NewDecoder(member.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Apps) != 1 || payload.Apps[0].AppID != "hermes" {
+	if len(payload.Apps) != 1 || payload.Apps[0].ID != "hermes" {
 		t.Fatalf("apps payload = %#v", payload)
+	}
+	got := payload.Apps[0]
+	if !got.Enabled || len(got.SlashCommands) != 1 || got.SlashCommands[0].Command != "/Hermes" || got.SlashCommands[0].CommandID != "chat" {
+		t.Fatalf("apps slash metadata = %#v", got)
+	}
+	if len(got.Commands) != 1 || got.Commands[0].ID != "chat" || len(got.Capabilities) != 1 || got.Capabilities[0] != "apps.hermes.chat" {
+		t.Fatalf("apps command metadata = %#v", got)
 	}
 
 	outsider := requestJSONStatus(t, testServer, tokens.outsider, http.MethodGet, "/v1/home/apps", nil, http.StatusNotFound)
 	outsider.Body.Close()
+}
+
+func TestAppsListFiltersMemberAccess(t *testing.T) {
+	ctx := context.Background()
+	db, testServer, tokens := setupAppsHTTPOnly(t, ctx)
+
+	now := time.Now().UTC()
+	for _, app := range []domain.HomeAgentApp{
+		{
+			HomeID:              "home_apps",
+			AppID:               "members_app",
+			Name:                "Members App",
+			Version:             "1.0.0",
+			Enabled:             true,
+			PublicConfigJSON:    `{}`,
+			SecretFieldsSetJSON: `{}`,
+			SlashCommandsJSON:   `[{"command":"/members","command_id":"run","description":"Run member app."}]`,
+			CommandsJSON:        `[{"id":"run","mode":"request_response","timeout_seconds":30}]`,
+			UserAccess:          domain.HomeAgentAppUserAccessHomeMembers,
+			Status:              "installed",
+			UpdatedAt:           now,
+			UpdatedBy:           "usr_apps_admin",
+		},
+		{
+			HomeID:              "home_apps",
+			AppID:               "admin_app",
+			Name:                "Admin App",
+			Version:             "1.0.0",
+			Enabled:             true,
+			PublicConfigJSON:    `{}`,
+			SecretFieldsSetJSON: `{}`,
+			SlashCommandsJSON:   `[{"command":"/admin","command_id":"run","description":"Run admin app."}]`,
+			CommandsJSON:        `[{"id":"run","mode":"request_response","timeout_seconds":30}]`,
+			UserAccess:          domain.HomeAgentAppUserAccessAdminsOnly,
+			Status:              "installed",
+			UpdatedAt:           now,
+			UpdatedBy:           "usr_apps_admin",
+		},
+	} {
+		must(t, db.UpsertHomeApp(ctx, app))
+	}
+
+	adminResponse := requestJSONStatus(t, testServer, tokens.admin, http.MethodGet, "/v1/home/apps", nil, http.StatusOK)
+	defer adminResponse.Body.Close()
+	var adminPayload protocol.AppsListResponse
+	if err := json.NewDecoder(adminResponse.Body).Decode(&adminPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(adminPayload.Apps) != 2 {
+		t.Fatalf("admin apps = %#v", adminPayload.Apps)
+	}
+
+	memberResponse := requestJSONStatus(t, testServer, tokens.member, http.MethodGet, "/v1/home/apps", nil, http.StatusOK)
+	defer memberResponse.Body.Close()
+	var memberPayload protocol.AppsListResponse
+	if err := json.NewDecoder(memberResponse.Body).Decode(&memberPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(memberPayload.Apps) != 1 || memberPayload.Apps[0].ID != "members_app" || memberPayload.Apps[0].UserAccess != domain.HomeAgentAppUserAccessHomeMembers {
+		t.Fatalf("member apps = %#v", memberPayload.Apps)
+	}
+}
+
+func TestFilterAppSummariesForMembership(t *testing.T) {
+	apps := []protocol.AppSummary{
+		{ID: "members_app", Enabled: true, UserAccess: domain.HomeAgentAppUserAccessHomeMembers, SlashCommands: []protocol.AppSlashCommand{{Command: "/members", CommandID: "run"}}},
+		{ID: "admin_app", Enabled: true, UserAccess: domain.HomeAgentAppUserAccessAdminsOnly, SlashCommands: []protocol.AppSlashCommand{{Command: "/admin", CommandID: "run"}}},
+		{ID: "disabled_app", Enabled: false, UserAccess: domain.HomeAgentAppUserAccessHomeMembers, SlashCommands: []protocol.AppSlashCommand{{Command: "/disabled", CommandID: "run"}}},
+		{ID: "legacy_app", Enabled: true, SlashCommands: []protocol.AppSlashCommand{{Command: "/legacy", CommandID: "run"}}},
+	}
+
+	admin := filterAppSummariesForMembership(apps, domain.HomeMembership{Role: domain.HomeRoleAdmin})
+	if len(admin) != 4 {
+		t.Fatalf("admin apps = %#v", admin)
+	}
+
+	member := filterAppSummariesForMembership(apps, domain.HomeMembership{Role: domain.HomeRoleMember})
+	if len(member) != 1 || member[0].ID != "members_app" || len(member[0].SlashCommands) != 1 {
+		t.Fatalf("member apps = %#v", member)
+	}
+}
+
+func TestCanUseHomeAgentApp(t *testing.T) {
+	admin := domain.HomeMembership{Role: domain.HomeRoleAdmin}
+	member := domain.HomeMembership{Role: domain.HomeRoleMember}
+
+	cases := []struct {
+		name       string
+		app        domain.HomeAgentApp
+		membership domain.HomeMembership
+		want       bool
+	}{
+		{
+			name:       "admin can use admins only app",
+			app:        domain.HomeAgentApp{Enabled: true, UserAccess: domain.HomeAgentAppUserAccessAdminsOnly},
+			membership: admin,
+			want:       true,
+		},
+		{
+			name:       "member cannot use admins only app",
+			app:        domain.HomeAgentApp{Enabled: true, UserAccess: domain.HomeAgentAppUserAccessAdminsOnly},
+			membership: member,
+			want:       false,
+		},
+		{
+			name:       "member can use home members app",
+			app:        domain.HomeAgentApp{Enabled: true, UserAccess: domain.HomeAgentAppUserAccessHomeMembers},
+			membership: member,
+			want:       true,
+		},
+		{
+			name:       "member cannot use disabled home members app",
+			app:        domain.HomeAgentApp{Enabled: false, UserAccess: domain.HomeAgentAppUserAccessHomeMembers},
+			membership: member,
+			want:       false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := canUseHomeAgentApp(tc.app, tc.membership); got != tc.want {
+				t.Fatalf("canUseHomeAgentApp() = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestAppsImportPreviewRequiresAdminAndOnlineAgent(t *testing.T) {
@@ -63,6 +198,61 @@ func TestAppsImportPreviewRequiresAdminAndOnlineAgent(t *testing.T) {
 	admin := doRawRequest(t, testServer, tokens.admin, http.MethodPost, "/v1/home/apps/import/preview", []byte("package"))
 	if admin.StatusCode != http.StatusConflict {
 		t.Fatalf("offline preview status = %d body=%s", admin.StatusCode, admin.Body)
+	}
+}
+
+func TestAppsListPrefersOnlineAgentSlashMetadata(t *testing.T) {
+	ctx := context.Background()
+	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "test done")
+
+	resultCh := make(chan testJSONResponse, 1)
+	go func() {
+		resultCh <- doJSONRequest(t, testServer, sessionToken, http.MethodGet, "/v1/home/apps", nil)
+	}()
+
+	envelope := readAgentCommandEnvelope(t, ctx, agentConn, protocol.CommandAppsList)
+	writeAgentResponse(t, ctx, agentConn, envelope, agentID, homeID, protocol.AppsListResponse{
+		Apps: []protocol.AppSummary{{
+			ID:           "ydownload",
+			Name:         "YDownload",
+			Version:      "1.0.0",
+			Enabled:      true,
+			Status:       "installed",
+			Capabilities: []string{"apps.ydownload.download"},
+			SlashCommands: []protocol.AppSlashCommand{{
+				Command:     "/ydownload",
+				CommandID:   "download",
+				Description: "Download a YouTube video.",
+			}},
+			Commands: []protocol.AppCommandSummary{{
+				ID:             "download",
+				Mode:           "request_response",
+				TimeoutSeconds: 900,
+				AdminOnly:      true,
+			}},
+			PublicConfig: json.RawMessage(`{"source_id":"hankdemo"}`),
+		}},
+	})
+
+	result := <-resultCh
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("apps list status = %d body=%s", result.StatusCode, result.Body)
+	}
+	var payload protocol.AppsListResponse
+	if err := json.Unmarshal([]byte(result.Body), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Apps) != 1 || len(payload.Apps[0].SlashCommands) != 1 || payload.Apps[0].SlashCommands[0].Command != "/ydownload" {
+		t.Fatalf("apps list payload = %#v", payload)
+	}
+	app, err := db.GetHomeApp(ctx, homeID, "ydownload")
+	if err != nil {
+		t.Fatalf("GetHomeApp: %v", err)
+	}
+	if app.SlashCommandsJSON == "" || app.CommandsJSON == "" || app.CapabilitiesJSON != `["apps.ydownload.download"]` {
+		t.Fatalf("persisted app metadata = %#v", app)
 	}
 }
 
@@ -130,11 +320,23 @@ func TestAppsActivatePersistsReturnedAppMetadata(t *testing.T) {
 	}
 	writeAgentResponse(t, ctx, agentConn, envelope, agentID, homeID, protocol.AppsPackageActivateResponse{
 		App: protocol.AppSummary{
-			ID:              "hermes",
-			Name:            "Hermes",
-			Version:         "1.0.0",
-			Enabled:         true,
-			Status:          "installed",
+			ID:           "hermes",
+			Name:         "Hermes",
+			Version:      "1.0.0",
+			Enabled:      true,
+			Status:       "installed",
+			Capabilities: []string{"apps.hermes.chat"},
+			SlashCommands: []protocol.AppSlashCommand{{
+				Command:     "/Hermes",
+				CommandID:   "chat",
+				Description: "Send a prompt to Hermes.",
+			}},
+			Commands: []protocol.AppCommandSummary{{
+				ID:             "chat",
+				Mode:           "request_response",
+				TimeoutSeconds: 120,
+				AdminOnly:      true,
+			}},
 			PublicConfig:    json.RawMessage(`{"api_base_url":"https://hermes.local"}`),
 			SecretFieldsSet: map[string]bool{"api_key": true},
 			SettingsSchema: protocol.AppSettingsSchema{
@@ -150,12 +352,29 @@ func TestAppsActivatePersistsReturnedAppMetadata(t *testing.T) {
 	if result.StatusCode != http.StatusOK {
 		t.Fatalf("activate status = %d body=%s", result.StatusCode, result.Body)
 	}
+	var activation protocol.AppsPackageActivateResponse
+	if err := json.Unmarshal([]byte(result.Body), &activation); err != nil {
+		t.Fatal(err)
+	}
+	if activation.App.UserAccess != domain.HomeAgentAppUserAccessAdminsOnly {
+		t.Fatalf("activation user access = %q", activation.App.UserAccess)
+	}
 	app, err := db.GetHomeApp(ctx, homeID, "hermes")
 	if err != nil {
 		t.Fatalf("GetHomeApp: %v", err)
 	}
 	if !app.Enabled || app.PublicConfigJSON != `{"api_base_url":"https://hermes.local"}` || app.SecretFieldsSetJSON != `{"api_key":true}` || app.SettingsSchemaJSON == "" {
 		t.Fatalf("persisted app = %#v", app)
+	}
+	if app.CapabilitiesJSON != `["apps.hermes.chat"]` || app.SlashCommandsJSON == "" || app.CommandsJSON == "" {
+		t.Fatalf("persisted app = %#v", app)
+	}
+	var slashCommands []protocol.AppSlashCommand
+	if err := json.Unmarshal([]byte(app.SlashCommandsJSON), &slashCommands); err != nil {
+		t.Fatal(err)
+	}
+	if len(slashCommands) != 1 || slashCommands[0].Command != "/Hermes" {
+		t.Fatalf("persisted slash commands = %#v", slashCommands)
 	}
 }
 
@@ -171,6 +390,7 @@ func TestAppsConfigApplyRoutesToAgent(t *testing.T) {
 			"public_config": map[string]any{"api_base_url": "https://hermes.local"},
 			"secrets":       map[string]any{"api_key": "secret"},
 			"enable":        true,
+			"user_access":   "home_members",
 		})
 	}()
 
@@ -200,6 +420,9 @@ func TestAppsConfigApplyRoutesToAgent(t *testing.T) {
 	}
 	if app.SecretFieldsSetJSON != `{"api_key":true}` {
 		t.Fatalf("persisted app = %#v", app)
+	}
+	if app.UserAccess != domain.HomeAgentAppUserAccessHomeMembers {
+		t.Fatalf("persisted app user access = %q", app.UserAccess)
 	}
 }
 

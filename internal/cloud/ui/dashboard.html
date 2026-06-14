@@ -37,12 +37,8 @@
         <section class="panel">
           <div class="panel-head">
             <h2 id="home-panel-title">Current Home</h2>
-            <span id="home-count" class="pill" hidden>0 homes</span>
+            <span id="home-count" class="pill">0 homes</span>
           </div>
-          <form id="home-form" class="inline-form" hidden>
-            <input id="home-name" type="text" placeholder="Home">
-            <button type="submit">Save Name</button>
-          </form>
           <div id="home-list" class="card-list empty-state">Loading home.</div>
         </section>
 
@@ -58,37 +54,10 @@
           <div class="panel-head">
             <h2>Quick Links</h2>
             <span class="quick-links-actions">
-              <span id="quick-links-count" class="pill" hidden>0 links</span>
-              <button id="quick-links-refresh" type="button" class="secondary" hidden>Refresh</button>
-              <button id="quick-link-add" type="button" class="icon-button secondary" title="Add quick link" aria-label="Add quick link" aria-expanded="false" hidden>
-                <span aria-hidden="true">+</span>
-              </button>
-              <button id="quick-links-edit-mode" type="button" class="secondary" aria-pressed="false" hidden>Edit</button>
+              <span id="quick-links-count" class="pill">0 links</span>
+              <a class="ops-card manage-link" href="/dashboard/settings/quick-links">Manage</a>
             </span>
           </div>
-          <form id="quick-link-form" class="quick-link-form" hidden>
-            <input id="quick-link-id" type="hidden">
-            <label>
-              <span>Name</span>
-              <input id="quick-link-title" type="text" maxlength="80" placeholder="GitHub">
-            </label>
-            <label>
-              <span>URL</span>
-              <input id="quick-link-url" type="url" maxlength="2048" placeholder="https://github.com" required>
-            </label>
-            <label>
-              <span>Description</span>
-              <input id="quick-link-description" type="text" maxlength="180" placeholder="Code">
-            </label>
-            <label class="toggle-field">
-              <input id="quick-link-health" type="checkbox" checked>
-              <span>Status checks</span>
-            </label>
-            <div class="actions wrap">
-              <button type="submit">Save</button>
-              <button id="quick-link-cancel" type="button" class="secondary">Cancel</button>
-            </div>
-          </form>
           <div id="quick-links-list" class="quick-links-grid empty-state">Loading links.</div>
         </section>
 
@@ -99,36 +68,6 @@
           </div>
           <div id="setup-checklist" class="setup-checklist"></div>
         </section>
-
-        <details id="setup-file-panel" class="panel collapsible-panel setup-file-panel" hidden>
-          <summary class="panel-head collapsible-panel-head">
-            <h2>Setup File</h2>
-            <span class="chevron" aria-hidden="true"></span>
-          </summary>
-          <div class="collapsible-panel-body">
-            <form id="token-form" class="stack compact">
-              <label>
-                <span>Home</span>
-                <select id="token-home" required></select>
-              </label>
-              <label>
-                <span>Connector ID</span>
-                <input id="token-agent-id" type="text" placeholder="Auto-generated from home name" required>
-              </label>
-              <label>
-                <span>Connector Name</span>
-                <input id="token-name" type="text" placeholder="Auto-generated as Home Agent">
-              </label>
-              <label>
-                <span>Expires After</span>
-                <input id="token-expiry" type="number" min="0" step="1" placeholder="0 means no expiry">
-              </label>
-              <button type="submit">Create Setup File</button>
-            </form>
-            <div id="token-created" class="token-output" hidden></div>
-            <div id="token-list" class="card-list empty-state">No setup files created yet.</div>
-          </div>
-        </details>
 
         <details id="health" class="panel wide-panel collapsible-panel dashboard-health-panel" open>
           <summary class="panel-head collapsible-panel-head">
@@ -141,8 +80,8 @@
           <div class="collapsible-panel-body">
             <div id="sync-summary" class="dashboard-health-grid"></div>
             <div class="dashboard-health-actions">
-              <a class="ops-card manage-link" href="/dashboard/settings#connections">Connections</a>
-              <a class="ops-card manage-link" href="/dashboard/settings#backups" data-admin-only="true" hidden>Backups</a>
+              <a class="ops-card manage-link" href="/dashboard/settings/connections">Connections</a>
+              <a class="ops-card manage-link" href="/dashboard/settings/backups" data-admin-only="true" hidden>Backups</a>
               <a class="ops-card manage-link" href="/docs/deployment">Setup Guide</a>
             </div>
           </div>
@@ -154,6 +93,7 @@
     </div>
 
     <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/ui-helpers.js" defer></script>
     <script src="/assets/dashboard.js?v=20260601-health-panel" defer></script>
     <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
   </body>

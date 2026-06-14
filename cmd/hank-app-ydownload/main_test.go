@@ -113,6 +113,16 @@ func TestYTDLPArgsCommonSettings(t *testing.T) {
 	}
 }
 
+func TestYTDLPArgsDefaultFormatPrefersCompatibleSingleFile(t *testing.T) {
+	t.Parallel()
+
+	args := ytDLPArgs(appConfig{}, commandInput{}, "/tmp/out", "https://example.test/watch")
+	joined := "\x00" + strings.Join(args, "\x00") + "\x00"
+	if !strings.Contains(joined, "\x00--format\x00best\x00") {
+		t.Fatalf("args = %#v, want default format best", args)
+	}
+}
+
 func TestRunRejectsUnsupportedCommand(t *testing.T) {
 	t.Parallel()
 	request := apps.AppStdioRequest{

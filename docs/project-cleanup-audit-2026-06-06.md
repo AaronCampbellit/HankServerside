@@ -6,6 +6,8 @@ This audit looked for holes, cleanup debt, and stale source-of-truth conflicts i
 
 This is not a full production readiness score. Use `docs/backend-production-repair-plan.md` for the broader hardening roadmap.
 
+This file is an archived audit snapshot. The status table below is the current interpretation of the original findings; the evidence sections are retained for traceability, not as an active task list.
+
 ## Repair Status
 
 Status as of 2026-06-06:
@@ -17,7 +19,7 @@ Status as of 2026-06-06:
 | `rollback_required` move jobs have no rollback path | Repaired | Added `files.move_rollback`, cloud rollback endpoint, dashboard rollback action, policy check, runbook coverage, and tests. |
 | Lifecycle cleanup is partial | Repaired | Expanded pruning for operational rows, old transfer rows, login backoff, assistant attachment metadata, deleted note attachment rows, and safe stale note attachment files, with summary logging and configurable interval/retention env vars. |
 | README route inventory is stale | Repaired | Updated README route and agent-command inventory, including quick links, audit/query telemetry, file jobs, assistant models/media image, attachment discard, and transfer status. |
-| Security hardening TODO reads as active risk | Repaired | Reworded the hardening TODO as historical rationale plus current-risk lines, with the active remaining risk focused on legacy plaintext-row detection/re-encryption. |
+| Security hardening note read as active risk | Repaired | Reworded the hardening note as historical rationale plus current-risk lines, with the active remaining risk focused on legacy plaintext-row detection/re-encryption. |
 | Architecture docs understate current surfaces | Repaired | Updated `docs/architecture.md` with current cloud, agent, protocol, operator, assistant, media, file-job, and maintenance surfaces. |
 | Historical audits need current-status framing | Repaired | Added a 2026-06-06 status table to `docs/backend-architecture-audit.md` and linked the legacy audit to this repaired cleanup snapshot. |
 | Migration tests need constraint-contract assertions | Partially repaired | Added the service-profile constraint-contract assertion. Broader enum coverage for file-job, assistant, note, and collaboration states remains follow-up hardening. |
@@ -131,7 +133,7 @@ Cleanup:
 - Replace the hand-maintained route list with either a generated route inventory or a smaller route-family summary that points to current handler groups.
 - Add a docs check if the project keeps route inventories in markdown.
 
-### 6. Security-hardening TODO is partly historical but still written as active risk
+### 6. Security-hardening note is partly historical but still written as active risk
 
 Evidence:
 

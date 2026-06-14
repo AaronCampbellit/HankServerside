@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hank-remote-cloud ./cmd/hank-remot
 	&& CGO_ENABLED=0 GOOS=linux go build -o /out/hank-remote-agent ./cmd/hank-remote-agent
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates ffmpeg yt-dlp \
 	&& addgroup -S hank \
 	&& adduser -S -G hank hank \
 	&& mkdir -p /var/lib/hank/db-ops/state /var/lib/hank/note-attachments /var/log/hank/db-ops \

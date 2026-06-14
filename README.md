@@ -2,7 +2,7 @@
 
 `Hank Remote` is the server-side companion for Hank. It runs a public cloud service plus a local agent service on the same machine so the iPhone app can reach Home Assistant, files, and notes remotely over one authenticated API surface.
 
-The cloud service now also serves a management dashboard at `/` for app auth, home creation, agent visibility, and token lifecycle operations.
+The cloud service now also serves a management dashboard at `/` and `/dashboard` for app auth, home creation, agent visibility, token lifecycle operations, Settings, files, notes, HankAI, backup/restore, and troubleshooting. Hank Remote does not currently serve a standalone PWA; the removed `/pwa` route family is documented in `docs/PWA/current-scope.md`.
 
 ## What Exists Now
 
@@ -129,12 +129,20 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `GET /dashboard/profile-notes`
   - `GET /dashboard/file-server`
   - `GET /dashboard/settings`
-  - `GET /dashboard/settings/people-pane`
-  - `GET /dashboard/settings/connections-pane`
-  - `GET /dashboard/settings/ai-pane`
-  - `GET /dashboard/settings/backups-pane`
-  - `GET /dashboard/settings/join-home-pane`
+  - `GET /dashboard/settings/home`
+  - `GET /dashboard/settings/quick-links`
+  - `GET /dashboard/settings/people`
+  - `GET /dashboard/settings/connections`
+  - `GET /dashboard/settings/ai`
+  - `GET /dashboard/settings/apps`
+  - `GET /dashboard/settings/backups`
+  - `GET /dashboard/settings/recovery`
+  - `GET /dashboard/settings/join-home`
   - `GET /docs/deployment`
+- current browser surface:
+  - the operator dashboard is the supported browser UI
+  - `/dashboard/settings/*` exposes Settings sections as direct authenticated routes. Dashboard navigation does not use iframe composition; only file preview content uses sandboxed iframes.
+  - `/pwa`, `/pwa/`, `/pwa/sw.js`, `/pwa/manifest.webmanifest`, and `/assets/site.webmanifest` are intentionally not served
 - cloud operations endpoints:
   - `GET /healthz`
   - `GET /readyz`
@@ -176,9 +184,16 @@ The cloud service now also serves a management dashboard at `/` for app auth, ho
   - `media.download_start`
   - `media.download_status`
   - `media.image_fetch`
-  - `hermes.chat`
+  - `apps.list`
+  - `apps.package_preview`
+  - `apps.package_activate`
+  - `apps.config_status`
+  - `apps.config_apply`
+  - `apps.invoke`
   - `config.status`
   - `config.apply`
+
+Installed first-party `.hankapp` packages can add HankAI slash commands without rebuilding HankServerside when they use the existing app runtime contract. Admins import and configure packages in Settings > Apps. Each installed app has one access mode: `admins_only` or `home_members`; when `home_members` is selected, every command in that app is available to regular home members.
 
 ## Project Layout
 

@@ -314,7 +314,7 @@ After the agent is online, use Settings > Connections to save Home Assistant and
 
 When no SMB shares are configured, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
 
-For optional HankAI app workflows such as Hermes or Gramaton, build the app package with `scripts/package-hermes-app.sh` or `scripts/package-gramaton-app.sh`, then open Settings > Apps and import the generated `.hankapp` archive. Configure the installed app from its Apps-page Configure action; the fields come from the package `config.settings_schema`. Hermes needs an agent-reachable API base URL, model, timeout, and API key. Gramaton needs provider credentials plus its media source and destination fields. Secrets stay agent-side and are shown in the dashboard only as set/unset metadata. HankAI slash commands such as `/Hermes` and `/gramaton` appear from installed enabled app metadata, not from built-in dashboard command lists.
+For optional HankAI app workflows such as Hermes, Gramaton, or other trusted first-party command apps, build the app package with the matching `scripts/package-*-app.sh` helper, then open Settings > Apps and import the generated `.hankapp` archive. Configure the installed app from its Apps-page Configure action; the fields come from the package `config.settings_schema`. Secrets stay agent-side and are shown in the dashboard only as set/unset metadata. HankAI slash commands such as `/Hermes` and `/gramaton` appear from installed enabled app metadata, not from built-in dashboard command lists. Each installed app also has an access setting: `admins_only` keeps all commands in that app admin-only, while `home_members` makes every command in that app available to regular home members who can use HankAI. If a new app needs a server-side primitive HankServerside does not expose yet, add that primitive to the cloud/agent protocol before relying on the package.
 
 If you have an older `.env.agent` with legacy single-share SMB keys, convert it before updating the agent:
 
@@ -348,7 +348,7 @@ Compose deployment does this through the agent service restart policy.
 
 ## 10. Storage And Backups
 
-Open `/dashboard/settings#backups` as an admin.
+Open `/dashboard/settings/backups` as an admin.
 
 After first boot:
 
@@ -410,6 +410,6 @@ Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
 - first admin registration works once on a fresh database
 - later public registration returns `403`
 - the agent starts only after `.env.agent` exists
-- `/dashboard/settings#backups` loads for admins
+- `/dashboard/settings/backups` loads for admins
 - Home agent status becomes online
 - the Hank app can sign in through the public URL

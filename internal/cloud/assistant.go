@@ -166,46 +166,56 @@ type assistantRankedNote struct {
 type assistantIntentKind string
 
 const (
-	assistantIntentGeneral            assistantIntentKind = "general"
-	assistantIntentNotesList          assistantIntentKind = "notes.list"
-	assistantIntentNotesSearch        assistantIntentKind = "notes.search"
-	assistantIntentNotesAppend        assistantIntentKind = "notes.append"
-	assistantIntentNotesCreate        assistantIntentKind = "notes.create"
-	assistantIntentNotesSummarize     assistantIntentKind = "notes.summarize"
-	assistantIntentFilesSearch        assistantIntentKind = "files.search"
-	assistantIntentFilesListFolder    assistantIntentKind = "files.list_folder"
-	assistantIntentFilesCreateFolder  assistantIntentKind = "files.create_folder"
-	assistantIntentCalendarSearch     assistantIntentKind = "calendar.search"
-	assistantIntentCalendarCreate     assistantIntentKind = "calendar.create_event"
-	assistantIntentCalendarUpdate     assistantIntentKind = "calendar.update_event"
-	assistantIntentCalendarDelete     assistantIntentKind = "calendar.delete_event"
-	assistantIntentMediaSearch        assistantIntentKind = "media.search"
-	assistantIntentMediaSelection     assistantIntentKind = "media.selection"
-	assistantIntentGramatonCommand    assistantIntentKind = "gramaton.command"
-	assistantIntentHACommand          assistantIntentKind = "ha.command"
-	assistantIntentFilesCommand       assistantIntentKind = "files.command"
-	assistantIntentNotesCommand       assistantIntentKind = "notes.command"
-	assistantIntentAppendCommand      assistantIntentKind = "append.command"
-	assistantIntentCalendarCommand    assistantIntentKind = "calendar.command"
-	assistantIntentDocsCommand        assistantIntentKind = "docs.command"
-	assistantIntentStatusCommand      assistantIntentKind = "status.command"
-	assistantIntentHermesChat         assistantIntentKind = "hermes.chat"
-	assistantIntentHomeAssistantQuery assistantIntentKind = "homeassistant.query"
-	assistantIntentProjectDocs        assistantIntentKind = "project_docs"
-	assistantIntentMemorySearch       assistantIntentKind = "assistant.memory_search"
-	assistantIntentReadOnlySynthesis  assistantIntentKind = "read_only.synthesis"
+	assistantIntentGeneral             assistantIntentKind = "general"
+	assistantIntentNotesList           assistantIntentKind = "notes.list"
+	assistantIntentNotesSearch         assistantIntentKind = "notes.search"
+	assistantIntentNotesAppend         assistantIntentKind = "notes.append"
+	assistantIntentNotesCreate         assistantIntentKind = "notes.create"
+	assistantIntentNotesSummarize      assistantIntentKind = "notes.summarize"
+	assistantIntentFilesSearch         assistantIntentKind = "files.search"
+	assistantIntentFilesListFolder     assistantIntentKind = "files.list_folder"
+	assistantIntentFilesCreateFolder   assistantIntentKind = "files.create_folder"
+	assistantIntentCalendarSearch      assistantIntentKind = "calendar.search"
+	assistantIntentCalendarCreate      assistantIntentKind = "calendar.create_event"
+	assistantIntentCalendarUpdate      assistantIntentKind = "calendar.update_event"
+	assistantIntentCalendarDelete      assistantIntentKind = "calendar.delete_event"
+	assistantIntentMediaSearch         assistantIntentKind = "media.search"
+	assistantIntentMediaSelection      assistantIntentKind = "media.selection"
+	assistantIntentGramatonCommand     assistantIntentKind = "gramaton.command"
+	assistantIntentHACommand           assistantIntentKind = "ha.command"
+	assistantIntentFilesCommand        assistantIntentKind = "files.command"
+	assistantIntentNotesCommand        assistantIntentKind = "notes.command"
+	assistantIntentAppendCommand       assistantIntentKind = "append.command"
+	assistantIntentCalendarCommand     assistantIntentKind = "calendar.command"
+	assistantIntentDocsCommand         assistantIntentKind = "docs.command"
+	assistantIntentStatusCommand       assistantIntentKind = "status.command"
+	assistantIntentHermesChat          assistantIntentKind = "hermes.chat"
+	assistantIntentYDownloadCommand    assistantIntentKind = "ydownload.command"
+	assistantIntentInstalledAppCommand assistantIntentKind = "installed_app.command"
+	assistantIntentHomeAssistantQuery  assistantIntentKind = "homeassistant.query"
+	assistantIntentProjectDocs         assistantIntentKind = "project_docs"
+	assistantIntentMemorySearch        assistantIntentKind = "assistant.memory_search"
+	assistantIntentReadOnlySynthesis   assistantIntentKind = "read_only.synthesis"
 )
 
 type assistantIntent struct {
 	Kind           assistantIntentKind
 	Query          string
 	MediaSelection *assistantResultCard
+	AppID          string
+	AppName        string
+	CommandID      string
+	SlashCommand   string
+	AppUnavailable bool
 }
 
 type assistantDiagnostics struct {
 	ToolKind            string `json:"tool_kind,omitempty"`
 	IntentKind          string `json:"intent_kind,omitempty"`
 	Query               string `json:"query,omitempty"`
+	AppID               string `json:"app_id,omitempty"`
+	CommandID           string `json:"command_id,omitempty"`
+	SlashCommand        string `json:"slash_command,omitempty"`
 	MediaSelectionTitle string `json:"media_selection_title,omitempty"`
 	MediaSelectionPath  string `json:"media_selection_path,omitempty"`
 }
@@ -1105,7 +1115,7 @@ func (s *Server) processAssistantMessageWithAttachments(ctx context.Context, hom
 		}, nil
 	}
 
-	assistantContent, err := s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, &session, content)
+	assistantContent, err := s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, &session, content, deviceID, timezone)
 	if err != nil {
 		s.recordAssistantTrace(ctx, assistantTraceEvent{
 			Level:   "error",
@@ -1663,12 +1673,12 @@ func (s *Server) touchAssistantSessionAndMemory(ctx context.Context, session dom
 }
 
 func (s *Server) generateAssistantResponse(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
-	return s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, nil, prompt)
+	return s.generateAssistantResponseForSession(ctx, home, membership, auth, settings, nil, prompt, "", "")
 }
 
-func (s *Server) generateAssistantResponseForSession(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, session *domain.AssistantSession, prompt string) (assistantMessageContent, error) {
+func (s *Server) generateAssistantResponseForSession(ctx context.Context, home domain.Home, membership domain.HomeMembership, auth authContext, settings domain.AssistantSettings, session *domain.AssistantSession, prompt string, deviceID string, timezone string) (assistantMessageContent, error) {
 	settings = normalizeAssistantSettings(settings)
-	tool, intent := resolveAssistantTool(prompt)
+	tool, intent := s.resolveAssistantTool(ctx, home, membership, prompt)
 	s.recordAssistantTrace(ctx, assistantTraceEvent{
 		Scope:   "assistant",
 		Event:   "assistant.tool.resolved",
@@ -1708,6 +1718,8 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 		Settings:   settings,
 		Prompt:     prompt,
 		Session:    session,
+		DeviceID:   deviceID,
+		Timezone:   timezone,
 	}
 	if session != nil {
 		if content, handled, err := s.resolvePreviousCardFollowup(ctx, runtime, intent); handled || err != nil {
@@ -2167,6 +2179,32 @@ type hermesChatAppResponse struct {
 	ConversationID string `json:"conversation_id,omitempty"`
 }
 
+type ydownloadAppRequest struct {
+	URL string `json:"url"`
+}
+
+type ydownloadAppResponse struct {
+	Text            string `json:"text"`
+	SourceID        string `json:"source_id,omitempty"`
+	DestinationPath string `json:"destination_path,omitempty"`
+	Files           []struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	} `json:"files,omitempty"`
+}
+
+type genericInstalledAppInput struct {
+	RawText      string `json:"raw_text"`
+	SlashCommand string `json:"slash_command"`
+}
+
+type genericInstalledAppOutput struct {
+	Text        string                 `json:"text"`
+	Cards       []assistantResultCard  `json:"cards,omitempty"`
+	JobID       string                 `json:"job_id,omitempty"`
+	Diagnostics map[string]interface{} `json:"diagnostics,omitempty"`
+}
+
 func (s *Server) answerHermesAppPrompt(ctx context.Context, home domain.Home, auth authContext, session *domain.AssistantSession, prompt string) (assistantMessageContent, error) {
 	input, err := json.Marshal(hermesChatAppRequest{
 		Prompt:         strings.TrimSpace(prompt),
@@ -2216,6 +2254,126 @@ func (s *Server) answerHermesAppPrompt(ctx context.Context, home domain.Home, au
 	return assistantContentFromHermesResponse(hermesResponse), nil
 }
 
+func (s *Server) answerYDownloadAppPrompt(ctx context.Context, home domain.Home, url string) (assistantMessageContent, error) {
+	input, err := json.Marshal(ydownloadAppRequest{URL: strings.TrimSpace(url)})
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	envelope, err := s.sendAgentCommand(ctx, home.ID, protocol.CommandAppsInvoke, protocol.AppsInvokeRequest{
+		AppID:     "ydownload",
+		CommandID: "download",
+		Input:     input,
+	})
+	if err != nil {
+		return assistantMessageContent{
+			Text: "I couldn't reach YDownload through the home agent right now.",
+		}, nil
+	}
+	if envelope.Error != nil {
+		switch envelope.Error.Code {
+		case "app_not_found", "app_disabled", "app_command_not_found", "unsupported_command":
+			return assistantMessageContent{
+				Text: "YDownload is not configured on the home agent yet.",
+			}, nil
+		case "request_timeout":
+			return assistantMessageContent{
+				Text: "YDownload did not finish before the request timed out.",
+			}, nil
+		default:
+			return assistantMessageContent{
+				Text: "YDownload returned an error before it could finish the download.",
+			}, nil
+		}
+	}
+	payload, err := protocol.DecodePayload[protocol.AppsInvokeResponse](envelope)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	if len(payload.Output) == 0 {
+		return assistantMessageContent{Text: "YDownload returned an empty response."}, nil
+	}
+	var response ydownloadAppResponse
+	if err := json.Unmarshal(payload.Output, &response); err != nil {
+		return assistantMessageContent{}, err
+	}
+	return assistantContentFromYDownloadResponse(response), nil
+}
+
+func (s *Server) answerGenericInstalledAppPrompt(ctx context.Context, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	appName := defaultString(intent.AppName, intent.AppID)
+	input, err := json.Marshal(genericInstalledAppInput{
+		RawText:      strings.TrimSpace(intent.Query),
+		SlashCommand: strings.TrimSpace(intent.SlashCommand),
+	})
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	appContext := map[string]interface{}{
+		"home_id": runtime.Home.ID,
+		"user_id": runtime.Auth.User.ID,
+		"role":    runtime.Membership.Role,
+	}
+	if runtime.Timezone != "" {
+		appContext["timezone"] = runtime.Timezone
+	}
+	if runtime.Session != nil {
+		appContext["session_id"] = runtime.Session.ID
+	}
+	if runtime.DeviceID != "" {
+		appContext["device"] = map[string]interface{}{"device_id": runtime.DeviceID}
+	}
+	contextPayload, err := json.Marshal(appContext)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	envelope, err := s.sendAgentCommand(ctx, runtime.Home.ID, protocol.CommandAppsInvoke, protocol.AppsInvokeRequest{
+		AppID:     intent.AppID,
+		CommandID: intent.CommandID,
+		Input:     input,
+		Context:   contextPayload,
+	})
+	if err != nil {
+		return assistantMessageContent{
+			Text: fmt.Sprintf("I couldn't reach %s through the home agent right now.", appName),
+		}, nil
+	}
+	if envelope.Error != nil {
+		switch envelope.Error.Code {
+		case "app_not_found", "app_disabled", "app_command_not_found", "app_unavailable", "unsupported_command":
+			return assistantMessageContent{
+				Text: fmt.Sprintf("%s is not configured on the home agent yet.", appName),
+			}, nil
+		case "request_timeout":
+			return assistantMessageContent{
+				Text: fmt.Sprintf("%s did not respond before the request timed out.", appName),
+			}, nil
+		case "permission_denied":
+			return assistantMessageContent{
+				Text: fmt.Sprintf("%s is not available to your Home account.", appName),
+			}, nil
+		default:
+			return assistantMessageContent{
+				Text: fmt.Sprintf("%s returned an error before it could finish.", appName),
+			}, nil
+		}
+	}
+	payload, err := protocol.DecodePayload[protocol.AppsInvokeResponse](envelope)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	content, err := assistantContentFromGenericAppOutput(appName, payload.Output)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	if payload.JobID != "" {
+		if content.Meta == nil {
+			content.Meta = make(map[string]interface{})
+		}
+		content.Meta["app_job_id"] = payload.JobID
+	}
+	return content, nil
+}
+
 func assistantContentFromHermesResponse(payload hermesChatAppResponse) assistantMessageContent {
 	text := strings.TrimSpace(payload.Text)
 	if text == "" {
@@ -2231,6 +2389,49 @@ func assistantContentFromHermesResponse(payload hermesChatAppResponse) assistant
 			},
 		},
 	}
+}
+
+func assistantContentFromYDownloadResponse(payload ydownloadAppResponse) assistantMessageContent {
+	text := strings.TrimSpace(payload.Text)
+	if text == "" {
+		text = "YDownload finished."
+	}
+	return assistantMessageContent{Text: text}
+}
+
+func assistantContentFromGenericAppOutput(appName string, output json.RawMessage) (assistantMessageContent, error) {
+	appName = defaultString(appName, "The app")
+	trimmed := strings.TrimSpace(string(output))
+	if len(output) == 0 || trimmed == "" || trimmed == "null" {
+		return assistantMessageContent{Text: fmt.Sprintf("%s returned an empty response.", appName)}, nil
+	}
+	var textOutput string
+	if err := json.Unmarshal(output, &textOutput); err == nil {
+		textOutput = strings.TrimSpace(textOutput)
+		if textOutput == "" {
+			textOutput = fmt.Sprintf("%s returned an empty response.", appName)
+		}
+		return assistantMessageContent{Text: textOutput}, nil
+	}
+	var payload genericInstalledAppOutput
+	if err := json.Unmarshal(output, &payload); err != nil {
+		return assistantMessageContent{}, err
+	}
+	text := strings.TrimSpace(payload.Text)
+	if text == "" && len(payload.Cards) == 0 && strings.TrimSpace(payload.JobID) == "" && len(payload.Diagnostics) == 0 {
+		text = fmt.Sprintf("%s returned an empty response.", appName)
+	}
+	meta := map[string]interface{}{}
+	if len(payload.Diagnostics) > 0 {
+		meta["app_diagnostics"] = payload.Diagnostics
+	}
+	if jobID := strings.TrimSpace(payload.JobID); jobID != "" {
+		meta["app_job_id"] = jobID
+	}
+	if len(meta) == 0 {
+		meta = nil
+	}
+	return assistantMessageContent{Text: text, Cards: payload.Cards, Meta: meta}, nil
 }
 
 func (s *Server) answerProjectDocPrompt(ctx context.Context, home domain.Home, auth authContext, settings domain.AssistantSettings, prompt string) (assistantMessageContent, error) {
@@ -3202,6 +3403,15 @@ func assistantDiagnosticsForIntent(tool assistantTool, intent assistantIntent) a
 		diagnostics.MediaSelectionTitle = intent.MediaSelection.Title
 		diagnostics.MediaSelectionPath = intent.MediaSelection.Path
 	}
+	if intent.AppID != "" {
+		diagnostics.AppID = intent.AppID
+	}
+	if intent.CommandID != "" {
+		diagnostics.CommandID = intent.CommandID
+	}
+	if intent.SlashCommand != "" {
+		diagnostics.SlashCommand = intent.SlashCommand
+	}
 	return diagnostics
 }
 
@@ -3637,6 +3847,10 @@ func hermesCommandPrompt(prompt string) (string, bool) {
 
 func gramatonCommandPrompt(prompt string) (string, bool) {
 	return slashCommandPrompt(prompt, "gramaton")
+}
+
+func ydownloadCommandPrompt(prompt string) (string, bool) {
+	return slashCommandPrompt(prompt, "ydownload")
 }
 
 func slashCommandPrompt(prompt string, command string) (string, bool) {

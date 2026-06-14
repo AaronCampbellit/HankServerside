@@ -15,6 +15,7 @@ import (
 const sessionCookieName = "hank_remote_session"
 const csrfCookieName = "hank_remote_csrf"
 const csrfHeaderName = "X-Hank-CSRF-Token"
+const fileTransferCookiePrefix = "hank_remote_transfer_"
 
 func newID(prefix string) string {
 	return prefix + "_" + randomHex(12)
@@ -106,6 +107,32 @@ func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, expires
 
 func csrfTokenFromCookie(r *http.Request) string {
 	cookie, err := r.Cookie(csrfCookieName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cookie.Value)
+}
+
+func fileTransferCookieName(transferID string) string {
+	clean := strings.NewReplacer("/", "_", "\\", "_", " ", "_").Replace(strings.TrimSpace(transferID))
+	return fileTransferCookiePrefix + clean
+}
+
+func setFileTransferCookie(w http.ResponseWriter, r *http.Request, transferID string, token string, expiresAt time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     fileTransferCookieName(transferID),
+		Value:    token,
+		Path:     "/v1/file-transfers/" + strings.Trim(transferID, "/"),
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   requestIsHTTPS(r),
+		Expires:  expiresAt,
+		MaxAge:   max(0, int(time.Until(expiresAt).Seconds())),
+	})
+}
+
+func fileTransferTokenFromCookie(r *http.Request, transferID string) string {
+	cookie, err := r.Cookie(fileTransferCookieName(transferID))
 	if err != nil {
 		return ""
 	}

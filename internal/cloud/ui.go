@@ -65,32 +65,40 @@ func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings", "settings.html")
 }
 
-func (s *Server) handleSettingsPeoplePane(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/people-pane", "home-users.html")
+func (s *Server) handleSettingsHomePage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/home", "settings-home.html")
 }
 
-func (s *Server) handleSettingsConnectionsPane(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/connections-pane", "settings-connections.html")
+func (s *Server) handleSettingsQuickLinksPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/quick-links", "settings-quick-links.html")
 }
 
-func (s *Server) handleSettingsAIPane(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/ai-pane", "assistant-settings.html")
+func (s *Server) handleSettingsPeoplePage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/people", "home-users.html")
 }
 
-func (s *Server) handleSettingsBackupsPane(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/backups-pane", "storage.html")
+func (s *Server) handleSettingsConnectionsPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/connections", "settings-connections.html")
 }
 
-func (s *Server) handleSettingsRecoveryPane(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/recovery-pane", "recovery.html")
+func (s *Server) handleSettingsAIPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/ai", "assistant-settings.html")
 }
 
-func (s *Server) handleSettingsAppsPane(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/apps-pane", "apps.html")
+func (s *Server) handleSettingsAppsPage(w http.ResponseWriter, r *http.Request) {
+	s.serveAdminUIPage(w, r, "/dashboard/settings/apps", "apps.html")
 }
 
-func (s *Server) handleSettingsJoinHomePane(w http.ResponseWriter, r *http.Request) {
-	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings/join-home-pane", "accept-invitation.html")
+func (s *Server) handleSettingsBackupsPage(w http.ResponseWriter, r *http.Request) {
+	s.serveAdminUIPage(w, r, "/dashboard/settings/backups", "storage.html")
+}
+
+func (s *Server) handleSettingsRecoveryPage(w http.ResponseWriter, r *http.Request) {
+	s.serveAdminUIPage(w, r, "/dashboard/settings/recovery", "recovery.html")
+}
+
+func (s *Server) handleSettingsJoinHomePage(w http.ResponseWriter, r *http.Request) {
+	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings/join-home", "accept-invitation.html")
 }
 
 func serveDeploymentGuide(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +122,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "styles.css":
 		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "api-client.js", "login.js", "join.js", "password-change.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "recovery.js", "apps.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
+	case "api-client.js", "ui-helpers.js", "settings-nav.js", "settings-home.js", "settings-quick-links.js", "file-server-utils.js", "file-server-preview.js", "profile-notes-editor.js", "hank-renderers.js", "login.js", "join.js", "password-change.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "recovery.js", "apps.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
 		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "favicon.ico", "favicon.png", "hank-icon.png", "hank-icon-192.png", "hank-icon-512.png", "apple-touch-icon.png":
 		serveUIFile(w, r, name, "image/png")
@@ -197,4 +205,14 @@ func serveUIFile(w http.ResponseWriter, r *http.Request, name string, contentTyp
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+func redirectToSettingsRoute(target string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
+	}
 }

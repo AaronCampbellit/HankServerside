@@ -147,6 +147,120 @@ func TestValidateManifestRejectsDuplicateSlashCommands(t *testing.T) {
 	}
 }
 
+func TestValidateManifestRejectsReservedSlashCommands(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	manifest.Assistant.SlashCommands[0].Command = "/files"
+	err := ValidateManifest(manifest)
+	if err == nil || !strings.Contains(err.Error(), "reserved slash command") {
+		t.Fatalf("ValidateManifest error = %v, want reserved slash command", err)
+	}
+}
+
+func TestValidateManifestRejectsInvalidSettingsDefaultsAndOptions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		field SettingsField
+		want  string
+	}{
+		{
+			name: "boolean default string",
+			field: SettingsField{
+				Key:     "enabled",
+				Type:    "boolean",
+				Default: json.RawMessage(`"true"`),
+			},
+			want: "default",
+		},
+		{
+			name: "number default string",
+			field: SettingsField{
+				Key:     "timeout_seconds",
+				Type:    "number",
+				Default: json.RawMessage(`"900"`),
+			},
+			want: "default",
+		},
+		{
+			name: "text default boolean",
+			field: SettingsField{
+				Key:     "model",
+				Type:    "text",
+				Default: json.RawMessage(`false`),
+			},
+			want: "default",
+		},
+		{
+			name: "select option object",
+			field: SettingsField{
+				Key:  "format",
+				Type: "select",
+				Options: []SettingsOption{{
+					Value: json.RawMessage(`{"bad":true}`),
+					Label: "Bad",
+				}},
+			},
+			want: "option",
+		},
+		{
+			name: "select default outside options",
+			field: SettingsField{
+				Key:     "format",
+				Type:    "select",
+				Default: json.RawMessage(`"missing"`),
+				Options: []SettingsOption{{
+					Value: json.RawMessage(`"best"`),
+					Label: "Best",
+				}},
+			},
+			want: "default must match",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := validHermesManifest()
+			manifest.Config.Settings = SettingsSchema{Fields: []SettingsField{tt.field}}
+			err := ValidateManifest(manifest)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateManifest error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateManifestAcceptsScalarSelectDefaultsAndEmptyOptions(t *testing.T) {
+	t.Parallel()
+	manifest := validHermesManifest()
+	manifest.Config.Settings = SettingsSchema{
+		Fields: []SettingsField{
+			{
+				Key:     "rate_limit",
+				Type:    "select",
+				Default: json.RawMessage(`""`),
+				Options: []SettingsOption{
+					{Value: json.RawMessage(`""`), Label: "No limit"},
+					{Value: json.RawMessage(`"10M"`), Label: "10 MB/s"},
+				},
+			},
+			{
+				Key:     "timeout_seconds",
+				Type:    "select",
+				Default: json.RawMessage(`900`),
+				Options: []SettingsOption{
+					{Value: json.RawMessage(`300`), Label: "5 minutes"},
+					{Value: json.RawMessage(`900`), Label: "15 minutes"},
+				},
+			},
+		},
+	}
+
+	if err := ValidateManifest(manifest); err != nil {
+		t.Fatalf("ValidateManifest error: %v", err)
+	}
+}
+
 func TestPreviewArchiveRejectsTraversal(t *testing.T) {
 	t.Parallel()
 	archivePath := filepath.Join(t.TempDir(), "bad.hankapp")

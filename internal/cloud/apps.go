@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,11 +15,18 @@ import (
 
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
+	storepkg "github.com/dropfile/hankremote/internal/store"
 )
 
 const (
 	maxAppPackageBytes = 32 << 20
 	appPackageTTL      = 15 * time.Minute
+)
+
+var (
+	errAppInvokeBadPayload   = errors.New("invalid apps.invoke payload")
+	errAppInvokeUnavailable  = errors.New("app is not installed, enabled, or command-capable")
+	errAppInvokeAccessDenied = errors.New("app is not available to this home member")
 )
 
 type appPackageStagingRecord struct {
@@ -116,12 +124,34 @@ func (s *Server) handleHomeAppPackageDownload(w http.ResponseWriter, r *http.Req
 
 func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {
 	if len(parts) == 1 && parts[0] == "apps" && r.Method == http.MethodGet {
+		if _, ok := s.router.GetAgent(home.ID); ok {
+			envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandAppsList, protocol.AppsListRequest{})
+			if err == nil && envelope.Error == nil {
+				response, err := protocol.DecodePayload[protocol.AppsListResponse](envelope)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadGateway)
+					return true
+				}
+				for _, app := range response.Apps {
+					if err := s.persistAgentApp(r, home.ID, auth.User.ID, app); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return true
+					}
+				}
+			}
+		}
 		apps, err := s.store.ListHomeApps(r.Context(), home.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"apps": apps})
+		summaries, err := persistedAppSummaries(apps)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		summaries = filterAppSummariesForMembership(summaries, membership)
+		writeJSON(w, http.StatusOK, protocol.AppsListResponse{Apps: summaries})
 		return true
 	}
 
@@ -191,6 +221,7 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return true
 		}
+		response.App.UserAccess = domain.HomeAgentAppUserAccessAdminsOnly
 		if err := s.persistAgentApp(r, home.ID, auth.User.ID, response.App); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
@@ -211,6 +242,15 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			return true
 		}
 		body.AppID = parts[1]
+		requestedUserAccess := ""
+		if strings.TrimSpace(body.UserAccess) != "" {
+			requestedUserAccess = normalizeAppUserAccess(body.UserAccess)
+			if requestedUserAccess == "" {
+				http.Error(w, "invalid app user_access", http.StatusBadRequest)
+				return true
+			}
+			body.UserAccess = requestedUserAccess
+		}
 		envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandAppsConfigApply, body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -224,6 +264,9 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return true
+		}
+		if requestedUserAccess != "" {
+			response.App.UserAccess = requestedUserAccess
 		}
 		if err := s.persistAgentApp(r, home.ID, auth.User.ID, response.App); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -255,21 +298,36 @@ func (s *Server) persistAgentApp(r *http.Request, homeID string, updatedBy strin
 	if publicConfig == "" {
 		publicConfig = "{}"
 	}
-	secretFieldsSet := "{}"
-	if len(app.SecretFieldsSet) > 0 {
-		raw, err := json.Marshal(app.SecretFieldsSet)
-		if err != nil {
-			return err
-		}
-		secretFieldsSet = string(raw)
+	secretFieldsSet, err := marshalAppMetadataObject(app.SecretFieldsSet)
+	if err != nil {
+		return err
 	}
-	settingsSchema := "{}"
-	if len(app.SettingsSchema.Fields) > 0 {
-		raw, err := json.Marshal(app.SettingsSchema)
-		if err != nil {
+	settingsSchema, err := marshalAppMetadataObject(app.SettingsSchema)
+	if err != nil {
+		return err
+	}
+	capabilities, err := marshalAppMetadataArray(app.Capabilities)
+	if err != nil {
+		return err
+	}
+	slashCommands, err := marshalAppMetadataArray(app.SlashCommands)
+	if err != nil {
+		return err
+	}
+	commands, err := marshalAppMetadataArray(app.Commands)
+	if err != nil {
+		return err
+	}
+	userAccess := normalizeAppUserAccess(app.UserAccess)
+	if userAccess == "" {
+		if existing, err := s.store.GetHomeApp(r.Context(), homeID, app.ID); err == nil {
+			userAccess = normalizeAppUserAccess(existing.UserAccess)
+		} else if !errors.Is(err, storepkg.ErrNotFound) {
 			return err
 		}
-		settingsSchema = string(raw)
+	}
+	if userAccess == "" {
+		userAccess = domain.HomeAgentAppUserAccessAdminsOnly
 	}
 	status := strings.TrimSpace(app.Status)
 	if status == "" {
@@ -284,11 +342,178 @@ func (s *Server) persistAgentApp(r *http.Request, homeID string, updatedBy strin
 		PublicConfigJSON:    publicConfig,
 		SecretFieldsSetJSON: secretFieldsSet,
 		SettingsSchemaJSON:  settingsSchema,
+		CapabilitiesJSON:    capabilities,
+		SlashCommandsJSON:   slashCommands,
+		CommandsJSON:        commands,
+		UserAccess:          userAccess,
 		Status:              status,
 		LastError:           app.LastError,
 		UpdatedAt:           now,
 		UpdatedBy:           updatedBy,
 	})
+}
+
+func persistedAppSummaries(apps []domain.HomeAgentApp) ([]protocol.AppSummary, error) {
+	summaries := make([]protocol.AppSummary, 0, len(apps))
+	for _, app := range apps {
+		summary := protocol.AppSummary{
+			ID:           app.AppID,
+			Name:         app.Name,
+			Version:      app.Version,
+			Enabled:      app.Enabled,
+			Status:       app.Status,
+			LastError:    app.LastError,
+			UserAccess:   normalizeAppUserAccess(app.UserAccess),
+			PublicConfig: json.RawMessage(defaultJSONObject(app.PublicConfigJSON)),
+		}
+		if err := unmarshalAppMetadata(defaultJSONObject(app.SecretFieldsSetJSON), &summary.SecretFieldsSet); err != nil {
+			return nil, fmt.Errorf("decode %s secret fields: %w", app.AppID, err)
+		}
+		if err := unmarshalAppMetadata(defaultJSONObject(app.SettingsSchemaJSON), &summary.SettingsSchema); err != nil {
+			return nil, fmt.Errorf("decode %s settings schema: %w", app.AppID, err)
+		}
+		if err := unmarshalAppMetadata(defaultJSONArray(app.CapabilitiesJSON), &summary.Capabilities); err != nil {
+			return nil, fmt.Errorf("decode %s capabilities: %w", app.AppID, err)
+		}
+		if err := unmarshalAppMetadata(defaultJSONArray(app.SlashCommandsJSON), &summary.SlashCommands); err != nil {
+			return nil, fmt.Errorf("decode %s slash commands: %w", app.AppID, err)
+		}
+		if err := unmarshalAppMetadata(defaultJSONArray(app.CommandsJSON), &summary.Commands); err != nil {
+			return nil, fmt.Errorf("decode %s commands: %w", app.AppID, err)
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
+}
+
+func filterAppSummariesForMembership(apps []protocol.AppSummary, membership domain.HomeMembership) []protocol.AppSummary {
+	if membership.Role == domain.HomeRoleAdmin {
+		return apps
+	}
+	filtered := make([]protocol.AppSummary, 0, len(apps))
+	for _, app := range apps {
+		if !app.Enabled {
+			continue
+		}
+		if normalizeAppUserAccess(app.UserAccess) != domain.HomeAgentAppUserAccessHomeMembers {
+			continue
+		}
+		filtered = append(filtered, app)
+	}
+	return filtered
+}
+
+func canUseHomeAgentApp(app domain.HomeAgentApp, membership domain.HomeMembership) bool {
+	if !app.Enabled {
+		return false
+	}
+	if membership.Role == domain.HomeRoleAdmin {
+		return true
+	}
+	return normalizeAppUserAccess(app.UserAccess) == domain.HomeAgentAppUserAccessHomeMembers
+}
+
+func (s *Server) authorizeAppsInvokeCommand(ctx context.Context, homeID string, membership domain.HomeMembership, command protocol.RoutedCommand) error {
+	if command.Command != protocol.CommandAppsInvoke {
+		return nil
+	}
+	var request protocol.AppsInvokeRequest
+	if err := json.Unmarshal(command.Body, &request); err != nil {
+		return fmt.Errorf("%w: %v", errAppInvokeBadPayload, err)
+	}
+	if strings.TrimSpace(request.AppID) == "" || strings.TrimSpace(request.CommandID) == "" {
+		return fmt.Errorf("%w: app_id and command_id are required", errAppInvokeBadPayload)
+	}
+	app, err := s.store.GetHomeApp(ctx, homeID, request.AppID)
+	if errors.Is(err, storepkg.ErrNotFound) {
+		return fmt.Errorf("%w: %s", errAppInvokeUnavailable, request.AppID)
+	}
+	if err != nil {
+		return err
+	}
+	if !canUseHomeAgentApp(app, membership) {
+		if !app.Enabled {
+			return fmt.Errorf("%w: %s", errAppInvokeUnavailable, request.AppID)
+		}
+		return fmt.Errorf("%w: %s", errAppInvokeAccessDenied, request.AppID)
+	}
+	if !homeAgentAppHasCommand(app, request.CommandID) {
+		return fmt.Errorf("%w: %s.%s", errAppInvokeUnavailable, request.AppID, request.CommandID)
+	}
+	return nil
+}
+
+func homeAgentAppHasCommand(app domain.HomeAgentApp, commandID string) bool {
+	commandID = strings.TrimSpace(commandID)
+	if commandID == "" {
+		return false
+	}
+	var commands []protocol.AppCommandSummary
+	if err := json.Unmarshal([]byte(defaultJSONArray(app.CommandsJSON)), &commands); err != nil {
+		return false
+	}
+	for _, command := range commands {
+		if command.ID == commandID {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAppUserAccess(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", "admins_only":
+		return domain.HomeAgentAppUserAccessAdminsOnly
+	case "home_members":
+		return domain.HomeAgentAppUserAccessHomeMembers
+	default:
+		return ""
+	}
+}
+
+func marshalAppMetadataObject(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	if string(raw) == "null" {
+		return "{}", nil
+	}
+	return string(raw), nil
+}
+
+func marshalAppMetadataArray(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	if string(raw) == "null" {
+		return "[]", nil
+	}
+	return string(raw), nil
+}
+
+func defaultJSONObject(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "{}"
+	}
+	return value
+}
+
+func defaultJSONArray(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "[]"
+	}
+	return value
+}
+
+func unmarshalAppMetadata(raw string, target any) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return json.Unmarshal([]byte(raw), target)
 }
 
 var errAppPackageTooLarge = errors.New("app package too large")

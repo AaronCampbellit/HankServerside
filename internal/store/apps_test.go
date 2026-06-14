@@ -30,6 +30,7 @@ func TestAppMetadataStoreRoundTrip(t *testing.T) {
 		PublicConfigJSON:    `{"api_base_url":"https://hermes.local"}`,
 		SecretFieldsSetJSON: `{"api_key":true}`,
 		SettingsSchemaJSON:  `{"fields":[{"key":"api_base_url","label":"Hermes URL","type":"url"}]}`,
+		UserAccess:          "home_members",
 		Status:              "installed",
 		LastError:           "",
 		UpdatedAt:           now,
@@ -49,6 +50,7 @@ func TestAppMetadataStoreRoundTrip(t *testing.T) {
 	updated.PublicConfigJSON = `{"api_base_url":"https://new-hermes.local"}`
 	updated.SecretFieldsSetJSON = `{"api_key":true,"other":false}`
 	updated.SettingsSchemaJSON = `{"fields":[{"key":"api_base_url","label":"Hermes URL","type":"url"},{"key":"api_key","type":"password","secret":true}]}`
+	updated.UserAccess = "admins_only"
 	updated.Status = "degraded"
 	updated.LastError = "agent offline"
 	updated.UpdatedAt = now.Add(time.Minute)
@@ -75,9 +77,9 @@ func TestAppMetadataListOrdersByName(t *testing.T) {
 	mustStore(t, db.CreateHome(ctx, home))
 
 	for _, app := range []domain.HomeAgentApp{
-		{HomeID: home.ID, AppID: "zeta", Name: "Zeta", Version: "1.0.0", Status: "installed", PublicConfigJSON: `{}`, SecretFieldsSetJSON: `{}`, UpdatedAt: now, UpdatedBy: user.ID},
+		{HomeID: home.ID, AppID: "zeta", Name: "Zeta", Version: "1.0.0", Status: "installed", PublicConfigJSON: `{}`, SecretFieldsSetJSON: `{}`, UserAccess: "home_members", UpdatedAt: now, UpdatedBy: user.ID},
 		{HomeID: home.ID, AppID: "alpha", Name: "Alpha", Version: "1.0.0", Status: "installed", PublicConfigJSON: `{}`, SecretFieldsSetJSON: `{}`, UpdatedAt: now, UpdatedBy: user.ID},
-		{HomeID: home.ID, AppID: "beta", Name: "Alpha", Version: "1.0.0", Status: "installed", PublicConfigJSON: `{}`, SecretFieldsSetJSON: `{}`, UpdatedAt: now, UpdatedBy: user.ID},
+		{HomeID: home.ID, AppID: "beta", Name: "Alpha", Version: "1.0.0", Status: "installed", PublicConfigJSON: `{}`, SecretFieldsSetJSON: `{}`, UserAccess: "admins_only", UpdatedAt: now, UpdatedBy: user.ID},
 	} {
 		mustStore(t, db.UpsertHomeApp(ctx, app))
 	}
@@ -99,6 +101,9 @@ func TestAppMetadataListOrdersByName(t *testing.T) {
 			t.Fatalf("app ids = %#v, want %#v", got, want)
 		}
 	}
+	if apps[0].UserAccess != "admins_only" || apps[1].UserAccess != "admins_only" || apps[2].UserAccess != "home_members" {
+		t.Fatalf("app access = %q, %q, %q", apps[0].UserAccess, apps[1].UserAccess, apps[2].UserAccess)
+	}
 }
 
 func assertHomeAgentAppEqual(t *testing.T, got domain.HomeAgentApp, want domain.HomeAgentApp) {
@@ -111,6 +116,7 @@ func assertHomeAgentAppEqual(t *testing.T, got domain.HomeAgentApp, want domain.
 		got.PublicConfigJSON != want.PublicConfigJSON ||
 		got.SecretFieldsSetJSON != want.SecretFieldsSetJSON ||
 		got.SettingsSchemaJSON != want.SettingsSchemaJSON ||
+		got.UserAccess != want.UserAccess ||
 		got.Status != want.Status ||
 		got.LastError != want.LastError ||
 		got.UpdatedBy != want.UpdatedBy ||

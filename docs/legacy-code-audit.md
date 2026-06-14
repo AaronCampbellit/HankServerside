@@ -16,7 +16,7 @@ For the next cleanup snapshot and the 2026-06-06 repair status, see [project-cle
 - Runtime note schema repair paths were removed from store writes and replaced with migration/status test coverage.
 - Agent SMB config now uses `HANK_REMOTE_SMB_SHARES_JSON` only. `scripts/migrate-agent-smb-env.sh` converts old single-share `.env.agent` files before upgrade.
 - Dashboard-generated `.env.agent` contains only required identity/config/root values. Home Assistant, SMB, and media credentials are set through Settings after the agent is online.
-- Public legacy dashboard routes were removed. Current pane routes are `/dashboard/settings/people-pane`, `/dashboard/settings/connections-pane`, `/dashboard/settings/ai-pane`, `/dashboard/settings/backups-pane`, and `/dashboard/settings/join-home-pane`.
+- Public legacy dashboard routes were removed. Settings now uses canonical top-level routes such as `/dashboard/settings/people`, `/dashboard/settings/connections`, `/dashboard/settings/ai`, `/dashboard/settings/apps`, `/dashboard/settings/backups`, `/dashboard/settings/recovery`, and `/dashboard/settings/join-home`. The old `*-pane` URLs are compatibility redirects only.
 - Dashboard scripts use the shared `/assets/api-client.js` helper for credentials, CSRF, JSON headers, and error handling.
 - Browser-redirect OpenAI OAuth was removed. OpenAI API-key provider support remains, and ChatGPT/Codex linking uses device code through the existing `/v1/oauth/openai/start` and `/v1/oauth/openai/status` contract.
 - pgvector is the production vector mode. JSON embedding fallback remains only for local/development resilience when pgvector is unavailable.
@@ -170,9 +170,9 @@ The dashboard has moved toward a consolidated Home/Tools/Settings structure. Old
 
 Recommended action:
 
-- Keep pane-only routes required by Settings iframes.
+- Keep old pane URLs only as redirects for bookmarked/operator compatibility; Settings no longer uses pane iframes for app navigation.
 - Remove public standalone redirects after bookmarked/operator links are updated.
-- Update tests and docs to use canonical `/dashboard`, `/dashboard/settings#people`, `/dashboard/settings#connections`, `/dashboard/settings#ai`, and `/dashboard/settings#backups` paths.
+- Update tests and docs to use canonical `/dashboard`, `/dashboard/settings/people`, `/dashboard/settings/connections`, `/dashboard/settings/ai`, `/dashboard/settings/apps`, and `/dashboard/settings/backups` paths.
 
 Primary files:
 

@@ -217,11 +217,20 @@ type HomeAgentApp struct {
 	PublicConfigJSON    string    `json:"public_config_json,omitempty"`
 	SecretFieldsSetJSON string    `json:"secret_fields_set_json,omitempty"`
 	SettingsSchemaJSON  string    `json:"settings_schema_json,omitempty"`
+	CapabilitiesJSON    string    `json:"capabilities_json,omitempty"`
+	SlashCommandsJSON   string    `json:"slash_commands_json,omitempty"`
+	CommandsJSON        string    `json:"commands_json,omitempty"`
+	UserAccess          string    `json:"user_access,omitempty"`
 	Status              string    `json:"status"`
 	LastError           string    `json:"last_error,omitempty"`
 	UpdatedAt           time.Time `json:"updated_at"`
 	UpdatedBy           string    `json:"updated_by"`
 }
+
+const (
+	HomeAgentAppUserAccessAdminsOnly  = "admins_only"
+	HomeAgentAppUserAccessHomeMembers = "home_members"
+)
 
 type HomeQuickLink struct {
 	ID                 string     `json:"id"`

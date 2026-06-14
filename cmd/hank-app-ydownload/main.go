@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	defaultFormat         = "bv*+ba/b"
+	defaultFormat         = "best"
 	defaultOutputTemplate = "%(title).200B [%(id)s].%(ext)s"
 	defaultSubLangs       = "en.*,all,-live_chat"
 	defaultSubFormat      = "srt/best"

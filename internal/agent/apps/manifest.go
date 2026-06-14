@@ -1,6 +1,7 @@
 package apps
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -28,6 +29,16 @@ var allowedSettingsFieldTypes = map[string]struct{}{
 
 var allowedSettingsFieldSources = map[string]struct{}{
 	"file_sources": {},
+}
+
+var reservedSlashCommands = map[string]struct{}{
+	"/append":   {},
+	"/calendar": {},
+	"/docs":     {},
+	"/files":    {},
+	"/ha":       {},
+	"/notes":    {},
+	"/status":   {},
 }
 
 type SettingsSchema = protocol.AppSettingsSchema
@@ -134,6 +145,9 @@ func ValidateManifest(manifest Manifest) error {
 		if !slashCommandPattern.MatchString(slashCommand.Command) {
 			return fmt.Errorf("slash command %q must match %s", slashCommand.Command, slashCommandPattern.String())
 		}
+		if _, ok := reservedSlashCommands[strings.ToLower(slashCommand.Command)]; ok {
+			return fmt.Errorf("reserved slash command %q is owned by HankAI", slashCommand.Command)
+		}
 		if _, ok := slashCommands[slashCommand.Command]; ok {
 			return fmt.Errorf("duplicate slash command %q", slashCommand.Command)
 		}
@@ -164,9 +178,27 @@ func ValidateManifest(manifest Manifest) error {
 				return fmt.Errorf("settings field %d source requires select type", i)
 			}
 		}
+		if err := validateSettingsDefault(i, field); err != nil {
+			return err
+		}
+		if field.Type != "select" && len(field.Options) > 0 {
+			return fmt.Errorf("settings field %d options require select type", i)
+		}
+		optionValues := make(map[string]struct{}, len(field.Options))
 		for optionIndex, option := range field.Options {
-			if strings.TrimSpace(option.Value) == "" {
-				return fmt.Errorf("settings field %d option %d value is required", i, optionIndex)
+			normalizedOption, err := normalizeSettingsScalarJSON(option.Value)
+			if err != nil {
+				return fmt.Errorf("settings field %d option %d value %w", i, optionIndex, err)
+			}
+			optionValues[normalizedOption] = struct{}{}
+		}
+		if field.Type == "select" && len(optionValues) > 0 && len(bytes.TrimSpace(field.Default)) > 0 {
+			normalizedDefault, err := normalizeSettingsScalarJSON(field.Default)
+			if err != nil {
+				return fmt.Errorf("settings field %d default %w", i, err)
+			}
+			if _, ok := optionValues[normalizedDefault]; !ok {
+				return fmt.Errorf("settings field %d default must match one of the static options", i)
 			}
 		}
 	}
@@ -188,6 +220,82 @@ func ValidateManifest(manifest Manifest) error {
 	}
 
 	return nil
+}
+
+func validateSettingsDefault(fieldIndex int, field SettingsField) error {
+	if len(bytes.TrimSpace(field.Default)) == 0 {
+		return nil
+	}
+	kind, err := settingsJSONKind(field.Default)
+	if err != nil {
+		return fmt.Errorf("settings field %d default %w", fieldIndex, err)
+	}
+	switch field.Type {
+	case "boolean":
+		if kind != "boolean" {
+			return fmt.Errorf("settings field %d default must be a boolean", fieldIndex)
+		}
+	case "number":
+		if kind != "number" {
+			return fmt.Errorf("settings field %d default must be a number", fieldIndex)
+		}
+	case "password", "path", "text", "url":
+		if kind != "string" {
+			return fmt.Errorf("settings field %d default must be a string", fieldIndex)
+		}
+	case "select":
+		if kind != "boolean" && kind != "number" && kind != "string" {
+			return fmt.Errorf("settings field %d default must be a string, number, or boolean", fieldIndex)
+		}
+	}
+	return nil
+}
+
+func normalizeSettingsScalarJSON(raw json.RawMessage) (string, error) {
+	kind, err := settingsJSONKind(raw)
+	if err != nil {
+		return "", err
+	}
+	if kind != "boolean" && kind != "number" && kind != "string" {
+		return "", fmt.Errorf("must be a string, number, or boolean")
+	}
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, bytes.TrimSpace(raw)); err != nil {
+		return "", fmt.Errorf("must be valid JSON")
+	}
+	return compacted.String(), nil
+}
+
+func settingsJSONKind(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", fmt.Errorf("is required")
+	}
+	if !json.Valid(trimmed) {
+		return "", fmt.Errorf("must be valid JSON")
+	}
+	var value interface{}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return "", fmt.Errorf("must be valid JSON")
+	}
+	switch value.(type) {
+	case nil:
+		return "null", nil
+	case bool:
+		return "boolean", nil
+	case json.Number:
+		return "number", nil
+	case string:
+		return "string", nil
+	case []interface{}:
+		return "array", nil
+	case map[string]interface{}:
+		return "object", nil
+	default:
+		return "unknown", nil
+	}
 }
 
 func validatePackagePath(label string, value string, required bool) error {

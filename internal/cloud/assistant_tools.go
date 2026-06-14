@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
 )
 
 type assistantToolRuntime struct {
@@ -17,6 +18,8 @@ type assistantToolRuntime struct {
 	Settings   domain.AssistantSettings
 	Prompt     string
 	Session    *domain.AssistantSession
+	DeviceID   string
+	Timezone   string
 }
 
 type assistantTool struct {
@@ -66,6 +69,18 @@ var assistantToolRegistry = []assistantTool{
 			return assistantIntent{Kind: assistantIntentGramatonCommand, Query: query}, true
 		},
 		Execute: executeAssistantMediaSearchTool,
+	},
+	{
+		Kind:        assistantIntentYDownloadCommand,
+		Description: "Route an explicit /ydownload URL to the installed YDownload app.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			query, ok := ydownloadCommandPrompt(prompt)
+			if !ok {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentYDownloadCommand, Query: query}, true
+		},
+		Execute: executeAssistantYDownloadTool,
 	},
 	assistantSlashTool(assistantIntentHACommand, "ha", "Route an explicit /ha query to Home Assistant state lookup.", executeAssistantHomeAssistantQueryTool),
 	assistantSlashTool(assistantIntentFilesCommand, "files", "Route an explicit /files query to File Server search.", executeAssistantFilesSearchTool),
@@ -329,6 +344,48 @@ func resolveAssistantTool(prompt string) (assistantTool, assistantIntent) {
 	}
 	fallback := assistantToolRegistry[len(assistantToolRegistry)-1]
 	return fallback, assistantIntent{Kind: assistantIntentGeneral, Query: strings.TrimSpace(prompt)}
+}
+
+func (s *Server) resolveAssistantTool(ctx context.Context, home domain.Home, membership domain.HomeMembership, prompt string) (assistantTool, assistantIntent) {
+	if tool, intent, ok := s.resolveInstalledAppSlashTool(ctx, home, membership, prompt); ok {
+		return tool, intent
+	}
+	return resolveAssistantTool(prompt)
+}
+
+func (s *Server) resolveInstalledAppSlashTool(ctx context.Context, home domain.Home, membership domain.HomeMembership, prompt string) (assistantTool, assistantIntent, bool) {
+	apps, err := s.store.ListHomeApps(ctx, home.ID)
+	if err != nil {
+		s.logger.Warn("assistant installed app metadata lookup failed", "home_id", home.ID, "error", err)
+		return assistantTool{}, assistantIntent{}, false
+	}
+	for _, app := range apps {
+		var slashCommands []protocol.AppSlashCommand
+		if err := json.Unmarshal([]byte(defaultJSONArray(app.SlashCommandsJSON)), &slashCommands); err != nil {
+			continue
+		}
+		for _, slashCommand := range slashCommands {
+			query, ok := slashCommandPrompt(prompt, slashCommand.Command)
+			if !ok {
+				continue
+			}
+			intent := assistantIntent{
+				Kind:           assistantIntentInstalledAppCommand,
+				Query:          query,
+				AppID:          app.AppID,
+				AppName:        app.Name,
+				CommandID:      slashCommand.CommandID,
+				SlashCommand:   slashCommand.Command,
+				AppUnavailable: !canUseHomeAgentApp(app, membership) || !homeAgentAppHasCommand(app, slashCommand.CommandID),
+			}
+			return assistantTool{
+				Kind:        assistantIntentInstalledAppCommand,
+				Description: "Route an installed first-party app slash command through the home agent.",
+				Execute:     executeAssistantInstalledAppTool,
+			}, intent, true
+		}
+	}
+	return assistantTool{}, assistantIntent{}, false
 }
 
 func (s *Server) resolveAssistantToolWithLocalModel(ctx context.Context, settings domain.AssistantSettings, userID string, prompt string) (assistantTool, assistantIntent, bool) {
@@ -599,6 +656,36 @@ func executeAssistantHermesChatTool(ctx context.Context, server *Server, runtime
 		return server.answerHermesAppPrompt(ctx, runtime.Home, runtime.Auth, runtime.Session, intent.Query)
 	}
 	return assistantMessageContent{Text: "Hermes chat is not configured on the home agent yet."}, nil
+}
+
+func executeAssistantYDownloadTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	if runtime.Membership.Role != domain.HomeRoleAdmin {
+		return assistantMessageContent{Text: "YDownload is only available to Home admins right now."}, nil
+	}
+	if !runtime.Settings.FilesEnabled {
+		return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
+	}
+	if err := server.requireHomeFeature(ctx, runtime.Home, runtime.Membership, runtime.Auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
+		if errors.Is(err, errFeaturePermissionDenied) {
+			return assistantMessageContent{Text: "File access is disabled for your Home membership right now."}, nil
+		}
+		return assistantMessageContent{}, err
+	}
+	if strings.TrimSpace(intent.Query) == "" {
+		return assistantMessageContent{Text: "Send `/ydownload` followed by a YouTube URL."}, nil
+	}
+	if server.agentHasCapability(runtime.Home.ID, "apps.ydownload.download") {
+		return server.answerYDownloadAppPrompt(ctx, runtime.Home, intent.Query)
+	}
+	return assistantMessageContent{Text: "YDownload is not configured on the home agent yet."}, nil
+}
+
+func executeAssistantInstalledAppTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	appName := defaultString(intent.AppName, intent.AppID)
+	if intent.AppUnavailable {
+		return assistantMessageContent{Text: fmt.Sprintf("%s is not available to your Home account.", appName)}, nil
+	}
+	return server.answerGenericInstalledAppPrompt(ctx, runtime, intent)
 }
 
 func (s *Server) agentHasCapability(homeID string, capability string) bool {

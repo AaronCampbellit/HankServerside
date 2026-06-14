@@ -32,28 +32,52 @@
       <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
       <main class="grid">
+        <section class="panel settings-index-panel" aria-label="Settings sections">
+          <div data-settings-nav></div>
+        </section>
+
         <section class="panel wide-panel">
           <div class="panel-head">
             <h2>Installed Apps</h2>
             <span id="apps-count" class="pill">Loading</span>
           </div>
-          <div id="apps-list" class="card-list empty-state">Loading apps.</div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Import App</h2>
-            <span class="pill">.hankapp</span>
+          <div class="actions wrap">
+            <button id="app-install-open-button" type="button">Install App</button>
           </div>
-          <form id="app-import-form" class="stack">
+          <div class="settings-form">
             <label class="setting-field">
-              <span>Package</span>
-              <input id="app-package-input" type="file" accept=".hankapp,application/zip,application/octet-stream">
+              <span>Installed app</span>
+              <select id="installed-app-select"></select>
             </label>
-            <div class="actions wrap">
-              <button type="submit">Preview Package</button>
+            <div id="selected-app-panel" class="stack empty-state">Loading apps.</div>
+            <div class="stack" id="app-config-panel" hidden>
+              <div class="panel-head">
+                <h2 id="app-config-title">App Configuration</h2>
+                <span id="app-config-status" class="pill">Selected</span>
+              </div>
+              <form id="app-config-form" class="settings-form">
+	                <label class="toggle-field">
+	                  <input id="app-enabled" type="checkbox">
+	                  <span>Enabled</span>
+	                </label>
+	                <label class="setting-field">
+	                  <span>App access</span>
+	                  <select id="app-user-access">
+	                    <option value="admins_only">Admins only</option>
+	                    <option value="home_members">Home members</option>
+	                  </select>
+	                </label>
+	                <label class="setting-field">
+	                  <span>Public Config JSON</span>
+	                  <textarea id="app-public-config" rows="8" spellcheck="false" autocomplete="off"></textarea>
+	                </label>
+                <div id="app-secret-fields" class="settings-grid"></div>
+                <div class="actions wrap">
+                  <button type="submit">Save App</button>
+                </div>
+              </form>
             </div>
-          </form>
+          </div>
         </section>
 
         <section class="panel" id="app-preview" hidden>
@@ -67,33 +91,32 @@
           </div>
         </section>
 
-        <section class="panel wide-panel" id="app-config-panel" hidden>
-          <div class="panel-head">
-            <h2 id="app-config-title">App Configuration</h2>
-            <span id="app-config-status" class="pill">Selected</span>
-          </div>
-          <form id="app-config-form" class="settings-form">
-            <label class="toggle-field">
-              <input id="app-enabled" type="checkbox">
-              <span>Enabled</span>
-            </label>
-            <label class="setting-field">
-              <span>Public Config JSON</span>
-              <textarea id="app-public-config" rows="8" spellcheck="false" autocomplete="off"></textarea>
-            </label>
-            <div id="app-secret-fields" class="settings-grid"></div>
-            <div class="actions wrap">
-              <button type="submit">Save App</button>
-            </div>
-          </form>
-        </section>
       </main>
+
+      <dialog id="app-install-dialog" class="file-dialog">
+        <form id="app-package-form" method="dialog">
+          <div class="panel-head">
+            <h3>Install App</h3>
+            <span class="pill">.hankapp</span>
+          </div>
+          <label class="setting-field">
+            <span>Package</span>
+            <input id="app-package-input" type="file" accept=".hankapp,application/zip,application/octet-stream">
+          </label>
+          <div class="actions wrap">
+            <button id="app-install-cancel-button" type="button" class="secondary">Cancel</button>
+            <button type="submit">Preview</button>
+          </div>
+        </form>
+      </dialog>
 
       <div id="toast" class="toast" hidden></div>
     </div>
 
     <script src="/assets/api-client.js" defer></script>
-    <script src="/assets/apps.js?v=20260609-typed-settings-2" defer></script>
+    <script src="/assets/ui-helpers.js" defer></script>
+    <script src="/assets/settings-nav.js" defer></script>
+    <script src="/assets/apps.js?v=20260612-app-settings-flow" defer></script>
     <script src="/assets/admin-nav.js?v=20260608-apps" defer></script>
   </body>
 </html>

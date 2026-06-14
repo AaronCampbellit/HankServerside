@@ -5,7 +5,7 @@
   "properties": {
     "source_id": { "type": "string" },
     "destination_path": { "type": "string", "default": "YouTube" },
-    "format": { "type": "string", "default": "bv*+ba/b" },
+    "format": { "type": "string", "default": "best" },
     "output_template": { "type": "string", "default": "%(title).200B [%(id)s].%(ext)s" },
     "write_subtitles": { "type": "boolean", "default": false },
     "write_auto_subtitles": { "type": "boolean", "default": false },

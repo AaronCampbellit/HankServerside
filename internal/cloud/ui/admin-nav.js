@@ -51,69 +51,81 @@
       group: "Settings",
     },
     {
-      href: "/dashboard/settings#home",
+      href: "/dashboard/settings/home",
       label: "Home Settings",
       detail: "Rename the home, review the connector, and create setup files.",
       keywords: ["home name", "connector", "agent", "setup file", "token", "settings"],
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#quick-links",
+      href: "/dashboard/settings/quick-links",
       label: "Quick Links",
       detail: "Add, reorder, and refresh shared homepage links.",
       keywords: ["quick links", "links", "homepage links", "home links", "add link", "refresh links", "settings"],
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#people",
+      href: "/dashboard/settings/people",
       label: "People Settings",
       detail: "Invite people, review members, and manage access.",
       keywords: ["people", "users", "members", "invite", "invitation", "role", "admin", "access"],
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#connections",
+      href: "/dashboard/settings/connections",
       label: "Connection Settings",
       detail: "Save Home Assistant and file server settings for the connector.",
       keywords: ["connections", "home assistant", "ha token", "settings", "file server", "smb", "nas", "credentials", "share"],
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#ai",
+      href: "/dashboard/settings/ai",
       label: "AI Settings",
       detail: "OpenAI account linking and HankAI setup.",
       keywords: ["ai", "assistant", "openai", "chatgpt", "oauth", "link openai", "relink", "subscription", "settings", "tools", "workflows", "media downloads"],
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#apps",
+      href: "/dashboard/settings/apps",
       label: "App Settings",
+      mobileLabel: "Apps",
       detail: "Import, configure, enable, and disable installed Hank agent apps.",
-      keywords: ["apps", "app packages", "install app", "import app", "hankapp", "hermes", "workflows", "tools"],
+      keywords: ["apps", "packages", "install", "configure", "ydownload", "hermes", "app packages", "install app", "import app", "hankapp", "workflows", "tools"],
       adminOnly: true,
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#backups",
+      href: "/dashboard/settings/backups",
       label: "Backup Settings",
-      detail: "Backups, restore tests, checksum checks, and backup schedules.",
-      keywords: ["storage", "backup", "backups", "restore", "checksum", "schedule", "encrypted", "retention"],
+      mobileLabel: "Backups",
+      detail: "Configure backups, retention, restore tests, and storage health.",
+      keywords: ["backup", "backups", "restore", "storage", "pgbackrest", "checksum", "schedule", "encrypted", "retention"],
       adminOnly: true,
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#recovery",
+      href: "/dashboard/settings/recovery",
       label: "Recovery Settings",
-      detail: "Export redacted settings and import rebuild profiles.",
-      keywords: ["recovery", "settings export", "settings import", "rebuild", "redacted", "configuration bundle"],
+      mobileLabel: "Recovery",
+      detail: "Export and import redacted settings bundles.",
+      keywords: ["recovery", "restore", "export", "import", "redacted settings", "settings export", "settings import", "rebuild", "configuration bundle"],
       adminOnly: true,
+      group: "Settings",
       searchOnly: true,
     },
     {
-      href: "/dashboard/settings#join-home",
+      href: "/dashboard/settings/join-home",
       label: "Join Home",
       detail: "Use an invite code to join a home.",
       keywords: ["join", "invite code", "accept invitation", "home invite"],
+      group: "Settings",
       searchOnly: true,
     },
     {
@@ -125,25 +137,7 @@
       group: "Support",
     },
   ];
-  const preloaded = new Set();
   let canViewAdmin = false;
-  let dashboardFrame = null;
-
-  function isEmbeddedDashboard() {
-    return new URLSearchParams(window.location.search).get("embedded") === "1";
-  }
-
-  function embeddedURL(href) {
-    const url = new URL(href, window.location.origin);
-    url.searchParams.set("embedded", "1");
-    return url;
-  }
-
-  function visibleURL(href) {
-    const url = new URL(href, window.location.origin);
-    url.searchParams.delete("embedded");
-    return url;
-  }
 
   function setAdminOnlyVisible(isVisible) {
     canViewAdmin = isVisible;
@@ -151,7 +145,6 @@
       element.hidden = !isVisible;
     });
     renderSideNav();
-    preloadDashboardPages();
   }
 
   function visiblePages() {
@@ -230,30 +223,6 @@
     renderSideNav();
   }
 
-  function installEmbeddedMode() {
-    if (!isEmbeddedDashboard()) {
-      return false;
-    }
-    document.documentElement.classList.add("embedded-dashboard");
-    document.body.classList.add("embedded-dashboard");
-    document.addEventListener("click", (event) => {
-      const link = event.target.closest("a[href]");
-      if (!link || event.defaultPrevented || event.button !== 0) {
-        return;
-      }
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || (link.target && link.target !== "_self")) {
-        return;
-      }
-      const url = new URL(link.href, window.location.origin);
-      if (url.origin !== window.location.origin || !url.pathname.startsWith("/dashboard")) {
-        return;
-      }
-      event.preventDefault();
-      window.parent.postMessage({ type: "hank-dashboard:navigate", href: visibleURL(url).toString() }, window.location.origin);
-    });
-    return true;
-  }
-
   function renderSideNav() {
     const nav = document.querySelector(".dashboard-shell .tab-strip");
     if (!nav) {
@@ -326,51 +295,6 @@
       }
       details.open = false;
     });
-  }
-
-  function currentFrameSource() {
-    return embeddedURL(window.location.href).toString();
-  }
-
-  function ensureDashboardFrame() {
-    const shell = document.querySelector(".dashboard-shell");
-    const main = shell?.querySelector("main");
-    if (!shell || !main || dashboardFrame) {
-      return dashboardFrame;
-    }
-    main.classList.add("dashboard-frame-main");
-    main.classList.remove("grid", "notes-workspace", "hank-chat-layout", "file-server-grid");
-    main.innerHTML = "";
-    dashboardFrame = document.createElement("iframe");
-    dashboardFrame.className = "dashboard-content-frame";
-    dashboardFrame.title = "Dashboard content";
-    dashboardFrame.allow = "clipboard-read; clipboard-write";
-    dashboardFrame.src = currentFrameSource();
-    dashboardFrame.addEventListener("load", () => {
-      document.body.classList.remove("dashboard-navigating");
-      try {
-        const framedURL = visibleURL(dashboardFrame.contentWindow.location.href);
-        setActiveShellPage(framedURL);
-      } catch (_) {
-      }
-    });
-    main.appendChild(dashboardFrame);
-    return dashboardFrame;
-  }
-
-  function navigateDashboardFrame(href, pushHistory = true) {
-    const frame = ensureDashboardFrame();
-    if (!frame) {
-      window.location.assign(href);
-      return;
-    }
-    const url = visibleURL(href);
-    document.body.classList.add("dashboard-navigating");
-    setActiveShellPage(url);
-    frame.src = embeddedURL(url).toString();
-    if (pushHistory) {
-      window.history.pushState({ dashboardURL: url.toString() }, "", url.pathname + url.search + url.hash);
-    }
   }
 
   function scorePage(page, queryTerms) {
@@ -464,60 +388,7 @@
     });
   }
 
-  function preloadAsset(url) {
-    if (preloaded.has(url)) {
-      return;
-    }
-    preloaded.add(url);
-    fetch(url, { credentials: "same-origin", cache: "force-cache" }).catch(() => {});
-  }
-
-  function preloadPageAssets(html) {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    doc.querySelectorAll('script[src], link[rel="stylesheet"][href]').forEach((element) => {
-      const url = element.getAttribute("src") || element.getAttribute("href");
-      if (url) {
-        preloadAsset(new URL(url, window.location.origin).toString());
-      }
-    });
-  }
-
-  function preloadPage(href) {
-    const url = new URL(href, window.location.origin);
-    const key = url.toString();
-    if (preloaded.has(key) || url.pathname === window.location.pathname) {
-      return;
-    }
-    preloaded.add(key);
-
-    const link = document.createElement("link");
-    link.rel = "prefetch";
-    link.href = url.pathname;
-    document.head.appendChild(link);
-
-    fetch(url.pathname, { credentials: "same-origin", cache: "force-cache" })
-      .then((response) => response.ok ? response.text() : "")
-      .then((html) => {
-        if (html) {
-          preloadPageAssets(html);
-        }
-      })
-      .catch(() => {});
-  }
-
-  function preloadDashboardPages() {
-    const run = () => {
-      visibleNavPages().forEach((page) => preloadPage(page.href));
-    };
-
-    if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(run, { timeout: 1800 });
-      return;
-    }
-    window.setTimeout(run, 250);
-  }
-
-  function shouldSmoothNavigate(event, link) {
+  function shouldUpdateRouteState(event, link) {
     if (!link || event.defaultPrevented || event.button !== 0) {
       return false;
     }
@@ -534,28 +405,16 @@
     if (!url.pathname.startsWith("/dashboard")) {
       return false;
     }
-    return url.pathname !== window.location.pathname || url.search !== window.location.search;
+    return true;
   }
 
-  function installSmoothNavigation() {
+  function installRouteStateSync() {
     document.addEventListener("click", (event) => {
       const link = event.target.closest("a[href]");
-      if (!shouldSmoothNavigate(event, link)) {
+      if (!shouldUpdateRouteState(event, link)) {
         return;
       }
-      event.preventDefault();
-      navigateDashboardFrame(link.href);
-    });
-
-    window.addEventListener("message", (event) => {
-      if (event.origin !== window.location.origin || event.data?.type !== "hank-dashboard:navigate") {
-        return;
-      }
-      navigateDashboardFrame(event.data.href);
-    });
-
-    window.addEventListener("popstate", () => {
-      navigateDashboardFrame(window.location.href, false);
+      setActiveShellPage(new URL(link.href, window.location.origin));
     });
   }
 
@@ -573,17 +432,11 @@
   }
 
   function start() {
-    if (installEmbeddedMode()) {
-      collapseMobileDetails();
-      applyAdminVisibility();
-      return;
-    }
     installDashboardShell();
-    installSmoothNavigation();
-    ensureDashboardFrame();
+    installRouteStateSync();
+    setActiveShellPage(new URL(window.location.href));
     collapseMobileDetails();
     applyAdminVisibility();
-    preloadDashboardPages();
   }
 
   if (document.readyState === "loading") {

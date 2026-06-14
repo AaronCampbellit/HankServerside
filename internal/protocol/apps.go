@@ -12,6 +12,9 @@ const (
 
 	AppSchemaVersion = "hank.app.v1"
 	AppRuntimeStdio  = "stdio"
+
+	AppUserAccessAdminsOnly  = "admins_only"
+	AppUserAccessHomeMembers = "home_members"
 )
 
 type AppSummary struct {
@@ -27,6 +30,7 @@ type AppSummary struct {
 	SlashCommands   []AppSlashCommand   `json:"slash_commands,omitempty"`
 	Commands        []AppCommandSummary `json:"commands,omitempty"`
 	SettingsSchema  AppSettingsSchema   `json:"settings_schema,omitempty"`
+	UserAccess      string              `json:"user_access,omitempty"`
 	PublicConfig    json.RawMessage     `json:"public_config,omitempty"`
 	SecretFieldsSet map[string]bool     `json:"secret_fields_set,omitempty"`
 }
@@ -64,8 +68,8 @@ type AppSettingsField struct {
 }
 
 type AppSettingsOption struct {
-	Value string `json:"value"`
-	Label string `json:"label,omitempty"`
+	Value json.RawMessage `json:"value"`
+	Label string          `json:"label,omitempty"`
 }
 
 type AppsListRequest struct{}
@@ -109,6 +113,7 @@ type AppsConfigApplyRequest struct {
 	PublicConfig json.RawMessage `json:"public_config,omitempty"`
 	Secrets      json.RawMessage `json:"secrets,omitempty"`
 	Enable       *bool           `json:"enable,omitempty"`
+	UserAccess   string          `json:"user_access,omitempty"`
 }
 
 type AppsConfigApplyResponse struct {

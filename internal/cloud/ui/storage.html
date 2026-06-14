@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Hank Remote Backups</title>
+    <title>Hank Remote Storage</title>
     <link rel="stylesheet" href="/assets/styles.css?v=20260606-mobile-responsive">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
@@ -34,6 +34,10 @@
       <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
 
       <main class="grid">
+        <section class="panel settings-index-panel" aria-label="Settings sections">
+          <div data-settings-nav></div>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <h2>Checksum Health</h2>
@@ -293,6 +297,8 @@
     </div>
 
     <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/ui-helpers.js" defer></script>
+    <script src="/assets/settings-nav.js" defer></script>
     <script src="/assets/storage.js?v=20260503-storage-settings" defer></script>
     <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
   </body>

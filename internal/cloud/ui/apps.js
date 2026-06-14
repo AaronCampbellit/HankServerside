@@ -1,4 +1,5 @@
 const api = window.HankAPI.request;
+const escapeHTML = window.HankUI.escapeHTML;
 
 const state = {
   user: null,
@@ -14,8 +15,12 @@ const els = {
   sessionMeta: document.getElementById("session-meta"),
   toast: document.getElementById("toast"),
   appsCount: document.getElementById("apps-count"),
-  appsList: document.getElementById("apps-list"),
-  importForm: document.getElementById("app-import-form"),
+  installedAppSelect: document.getElementById("installed-app-select"),
+  selectedAppPanel: document.getElementById("selected-app-panel"),
+  installOpenButton: document.getElementById("app-install-open-button"),
+  installDialog: document.getElementById("app-install-dialog"),
+  packageForm: document.getElementById("app-package-form"),
+  installCancelButton: document.getElementById("app-install-cancel-button"),
   packageInput: document.getElementById("app-package-input"),
   preview: document.getElementById("app-preview"),
   previewStatus: document.getElementById("app-preview-status"),
@@ -26,27 +31,13 @@ const els = {
   configStatus: document.getElementById("app-config-status"),
   configForm: document.getElementById("app-config-form"),
   appEnabled: document.getElementById("app-enabled"),
+  appUserAccess: document.getElementById("app-user-access"),
   publicConfig: document.getElementById("app-public-config"),
   secretFields: document.getElementById("app-secret-fields"),
 };
 
 function showToast(message, isError = false) {
-  els.toast.hidden = false;
-  els.toast.textContent = message;
-  els.toast.style.background = isError ? "rgba(142, 45, 28, 0.94)" : "rgba(35, 27, 20, 0.92)";
-  clearTimeout(showToast.timeoutID);
-  showToast.timeoutID = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 3400);
-}
-
-function escapeHTML(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  window.HankUI.showToast(els.toast, message, isError);
 }
 
 function appID(app) {
@@ -67,6 +58,10 @@ function appEnabled(app) {
 
 function appStatus(app) {
   return app.status || "unknown";
+}
+
+function appUserAccess(app) {
+  return app.user_access === "home_members" ? "home_members" : "admins_only";
 }
 
 function appPublicConfig(app) {
@@ -155,13 +150,62 @@ function renderSession() {
 
 function renderApps() {
   els.appsCount.textContent = `${state.apps.length} app${state.apps.length === 1 ? "" : "s"}`;
+  renderAppSelector();
+  renderSelectedAppPanel();
+}
+
+function renderAppSelector() {
   if (!state.apps.length) {
-    els.appsList.className = "card-list empty-state";
-    els.appsList.textContent = "No apps installed.";
+    els.installedAppSelect.innerHTML = `<option value="">No apps installed</option>`;
+    els.installedAppSelect.disabled = true;
+    state.selectedApp = null;
     return;
   }
-  els.appsList.className = "card-list";
-  els.appsList.innerHTML = "";
+  els.installedAppSelect.disabled = false;
+  if (!state.selectedApp || !state.apps.some((app) => appID(app) === appID(state.selectedApp))) {
+    state.selectedApp = state.apps[0];
+  }
+  const selectedID = appID(state.selectedApp);
+  els.installedAppSelect.innerHTML = state.apps.map((app) => {
+    const id = appID(app);
+    const label = `${appName(app)} (${id})`;
+    return `<option value="${escapeHTML(id)}" ${id === selectedID ? "selected" : ""}>${escapeHTML(label)}</option>`;
+  }).join("");
+}
+
+function renderSelectedAppPanel() {
+  const app = state.selectedApp;
+  if (!app) {
+    els.selectedAppPanel.className = "stack empty-state";
+    els.selectedAppPanel.textContent = "No apps installed.";
+    els.configPanel.hidden = true;
+    return;
+  }
+  els.selectedAppPanel.className = "stack";
+  const id = appID(app);
+  els.selectedAppPanel.innerHTML = `
+    <article class="card split-card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">${escapeHTML(appName(app))}</div>
+          <div class="meta">${escapeHTML(id)} · ${escapeHTML(appVersion(app))}</div>
+        </div>
+        <span class="status-chip ${appEnabled(app) ? "" : "offline"}">${escapeHTML(appEnabled(app) ? "enabled" : "disabled")}</span>
+      </div>
+      <div class="kv-grid">
+        <div class="kv-row"><div class="kv-label">Status</div><div>${escapeHTML(appStatus(app))}</div></div>
+        <div class="kv-row"><div class="kv-label">Updated</div><div>${escapeHTML(app.updated_at ? new Date(app.updated_at).toLocaleString() : "Unknown")}</div></div>
+        <div class="kv-row"><div class="kv-label">Last Error</div><div>${escapeHTML(app.last_error || "None")}</div></div>
+      </div>
+      <div class="actions wrap compact">
+        <button type="button" class="secondary" data-action="configure" data-app-id="${escapeHTML(id)}">Configure</button>
+        <button type="button" class="ghost" data-action="toggle" data-app-id="${escapeHTML(id)}">${appEnabled(app) ? "Disable" : "Enable"}</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderLegacyAppsList() {
   state.apps.forEach((app) => {
     const id = appID(app);
     const card = document.createElement("article");
@@ -184,7 +228,7 @@ function renderApps() {
         <button type="button" class="ghost" data-action="toggle" data-app-id="${escapeHTML(id)}">${appEnabled(app) ? "Disable" : "Enable"}</button>
       </div>
     `;
-    els.appsList.appendChild(card);
+    els.selectedAppPanel.appendChild(card);
   });
 }
 
@@ -218,12 +262,17 @@ function renderPreview() {
 
 function selectApp(app) {
   state.selectedApp = app;
+  renderAppSelector();
+  renderSelectedAppPanel();
   els.configPanel.hidden = !app;
   if (!app) return;
   els.configTitle.setAttribute("tabindex", "-1");
   els.configTitle.textContent = `${appName(app)} Configuration`;
   els.configStatus.textContent = appEnabled(app) ? "Enabled" : "Disabled";
   els.appEnabled.checked = appEnabled(app);
+  if (els.appUserAccess) {
+    els.appUserAccess.value = appUserAccess(app);
+  }
   const config = parseConfigValue(app);
   els.publicConfig.value = JSON.stringify(config, null, 2);
   els.secretFields.innerHTML = "";
@@ -276,7 +325,7 @@ function renderSettingsFields(app, config, fields) {
         <span>${escapeHTML(labelText)}</span>
         <select data-config-field="${escapeHTML(key)}" ${field.required ? "required" : ""}>
           <option value="">Default</option>
-          ${options.map((option) => `<option value="${escapeHTML(option.value)}" ${String(option.value) === String(value || "") ? "selected" : ""}>${escapeHTML(option.label || option.value)}</option>`).join("")}
+          ${options.map((option) => `<option value="${escapeHTML(option.value)}" data-option-type="${escapeHTML(typeof option.value)}" ${String(option.value) === String(value || "") ? "selected" : ""}>${escapeHTML(option.label || option.value)}</option>`).join("")}
         </select>
         ${help}
       `;
@@ -319,7 +368,11 @@ function scrollContainingFramesIntoView() {
 
 async function loadApps() {
   const payload = await api("/v1/home/apps");
+  const selectedID = state.selectedApp ? appID(state.selectedApp) : "";
   state.apps = payload.apps || [];
+  if (selectedID) {
+    state.selectedApp = state.apps.find((app) => appID(app) === selectedID) || null;
+  }
   renderApps();
   if (state.selectedApp) {
     selectApp(state.apps.find((app) => appID(app) === appID(state.selectedApp)) || null);
@@ -389,6 +442,7 @@ async function previewPackage(event) {
     }
     state.preview = payload;
     renderPreview();
+    closeInstallDialog();
     showToast("Package preview ready.");
   } catch (error) {
     showToast(error.message, true);
@@ -412,6 +466,24 @@ async function installPreview() {
   }
 }
 
+function openInstallDialog() {
+  if (!els.installDialog) return;
+  if (typeof els.installDialog.showModal === "function") {
+    els.installDialog.showModal();
+  } else {
+    els.installDialog.hidden = false;
+  }
+}
+
+function closeInstallDialog() {
+  if (!els.installDialog) return;
+  if (typeof els.installDialog.close === "function" && els.installDialog.open) {
+    els.installDialog.close();
+  } else {
+    els.installDialog.hidden = true;
+  }
+}
+
 async function saveSelectedApp(event) {
   event.preventDefault();
   const app = state.selectedApp;
@@ -427,7 +499,7 @@ async function saveSelectedApp(event) {
     }
   });
   try {
-    const payload = { public_config: publicConfig, enable: els.appEnabled.checked };
+    const payload = { public_config: publicConfig, enable: els.appEnabled.checked, user_access: els.appUserAccess?.value || "admins_only" };
     if (Object.keys(secrets).length) {
       payload.secrets = secrets;
     }
@@ -464,6 +536,11 @@ function collectSettingsConfig() {
     } else if (input.type === "number") {
       const value = input.value.trim();
       if (value !== "") config[key] = Number(value);
+    } else if (input.tagName === "SELECT") {
+      const value = input.value.trim();
+      if (value === "") return;
+      const optionType = input.selectedOptions?.[0]?.dataset?.optionType;
+      config[key] = optionType === "number" ? Number(value) : value;
     } else {
       const value = input.value.trim();
       if (value !== "") config[key] = value;
@@ -476,7 +553,7 @@ async function toggleApp(app) {
   try {
     await api(`/v1/home/apps/${encodeURIComponent(appID(app))}/config`, {
       method: "PUT",
-      body: JSON.stringify({ enable: !appEnabled(app) }),
+      body: JSON.stringify({ enable: !appEnabled(app), user_access: appUserAccess(app) }),
     });
     await loadApps();
     showToast(appEnabled(app) ? "App disabled." : "App enabled.");
@@ -505,11 +582,18 @@ async function hydrate() {
   }
 }
 
-els.importForm.addEventListener("submit", previewPackage);
+els.packageForm.addEventListener("submit", previewPackage);
+els.installOpenButton.addEventListener("click", openInstallDialog);
+els.installCancelButton.addEventListener("click", closeInstallDialog);
 els.installButton.addEventListener("click", installPreview);
 els.configForm.addEventListener("submit", saveSelectedApp);
 els.logoutButton.addEventListener("click", logout);
-els.appsList.addEventListener("click", (event) => {
+els.installedAppSelect.addEventListener("change", () => {
+  state.selectedApp = state.apps.find((app) => appID(app) === els.installedAppSelect.value) || null;
+  renderSelectedAppPanel();
+  els.configPanel.hidden = true;
+});
+els.selectedAppPanel.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const app = state.apps.find((item) => appID(item) === button.dataset.appId);

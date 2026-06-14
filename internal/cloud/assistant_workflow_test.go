@@ -53,6 +53,7 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "assistant memory decision", prompt: "what did we decide about calendar defaults", want: assistantIntentMemorySearch},
 		{name: "Hermes slash command", prompt: "/Hermes summarize the current plan", want: assistantIntentHermesChat},
 		{name: "Gramaton slash command", prompt: "/gramaton dutton ranch", want: assistantIntentGramatonCommand},
+		{name: "YDownload slash command", prompt: "/ydownload https://www.youtube.com/watch?v=UYbZo6UuMMY", want: assistantIntentYDownloadCommand},
 		{name: "Home Assistant slash command", prompt: "/ha garage lights", want: assistantIntentHACommand},
 		{name: "files slash command", prompt: "/files 2025 taxes", want: assistantIntentFilesCommand},
 		{name: "notes slash command", prompt: "/notes grocery list", want: assistantIntentNotesCommand},
@@ -1454,6 +1455,215 @@ func TestAssistantHermesCommandPrefersInstalledApp(t *testing.T) {
 	}
 }
 
+func TestAssistantYDownloadCommandRequiresInstalledApp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	_ = homeID
+	_ = agentID
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/ydownload https://www.youtube.com/watch?v=UYbZo6UuMMY",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &run)
+	if run.AssistantMessage == nil {
+		t.Fatalf("missing assistant message: %#v", run)
+	}
+	if run.AssistantMessage.Text != "YDownload is not configured on the home agent yet." {
+		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
+	}
+	if run.Diagnostics == nil || run.Diagnostics.ToolKind != string(assistantIntentYDownloadCommand) || run.Diagnostics.Query != "https://www.youtube.com/watch?v=UYbZo6UuMMY" {
+		t.Fatalf("diagnostics = %#v", run.Diagnostics)
+	}
+}
+
+func TestAssistantYDownloadCommandInvokesInstalledApp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	heartbeat, err := protocol.NewEnvelope(protocol.TypeAgentHeartbeat, "", agentID, homeID, protocol.AgentHeartbeat{
+		AgentID:      agentID,
+		SentAt:       time.Now().UTC(),
+		Capabilities: []string{"apps.ydownload.download"},
+	})
+	if err != nil {
+		t.Fatalf("NewEnvelope heartbeat: %v", err)
+	}
+	if err := wsjson.Write(ctx, agentConn, heartbeat); err != nil {
+		t.Fatalf("heartbeat write: %v", err)
+	}
+	waitForAgentCapability(t, testServer, sessionToken, "apps.ydownload.download")
+
+	requests := make(chan assistantAppCommandCapture, 1)
+	go serveAssistantAppInvoke(ctx, t, agentConn, agentID, homeID, requests, func(request protocol.AppsInvokeRequest) json.RawMessage {
+		if request.AppID != "ydownload" || request.CommandID != "download" {
+			t.Errorf("apps.invoke request = %#v", request)
+		}
+		return json.RawMessage(`{"text":"Downloaded 1 file(s) to YouTube.","destination_path":"YouTube","files":[{"path":"YouTube/video.mp4","size":123}]}`)
+	})
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/ydownload https://www.youtube.com/watch?v=UYbZo6UuMMY",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &run)
+	if run.AssistantMessage == nil {
+		t.Fatalf("missing assistant message: %#v", run)
+	}
+	if run.AssistantMessage.Text != "Downloaded 1 file(s) to YouTube." {
+		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != protocol.CommandAppsInvoke {
+			t.Fatalf("command = %q, want %q", request.Command, protocol.CommandAppsInvoke)
+		}
+		if request.AppInvoke.AppID != "ydownload" || request.AppInvoke.CommandID != "download" {
+			t.Fatalf("apps.invoke request = %#v", request.AppInvoke)
+		}
+		var input struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(request.AppInvoke.Input, &input); err != nil {
+			t.Fatalf("Decode app input: %v", err)
+		}
+		if input.URL != "https://www.youtube.com/watch?v=UYbZo6UuMMY" {
+			t.Fatalf("app url = %q", input.URL)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for app invoke command")
+	}
+}
+
+func TestAssistantGenericInstalledAppSlashInvokesApp(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	now := time.Now().UTC()
+	must(t, db.UpsertHomeApp(ctx, domain.HomeAgentApp{
+		HomeID:              homeID,
+		AppID:               "members_app",
+		Name:                "Members App",
+		Version:             "1.0.0",
+		Enabled:             true,
+		PublicConfigJSON:    `{}`,
+		SecretFieldsSetJSON: `{}`,
+		CapabilitiesJSON:    `["apps.members.run"]`,
+		SlashCommandsJSON:   `[{"command":"/members","command_id":"run","description":"Run member app."}]`,
+		CommandsJSON:        `[{"id":"run","mode":"request_response","timeout_seconds":30}]`,
+		UserAccess:          domain.HomeAgentAppUserAccessHomeMembers,
+		Status:              "installed",
+		UpdatedAt:           now,
+		UpdatedBy:           "usr_1",
+	}))
+
+	requests := make(chan assistantAppCommandCapture, 1)
+	go serveAssistantAppInvoke(ctx, t, agentConn, agentID, homeID, requests, func(request protocol.AppsInvokeRequest) json.RawMessage {
+		if request.AppID != "members_app" || request.CommandID != "run" {
+			t.Errorf("apps.invoke request = %#v", request)
+		}
+		return json.RawMessage(`{"text":"Members app answered.","cards":[{"kind":"app","title":"Result","summary":"Generic app card","action_title":"Open"}]}`)
+	})
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/members check the new platform",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &run)
+	if run.AssistantMessage == nil {
+		t.Fatalf("missing assistant message: %#v", run)
+	}
+	if run.AssistantMessage.Text != "Members app answered." {
+		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
+	}
+	if run.Diagnostics == nil || run.Diagnostics.ToolKind != string(assistantIntentInstalledAppCommand) || run.Diagnostics.AppID != "members_app" || run.Diagnostics.CommandID != "run" || run.Diagnostics.SlashCommand != "/members" {
+		t.Fatalf("diagnostics = %#v", run.Diagnostics)
+	}
+
+	select {
+	case request := <-requests:
+		if request.Command != protocol.CommandAppsInvoke {
+			t.Fatalf("command = %q, want %q", request.Command, protocol.CommandAppsInvoke)
+		}
+		var input genericInstalledAppInput
+		if err := json.Unmarshal(request.AppInvoke.Input, &input); err != nil {
+			t.Fatalf("Decode app input: %v", err)
+		}
+		if input.RawText != "check the new platform" || input.SlashCommand != "/members" {
+			t.Fatalf("app input = %#v", input)
+		}
+		var appContext map[string]interface{}
+		if err := json.Unmarshal(request.AppInvoke.Context, &appContext); err != nil {
+			t.Fatalf("Decode app context: %v", err)
+		}
+		if appContext["home_id"] != homeID || appContext["user_id"] != "usr_1" || appContext["role"] != domain.HomeRoleAdmin {
+			t.Fatalf("app context = %#v", appContext)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for app invoke command")
+	}
+}
+
+func TestAssistantGenericAppOutputContent(t *testing.T) {
+	content, err := assistantContentFromGenericAppOutput("Members App", json.RawMessage(`{
+		"text":"Members app answered.",
+		"cards":[{"kind":"app","title":"Result","summary":"Generic app card","action_title":"Open"}],
+		"diagnostics":{"job":"job_123"}
+	}`))
+	if err != nil {
+		t.Fatalf("assistantContentFromGenericAppOutput: %v", err)
+	}
+	if content.Text != "Members app answered." {
+		t.Fatalf("text = %q", content.Text)
+	}
+	if len(content.Cards) != 1 || content.Cards[0].Title != "Result" {
+		t.Fatalf("cards = %#v", content.Cards)
+	}
+	if content.Meta["app_diagnostics"] == nil {
+		t.Fatalf("meta = %#v", content.Meta)
+	}
+
+	empty, err := assistantContentFromGenericAppOutput("Members App", nil)
+	if err != nil {
+		t.Fatalf("empty output: %v", err)
+	}
+	if empty.Text != "Members App returned an empty response." {
+		t.Fatalf("empty text = %q", empty.Text)
+	}
+}
+
 func assistantTraceHasEvent(events []assistantTraceEvent, eventName string) bool {
 	for _, event := range events {
 		if event.Event == eventName {
@@ -1514,6 +1724,53 @@ func waitForAgentCapability(t *testing.T, testServer *httptest.Server, sessionTo
 type assistantHermesCommandCapture struct {
 	Command   string
 	AppInvoke protocol.AppsInvokeRequest
+}
+
+type assistantAppCommandCapture struct {
+	Command   string
+	AppInvoke protocol.AppsInvokeRequest
+}
+
+func serveAssistantAppInvoke(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, requests chan<- assistantAppCommandCapture, output func(protocol.AppsInvokeRequest) json.RawMessage) {
+	t.Helper()
+
+	for {
+		var envelope protocol.Envelope
+		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+			return
+		}
+		if envelope.Type != protocol.TypeCloudCommand {
+			continue
+		}
+		command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+		if err != nil {
+			return
+		}
+		capture := assistantAppCommandCapture{Command: command.Command}
+		if command.Command == protocol.CommandAppsInvoke {
+			request, err := decodeProtocolBody[protocol.AppsInvokeRequest](command.Body)
+			if err != nil {
+				return
+			}
+			capture.AppInvoke = request
+			select {
+			case requests <- capture:
+			default:
+			}
+			response, err := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.AppsInvokeResponse{
+				Output: output(request),
+			})
+			if err != nil {
+				return
+			}
+			_ = wsjson.Write(ctx, agentConn, response)
+			continue
+		}
+		select {
+		case requests <- capture:
+		default:
+		}
+	}
 }
 
 func serveAssistantHermesAppInvoke(ctx context.Context, t *testing.T, agentConn *websocket.Conn, agentID string, homeID string, requests chan<- assistantHermesCommandCapture) {

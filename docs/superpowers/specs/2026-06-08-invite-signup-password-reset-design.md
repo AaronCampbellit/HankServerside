@@ -2,7 +2,7 @@
 
 Date: 2026-06-08
 
-Status: Approved design, pending implementation plan.
+Status: Implemented. Retained as design context for invite signup, admin password reset, forced password change, session revocation, and recovery CLI behavior.
 
 ## Context
 

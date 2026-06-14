@@ -5,6 +5,17 @@ Installable Hank agent app package `ydownload`.
 YDownload runs `yt-dlp` from the home agent, stages completed downloads in a
 private temporary directory, and streams the finished files into the configured
 Hank file source. The app exposes `/ydownload` and a single `download` command.
+The `/ydownload` entry is declared in `app.json` under `assistant.slash_commands`;
+after the app is installed and enabled, Hank chat reads it from `/v1/home/apps`.
+
+Use it from Hank chat as:
+
+```text
+/ydownload https://www.youtube.com/watch?v=UYbZo6UuMMY
+```
+
+HankAI routes the text after `/ydownload` to the installed app as the
+`download` command input `{"url":"..."}`.
 
 The agent host or container must have `yt-dlp` available on `PATH`, or the app
 setting `yt_dlp_path` must point to the executable.
@@ -13,7 +24,7 @@ Common settings include:
 
 - `source_id`: Hank file source for completed downloads.
 - `destination_path`: destination folder inside that source.
-- `format`: yt-dlp format selector, default `bv*+ba/b`.
+- `format`: yt-dlp format selector, default `best` for broad YouTube compatibility.
 - `output_template`: yt-dlp output template.
 - `write_subtitles`, `write_auto_subtitles`, `subtitle_languages`,
   `subtitle_format`: subtitle options.
@@ -32,3 +43,7 @@ scripts/package-ydownload-app.sh
 Import `dist/ydownload.hankapp` from Settings > Apps, then use the installed
 app's Configure action. The form is rendered from `app.json`
 `config.settings_schema`; do not add a dedicated settings panel for this app.
+
+Settings > Apps also controls the app-level access mode. `admins_only` keeps all
+YDownload commands limited to home admins; `home_members` makes every command in
+this installed app available to regular home members.

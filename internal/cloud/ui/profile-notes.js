@@ -1,4 +1,12 @@
 const api = window.HankAPI.request;
+const notesEditor = window.HankProfileNotesEditor;
+const escapeHTML = window.HankUI.escapeHTML;
+const normalizeTag = notesEditor.normalizeTag;
+const normalizeURL = notesEditor.normalizeURL;
+const isLikelyURL = notesEditor.isLikelyURL;
+const cleanLinkToken = notesEditor.cleanLinkToken;
+const orderedListMatch = notesEditor.orderedListMatch;
+const mapPositionThroughOrderedListChanges = notesEditor.mapPositionThroughOrderedListChanges;
 
 const AUTOSAVE_DELAY_MS = 700;
 const HISTORY_LIMIT = 20;
@@ -59,22 +67,7 @@ function logLive(message, detail = {}) {
 
 
 function showToast(message, isError = false) {
-  els.toast.hidden = false;
-  els.toast.textContent = message;
-  els.toast.style.background = isError ? "rgba(142, 45, 28, 0.94)" : "rgba(35, 27, 20, 0.92)";
-  clearTimeout(showToast.timeoutID);
-  showToast.timeoutID = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 3200);
-}
-
-function escapeHTML(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  window.HankUI.showToast(els.toast, message, isError, 3200);
 }
 
 function formatDate(value) {
@@ -1014,36 +1007,6 @@ function insertAtCursor(text) {
   replaceText(start, end, text, start + text.length, start + text.length);
 }
 
-function normalizeTag(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^#/, "")
-    .replace(/\s+/g, "-")
-    .replace(/[^A-Za-z0-9_-]/g, "");
-}
-
-function normalizeURL(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return "";
-  }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
-    return trimmed;
-  }
-  return `https://${trimmed}`;
-}
-
-function isLikelyURL(value) {
-  return /^(https?:\/\/|www\.|[A-Za-z0-9-]+\.[A-Za-z]{2,})/.test(String(value || "").trim());
-}
-
-function cleanLinkToken(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^["'`<([{]+/, "")
-    .replace(/[>"'`)\]},.;!?]+$/g, "");
-}
-
 function noteAttachmentURL(rawURL) {
   const value = String(rawURL || "").trim();
   if (!value.startsWith("hank-note-attachment://")) {
@@ -1132,48 +1095,6 @@ function renderEditorExtras() {
   renderInlineEditor();
   renderKanbanBoard();
   syncEditorScroll();
-}
-
-function orderedListMatch(line) {
-  return String(line || "").match(/^(\s*)(\d+)(\.\s+)(.*)$/);
-}
-
-function mapPositionThroughLineChange(position, oldStart, oldLine, newStart, newLine, oldPrefixLength, newPrefixLength) {
-  if (position <= oldStart) {
-    return newStart;
-  }
-  const oldEnd = oldStart + oldLine.length;
-  if (position > oldEnd) {
-    return newStart + newLine.length;
-  }
-  const offset = position - oldStart;
-  if (offset <= oldPrefixLength) {
-    return newStart + Math.min(offset, newPrefixLength);
-  }
-  return newStart + newPrefixLength + Math.min(offset - oldPrefixLength, newLine.length - newPrefixLength);
-}
-
-function mapPositionThroughOrderedListChanges(position, changes) {
-  let delta = 0;
-  for (const change of changes) {
-    const oldEnd = change.oldStart + change.oldLine.length;
-    if (position < change.oldStart) {
-      return position + delta;
-    }
-    if (position <= oldEnd) {
-      return mapPositionThroughLineChange(
-        position,
-        change.oldStart,
-        change.oldLine,
-        change.oldStart + delta,
-        change.newLine,
-        change.oldPrefixLength,
-        change.newPrefixLength,
-      );
-    }
-    delta += change.newLine.length - change.oldLine.length;
-  }
-  return position + delta;
 }
 
 function normalizeOrderedLists() {
