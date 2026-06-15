@@ -99,6 +99,9 @@ func (r Runner) Invoke(ctx context.Context, spec InvokeSpec) (AppStdioResponse, 
 		return AppStdioResponse{}, fmt.Errorf("app invocation canceled: %w", runCtx.Err())
 	}
 	if runErr != nil {
+		if response, err := decodeAppResponse(stdout.Bytes(), spec.Request.RequestID); err == nil {
+			return response, nil
+		}
 		return AppStdioResponse{}, fmt.Errorf("app invocation failed: %w", runErr)
 	}
 

@@ -1636,6 +1636,72 @@ func TestAssistantGenericInstalledAppSlashInvokesApp(t *testing.T) {
 	}
 }
 
+func TestAssistantInstalledGramatonSlashUsesSearchInput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	now := time.Now().UTC()
+	must(t, db.UpsertHomeApp(ctx, domain.HomeAgentApp{
+		HomeID:              homeID,
+		AppID:               "gramaton",
+		Name:                "Gramaton",
+		Version:             "1.0.0",
+		Enabled:             true,
+		PublicConfigJSON:    `{}`,
+		SecretFieldsSetJSON: `{"password":true}`,
+		CapabilitiesJSON:    `["apps.gramaton.search"]`,
+		SlashCommandsJSON:   `[{"command":"/gramaton","command_id":"search","description":"Search Gramaton."}]`,
+		CommandsJSON:        `[{"id":"search","mode":"request_response","timeout_seconds":120}]`,
+		UserAccess:          domain.HomeAgentAppUserAccessAdminsOnly,
+		Status:              "installed",
+		UpdatedAt:           now,
+		UpdatedBy:           "usr_1",
+	}))
+
+	requests := make(chan assistantAppCommandCapture, 1)
+	go serveAssistantAppInvoke(ctx, t, agentConn, agentID, homeID, requests, func(request protocol.AppsInvokeRequest) json.RawMessage {
+		if request.AppID != "gramaton" || request.CommandID != "search" {
+			t.Errorf("apps.invoke request = %#v", request)
+		}
+		return json.RawMessage(`{"query":"the arrow","results":[{"id":"movies/the-arrow","title":"The Arrow","year":2026,"type":"movie","summary":"Movie | Demo","page_path":"/movies/the-arrow"},{"id":"series/the-arrow","title":"The Arrow Series","year":2025,"type":"series","summary":"Series | Demo","page_path":"/series/the-arrow"}]}`)
+	})
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/gramaton the arrow",
+		"device_context": map[string]any{
+			"device_id": "test-device",
+			"timezone":  "UTC",
+		},
+	}, &run)
+	if run.AssistantMessage == nil {
+		t.Fatalf("missing assistant message: %#v", run)
+	}
+	if !strings.Contains(run.AssistantMessage.Text, "The Arrow") {
+		t.Fatalf("assistant text = %q", run.AssistantMessage.Text)
+	}
+
+	select {
+	case request := <-requests:
+		var input protocol.MediaSearchRequest
+		if err := json.Unmarshal(request.AppInvoke.Input, &input); err != nil {
+			t.Fatalf("Decode app input: %v", err)
+		}
+		if input.Query != "the arrow" || input.Limit != 10 {
+			t.Fatalf("app input = %#v", input)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for app invoke command")
+	}
+}
+
 func TestAssistantGenericAppOutputContent(t *testing.T) {
 	content, err := assistantContentFromGenericAppOutput("Members App", json.RawMessage(`{
 		"text":"Members app answered.",
@@ -1661,6 +1727,51 @@ func TestAssistantGenericAppOutputContent(t *testing.T) {
 	}
 	if empty.Text != "Members App returned an empty response." {
 		t.Fatalf("empty text = %q", empty.Text)
+	}
+}
+
+func TestInstalledAppSlashInputUsesFirstPartySchemas(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		intent assistantIntent
+		want   string
+	}{
+		{
+			name:   "gramaton search",
+			intent: assistantIntent{AppID: "gramaton", CommandID: "search", Query: "the arrow", SlashCommand: "/gramaton"},
+			want:   `{"query":"the arrow","limit":10}`,
+		},
+		{
+			name:   "ydownload download",
+			intent: assistantIntent{AppID: "ydownload", CommandID: "download", Query: "https://youtu.be/example", SlashCommand: "/ydownload"},
+			want:   `{"url":"https://youtu.be/example"}`,
+		},
+		{
+			name:   "hermes chat",
+			intent: assistantIntent{AppID: "hermes", CommandID: "chat", Query: "summarize this", SlashCommand: "/Hermes"},
+			want:   `{"prompt":"summarize this"}`,
+		},
+		{
+			name:   "generic app",
+			intent: assistantIntent{AppID: "members_app", CommandID: "run", Query: "check status", SlashCommand: "/members"},
+			want:   `{"raw_text":"check status","slash_command":"/members"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := installedAppSlashInput(tt.intent)
+			if err != nil {
+				t.Fatalf("installedAppSlashInput: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("input = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

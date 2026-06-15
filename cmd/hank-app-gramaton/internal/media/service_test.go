@@ -501,7 +501,7 @@ func TestLiveMediaDownloadProbeFromEnv(t *testing.T) {
 	if len(search.Results) == 0 {
 		t.Fatalf("search %q returned no results", query)
 	}
-	plan, downloads, err := service.buildPlan(ctx, search.Results[0])
+	plan, downloads, err := service.buildPlan(ctx, search.Results[0], protocol.MediaEpisodeFilter{})
 	if err != nil {
 		t.Fatalf("build plan: %v", err)
 	}
@@ -930,6 +930,170 @@ func TestMediaDownloadJobPrefers1080FallsBackAndSkipsExisting(t *testing.T) {
 	}
 	if len(events) == 0 {
 		t.Fatal("expected progress/completed events")
+	}
+}
+
+func TestSeriesPlanReportsSeasonInventory(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/series/fixture-show", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Query().Get("season") == "1" && r.URL.Query().Get("episode") == "1":
+			fmt.Fprintf(w, `<h1>Fixture Show</h1><a href="%s/download/s1e1_1080p.mp4?file=Fixture_Show_S01E01_1080p.mp4">Download 1080p</a>`, baseURL)
+		case r.URL.Query().Get("season") == "1" && r.URL.Query().Get("episode") == "2":
+			fmt.Fprintf(w, `<h1>Fixture Show</h1><a href="%s/download/s1e2_1080p.mp4?file=Fixture_Show_S01E02_1080p.mp4">Download 1080p</a>`, baseURL)
+		case r.URL.Query().Get("season") == "2" && r.URL.Query().Get("episode") == "1":
+			fmt.Fprintf(w, `<h1>Fixture Show</h1><a href="%s/download/s2e1_1080p.mp4?file=Fixture_Show_S02E01_1080p.mp4">Download 1080p</a>`, baseURL)
+		default:
+			fmt.Fprint(w, `<h1>Fixture Show</h1><div class="tv-details-episodes"><ol id="season1"><li data-episode="1">Pilot</li><li data-episode="2">Second</li></ol><ol id="season2"><li data-episode="1">Return</li></ol></div>`)
+		}
+	})
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "download")
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+	response, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{Selection: protocol.MediaSearchResult{
+		ID:       "series/fixture-show",
+		Title:    "Fixture Show",
+		Type:     protocol.MediaTypeSeries,
+		PagePath: "/series/fixture-show",
+	}})
+	if err != nil {
+		t.Fatalf("PlanDownload: %v", err)
+	}
+	if len(response.Plan.Seasons) != 2 || response.Plan.Seasons[0].EpisodeCount != 2 || response.Plan.Seasons[1].EpisodeCount != 1 {
+		t.Fatalf("seasons = %#v", response.Plan.Seasons)
+	}
+	if response.Plan.Filter.Season != 0 || response.Plan.Filter.Episode != 0 {
+		t.Fatalf("filter = %#v, want empty all-episode default", response.Plan.Filter)
+	}
+}
+
+func TestSeriesPlanFiltersToSelectedSeasonBeforeFetchingLinks(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	requestedEpisodes := map[string]int{}
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/series/fixture-show", func(w http.ResponseWriter, r *http.Request) {
+		season := r.URL.Query().Get("season")
+		episode := r.URL.Query().Get("episode")
+		if season != "" && episode != "" {
+			key := "s" + season + "e" + episode
+			requestedEpisodes[key]++
+			fmt.Fprintf(w, `<h1>Fixture Show</h1><a href="%s/download/%s_1080p.mp4?file=Fixture_Show_%s_1080p.mp4">Download 1080p</a>`, baseURL, key, strings.ToUpper(key))
+			return
+		}
+		fmt.Fprint(w, `<h1>Fixture Show</h1><div class="tv-details-episodes"><ol id="season1"><li data-episode="1">Pilot</li><li data-episode="2">Second</li></ol><ol id="season2"><li data-episode="1">Return</li><li data-episode="2">Finale</li></ol></div>`)
+	})
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "download")
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+	response, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{
+		Selection: protocol.MediaSearchResult{
+			ID:       "series/fixture-show",
+			Title:    "Fixture Show",
+			Type:     protocol.MediaTypeSeries,
+			PagePath: "/series/fixture-show",
+		},
+		Filter: protocol.MediaEpisodeFilter{Season: 2},
+	})
+	if err != nil {
+		t.Fatalf("PlanDownload: %v", err)
+	}
+	if response.Plan.ItemCount != 2 || response.Plan.Filter.Season != 2 {
+		t.Fatalf("plan = %#v", response.Plan)
+	}
+	if requestedEpisodes["s1e1"] != 0 || requestedEpisodes["s1e2"] != 0 || requestedEpisodes["s2e1"] != 1 || requestedEpisodes["s2e2"] != 1 {
+		t.Fatalf("requested episodes = %#v", requestedEpisodes)
+	}
+}
+
+func TestSeriesPlanFiltersToSelectedEpisode(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var requested []string
+	var baseURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<a href="/session/logout">Sign out</a>`)
+	})
+	mux.HandleFunc("/series/fixture-show", func(w http.ResponseWriter, r *http.Request) {
+		season := r.URL.Query().Get("season")
+		episode := r.URL.Query().Get("episode")
+		if season != "" && episode != "" {
+			requested = append(requested, "s"+season+"e"+episode)
+			fmt.Fprintf(w, `<h1>Fixture Show</h1><a href="%s/download/s%se%s_1080p.mp4?file=Fixture_Show_S%sE%s_1080p.mp4">Download 1080p</a>`, baseURL, season, episode, season, episode)
+			return
+		}
+		fmt.Fprint(w, `<h1>Fixture Show</h1><div class="tv-details-episodes"><ol id="season1"><li data-episode="1">Pilot</li><li data-episode="2">Second</li></ol><ol id="season2"><li data-episode="1">Return</li><li data-episode="2">Finale</li></ol></div>`)
+	})
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "download")
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	baseURL = server.URL
+
+	service := New(Config{
+		Enabled:  true,
+		BaseURL:  server.URL,
+		Username: "user@example.com",
+		Password: "password",
+	}, agentfiles.New(t.TempDir()), nil)
+	response, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{
+		Selection: protocol.MediaSearchResult{
+			ID:       "series/fixture-show",
+			Title:    "Fixture Show",
+			Type:     protocol.MediaTypeSeries,
+			PagePath: "/series/fixture-show",
+		},
+		Filter: protocol.MediaEpisodeFilter{Season: 1, Episode: 2},
+	})
+	if err != nil {
+		t.Fatalf("PlanDownload: %v", err)
+	}
+	if response.Plan.ItemCount != 1 || response.Plan.Items[0].Season != 1 || response.Plan.Items[0].Episode != 2 {
+		t.Fatalf("plan items = %#v", response.Plan.Items)
+	}
+	if strings.Join(requested, ",") != "s1e2" {
+		t.Fatalf("requested = %#v", requested)
 	}
 }
 

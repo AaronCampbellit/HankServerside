@@ -580,6 +580,9 @@ func executeAssistantMediaSearchTool(ctx context.Context, server *Server, runtim
 		}
 		return server.answerMediaSelection(ctx, runtime.Home, *intent.MediaSelection)
 	}
+	if jobID, latest, ok := mediaCancelPrompt(intent.Query); ok {
+		return server.answerMediaCancel(ctx, runtime.Home, jobID, latest)
+	}
 	if strings.TrimSpace(intent.Query) == "" {
 		return assistantMessageContent{Text: "Send `/gramaton` followed by a movie or TV show title."}, nil
 	}

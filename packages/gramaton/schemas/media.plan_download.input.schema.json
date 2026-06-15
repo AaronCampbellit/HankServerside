@@ -3,6 +3,15 @@
   "type": "object",
   "required": ["selection"],
   "properties": {
-    "selection": { "type": "object", "additionalProperties": true }
+    "selection": { "type": "object", "additionalProperties": true },
+    "filter": {
+      "type": "object",
+      "properties": {
+        "season": { "type": "integer", "minimum": 1 },
+        "episode": { "type": "integer", "minimum": 1 },
+        "all": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
   }
 }

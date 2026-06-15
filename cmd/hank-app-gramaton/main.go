@@ -242,7 +242,7 @@ func startDownloadWorker(ctx context.Context, request apps.AppStdioRequest, body
 	if err != nil {
 		return commandResponse{}, err
 	}
-	plan, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{Selection: body.Selection})
+	plan, err := service.PlanDownload(ctx, protocol.MediaPlanDownloadRequest{Selection: body.Selection, Filter: body.Filter})
 	if err != nil {
 		return commandResponse{}, appError{"media_error", err.Error()}
 	}

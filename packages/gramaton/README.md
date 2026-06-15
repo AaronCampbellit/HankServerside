@@ -32,3 +32,16 @@ Required app config:
 Required secret config:
 
 - `password`
+
+Chat flow:
+
+- `/gramaton <show name>` searches Gramaton and returns matching movies or TV shows.
+- Selecting a TV show first builds a season inventory with all seasons and each known season count.
+- The user can choose all seasons, a single season, or a specific episode such as `S2E4` before the app prepares the download plan.
+- Download confirmation and the started job keep the selected scope, so a season-only choice downloads only that season.
+
+Cancel flow:
+
+- Active Gramaton job cards in Hank chat show a Cancel Job action.
+- Text fallback supports `/gramaton cancel latest` and `/gramaton cancel <job_id>`.
+- Cancel uses the existing `media.download_cancel` command and returns the updated job status.

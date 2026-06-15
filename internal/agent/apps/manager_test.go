@@ -276,6 +276,50 @@ func TestManagerConfigApplyEmptySecretWithoutExistingValueDoesNotSetMetadata(t *
 	}
 }
 
+func TestManagerConfigApplyRunsSettingsApplyBeforePersisting(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	manager := installManagerGramatonPackageWithScript(t, true, gramatonSettingsApplyScript())
+
+	_, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:        "gramaton",
+		PublicConfig: json.RawMessage(`{"enabled":true,"base_url":"https://media.local","username":"bad-user","source_id":"media","destination_path":"/downloads"}`),
+		Secrets:      json.RawMessage(`{"password":"bad"}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "login failed") {
+		t.Fatalf("ConfigApply error = %v, want settings_apply validation failure", err)
+	}
+
+	status, err := manager.ConfigStatus(ctx, protocol.AppsConfigStatusRequest{AppID: "gramaton"})
+	if err != nil {
+		t.Fatalf("ConfigStatus error: %v", err)
+	}
+	if len(status.Apps) != 1 {
+		t.Fatalf("ConfigStatus apps = %#v, want one app", status.Apps)
+	}
+	if len(status.Apps[0].PublicConfig) != 0 {
+		t.Fatalf("PublicConfig after failed validation = %s, want unchanged empty config", status.Apps[0].PublicConfig)
+	}
+	if status.Apps[0].SecretFieldsSet["password"] {
+		t.Fatalf("SecretFieldsSet after failed validation = %#v, want password unset", status.Apps[0].SecretFieldsSet)
+	}
+
+	response, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:        "gramaton",
+		PublicConfig: json.RawMessage(`{"enabled":true,"base_url":"https://media.local","username":"good-user","source_id":"media","destination_path":"/downloads"}`),
+		Secrets:      json.RawMessage(`{"password":"good"}`),
+	})
+	if err != nil {
+		t.Fatalf("ConfigApply good credentials error: %v", err)
+	}
+	if string(response.App.PublicConfig) != `{"enabled":true,"base_url":"https://media.local","username":"good-user","source_id":"media","destination_path":"/downloads"}` {
+		t.Fatalf("PublicConfig = %s, want good config persisted", response.App.PublicConfig)
+	}
+	if !response.App.SecretFieldsSet["password"] {
+		t.Fatalf("SecretFieldsSet = %#v, want password set", response.App.SecretFieldsSet)
+	}
+}
+
 func TestManagerInvokeRefusesDisabledApp(t *testing.T) {
 	t.Parallel()
 	manager := installManagerHermesPackage(t, false)
@@ -373,6 +417,32 @@ func installManagerHermesPackageWithScript(t *testing.T, enable bool, script str
 	return manager
 }
 
+func installManagerGramatonPackageWithScript(t *testing.T, enable bool, script string) *Manager {
+	t.Helper()
+	ctx := context.Background()
+	appsDir := filepath.Join(t.TempDir(), "apps")
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	archivePath := writeManagerGramatonPackage(t, t.TempDir(), script)
+	manager := NewManager(appsDir, stagingDir, Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024})
+	preview, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:   "stage_1",
+		DownloadURL: fileURL(t, archivePath),
+	})
+	if err != nil {
+		t.Fatalf("PreviewPackage error: %v", err)
+	}
+	if preview.App.ID != "gramaton" {
+		t.Fatalf("preview app = %#v", preview.App)
+	}
+	if _, err := manager.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{
+		StagingID: "stage_1",
+		Enable:    enable,
+	}); err != nil {
+		t.Fatalf("ActivatePackage error: %v", err)
+	}
+	return manager
+}
+
 func assertHermesReceivesAPIKey(t *testing.T, manager *Manager, want string) {
 	t.Helper()
 	response, err := manager.Invoke(context.Background(), protocol.AppsInvokeRequest{
@@ -420,6 +490,56 @@ func writeManagerHermesPackage(t *testing.T, dir string, script string) string {
 	return archivePath
 }
 
+func writeManagerGramatonPackage(t *testing.T, dir string, script string) string {
+	t.Helper()
+	manifest := Manifest{
+		SchemaVersion: "hank.app.v1",
+		ID:            "gramaton",
+		Name:          "Gramaton",
+		Version:       "1.0.0",
+		Publisher:     "Hank",
+		Description:   "Search and queue media downloads.",
+		Runtime: Runtime{
+			Type:    "stdio",
+			Command: "bin/gramaton-app",
+		},
+		Commands: []Command{{
+			ID:             "settings_apply",
+			Mode:           "request_response",
+			InputSchema:    "schemas/settings_apply.input.schema.json",
+			OutputSchema:   "schemas/settings_apply.output.schema.json",
+			TimeoutSeconds: 30,
+			AdminOnly:      true,
+		}},
+		Config: Config{
+			Schema:       "schemas/config.schema.json",
+			SecretFields: []string{"password"},
+		},
+	}
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(dir, "gramaton.hankapp")
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(file)
+	writeZipEntry(t, zw, "app.json", string(rawManifest), 0o600)
+	writeZipEntry(t, zw, "bin/gramaton-app", script, 0o700)
+	writeZipEntry(t, zw, "schemas/config.schema.json", `{"type":"object"}`, 0o600)
+	writeZipEntry(t, zw, "schemas/settings_apply.input.schema.json", `{"type":"object"}`, 0o600)
+	writeZipEntry(t, zw, "schemas/settings_apply.output.schema.json", `{"type":"object"}`, 0o600)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return archivePath
+}
+
 func writeZipEntry(t *testing.T, zw *zip.Writer, name string, body string, mode os.FileMode) {
 	t.Helper()
 	header := &zip.FileHeader{Name: name}
@@ -443,4 +563,8 @@ func hermesRuntimeScriptWithEvent(output string) string {
 
 func hermesSecretEchoScript() string {
 	return "#!/bin/sh\nread line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\napi_key=$(printf '%s' \"$line\" | sed -n 's/.*\"api_key\":\"\\([^\"]*\\)\".*/\\1/p')\nprintf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":true,\"output\":{\"api_key\":\"'\"$api_key\"'\"}}'\n"
+}
+
+func gramatonSettingsApplyScript() string {
+	return "#!/bin/sh\nread line\nrequest_id=$(printf '%s' \"$line\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\ncase \"$line\" in *'\"command_id\":\"settings_apply\"'*) ;; *) printf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":false,\"error\":{\"code\":\"validation_failed\",\"message\":\"wrong command\"}}'; exit 1 ;; esac\ncase \"$line\" in *'\"settings\":{\"base_url\":\"https://media.local\",\"destination_path\":\"/downloads\",\"enabled\":true'*|*'\"settings\":{\"enabled\":true'*);; *) printf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":false,\"error\":{\"code\":\"validation_failed\",\"message\":\"missing settings\"}}'; exit 1 ;; esac\ncase \"$line\" in *'\"persist\":false'*) ;; *) printf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":false,\"error\":{\"code\":\"validation_failed\",\"message\":\"persist should be false\"}}'; exit 1 ;; esac\ncase \"$line\" in *'\"password\":\"good\"'*) printf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":true,\"output\":{\"settings\":{\"enabled\":true}}}' ;; *) printf '%s\\n' '{\"request_id\":\"'\"$request_id\"'\",\"ok\":false,\"error\":{\"code\":\"validation_failed\",\"message\":\"login failed\"}}'; exit 1 ;; esac\n"
 }

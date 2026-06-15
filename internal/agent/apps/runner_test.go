@@ -44,6 +44,31 @@ func TestRunnerInvokeReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestRunnerInvokeDecodesStructuredErrorFromFailedProcess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	exe := writeExecutable(t, dir, "#!/bin/sh\nread line\nprintf '%s\n' '{\"request_id\":\"req_1\",\"ok\":false,\"error\":{\"code\":\"media_error\",\"message\":\"media source is not configured\"}}'\nexit 1\n")
+	runner := Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024}
+	response, err := runner.Invoke(context.Background(), InvokeSpec{
+		Executable: exe,
+		WorkDir:    dir,
+		Timeout:    5 * time.Second,
+		Request: AppStdioRequest{
+			ProtocolVersion: "hank.app.stdio.v1",
+			RequestID:       "req_1",
+			AppID:           "gramaton",
+			CommandID:       "search",
+			Input:           json.RawMessage(`{"query":"the arrow"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke error: %v", err)
+	}
+	if response.OK || response.Error == nil || response.Error.Message != "media source is not configured" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func TestRunnerInvokeCarriesContextAndDecodesEvents(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

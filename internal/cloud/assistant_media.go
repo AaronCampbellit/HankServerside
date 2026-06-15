@@ -16,6 +16,9 @@ import (
 var (
 	mediaOptionPattern      = regexp.MustCompile(`(?i)^\s*(?:option\s*)?(\d+)\s*$`)
 	mediaQuotedTitlePattern = regexp.MustCompile(`"([^"]+)"`)
+	mediaSeasonPattern      = regexp.MustCompile(`(?i)\b(?:season|s)\s*(\d+)\b`)
+	mediaEpisodePattern     = regexp.MustCompile(`(?i)\b(?:episode|e)\s*(\d+)\b`)
+	mediaCompactSxePattern  = regexp.MustCompile(`(?i)\bs\s*(\d+)\s*e\s*(\d+)\b`)
 )
 
 func mediaAvailabilityQuery(prompt string) (string, bool) {
@@ -173,6 +176,23 @@ func cleanMediaPromptQuery(query string) string {
 	return query
 }
 
+func mediaCancelPrompt(query string) (string, bool, bool) {
+	trimmed := strings.TrimSpace(query)
+	lowered := strings.ToLower(trimmed)
+	if lowered != "cancel" && !strings.HasPrefix(lowered, "cancel ") {
+		return "", false, false
+	}
+	target := strings.TrimSpace(trimmed[len("cancel"):])
+	if strings.HasPrefix(strings.ToLower(target), "job ") {
+		target = strings.TrimSpace(target[len("job "):])
+	}
+	normalizedTarget := strings.ToLower(target)
+	if target == "" || normalizedTarget == "latest" || normalizedTarget == "last" || normalizedTarget == "current" {
+		return "", true, true
+	}
+	return target, false, true
+}
+
 func mediaQueryEndsWithTypeHint(query string) bool {
 	tokens := strings.Fields(normalizedMediaSelection(query))
 	if len(tokens) == 0 {
@@ -258,11 +278,76 @@ func (s *Server) answerMediaSearch(ctx context.Context, home domain.Home, query 
 	if len(payload.Results) == 0 {
 		return assistantMessageContent{Text: fmt.Sprintf("I couldn't find `%s` available for download.", query)}, nil
 	}
+	return s.assistantContentFromMediaSearchResponse(ctx, home, query, payload)
+}
+
+func (s *Server) answerMediaCancel(ctx context.Context, home domain.Home, jobID string, latest bool) (assistantMessageContent, error) {
+	jobID = strings.TrimSpace(jobID)
+	if latest {
+		jobs, err := s.mediaDownloadJobs(ctx, home.ID)
+		if err != nil {
+			return assistantMessageContent{Text: "I couldn't look up Gramaton jobs through the home agent right now."}, nil
+		}
+		for _, job := range jobs {
+			if mediaJobIsActive(job.Status) {
+				jobID = job.JobID
+				break
+			}
+		}
+		if jobID == "" && len(jobs) > 0 {
+			jobID = jobs[0].JobID
+		}
+	}
+	if jobID == "" {
+		return assistantMessageContent{Text: "I couldn't find an active Gramaton job to cancel."}, nil
+	}
+	envelope, err := s.sendMediaCommand(ctx, home.ID, protocol.CommandMediaDownloadCancel, protocol.MediaDownloadCancelRequest{JobID: jobID})
+	if err != nil {
+		return assistantMessageContent{Text: "I couldn't reach the home agent to cancel that media job."}, nil
+	}
+	if envelope.Error != nil {
+		return assistantMessageContent{Text: fmt.Sprintf("I couldn't cancel media job `%s`: %s", jobID, envelope.Error.Message)}, nil
+	}
+	payload, err := protocol.DecodePayload[protocol.MediaDownloadCancelResponse](envelope)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	return mediaDownloadCancelledContent(payload.Job), nil
+}
+
+func (s *Server) mediaDownloadJobs(ctx context.Context, homeID string) ([]protocol.MediaDownloadJobStatus, error) {
+	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaDownloadJobs, protocol.MediaDownloadJobsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	if envelope.Error != nil {
+		return nil, errors.New(envelope.Error.Message)
+	}
+	payload, err := protocol.DecodePayload[protocol.MediaDownloadJobsResponse](envelope)
+	if err != nil {
+		return nil, err
+	}
+	return payload.Jobs, nil
+}
+
+func mediaJobIsActive(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case protocol.MediaJobStatusQueued, protocol.MediaJobStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) assistantContentFromMediaSearchResponse(ctx context.Context, home domain.Home, query string, payload protocol.MediaSearchResponse) (assistantMessageContent, error) {
+	query = strings.TrimSpace(firstNonBlank(query, payload.Query))
+	if len(payload.Results) == 0 {
+		return assistantMessageContent{Text: fmt.Sprintf("I couldn't find `%s` available for download.", query)}, nil
+	}
 	if len(payload.Results) == 1 {
 		card := assistantMediaCard(payload.Results[0], 1)
 		return s.answerMediaSelection(ctx, home, card)
 	}
-
 	cards := make([]assistantResultCard, 0, len(payload.Results))
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("I found %d media matches for `%s`. Choose one of the options below:", len(payload.Results), query))
@@ -285,9 +370,13 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 			"type":  card.MediaType,
 		}),
 	})
+	selectionTitle := card.Title
+	if card.MediaFilter != nil && strings.TrimSpace(card.SearchText) != "" {
+		selectionTitle = card.SearchText
+	}
 	selection := protocol.MediaSearchResult{
 		ID:         card.MediaOptionID,
-		Title:      card.Title,
+		Title:      selectionTitle,
 		Year:       card.Year,
 		Type:       card.MediaType,
 		Summary:    card.Summary,
@@ -295,7 +384,11 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 		PagePath:   card.Path,
 		SearchText: card.SearchText,
 	}
-	plan, err := s.planMediaDownload(ctx, home.ID, selection)
+	var filter protocol.MediaEpisodeFilter
+	if card.MediaFilter != nil {
+		filter = *card.MediaFilter
+	}
+	plan, err := s.planMediaDownload(ctx, home.ID, selection, filter)
 	if err != nil {
 		s.recordAssistantTrace(ctx, assistantTraceEvent{
 			Level:   "error",
@@ -328,8 +421,11 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 	if plan.ItemCount == 0 || plan.MissingLinkCount >= plan.ItemCount {
 		return assistantMessageContent{Text: fmt.Sprintf("I found `%s`, but no downloadable movie or episode entries were available.", card.Title)}, nil
 	}
+	if plan.Selection.Type == protocol.MediaTypeSeries && len(plan.Seasons) > 0 && mediaFilterIsEmpty(filter) {
+		return mediaInventoryContent(plan, card), nil
+	}
 	if !mediaPlanRequiresConfirmation(plan) {
-		response, err := s.startMediaDownload(ctx, home.ID, plan.Selection)
+		response, err := s.startMediaDownload(ctx, home.ID, plan.Selection, plan.Filter)
 		if err != nil {
 			s.recordAssistantTrace(ctx, assistantTraceEvent{
 				Level:   "error",
@@ -360,6 +456,7 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 		Kind: "media_download",
 		MediaDownload: &assistantPendingMediaDownload{
 			Selection:             plan.Selection,
+			Filter:                plan.Filter,
 			Title:                 firstNonBlank(plan.Selection.Title, card.Title),
 			MediaType:             plan.Selection.Type,
 			ItemCount:             plan.ItemCount,
@@ -380,6 +477,82 @@ func (s *Server) answerMediaSelection(ctx context.Context, home domain.Home, car
 	}, nil
 }
 
+func mediaInventoryContent(plan protocol.MediaDownloadPlan, sourceCard assistantResultCard) assistantMessageContent {
+	title := firstNonBlank(plan.Selection.Title, sourceCard.Title, "Selected TV show")
+	cards := mediaInventoryCards(plan, sourceCard)
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("I found `%s` and loaded %d season(s), %d episode(s). Choose all seasons, a season, or type a specific episode like `S1E2`.", title, len(plan.Seasons), plan.ItemCount))
+	for _, season := range plan.Seasons {
+		builder.WriteString(fmt.Sprintf("\nSeason %d: %d episode(s)", season.Season, season.EpisodeCount))
+		if len(season.Episodes) > 0 {
+			names := make([]string, 0, min(len(season.Episodes), 4))
+			for _, episode := range season.Episodes {
+				label := fmt.Sprintf("E%d", episode.Episode)
+				if strings.TrimSpace(episode.Title) != "" {
+					label += " " + strings.TrimSpace(episode.Title)
+				}
+				names = append(names, label)
+				if len(names) >= 4 {
+					break
+				}
+			}
+			if len(names) > 0 {
+				builder.WriteString(": " + strings.Join(names, ", "))
+				if len(season.Episodes) > len(names) {
+					builder.WriteString(", ...")
+				}
+			}
+		}
+	}
+	return assistantMessageContent{Text: builder.String(), Cards: cards}
+}
+
+func mediaInventoryCards(plan protocol.MediaDownloadPlan, sourceCard assistantResultCard) []assistantResultCard {
+	title := firstNonBlank(plan.Selection.Title, sourceCard.Title, "Selected TV show")
+	base := assistantResultCard{
+		Kind:          "media",
+		Path:          firstNonBlank(plan.Selection.PagePath, sourceCard.Path),
+		SearchText:    title,
+		ImageURL:      firstNonBlank(plan.Selection.PosterURL, sourceCard.ImageURL),
+		MediaOptionID: firstNonBlank(plan.Selection.ID, sourceCard.MediaOptionID),
+		MediaType:     protocol.MediaTypeSeries,
+		Year:          firstNonZero(plan.Selection.Year, sourceCard.Year),
+	}
+	allFilter := protocol.MediaEpisodeFilter{All: true}
+	cards := []assistantResultCard{{
+		Kind:          base.Kind,
+		Title:         "All seasons",
+		Summary:       fmt.Sprintf("%s - %d episode(s)", title, plan.ItemCount),
+		ActionTitle:   "Choose",
+		Path:          base.Path,
+		SearchText:    base.SearchText,
+		ImageURL:      base.ImageURL,
+		MediaOptionID: base.MediaOptionID,
+		MediaType:     base.MediaType,
+		MediaFilter:   &allFilter,
+		EpisodeCount:  plan.ItemCount,
+		Year:          base.Year,
+	}}
+	for _, season := range plan.Seasons {
+		filter := protocol.MediaEpisodeFilter{Season: season.Season}
+		cards = append(cards, assistantResultCard{
+			Kind:          base.Kind,
+			Title:         fmt.Sprintf("Season %d", season.Season),
+			Summary:       fmt.Sprintf("%s - %d episode(s)", title, season.EpisodeCount),
+			ActionTitle:   "Choose",
+			Path:          base.Path,
+			SearchText:    base.SearchText,
+			ImageURL:      base.ImageURL,
+			MediaOptionID: base.MediaOptionID,
+			MediaType:     base.MediaType,
+			MediaFilter:   &filter,
+			EpisodeCount:  season.EpisodeCount,
+			Year:          base.Year,
+		})
+	}
+	return cards
+}
+
 func mediaPlanRequiresConfirmation(plan protocol.MediaDownloadPlan) bool {
 	if plan.RequireConfirmation == nil {
 		return true
@@ -387,8 +560,21 @@ func mediaPlanRequiresConfirmation(plan protocol.MediaDownloadPlan) bool {
 	return *plan.RequireConfirmation
 }
 
-func (s *Server) planMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, error) {
-	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaPlanDownload, protocol.MediaPlanDownloadRequest{Selection: selection})
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func mediaFilterIsEmpty(filter protocol.MediaEpisodeFilter) bool {
+	return filter.Season == 0 && filter.Episode == 0 && !filter.All
+}
+
+func (s *Server) planMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult, filter protocol.MediaEpisodeFilter) (protocol.MediaDownloadPlan, error) {
+	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaPlanDownload, protocol.MediaPlanDownloadRequest{Selection: selection, Filter: filter})
 	if err != nil {
 		return protocol.MediaDownloadPlan{}, err
 	}
@@ -402,8 +588,8 @@ func (s *Server) planMediaDownload(ctx context.Context, homeID string, selection
 	return payload.Plan, nil
 }
 
-func (s *Server) startMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult) (protocol.MediaDownloadStartResponse, error) {
-	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaDownloadStart, protocol.MediaDownloadStartRequest{Selection: selection})
+func (s *Server) startMediaDownload(ctx context.Context, homeID string, selection protocol.MediaSearchResult, filter protocol.MediaEpisodeFilter) (protocol.MediaDownloadStartResponse, error) {
+	envelope, err := s.sendMediaCommand(ctx, homeID, protocol.CommandMediaDownloadStart, protocol.MediaDownloadStartRequest{Selection: selection, Filter: filter})
 	if err != nil {
 		return protocol.MediaDownloadStartResponse{}, err
 	}
@@ -448,6 +634,23 @@ func mediaDownloadStartedContent(title string, selection protocol.MediaSearchRes
 	}
 }
 
+func mediaDownloadCancelledContent(job protocol.MediaDownloadJobStatus) assistantMessageContent {
+	title := firstNonBlank(job.Title, "media job")
+	return assistantMessageContent{
+		Text: fmt.Sprintf("Cancelled media job `%s`.", job.JobID),
+		Cards: []assistantResultCard{
+			{
+				Kind:        "media",
+				Title:       title,
+				Summary:     fmt.Sprintf("Job %s is %s.", job.JobID, job.Status),
+				ActionTitle: "View Job",
+				MediaType:   protocol.MediaTypeSeries,
+				JobID:       job.JobID,
+			},
+		},
+	}
+}
+
 func (s *Server) resolvePreviousMediaSelection(ctx context.Context, sessionID string, prompt string) (assistantResultCard, bool) {
 	cards := s.latestMediaCards(ctx, sessionID)
 	if len(cards) == 0 {
@@ -468,12 +671,111 @@ func (s *Server) resolvePreviousMediaSelection(ctx context.Context, sessionID st
 			return card, true
 		}
 	}
+	if selected, ok := mediaScopeCardFromPrompt(prompt, cards); ok {
+		return selected, true
+	}
 	for _, card := range cards {
-		if strings.Contains(normalizedMediaSelection(card.Title), promptKey) || strings.Contains(promptKey, normalizedMediaSelection(card.Title)) {
+		cardKey := normalizedMediaSelection(card.Title)
+		searchKey := normalizedMediaSelection(card.SearchText)
+		if strings.Contains(cardKey, promptKey) || strings.Contains(promptKey, cardKey) ||
+			(searchKey != "" && (strings.Contains(searchKey, promptKey) || strings.Contains(promptKey, searchKey))) {
 			return card, true
 		}
 	}
 	return assistantResultCard{}, false
+}
+
+func mediaScopeCardFromPrompt(prompt string, cards []assistantResultCard) (assistantResultCard, bool) {
+	base, ok := firstMediaInventoryCard(cards)
+	if !ok {
+		return assistantResultCard{}, false
+	}
+	promptKey := normalizedMediaSelection(prompt)
+	switch promptKey {
+	case "all", "all episodes", "all seasons", "everything":
+		if card, ok := findMediaFilterCard(cards, protocol.MediaEpisodeFilter{All: true}); ok {
+			return card, true
+		}
+		return mediaScopedCard(base, protocol.MediaEpisodeFilter{All: true}, "All seasons"), true
+	}
+
+	season, episode := mediaScopeNumbers(prompt)
+	if season == 0 && episode == 0 {
+		return assistantResultCard{}, false
+	}
+	filter := protocol.MediaEpisodeFilter{Season: season, Episode: episode}
+	if card, ok := findMediaFilterCard(cards, filter); ok {
+		return card, true
+	}
+	title := ""
+	switch {
+	case season > 0 && episode > 0:
+		title = fmt.Sprintf("Season %d Episode %d", season, episode)
+	case season > 0:
+		title = fmt.Sprintf("Season %d", season)
+	case episode > 0:
+		title = fmt.Sprintf("Episode %d", episode)
+	}
+	return mediaScopedCard(base, filter, title), true
+}
+
+func firstMediaInventoryCard(cards []assistantResultCard) (assistantResultCard, bool) {
+	for _, card := range cards {
+		if card.MediaFilter != nil && card.MediaType == protocol.MediaTypeSeries {
+			return card, true
+		}
+	}
+	return assistantResultCard{}, false
+}
+
+func findMediaFilterCard(cards []assistantResultCard, filter protocol.MediaEpisodeFilter) (assistantResultCard, bool) {
+	for _, card := range cards {
+		if card.MediaFilter == nil {
+			continue
+		}
+		if card.MediaFilter.Season == filter.Season && card.MediaFilter.Episode == filter.Episode && card.MediaFilter.All == filter.All {
+			return card, true
+		}
+	}
+	return assistantResultCard{}, false
+}
+
+func mediaScopeNumbers(prompt string) (int, int) {
+	if match := mediaCompactSxePattern.FindStringSubmatch(prompt); len(match) == 3 {
+		season, _ := strconv.Atoi(match[1])
+		episode, _ := strconv.Atoi(match[2])
+		return season, episode
+	}
+	season := 0
+	episode := 0
+	if match := mediaSeasonPattern.FindStringSubmatch(prompt); len(match) == 2 {
+		season, _ = strconv.Atoi(match[1])
+	}
+	if match := mediaEpisodePattern.FindStringSubmatch(prompt); len(match) == 2 {
+		episode, _ = strconv.Atoi(match[1])
+	}
+	return season, episode
+}
+
+func mediaScopedCard(base assistantResultCard, filter protocol.MediaEpisodeFilter, title string) assistantResultCard {
+	filterCopy := filter
+	if title == "" {
+		title = base.Title
+	}
+	return assistantResultCard{
+		Kind:          "media",
+		Title:         title,
+		Summary:       base.Summary,
+		ActionTitle:   "Choose",
+		Path:          base.Path,
+		SearchText:    base.SearchText,
+		ImageURL:      base.ImageURL,
+		MediaOptionID: base.MediaOptionID,
+		MediaType:     protocol.MediaTypeSeries,
+		MediaFilter:   &filterCopy,
+		EpisodeCount:  base.EpisodeCount,
+		Year:          base.Year,
+	}
 }
 
 func (s *Server) latestMediaCards(ctx context.Context, sessionID string) []assistantResultCard {
@@ -550,6 +852,10 @@ func mediaCardLine(card assistantResultCard) string {
 func mediaPlanText(plan protocol.MediaDownloadPlan) string {
 	title := firstNonBlank(plan.Selection.Title, "Selected media")
 	if plan.Selection.Type == protocol.MediaTypeSeries {
+		scope := mediaFilterSummary(plan.Filter)
+		if scope != "" {
+			return fmt.Sprintf("I found `%s` and prepared %s: %d available episode(s) for download. %d will use 1080p and %d will fall back to 720p. Confirm before I start the batch.", title, strings.ToLower(scope), plan.ItemCount, plan.PreferredQualityCount, plan.FallbackQualityCount)
+		}
 		return fmt.Sprintf("I found `%s` and prepared %d available episode(s) for download. %d will use 1080p and %d will fall back to 720p. Confirm before I start the batch.", title, plan.ItemCount, plan.PreferredQualityCount, plan.FallbackQualityCount)
 	}
 	return fmt.Sprintf("I found `%s` and prepared it for download. Confirm before I start the download.", title)
@@ -558,9 +864,25 @@ func mediaPlanText(plan protocol.MediaDownloadPlan) string {
 func mediaConfirmationText(plan protocol.MediaDownloadPlan) string {
 	title := firstNonBlank(plan.Selection.Title, "selected media")
 	if plan.Selection.Type == protocol.MediaTypeSeries {
+		if scope := mediaFilterSummary(plan.Filter); scope != "" {
+			return fmt.Sprintf("Confirm downloading %s of `%s` to the Media share root.", strings.ToLower(scope), title)
+		}
 		return fmt.Sprintf("Confirm downloading %d episode(s) of `%s` to the Media share root.", plan.ItemCount, title)
 	}
 	return fmt.Sprintf("Confirm downloading `%s` to the Media share root.", title)
+}
+
+func mediaFilterSummary(filter protocol.MediaEpisodeFilter) string {
+	switch {
+	case filter.Season > 0 && filter.Episode > 0:
+		return fmt.Sprintf("Season %d Episode %d", filter.Season, filter.Episode)
+	case filter.Season > 0:
+		return fmt.Sprintf("Season %d", filter.Season)
+	case filter.All:
+		return "All seasons"
+	default:
+		return ""
+	}
 }
 
 func normalizedMediaSelection(value string) string {

@@ -147,6 +147,62 @@ func TestGramatonAppRunDownloadStatusEmitsEvent(t *testing.T) {
 	}
 }
 
+func TestDownloadStartPersistsEpisodeFilter(t *testing.T) {
+	root := t.TempDir()
+	setRequiredAgentEnv(t, root)
+	workDir := t.TempDir()
+
+	var baseURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/":
+			_, _ = w.Write([]byte(`<a href="/session/logout">logout</a>`))
+		case r.URL.Path == "/series/fixture-show" && r.URL.Query().Get("season") == "1" && r.URL.Query().Get("episode") == "1":
+			_, _ = w.Write([]byte(`<h1>Fixture Show</h1><a href="` + baseURL + `/download/s1e1_1080p.mp4?file=Fixture_Show_S01E01_1080p.mp4">Download 1080p</a>`))
+		case r.URL.Path == "/series/fixture-show" && r.URL.Query().Get("season") == "2" && r.URL.Query().Get("episode") == "1":
+			_, _ = w.Write([]byte(`<h1>Fixture Show</h1><a href="` + baseURL + `/download/s2e1_1080p.mp4?file=Fixture_Show_S02E01_1080p.mp4">Download 1080p</a>`))
+		case r.URL.Path == "/series/fixture-show":
+			_, _ = w.Write([]byte(`<h1>Fixture Show</h1><div class="tv-details-episodes"><ol id="season1"><li data-episode="1">Pilot</li></ol><ol id="season2"><li data-episode="1">Return</li></ol></div>`))
+		case strings.HasPrefix(r.URL.Path, "/download/"):
+			_, _ = w.Write([]byte("download"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	baseURL = server.URL
+
+	code, stdout, stderr := runGramatonAppInDir(t, workDir, apps.AppStdioRequest{
+		RequestID: "req_start",
+		AppID:     "gramaton",
+		CommandID: "download_start",
+		Config:    json.RawMessage(`{"enabled":true,"base_url":` + quoteJSON(server.URL) + `,"username":"aaron","source_id":"local","destination_path":"Media","require_confirmation":true}`),
+		Secrets:   json.RawMessage(`{"password":"secret"}`),
+		Input: json.RawMessage(`{
+			"selection":{"id":"series/fixture-show","title":"Fixture Show","type":"series","page_path":"/series/fixture-show"},
+			"filter":{"season":2}
+		}`),
+	})
+	if code != 0 {
+		t.Fatalf("run code = %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	response := decodeGramatonResponse(t, stdout)
+	var output protocol.MediaDownloadStartResponse
+	if err := json.Unmarshal(response.Output, &output); err != nil {
+		t.Fatalf("Decode output: %v", err)
+	}
+	if output.Job.TotalCount != 1 {
+		t.Fatalf("job total = %d, want filtered season total 1", output.Job.TotalCount)
+	}
+	record, err := readJobRecordPath(filepath.Join(workDir, jobsDir(), output.Job.JobID+".json"))
+	if err != nil {
+		t.Fatalf("read job record: %v", err)
+	}
+	if record.Request.Filter.Season != 2 || record.Request.Filter.Episode != 0 {
+		t.Fatalf("record filter = %#v", record.Request.Filter)
+	}
+}
+
 func runGramatonApp(t *testing.T, request apps.AppStdioRequest) (int, string, string) {
 	t.Helper()
 	return runGramatonAppInDir(t, t.TempDir(), request)

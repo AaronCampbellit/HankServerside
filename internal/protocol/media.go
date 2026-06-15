@@ -86,8 +86,27 @@ type MediaSearchResponse struct {
 	Results []MediaSearchResult `json:"results"`
 }
 
+type MediaEpisodeFilter struct {
+	Season  int  `json:"season,omitempty"`
+	Episode int  `json:"episode,omitempty"`
+	All     bool `json:"all,omitempty"`
+}
+
+type MediaEpisodeEntry struct {
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	Title   string `json:"title,omitempty"`
+}
+
+type MediaSeasonSummary struct {
+	Season       int                 `json:"season"`
+	EpisodeCount int                 `json:"episode_count"`
+	Episodes     []MediaEpisodeEntry `json:"episodes,omitempty"`
+}
+
 type MediaPlanDownloadRequest struct {
-	Selection MediaSearchResult `json:"selection"`
+	Selection MediaSearchResult  `json:"selection"`
+	Filter    MediaEpisodeFilter `json:"filter,omitempty"`
 }
 
 type MediaDownloadItem struct {
@@ -105,15 +124,17 @@ type MediaDownloadItem struct {
 }
 
 type MediaDownloadPlan struct {
-	Selection             MediaSearchResult   `json:"selection"`
-	Items                 []MediaDownloadItem `json:"items"`
-	ItemCount             int                 `json:"item_count"`
-	PreferredQualityCount int                 `json:"preferred_quality_count"`
-	FallbackQualityCount  int                 `json:"fallback_quality_count"`
-	MissingLinkCount      int                 `json:"missing_link_count"`
-	ExistingCount         int                 `json:"existing_count"`
-	DestinationPath       string              `json:"destination_path"`
-	RequireConfirmation   *bool               `json:"require_confirmation,omitempty"`
+	Selection             MediaSearchResult    `json:"selection"`
+	Filter                MediaEpisodeFilter   `json:"filter,omitempty"`
+	Seasons               []MediaSeasonSummary `json:"seasons,omitempty"`
+	Items                 []MediaDownloadItem  `json:"items"`
+	ItemCount             int                  `json:"item_count"`
+	PreferredQualityCount int                  `json:"preferred_quality_count"`
+	FallbackQualityCount  int                  `json:"fallback_quality_count"`
+	MissingLinkCount      int                  `json:"missing_link_count"`
+	ExistingCount         int                  `json:"existing_count"`
+	DestinationPath       string               `json:"destination_path"`
+	RequireConfirmation   *bool                `json:"require_confirmation,omitempty"`
 }
 
 type MediaPlanDownloadResponse struct {
@@ -121,7 +142,8 @@ type MediaPlanDownloadResponse struct {
 }
 
 type MediaDownloadStartRequest struct {
-	Selection MediaSearchResult `json:"selection"`
+	Selection MediaSearchResult  `json:"selection"`
+	Filter    MediaEpisodeFilter `json:"filter,omitempty"`
 }
 
 type MediaDownloadStartResponse struct {

@@ -95,6 +95,73 @@ func TestAssistantMediaCardCarriesPosterImage(t *testing.T) {
 	}
 }
 
+func TestMediaInventoryCardsExposeSeasonFilters(t *testing.T) {
+	t.Parallel()
+
+	plan := fixtureSeriesPlan(protocol.MediaSearchResult{
+		ID:       "series/fixture-show",
+		Title:    "Fixture Show",
+		Type:     protocol.MediaTypeSeries,
+		PagePath: "/series/fixture-show",
+	}, protocol.MediaEpisodeFilter{})
+	cards := mediaInventoryCards(plan, assistantResultCard{})
+	if len(cards) != 3 {
+		t.Fatalf("cards = %#v, want all seasons plus two season cards", cards)
+	}
+	if cards[0].MediaFilter == nil || !cards[0].MediaFilter.All {
+		t.Fatalf("all seasons card filter = %#v", cards[0].MediaFilter)
+	}
+	if cards[2].MediaFilter == nil || cards[2].MediaFilter.Season != 2 || cards[2].EpisodeCount != 1 {
+		t.Fatalf("season 2 card = %#v", cards[2])
+	}
+}
+
+func TestMediaScopeCardFromPromptParsesSeasonEpisodeAndAll(t *testing.T) {
+	t.Parallel()
+
+	plan := fixtureSeriesPlan(protocol.MediaSearchResult{
+		ID:       "series/fixture-show",
+		Title:    "Fixture Show",
+		Type:     protocol.MediaTypeSeries,
+		PagePath: "/series/fixture-show",
+	}, protocol.MediaEpisodeFilter{})
+	cards := mediaInventoryCards(plan, assistantResultCard{})
+
+	selected, ok := mediaScopeCardFromPrompt("all episodes", cards)
+	if !ok || selected.MediaFilter == nil || !selected.MediaFilter.All {
+		t.Fatalf("all episodes selected = %#v, %v", selected, ok)
+	}
+	selected, ok = mediaScopeCardFromPrompt("season 2", cards)
+	if !ok || selected.MediaFilter == nil || selected.MediaFilter.Season != 2 || selected.MediaFilter.Episode != 0 {
+		t.Fatalf("season selected = %#v, %v", selected, ok)
+	}
+	selected, ok = mediaScopeCardFromPrompt("s1e2", cards)
+	if !ok || selected.MediaFilter == nil || selected.MediaFilter.Season != 1 || selected.MediaFilter.Episode != 2 {
+		t.Fatalf("episode selected = %#v, %v", selected, ok)
+	}
+}
+
+func TestMediaCancelPrompt(t *testing.T) {
+	t.Parallel()
+
+	jobID, latest, ok := mediaCancelPrompt("cancel latest")
+	if !ok || !latest || jobID != "" {
+		t.Fatalf("cancel latest = %q, %v, %v", jobID, latest, ok)
+	}
+	jobID, latest, ok = mediaCancelPrompt("cancel job job_fixture")
+	if !ok || latest || jobID != "job_fixture" {
+		t.Fatalf("cancel job = %q, %v, %v", jobID, latest, ok)
+	}
+	jobID, latest, ok = mediaCancelPrompt("cancel job Job_Fixture")
+	if !ok || latest || jobID != "Job_Fixture" {
+		t.Fatalf("cancel job preserves ID = %q, %v, %v", jobID, latest, ok)
+	}
+	_, _, ok = mediaCancelPrompt("Fixture Show")
+	if ok {
+		t.Fatal("non-cancel prompt matched")
+	}
+}
+
 func TestAssistantMediaConfirmationCarriesPosterCard(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -169,6 +236,73 @@ func TestAssistantMediaConfirmationCarriesPosterCard(t *testing.T) {
 	}
 	if run.PendingActionSummary == nil || run.PendingActionSummary.Kind != "media_download" {
 		t.Fatalf("pending action summary = %#v", run.PendingActionSummary)
+	}
+}
+
+func TestAssistantMediaConfirmationCancelCompletesRun(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSearch, func(body json.RawMessage) (any, error) {
+			return protocol.MediaSearchResponse{
+				Query: "Fixture Movie",
+				Results: []protocol.MediaSearchResult{{
+					ID:       "movies/fixture-movie",
+					Title:    "Fixture Movie",
+					Year:     2026,
+					Type:     protocol.MediaTypeMovie,
+					Summary:  "Movie | Fixture",
+					PagePath: "/movies/fixture-movie",
+				}},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaPlanDownloadResponse{
+				Plan: protocol.MediaDownloadPlan{
+					Selection:             request.Selection,
+					Items:                 []protocol.MediaDownloadItem{{Title: "Fixture Movie", MediaType: protocol.MediaTypeMovie, Quality: "1080p", Filename: "Fixture Movie.mp4", DownloadOK: true}},
+					ItemCount:             1,
+					PreferredQualityCount: 1,
+					DestinationPath:       "Media root/Movies",
+				},
+			}, nil
+		})
+	}()
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var initial assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "find Fixture Movie for download",
+	}, &initial)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if !initial.RequiresConfirmation {
+		t.Fatalf("run did not wait for media confirmation: %#v", initial)
+	}
+
+	var cancelled assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/runs/"+initial.ID+"/confirm", map[string]any{
+		"approved": false,
+	}, &cancelled)
+	if cancelled.State != assistantStateCompleted || cancelled.RequiresConfirmation || cancelled.RequiresClientTools {
+		t.Fatalf("cancelled confirmation response = %#v", cancelled)
 	}
 }
 
@@ -330,6 +464,149 @@ func TestAssistantMediaSelectionPlansDownloadAfterSearchResults(t *testing.T) {
 	}
 }
 
+func TestAssistantMediaSeriesShowsInventoryBeforeConfirmation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSearch, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaSearchRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaSearchResponse{
+				Query: request.Query,
+				Results: []protocol.MediaSearchResult{{
+					ID:       "series/fixture-show",
+					Title:    "Fixture Show",
+					Year:     2026,
+					Type:     protocol.MediaTypeSeries,
+					PagePath: "/series/fixture-show",
+				}},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			if request.Filter.Season != 0 || request.Filter.Episode != 0 {
+				return nil, fmt.Errorf("initial inventory filter = %#v, want empty", request.Filter)
+			}
+			return protocol.MediaPlanDownloadResponse{Plan: fixtureSeriesPlan(request.Selection, request.Filter)}, nil
+		})
+	}()
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var run assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/gramaton Fixture Show",
+	}, &run)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if run.RequiresConfirmation || run.State != assistantStateCompleted || run.AssistantMessage == nil {
+		t.Fatalf("series inventory should complete without confirmation: %#v", run)
+	}
+	if !assistantCardsContainTitle(run.AssistantMessage.Cards, "All seasons") || !assistantCardsContainTitle(run.AssistantMessage.Cards, "Season 2") {
+		t.Fatalf("inventory cards = %#v", run.AssistantMessage.Cards)
+	}
+}
+
+func TestAssistantMediaSeriesSeasonFollowupCreatesScopedConfirmation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+	advertiseGramatonAppCapabilities(t, ctx, testServer, sessionToken, agentConn, agentID, homeID)
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaSearch, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaSearchRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaSearchResponse{
+				Query: request.Query,
+				Results: []protocol.MediaSearchResult{{
+					ID:       "series/fixture-show",
+					Title:    "Fixture Show",
+					Year:     2026,
+					Type:     protocol.MediaTypeSeries,
+					PagePath: "/series/fixture-show",
+				}},
+			}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		if err := serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			return protocol.MediaPlanDownloadResponse{Plan: fixtureSeriesPlan(request.Selection, request.Filter)}, nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- serveOneMediaAgentCommand(ctx, agentConn, agentID, homeID, protocol.CommandMediaPlanDownload, func(body json.RawMessage) (any, error) {
+			var request protocol.MediaPlanDownloadRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, err
+			}
+			if request.Filter.Season != 2 || request.Filter.Episode != 0 {
+				return nil, fmt.Errorf("season follow-up filter = %#v, want season 2", request.Filter)
+			}
+			plan := fixtureSeriesPlan(request.Selection, request.Filter)
+			plan.Items = []protocol.MediaDownloadItem{{Title: "Return", MediaType: protocol.MediaTypeSeries, Season: 2, Episode: 1, Quality: "1080p", Filename: "Fixture_Show_S02E01_1080p.mp4", DownloadOK: true}}
+			plan.ItemCount = 1
+			plan.PreferredQualityCount = 1
+			plan.FallbackQualityCount = 0
+			return protocol.MediaPlanDownloadResponse{Plan: plan}, nil
+		})
+	}()
+
+	var session assistantAPISession
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions", nil, &session)
+
+	var first assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "/gramaton Fixture Show",
+	}, &first)
+	if first.RequiresConfirmation || first.AssistantMessage == nil {
+		t.Fatalf("first run should show inventory: %#v", first)
+	}
+
+	var second assistantRunResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/assistant/sessions/"+session.ID+"/messages", map[string]any{
+		"content": "season 2",
+	}, &second)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if !second.RequiresConfirmation || second.PendingActionSummary == nil || second.PendingActionSummary.Kind != "media_download" {
+		t.Fatalf("season follow-up should prepare confirmation: %#v", second)
+	}
+	if !assistantSummaryDetailsContain(second.PendingActionSummary.Details, "Scope", "Season 2") {
+		t.Fatalf("pending summary details = %#v", second.PendingActionSummary.Details)
+	}
+}
+
 func TestResolvePreviousMediaSelection(t *testing.T) {
 	t.Parallel()
 
@@ -374,5 +651,28 @@ func TestResolvePreviousMediaSelection(t *testing.T) {
 	selected, ok = server.resolvePreviousMediaSelection(ctx, session.ID, "Batman Returns")
 	if !ok || selected.Path != "/movies/2787-batman-returns" {
 		t.Fatalf("title selection = %#v, %v", selected, ok)
+	}
+}
+
+func fixtureSeriesPlan(selection protocol.MediaSearchResult, filter protocol.MediaEpisodeFilter) protocol.MediaDownloadPlan {
+	if selection.Title == "" {
+		selection.Title = "Fixture Show"
+	}
+	items := []protocol.MediaDownloadItem{
+		{Title: "Pilot", MediaType: protocol.MediaTypeSeries, Season: 1, Episode: 1, Quality: "1080p", Filename: "Fixture_Show_S01E01_1080p.mp4", DownloadOK: true},
+		{Title: "Second", MediaType: protocol.MediaTypeSeries, Season: 1, Episode: 2, Quality: "1080p", Filename: "Fixture_Show_S01E02_1080p.mp4", DownloadOK: true},
+		{Title: "Return", MediaType: protocol.MediaTypeSeries, Season: 2, Episode: 1, Quality: "1080p", Filename: "Fixture_Show_S02E01_1080p.mp4", DownloadOK: true},
+	}
+	return protocol.MediaDownloadPlan{
+		Selection: selection,
+		Filter:    filter,
+		Seasons: []protocol.MediaSeasonSummary{
+			{Season: 1, EpisodeCount: 2, Episodes: []protocol.MediaEpisodeEntry{{Season: 1, Episode: 1, Title: "Pilot"}, {Season: 1, Episode: 2, Title: "Second"}}},
+			{Season: 2, EpisodeCount: 1, Episodes: []protocol.MediaEpisodeEntry{{Season: 2, Episode: 1, Title: "Return"}}},
+		},
+		Items:                 items,
+		ItemCount:             len(items),
+		PreferredQualityCount: len(items),
+		DestinationPath:       "SMB share/TV",
 	}
 }

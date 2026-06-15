@@ -2,6 +2,45 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "plan": { "type": "object", "additionalProperties": true }
+    "plan": {
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": "object",
+          "properties": {
+            "season": { "type": "integer", "minimum": 1 },
+            "episode": { "type": "integer", "minimum": 1 },
+            "all": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "seasons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["season", "episode_count"],
+            "properties": {
+              "season": { "type": "integer", "minimum": 1 },
+              "episode_count": { "type": "integer", "minimum": 0 },
+              "episodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["season", "episode"],
+                  "properties": {
+                    "season": { "type": "integer", "minimum": 1 },
+                    "episode": { "type": "integer", "minimum": 1 },
+                    "title": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
   }
 }

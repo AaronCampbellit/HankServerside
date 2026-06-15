@@ -44,22 +44,24 @@ type assistantMessageAttachment struct {
 }
 
 type assistantResultCard struct {
-	Kind          string     `json:"kind"`
-	Title         string     `json:"title"`
-	Summary       string     `json:"summary"`
-	ActionTitle   string     `json:"action_title"`
-	NoteID        string     `json:"note_id,omitempty"`
-	EventID       string     `json:"event_id,omitempty"`
-	SourceID      string     `json:"source_id,omitempty"`
-	TargetDate    *time.Time `json:"target_date,omitempty"`
-	Path          string     `json:"path,omitempty"`
-	IsDirectory   bool       `json:"is_directory,omitempty"`
-	SearchText    string     `json:"search_text,omitempty"`
-	ImageURL      string     `json:"image_url,omitempty"`
-	MediaOptionID string     `json:"media_option_id,omitempty"`
-	MediaType     string     `json:"media_type,omitempty"`
-	Year          int        `json:"year,omitempty"`
-	JobID         string     `json:"job_id,omitempty"`
+	Kind          string                       `json:"kind"`
+	Title         string                       `json:"title"`
+	Summary       string                       `json:"summary"`
+	ActionTitle   string                       `json:"action_title"`
+	NoteID        string                       `json:"note_id,omitempty"`
+	EventID       string                       `json:"event_id,omitempty"`
+	SourceID      string                       `json:"source_id,omitempty"`
+	TargetDate    *time.Time                   `json:"target_date,omitempty"`
+	Path          string                       `json:"path,omitempty"`
+	IsDirectory   bool                         `json:"is_directory,omitempty"`
+	SearchText    string                       `json:"search_text,omitempty"`
+	ImageURL      string                       `json:"image_url,omitempty"`
+	MediaOptionID string                       `json:"media_option_id,omitempty"`
+	MediaType     string                       `json:"media_type,omitempty"`
+	MediaFilter   *protocol.MediaEpisodeFilter `json:"media_filter,omitempty"`
+	EpisodeCount  int                          `json:"episode_count,omitempty"`
+	Year          int                          `json:"year,omitempty"`
+	JobID         string                       `json:"job_id,omitempty"`
 }
 
 type assistantClientToolRequest struct {
@@ -131,16 +133,17 @@ type assistantPendingFileCreateFolder struct {
 }
 
 type assistantPendingMediaDownload struct {
-	Selection             protocol.MediaSearchResult `json:"selection"`
-	Title                 string                     `json:"title"`
-	MediaType             string                     `json:"media_type"`
-	ItemCount             int                        `json:"item_count"`
-	PreferredQualityCount int                        `json:"preferred_quality_count"`
-	FallbackQualityCount  int                        `json:"fallback_quality_count"`
-	MissingLinkCount      int                        `json:"missing_link_count"`
-	ExistingCount         int                        `json:"existing_count"`
-	DestinationPath       string                     `json:"destination_path"`
-	Confirmation          string                     `json:"confirmation_message"`
+	Selection             protocol.MediaSearchResult  `json:"selection"`
+	Filter                protocol.MediaEpisodeFilter `json:"filter,omitempty"`
+	Title                 string                      `json:"title"`
+	MediaType             string                      `json:"media_type"`
+	ItemCount             int                         `json:"item_count"`
+	PreferredQualityCount int                         `json:"preferred_quality_count"`
+	FallbackQualityCount  int                         `json:"fallback_quality_count"`
+	MissingLinkCount      int                         `json:"missing_link_count"`
+	ExistingCount         int                         `json:"existing_count"`
+	DestinationPath       string                      `json:"destination_path"`
+	Confirmation          string                      `json:"confirmation_message"`
 }
 
 type assistantPendingActionSummary struct {
@@ -715,7 +718,7 @@ func (s *Server) handleAssistantConfirm(w http.ResponseWriter, r *http.Request, 
 
 	if !request.Approved {
 		completedAt := time.Now().UTC()
-		run.State = "cancelled"
+		run.State = assistantStateCompleted
 		run.RequiresConfirmation = false
 		run.PendingActionJSON = ""
 		run.CompletedAt = &completedAt
@@ -2301,10 +2304,7 @@ func (s *Server) answerYDownloadAppPrompt(ctx context.Context, home domain.Home,
 
 func (s *Server) answerGenericInstalledAppPrompt(ctx context.Context, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
 	appName := defaultString(intent.AppName, intent.AppID)
-	input, err := json.Marshal(genericInstalledAppInput{
-		RawText:      strings.TrimSpace(intent.Query),
-		SlashCommand: strings.TrimSpace(intent.SlashCommand),
-	})
+	input, err := installedAppSlashInput(intent)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
@@ -2361,6 +2361,13 @@ func (s *Server) answerGenericInstalledAppPrompt(ctx context.Context, runtime as
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
+	if intent.AppID == "gramaton" && intent.CommandID == "search" {
+		var searchResponse protocol.MediaSearchResponse
+		if err := json.Unmarshal(payload.Output, &searchResponse); err != nil {
+			return assistantMessageContent{}, err
+		}
+		return s.assistantContentFromMediaSearchResponse(ctx, runtime.Home, intent.Query, searchResponse)
+	}
 	content, err := assistantContentFromGenericAppOutput(appName, payload.Output)
 	if err != nil {
 		return assistantMessageContent{}, err
@@ -2372,6 +2379,29 @@ func (s *Server) answerGenericInstalledAppPrompt(ctx context.Context, runtime as
 		content.Meta["app_job_id"] = payload.JobID
 	}
 	return content, nil
+}
+
+func installedAppSlashInput(intent assistantIntent) (json.RawMessage, error) {
+	query := strings.TrimSpace(intent.Query)
+	var input any
+	switch {
+	case intent.AppID == "gramaton" && intent.CommandID == "search":
+		input = protocol.MediaSearchRequest{Query: query, Limit: 10}
+	case intent.AppID == "ydownload" && intent.CommandID == "download":
+		input = ydownloadAppRequest{URL: query}
+	case intent.AppID == "hermes" && intent.CommandID == "chat":
+		input = hermesChatAppRequest{Prompt: query}
+	default:
+		input = genericInstalledAppInput{
+			RawText:      query,
+			SlashCommand: strings.TrimSpace(intent.SlashCommand),
+		}
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
 }
 
 func assistantContentFromHermesResponse(payload hermesChatAppResponse) assistantMessageContent {
@@ -3160,7 +3190,7 @@ func (s *Server) executeConfirmedAssistantAction(
 		if pending.MediaDownload == nil {
 			return assistantRunResponse{}, errors.New("pending media download is missing")
 		}
-		response, err := s.startMediaDownload(ctx, session.HomeID, pending.MediaDownload.Selection)
+		response, err := s.startMediaDownload(ctx, session.HomeID, pending.MediaDownload.Selection, pending.MediaDownload.Filter)
 		if err != nil {
 			return assistantRunResponse{}, err
 		}
@@ -3619,6 +3649,9 @@ func assistantPendingActionSummaryFromAction(pending assistantPendingAction) *as
 			{Label: "Items", Value: fmt.Sprintf("%d", action.ItemCount)},
 			{Label: "Destination", Value: defaultString(action.DestinationPath, "Media root")},
 			{Label: "1080p", Value: fmt.Sprintf("%d", action.PreferredQualityCount)},
+		}
+		if scope := mediaFilterSummary(action.Filter); scope != "" {
+			details = append(details, assistantPendingActionDetail{Label: "Scope", Value: scope})
 		}
 		if action.FallbackQualityCount > 0 {
 			details = append(details, assistantPendingActionDetail{Label: "720p fallbacks", Value: fmt.Sprintf("%d", action.FallbackQualityCount)})

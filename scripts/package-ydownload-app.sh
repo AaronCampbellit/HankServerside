@@ -7,7 +7,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
 mkdir -p "${TMP}/bin" "${TMP}/schemas" "${ROOT}/dist"
-CGO_ENABLED=0 GOOS=linux go build -o "${TMP}/bin/hank-app-ydownload" "${ROOT}/cmd/hank-app-ydownload"
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "${TMP}/bin/hank-app-ydownload" "${ROOT}/cmd/hank-app-ydownload"
 cp "${ROOT}/packages/ydownload/app.json" "${TMP}/app.json"
 cp "${ROOT}/packages/ydownload/schemas/"*.json "${TMP}/schemas/"
 cp "${ROOT}/packages/ydownload/README.md" "${TMP}/README.md" 2>/dev/null || true

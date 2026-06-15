@@ -630,7 +630,7 @@ func (s *Service) PlanDownload(ctx context.Context, request protocol.MediaPlanDo
 	if err := s.ensureAuthenticated(ctx); err != nil {
 		return protocol.MediaPlanDownloadResponse{}, err
 	}
-	plan, _, err := s.buildPlan(ctx, request.Selection)
+	plan, _, err := s.buildPlan(ctx, request.Selection, request.Filter)
 	if err != nil {
 		return protocol.MediaPlanDownloadResponse{}, err
 	}
@@ -641,7 +641,7 @@ func (s *Service) StartDownload(ctx context.Context, request protocol.MediaDownl
 	if err := s.ensureAuthenticated(ctx); err != nil {
 		return protocol.MediaDownloadStartResponse{}, err
 	}
-	plan, downloads, err := s.buildPlan(ctx, request.Selection)
+	plan, downloads, err := s.buildPlan(ctx, request.Selection, request.Filter)
 	if err != nil {
 		return protocol.MediaDownloadStartResponse{}, err
 	}
@@ -891,7 +891,7 @@ func (s *Service) pageToken(ctx context.Context, path string) (string, error) {
 	return match[1], nil
 }
 
-func (s *Service) buildPlan(ctx context.Context, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, []plannedDownload, error) {
+func (s *Service) buildPlan(ctx context.Context, selection protocol.MediaSearchResult, filter protocol.MediaEpisodeFilter) (protocol.MediaDownloadPlan, []plannedDownload, error) {
 	selection.PagePath = canonicalMediaPathWithContext(selection.PagePath)
 	if selection.PagePath == "" {
 		return protocol.MediaDownloadPlan{}, nil, fmt.Errorf("media selection is missing a page path")
@@ -903,7 +903,7 @@ func (s *Service) buildPlan(ctx context.Context, selection protocol.MediaSearchR
 	case protocol.MediaTypeMovie:
 		return s.buildMoviePlan(ctx, selection)
 	case protocol.MediaTypeSeries:
-		return s.buildSeriesPlan(ctx, selection)
+		return s.buildSeriesPlan(ctx, selection, filter)
 	default:
 		return protocol.MediaDownloadPlan{}, nil, fmt.Errorf("unsupported media type %q", selection.Type)
 	}
@@ -982,7 +982,7 @@ func (s *Service) dynamicMovieDownloadLink(ctx context.Context, pagePath string,
 	return downloadLink{}
 }
 
-func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaSearchResult) (protocol.MediaDownloadPlan, []plannedDownload, error) {
+func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaSearchResult, filter protocol.MediaEpisodeFilter) (protocol.MediaDownloadPlan, []plannedDownload, error) {
 	page, err := s.fetchPage(ctx, selection.PagePath)
 	if err != nil {
 		return protocol.MediaDownloadPlan{}, nil, err
@@ -1002,11 +1002,16 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 		}
 		return episodes[i].season < episodes[j].season
 	})
+	seasons := seasonSummaries(episodes)
+	filteredEpisodes, normalizedFilter, err := filterSeriesEpisodes(episodes, filter)
+	if err != nil {
+		return protocol.MediaDownloadPlan{}, nil, err
+	}
 
-	downloads := make([]plannedDownload, 0, len(episodes))
+	downloads := make([]plannedDownload, 0, len(filteredEpisodes))
 	episodeBasePath := canonicalMediaPath(selection.PagePath)
 	episodeContext := mediaPageContext(selection.PagePath)
-	for _, episode := range episodes {
+	for _, episode := range filteredEpisodes {
 		pagePath := mediaEpisodePath(episodeBasePath, episodeContext, episode.season, episode.episode)
 		episodePage, err := s.fetchPage(ctx, pagePath)
 		itemTitle := firstNonBlank(episode.title, fmt.Sprintf("S%dE%d", episode.season, episode.episode))
@@ -1043,7 +1048,10 @@ func (s *Service) buildSeriesPlan(ctx context.Context, selection protocol.MediaS
 		item.Existing = s.fileExists(ctx, item.MediaType, title, item.Filename)
 		downloads = append(downloads, plannedDownload{item: item, mediaTitle: title, downloadURL: link.href})
 	}
-	return s.planFromDownloads(selection, downloads), downloads, nil
+	plan := s.planFromDownloads(selection, downloads)
+	plan.Filter = normalizedFilter
+	plan.Seasons = seasons
+	return plan, downloads, nil
 }
 
 func (s *Service) dynamicSeriesDownloadLink(ctx context.Context, pagePath string, season int, episode int, token string) downloadLink {
@@ -1690,6 +1698,92 @@ func parseEpisodes(root *html.Node) []seriesEpisode {
 		}
 	}
 	return episodes
+}
+
+func seasonSummaries(episodes []seriesEpisode) []protocol.MediaSeasonSummary {
+	bySeason := map[int][]protocol.MediaEpisodeEntry{}
+	for _, episode := range episodes {
+		if episode.season <= 0 || episode.episode <= 0 {
+			continue
+		}
+		bySeason[episode.season] = append(bySeason[episode.season], protocol.MediaEpisodeEntry{
+			Season:  episode.season,
+			Episode: episode.episode,
+			Title:   episode.title,
+		})
+	}
+	seasons := make([]int, 0, len(bySeason))
+	for season := range bySeason {
+		seasons = append(seasons, season)
+	}
+	sort.Ints(seasons)
+	summaries := make([]protocol.MediaSeasonSummary, 0, len(seasons))
+	for _, season := range seasons {
+		entries := bySeason[season]
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Episode < entries[j].Episode
+		})
+		summaries = append(summaries, protocol.MediaSeasonSummary{
+			Season:       season,
+			EpisodeCount: len(entries),
+			Episodes:     entries,
+		})
+	}
+	return summaries
+}
+
+func normalizeEpisodeFilter(filter protocol.MediaEpisodeFilter) protocol.MediaEpisodeFilter {
+	if filter.Season < 0 {
+		filter.Season = 0
+	}
+	if filter.Episode < 0 {
+		filter.Episode = 0
+	}
+	if filter.Season > 0 || filter.Episode > 0 {
+		filter.All = false
+	}
+	return filter
+}
+
+func filterSeriesEpisodes(episodes []seriesEpisode, filter protocol.MediaEpisodeFilter) ([]seriesEpisode, protocol.MediaEpisodeFilter, error) {
+	filter = normalizeEpisodeFilter(filter)
+	if filter.Season == 0 && filter.Episode == 0 {
+		return episodes, filter, nil
+	}
+	if filter.Season == 0 && filter.Episode > 0 {
+		var matches []seriesEpisode
+		for _, episode := range episodes {
+			if episode.episode == filter.Episode {
+				matches = append(matches, episode)
+			}
+		}
+		if len(matches) == 0 {
+			return nil, filter, fmt.Errorf("episode %d was not found", filter.Episode)
+		}
+		if len(matches) > 1 {
+			return nil, filter, fmt.Errorf("episode %d exists in multiple seasons; choose a season", filter.Episode)
+		}
+		filter.Season = matches[0].season
+		return matches, filter, nil
+	}
+
+	filtered := make([]seriesEpisode, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode.season != filter.Season {
+			continue
+		}
+		if filter.Episode > 0 && episode.episode != filter.Episode {
+			continue
+		}
+		filtered = append(filtered, episode)
+	}
+	if len(filtered) == 0 {
+		if filter.Episode > 0 {
+			return nil, filter, fmt.Errorf("season %d episode %d was not found", filter.Season, filter.Episode)
+		}
+		return nil, filter, fmt.Errorf("season %d was not found", filter.Season)
+	}
+	return filtered, filter, nil
 }
 
 func chooseDownloadLink(links []downloadLink) downloadLink {

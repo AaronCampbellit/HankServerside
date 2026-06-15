@@ -257,29 +257,114 @@ func (m *Manager) ConfigStatus(ctx context.Context, request protocol.AppsConfigS
 }
 
 func (m *Manager) ConfigApply(ctx context.Context, request protocol.AppsConfigApplyRequest) (protocol.AppsConfigApplyResponse, error) {
-	_ = ctx
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	app, ok := m.apps[request.AppID]
 	if !ok {
+		m.mu.Unlock()
 		return protocol.AppsConfigApplyResponse{}, fmt.Errorf("%w: %s", ErrUnknownApp, request.AppID)
 	}
+	candidate := cloneInstalledApp(app)
+	m.mu.Unlock()
+
 	if len(request.PublicConfig) > 0 {
-		app.PublicConfig = cloneRawMessage(request.PublicConfig)
+		candidate.PublicConfig = cloneRawMessage(request.PublicConfig)
 	}
 	if len(request.Secrets) > 0 {
-		if err := applySecrets(app, request.Secrets); err != nil {
+		if err := applySecrets(&candidate, request.Secrets); err != nil {
 			return protocol.AppsConfigApplyResponse{}, err
 		}
 	}
 	if request.Enable != nil {
-		app.Enabled = *request.Enable
+		candidate.Enabled = *request.Enable
 	}
+	if candidate.Enabled {
+		if err := m.validateSettingsApply(ctx, candidate, request.Secrets); err != nil {
+			return protocol.AppsConfigApplyResponse{}, err
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	app, ok = m.apps[request.AppID]
+	if !ok {
+		return protocol.AppsConfigApplyResponse{}, fmt.Errorf("%w: %s", ErrUnknownApp, request.AppID)
+	}
+	app.Enabled = candidate.Enabled
+	app.PublicConfig = cloneRawMessage(candidate.PublicConfig)
+	app.Secrets = cloneRawMessage(candidate.Secrets)
+	app.SecretSet = cloneSecretSet(candidate.SecretSet)
+	app.Status = candidate.Status
+	app.LastError = ""
 	if err := writePersistedAppState(app); err != nil {
 		return protocol.AppsConfigApplyResponse{}, err
 	}
 	return protocol.AppsConfigApplyResponse{App: appSummary(app)}, nil
+}
+
+func (m *Manager) validateSettingsApply(ctx context.Context, app InstalledApp, requestSecrets json.RawMessage) error {
+	command, ok := findCommand(app.Manifest, "settings_apply")
+	if !ok {
+		return nil
+	}
+	executable, err := containedPath(app.Path, app.Manifest.Runtime.Command)
+	if err != nil {
+		return err
+	}
+	input, err := settingsApplyInput(app, requestSecrets)
+	if err != nil {
+		return err
+	}
+	timeout := time.Duration(command.TimeoutSeconds) * time.Second
+	response, err := m.runner.Invoke(ctx, InvokeSpec{
+		Executable: executable,
+		WorkDir:    app.Path,
+		Timeout:    timeout,
+		Request: AppStdioRequest{
+			ProtocolVersion: appStdioProtocolVersion,
+			RequestID:       fmt.Sprintf("%s.settings_apply.%d", app.Manifest.ID, time.Now().UTC().UnixNano()),
+			AppID:           app.Manifest.ID,
+			CommandID:       "settings_apply",
+			Config:          app.PublicConfig,
+			Secrets:         app.Secrets,
+			Input:           input,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: settings validation failed: %v", ErrAppInvocationFailed, err)
+	}
+	if !response.OK {
+		message := "settings validation failed"
+		if response.Error != nil && strings.TrimSpace(response.Error.Message) != "" {
+			message = response.Error.Message
+		}
+		return fmt.Errorf("%w: %s", ErrAppInvocationFailed, message)
+	}
+	return nil
+}
+
+func settingsApplyInput(app InstalledApp, requestSecrets json.RawMessage) (json.RawMessage, error) {
+	input := map[string]any{
+		"persist": false,
+	}
+	if len(app.PublicConfig) > 0 {
+		var settings map[string]any
+		if err := json.Unmarshal(app.PublicConfig, &settings); err != nil {
+			return nil, fmt.Errorf("decode app settings: %w", err)
+		}
+		input["settings"] = settings
+	} else {
+		input["settings"] = map[string]any{}
+	}
+	if password, ok, err := plaintextSecret(requestSecrets, "password"); err != nil {
+		return nil, err
+	} else if ok {
+		input["password"] = password
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("encode settings validation input: %w", err)
+	}
+	return encoded, nil
 }
 
 func (m *Manager) Invoke(ctx context.Context, request protocol.AppsInvokeRequest) (protocol.AppsInvokeResponse, error) {
@@ -795,6 +880,22 @@ func encodeSecretObject(values map[string]json.RawMessage) (json.RawMessage, err
 		return nil, fmt.Errorf("encode app secrets: %w", err)
 	}
 	return encoded, nil
+}
+
+func plaintextSecret(raw json.RawMessage, field string) (string, bool, error) {
+	values, err := decodeSecretObject(raw)
+	if err != nil {
+		return "", false, err
+	}
+	value, ok := values[field]
+	if !ok || isEmptySecretValue(value) {
+		return "", false, nil
+	}
+	var decoded string
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return "", false, fmt.Errorf("decode app secret %q: %w", field, err)
+	}
+	return decoded, true, nil
 }
 
 func isEmptySecretValue(raw json.RawMessage) bool {
