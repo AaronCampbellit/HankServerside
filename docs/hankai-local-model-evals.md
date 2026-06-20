@@ -2,6 +2,21 @@
 
 Use these checks when changing Ollama models, local prompt profiles, planner settings, or vector context packaging.
 
+## Automated Harness
+
+Use `tools/hankaieval` before manual prompt checks:
+
+```bash
+HANK_REMOTE_LIVE_BASE_URL="https://hankdemo.campbellservers.com" \
+HANK_REMOTE_LIVE_SESSION_TOKEN="$HANK_REMOTE_LIVE_SESSION_TOKEN" \
+HANK_REMOTE_HANKAI_EXPECT_PROVIDER="ollama" \
+go run ./tools/hankaieval
+```
+
+The harness validates provider status, typed tool diagnostics, result cards,
+confirmation behavior, and safety expectations. Manual checks below are still
+useful when changing model prompts or comparing model quality.
+
 ## Settings Baseline
 
 - Provider: `ollama`

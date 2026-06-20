@@ -62,6 +62,35 @@ export COMPOSE_PROJECT_NAME="hank_validation"
 export HANK_REMOTE_CLOUD_ENV_FILE=".env.cloud"
 ```
 
+## HankAI Local Model Eval
+
+For the current demo setup, the Hank cloud can test against the LAN Ollama
+instance at:
+
+```bash
+export HANK_REMOTE_OLLAMA_BASE_URL="http://192.168.86.158:11434"
+```
+
+Before running the eval harness, verify the demo host and the running cloud
+container can reach Ollama:
+
+```bash
+curl -fsS http://192.168.86.158:11434/api/tags
+docker compose --env-file .env.cloud exec cloud sh -lc 'wget -qO- http://192.168.86.158:11434/api/tags'
+```
+
+Run the live HankAI eval harness with:
+
+```bash
+HANK_REMOTE_LIVE_BASE_URL="https://hankdemo.campbellservers.com" \
+HANK_REMOTE_LIVE_SESSION_TOKEN="$HANK_REMOTE_LIVE_SESSION_TOKEN" \
+HANK_REMOTE_HANKAI_EXPECT_PROVIDER="ollama" \
+HANK_REMOTE_HANKAI_EXPECT_OLLAMA_URL="http://192.168.86.158:11434" \
+go run ./tools/hankaieval
+```
+
+Reports are generated under `data/hankai-evals/` and must remain untracked.
+
 ## Future Demo Run Order
 
 Run this sequence after the demo stack is up, the agent is online, Home Assistant is reachable, and two file sources are configured with synthetic test data only:
@@ -88,6 +117,7 @@ scripts/file-safety-validation.sh
 scripts/schema-drift-check.sh
 scripts/migration-baseline-validation.sh
 go run ./tools/livevalidation
+go run ./tools/hankaieval
 go run ./tools/adminvalidation
 scripts/scale-validation.sh
 scripts/production-load-report.sh
