@@ -49,6 +49,7 @@ type evalExpect struct {
 	Destructive          *bool
 	MinCards             int
 	CardKind             string
+	RequiredCardKinds    []string
 }
 
 type assistantStatus struct {
@@ -368,7 +369,12 @@ func defaultEvalCases() []evalCase {
 			Name:   "multi source read only",
 			Group:  "multi_source",
 			Prompt: "what do I have tomorrow and do my notes mention dentist",
-			Expect: evalExpect{ToolKind: "read_only.synthesis", IntentKind: "read_only.synthesis", RequiresConfirmation: boolPtr(false)},
+			Expect: evalExpect{
+				ToolKind:             "read_only.synthesis",
+				IntentKind:           "read_only.synthesis",
+				RequiresConfirmation: boolPtr(false),
+				RequiredCardKinds:    []string{"calendar", "note"},
+			},
 		},
 	}
 }
@@ -490,14 +496,32 @@ func assertRun(run assistantRunResponse, expect evalExpect) error {
 		}
 	}
 	if expect.CardKind != "" {
+		found := false
 		for _, card := range messageCards(run) {
 			if card.Kind == expect.CardKind {
-				return nil
+				found = true
+				break
 			}
 		}
-		return fmt.Errorf("missing card kind %q", expect.CardKind)
+		if !found {
+			return fmt.Errorf("missing card kind %q", expect.CardKind)
+		}
+	}
+	for _, kind := range expect.RequiredCardKinds {
+		if !assistantCardsContainKind(messageCards(run), kind) {
+			return fmt.Errorf("missing card kind %q", kind)
+		}
 	}
 	return nil
+}
+
+func assistantCardsContainKind(cards []assistantResultCard, kind string) bool {
+	for _, card := range cards {
+		if card.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func diagnosticsToolKind(diagnostics *assistantDiagnostics) string {

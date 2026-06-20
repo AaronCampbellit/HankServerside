@@ -560,7 +560,126 @@ func isReadOnlyMultiSourcePrompt(prompt string) bool {
 }
 
 func executeAssistantReadOnlySynthesisTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
-	return server.answerRetrievedPrompt(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings, runtime.Prompt)
+	content, err := server.answerRetrievedPrompt(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings, runtime.Prompt)
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	settings := normalizeAssistantSettings(runtime.Settings)
+	if synthesisPromptMentionsCalendar(runtime.Prompt) && settings.CalendarEnabled {
+		calendarPrompt := synthesisCalendarPrompt(runtime.Prompt)
+		if calendarContent, err := server.answerCalendarSearchPrompt(ctx, runtime.Home.ID, runtime.Auth.User.ID, calendarPrompt, runtime.Timezone); err == nil {
+			content.Cards = appendUniqueAssistantCards(content.Cards, calendarContent.Cards, 6)
+		}
+	}
+	if synthesisPromptMentionsNotes(runtime.Prompt) && (settings.ProfileNotesEnabled || settings.HomeNotesEnabled) {
+		notePrompt := synthesisNotePrompt(runtime.Prompt)
+		noteRuntime := runtime
+		noteContent, err := executeAssistantNotesTool(ctx, server, noteRuntime, assistantIntent{Kind: assistantIntentNotesSearch, Query: notePrompt})
+		if err == nil {
+			content.Cards = appendUniqueAssistantCards(content.Cards, noteContent.Cards, 6)
+		}
+	}
+	return content, nil
+}
+
+func synthesisPromptMentionsCalendar(prompt string) bool {
+	lowered := strings.ToLower(prompt)
+	for _, term := range []string{"calendar", "schedule", "event", "tomorrow", "today", "appointment", "meeting"} {
+		if strings.Contains(lowered, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func synthesisPromptMentionsNotes(prompt string) bool {
+	lowered := strings.ToLower(prompt)
+	for _, term := range []string{"note", "notes", "list"} {
+		if strings.Contains(lowered, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func synthesisCalendarPrompt(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	lowered := strings.ToLower(trimmed)
+	for _, connector := range []string{" and ", " also ", " plus ", " alongside "} {
+		if index := strings.Index(lowered, connector); index > 0 {
+			left := strings.TrimSpace(trimmed[:index])
+			if synthesisPromptMentionsCalendar(left) {
+				return left
+			}
+		}
+	}
+	return trimmed
+}
+
+func synthesisNotePrompt(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	lowered := strings.ToLower(trimmed)
+	for _, marker := range []string{"notes mention ", "note mention ", "notes about ", "note about ", "notes on ", "note on "} {
+		if index := strings.Index(lowered, marker); index >= 0 {
+			query := strings.TrimSpace(trimmed[index+len(marker):])
+			return trimSynthesisSubquery(query)
+		}
+	}
+	for _, connector := range []string{" and ", " also ", " plus ", " alongside "} {
+		parts := strings.Split(trimmed, connector)
+		for _, part := range parts {
+			if synthesisPromptMentionsNotes(part) {
+				return noteSearchQuery(part)
+			}
+		}
+	}
+	return noteSearchQuery(trimmed)
+}
+
+func trimSynthesisSubquery(query string) string {
+	query = strings.TrimSpace(query)
+	lowered := strings.ToLower(query)
+	for _, connector := range []string{" and ", " also ", " plus ", " alongside ", " compared to "} {
+		if index := strings.Index(lowered, connector); index > 0 {
+			query = strings.TrimSpace(query[:index])
+			break
+		}
+	}
+	return strings.TrimRight(query, ".,;!?")
+}
+
+func appendUniqueAssistantCards(existing []assistantResultCard, extras []assistantResultCard, limit int) []assistantResultCard {
+	if limit <= 0 {
+		limit = len(existing) + len(extras)
+	}
+	seen := map[string]bool{}
+	result := make([]assistantResultCard, 0, min(limit, len(existing)+len(extras)))
+	for _, card := range append(existing, extras...) {
+		if card.Kind == "" {
+			continue
+		}
+		key := assistantCardKey(card)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, card)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+func assistantCardKey(card assistantResultCard) string {
+	return strings.Join([]string{
+		card.Kind,
+		card.NoteID,
+		card.EventID,
+		card.SourceID,
+		card.Path,
+		card.Title,
+	}, "\x00")
 }
 
 func assistantCommandPrompt(intent assistantIntent, fallback string) string {

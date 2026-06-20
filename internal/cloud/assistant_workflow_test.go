@@ -133,6 +133,11 @@ func TestAssistantParsingHelpers(t *testing.T) {
 		t.Fatalf("stripFileSourceSuffix query=%q source_id=%q", query, sourceID)
 	}
 
+	noteQuery := noteSearchQuery("find information in my notes about SMB")
+	if noteQuery != "SMB" {
+		t.Fatalf("noteSearchQuery = %q, want SMB", noteQuery)
+	}
+
 	index, ok := assistantSelectionIndex("use the second one", 3)
 	if !ok || index != 1 {
 		t.Fatalf("assistantSelectionIndex = %d %t, want 1 true", index, ok)
@@ -537,9 +542,25 @@ func TestAssistantCalendarSearchAndMutationPlanning(t *testing.T) {
 	user := domain.User{ID: "usr_assistant_calendar", Email: "assistant-calendar@example.com", PasswordHash: "hash", CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 	home := domain.Home{ID: "home_assistant_calendar", UserID: user.ID, Name: "Home", CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 	session := domain.AssistantSession{ID: "asess_calendar", HomeID: home.ID, UserID: user.ID, Title: "Calendar", LastMessageAt: now.UTC(), CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+	dentistNote := domain.UserNote{
+		ID:           "note_assistant_calendar_dentist",
+		NoteID:       "dentist-note",
+		OwnerUserID:  user.ID,
+		Title:        "Dentist Notes",
+		Content:      "Remember to ask the dentist about the night guard.",
+		BodyMarkdown: "Remember to ask the dentist about the night guard.",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now.UTC(),
+		UpdatedAt:    now.UTC(),
+		UpdatedBy:    user.ID,
+	}
 	must(t, db.CreateUser(ctx, user))
 	must(t, db.CreateHome(ctx, home))
 	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.UpsertUserNote(ctx, dentistNote))
 	must(t, db.UpsertAssistantCalendarEntries(ctx, []domain.AssistantCalendarEntry{
 		{
 			ID:              "acal_dentist",
@@ -572,6 +593,14 @@ func TestAssistantCalendarSearchAndMutationPlanning(t *testing.T) {
 	diagnostics := assistantDiagnosticsFromContent(agenda)
 	if diagnostics == nil || diagnostics.ToolKind != string(assistantIntentCalendarSearch) {
 		t.Fatalf("calendar diagnostics = %#v", diagnostics)
+	}
+
+	multiSource, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "what do I have tomorrow and do my notes mention dentist")
+	if err != nil {
+		t.Fatalf("generateAssistantResponse multi source: %v", err)
+	}
+	if !assistantCardsContainKind(multiSource.Cards, "calendar") || !assistantCardsContainKind(multiSource.Cards, "note") {
+		t.Fatalf("multi-source cards = %#v, want calendar and note cards", multiSource.Cards)
 	}
 
 	updateRun, err := server.processAssistantMessage(ctx, home, membership, auth, session, "move my dentist appointment to 4", "device-calendar", "UTC")
@@ -1792,6 +1821,15 @@ func assistantTraceHasEvent(events []assistantTraceEvent, eventName string) bool
 func assistantCardsContainTitle(cards []assistantResultCard, title string) bool {
 	for _, card := range cards {
 		if card.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func assistantCardsContainKind(cards []assistantResultCard, kind string) bool {
+	for _, card := range cards {
+		if card.Kind == kind {
 			return true
 		}
 	}

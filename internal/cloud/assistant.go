@@ -4372,6 +4372,9 @@ func cleanNoteHint(value string) string {
 func noteSearchQuery(prompt string) string {
 	query := stripAssistantSearchPrefix(prompt)
 	query = strings.TrimSuffix(strings.TrimSpace(query), ".")
+	if explicit := explicitNotesAboutQuery(query); explicit != "" {
+		return explicit
+	}
 	query = removeQueryWords(query, map[string]bool{
 		"a": true, "an": true, "the": true,
 		"note": true, "notes": true,
@@ -4381,6 +4384,19 @@ func noteSearchQuery(prompt string) string {
 		return strings.TrimSpace(prompt)
 	}
 	return query
+}
+
+func explicitNotesAboutQuery(value string) string {
+	trimmed := strings.TrimSpace(value)
+	lowered := strings.ToLower(trimmed)
+	for _, marker := range []string{"notes about ", "note about ", "notes on ", "note on "} {
+		if index := strings.Index(lowered, marker); index >= 0 {
+			query := strings.TrimSpace(trimmed[index+len(marker):])
+			query = strings.TrimRight(query, ".,;!?")
+			return strings.TrimSpace(query)
+		}
+	}
+	return ""
 }
 
 func attachmentDestinationKind(prompt string) string {
