@@ -61,6 +61,11 @@ func TestAssistantIntentClassification(t *testing.T) {
 		{name: "calendar slash command", prompt: "/calendar tomorrow", want: assistantIntentCalendarCommand},
 		{name: "docs slash command", prompt: "/docs deployment", want: assistantIntentDocsCommand},
 		{name: "status slash command", prompt: "/status", want: assistantIntentStatusCommand},
+		{name: "assistant source status", prompt: "show assistant source and index status", want: assistantIntentAssistantStatus},
+		{name: "local model status", prompt: "what local model is HankAI using", want: assistantIntentAssistantStatus},
+		{name: "agent online status", prompt: "is the home agent online", want: assistantIntentAgentStatus},
+		{name: "notes sync status", prompt: "show notes sync status", want: assistantIntentSyncStatus},
+		{name: "backup status", prompt: "show backup status", want: assistantIntentBackupStatus},
 	}
 
 	for _, test := range tests {

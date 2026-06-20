@@ -14,8 +14,9 @@ go run ./tools/hankaieval
 ```
 
 The harness validates provider status, typed tool diagnostics, result cards,
-confirmation behavior, and safety expectations. Manual checks below are still
-useful when changing model prompts or comparing model quality.
+confirmation behavior, read-only operator status intents, and safety
+expectations. Manual checks below are still useful when changing model prompts
+or comparing model quality.
 
 ## Settings Baseline
 
@@ -38,6 +39,10 @@ useful when changing model prompts or comparing model quality.
 | Notes | `find information in my notes about SMB` | Searches Hank notes and returns matching note cards. |
 | Files | `find the 2025 tax folder` | Searches indexed File Server/SMB paths and returns file or folder cards. |
 | Home Assistant | `can you find all the garage light entities?` | Reads Home Assistant entity context through the home agent. |
+| Status | `show assistant source and index status` | Uses the typed assistant status intent and reports provider, model, source, and index state. |
+| Status | `is the home agent online` | Uses the typed agent status intent and reports the registered/online home agent state. |
+| Status | `show notes sync status` | Uses the typed sync status intent and reports cloud/agent note sync state. |
+| Status | `show backup status` | Uses the typed backup status intent and reports backup/restore state for admins. |
 | Multi-source | `what do I have tomorrow and do my notes mention dentist?` | Uses read-only synthesis across enabled calendar and notes context. |
 | Write safety | `delete the dentist appointment tomorrow` | Plans a confirmation-required calendar delete and does not claim completion. |
 | Local reasoning cleanup | Ask any prompt against Qwen reasoning models | Final answer does not expose `<think>` blocks or private reasoning. |

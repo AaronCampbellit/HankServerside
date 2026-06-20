@@ -203,6 +203,70 @@ func errorsIsFeatureDenied(err error) bool {
 	return errors.Is(err, errFeaturePermissionDenied)
 }
 
+func isAssistantStatusPrompt(prompt string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(prompt))
+	if lowered == "" {
+		return false
+	}
+	assistantTerms := []string{
+		"assistant status",
+		"hankai status",
+		"hank ai status",
+		"assistant source",
+		"assistant index",
+		"hankai source",
+		"hankai index",
+		"ai settings",
+		"ai status",
+		"local model",
+		"ollama status",
+		"model is hankai using",
+		"model hankai is using",
+	}
+	for _, term := range assistantTerms {
+		if strings.Contains(lowered, term) {
+			return true
+		}
+	}
+	return strings.Contains(lowered, "hankai") && (strings.Contains(lowered, "provider") || strings.Contains(lowered, "model") || strings.Contains(lowered, "index"))
+}
+
+func isAgentStatusPrompt(prompt string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(prompt))
+	if lowered == "" {
+		return false
+	}
+	return strings.Contains(lowered, "agent status") ||
+		strings.Contains(lowered, "home agent status") ||
+		strings.Contains(lowered, "home agent online") ||
+		strings.Contains(lowered, "is the agent online") ||
+		strings.Contains(lowered, "agent capabilities")
+}
+
+func isSyncStatusPrompt(prompt string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(prompt))
+	if lowered == "" {
+		return false
+	}
+	return strings.Contains(lowered, "sync status") ||
+		strings.Contains(lowered, "notes sync") ||
+		strings.Contains(lowered, "home sync") ||
+		strings.Contains(lowered, "sync health")
+}
+
+func isBackupStatusPrompt(prompt string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(prompt))
+	if lowered == "" {
+		return false
+	}
+	return strings.Contains(lowered, "backup status") ||
+		strings.Contains(lowered, "backups status") ||
+		strings.Contains(lowered, "storage status") ||
+		strings.Contains(lowered, "restore status") ||
+		strings.Contains(lowered, "restore verification") ||
+		strings.Contains(lowered, "pgbackrest")
+}
+
 func isNoteCreatePrompt(prompt string) bool {
 	slots := extractAssistantSlots(prompt)
 	lowered := strings.ToLower(strings.TrimSpace(prompt))

@@ -90,6 +90,50 @@ var assistantToolRegistry = []assistantTool{
 	assistantSlashTool(assistantIntentDocsCommand, "docs", "Route an explicit /docs query to Hank Remote project documentation.", executeAssistantProjectDocsTool),
 	assistantSlashTool(assistantIntentStatusCommand, "status", "Show enabled HankAI workflow surfaces and source status.", executeAssistantStatusCommandTool),
 	{
+		Kind:        assistantIntentAssistantStatus,
+		Description: "Show HankAI provider, model, source, and index status.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isAssistantStatusPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentAssistantStatus, Query: strings.TrimSpace(prompt)}, true
+		},
+		Execute: executeAssistantAssistantStatusTool,
+	},
+	{
+		Kind:        assistantIntentAgentStatus,
+		Description: "Show the current home agent connection and capability status.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isAgentStatusPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentAgentStatus, Query: strings.TrimSpace(prompt)}, true
+		},
+		Execute: executeAssistantAgentStatusTool,
+	},
+	{
+		Kind:        assistantIntentSyncStatus,
+		Description: "Show Home note sync status between cloud and home agent.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isSyncStatusPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentSyncStatus, Query: strings.TrimSpace(prompt)}, true
+		},
+		Execute: executeAssistantSyncStatusTool,
+	},
+	{
+		Kind:        assistantIntentBackupStatus,
+		Description: "Show storage, backup, and restore verification status for Home admins.",
+		Match: func(prompt string) (assistantIntent, bool) {
+			if !isBackupStatusPrompt(prompt) {
+				return assistantIntent{}, false
+			}
+			return assistantIntent{Kind: assistantIntentBackupStatus, Query: strings.TrimSpace(prompt)}, true
+		},
+		Execute: executeAssistantBackupStatusTool,
+	},
+	{
 		Kind:        assistantIntentNotesAppend,
 		Description: "Append a short item to a uniquely matched Hank note or list.",
 		Match: func(prompt string) (assistantIntent, bool) {

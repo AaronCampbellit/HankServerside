@@ -1,0 +1,136 @@
+package cloud
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/store"
+)
+
+func executeAssistantAssistantStatusTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	settings := normalizeAssistantSettings(runtime.Settings)
+	status := server.assistantStatusWithSettings(ctx, runtime.Auth.User.ID, settings)
+	indexStats, err := server.store.AssistantIndexStats(ctx, runtime.Home.ID, runtime.Auth.User.ID)
+
+	rows := []string{
+		"HankAI status:",
+		fmt.Sprintf("- Provider: %s", status.Provider),
+		fmt.Sprintf("- Chat model: %s", assistantStatusValue(status.ChatModel)),
+		fmt.Sprintf("- Embeddings: %s (%s)", enabledLabel(status.EmbeddingConfigured), assistantStatusValue(status.EmbeddingModel)),
+		fmt.Sprintf("- Planner: %s", enabledLabel(settings.PlannerEnabled)),
+		fmt.Sprintf("- Prompt profile: %s", assistantStatusValue(settings.PromptProfile)),
+	}
+	if err != nil {
+		rows = append(rows, "- Index: unavailable")
+	} else {
+		rows = append(rows,
+			fmt.Sprintf("- Vector mode: %s", assistantStatusValue(indexStats.VectorMode)),
+			fmt.Sprintf("- Indexed chunks: %d (%d embedded)", indexStats.ChunkCount, indexStats.EmbeddedChunkCount),
+			fmt.Sprintf("- Indexed files: %d (%d embedded)", indexStats.FileCount, indexStats.EmbeddedFileCount),
+			fmt.Sprintf("- Past conversations: %d", indexStats.ConversationCount),
+		)
+	}
+	rows = append(rows,
+		fmt.Sprintf("- Home Assistant source: %s", enabledLabel(settings.HomeAssistantEnabled)),
+		fmt.Sprintf("- Files source: %s", enabledLabel(settings.FilesEnabled)),
+		fmt.Sprintf("- Notes source: %s", enabledLabel(settings.ProfileNotesEnabled || settings.HomeNotesEnabled)),
+		fmt.Sprintf("- Calendar source: %s", enabledLabel(settings.CalendarEnabled)),
+		fmt.Sprintf("- Project docs source: %s", enabledLabel(settings.ProjectDocsEnabled)),
+	)
+	return assistantMessageContent{Text: strings.Join(rows, "\n")}, nil
+}
+
+func executeAssistantAgentStatusTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	agent, err := server.store.GetAgentByHomeID(ctx, runtime.Home.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return assistantMessageContent{Text: "No home agent is registered for this Home."}, nil
+	}
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+
+	status := agent.Status
+	capabilities := []string(nil)
+	if server.router != nil {
+		if online, ok := server.router.GetAgent(runtime.Home.ID); ok {
+			status = online.agent.Status
+			capabilities = append(capabilities, online.capabilities...)
+		}
+	}
+	rows := []string{
+		"Home agent status:",
+		fmt.Sprintf("- Agent: %s", assistantStatusValue(agent.Name)),
+		fmt.Sprintf("- Status: %s", assistantStatusValue(status)),
+		fmt.Sprintf("- Last seen: %s", assistantStatusTime(agent.LastSeenAt)),
+	}
+	if len(capabilities) > 0 {
+		rows = append(rows, fmt.Sprintf("- Capabilities: %d advertised", len(capabilities)))
+	}
+	return assistantMessageContent{Text: strings.Join(rows, "\n")}, nil
+}
+
+func executeAssistantSyncStatusTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	state, err := server.store.GetHomeNoteSyncState(ctx, runtime.Home.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return assistantMessageContent{Text: "No note sync status has been recorded yet."}, nil
+	}
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	rows := []string{
+		"Notes sync status:",
+		fmt.Sprintf("- Status: %s", assistantStatusValue(state.Status)),
+		fmt.Sprintf("- Agent: %s", assistantStatusValue(state.AgentID)),
+		fmt.Sprintf("- Last successful sync: %s", assistantStatusTime(state.LastSuccessfulSyncAt)),
+		fmt.Sprintf("- Last manifest: %s", assistantStatusTime(state.LastManifestAt)),
+		fmt.Sprintf("- Pending pull/push: %d/%d", state.PendingPullCount, state.PendingPushCount),
+	}
+	if strings.TrimSpace(state.LastError) != "" {
+		rows = append(rows, "- Last error: "+state.LastError)
+	}
+	return assistantMessageContent{Text: strings.Join(rows, "\n")}, nil
+}
+
+func executeAssistantBackupStatusTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
+	if runtime.Membership.Role != domain.HomeRoleAdmin {
+		return assistantMessageContent{Text: "Backup and storage status is available to Home admins only."}, nil
+	}
+	if server.storage == nil {
+		return assistantMessageContent{Text: "Storage operations are not configured for this Hank Remote server."}, nil
+	}
+	status, err := server.storage.Status()
+	if err != nil {
+		return assistantMessageContent{}, err
+	}
+	rows := []string{
+		"Backup and storage status:",
+		fmt.Sprintf("- Backup target: %s", assistantStatusValue(status.Backup.Target.Type)),
+		fmt.Sprintf("- Last successful backup: %s", assistantStatusTime(status.Backup.LastSuccessfulAt)),
+		fmt.Sprintf("- Last backup label: %s", assistantStatusValue(status.Backup.LastBackupLabel)),
+		fmt.Sprintf("- Backup failures: %d", status.Backup.FailureCount),
+		fmt.Sprintf("- Reported backups: %d", len(status.Backup.Backups)),
+		fmt.Sprintf("- Restore test: %s", assistantStatusTime(status.Restore.LastTestAt)),
+		fmt.Sprintf("- Active storage tasks: %d", len(status.Tasks)),
+		fmt.Sprintf("- Recent failures: %d", len(status.Failures)),
+	}
+	return assistantMessageContent{Text: strings.Join(rows, "\n")}, nil
+}
+
+func assistantStatusValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func assistantStatusTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return "never"
+	}
+	return value.UTC().Format(time.RFC3339)
+}

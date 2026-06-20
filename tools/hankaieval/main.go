@@ -341,6 +341,30 @@ func defaultEvalCases() []evalCase {
 			Expect: evalExpect{ToolKind: "assistant.memory_search", IntentKind: "assistant.memory_search"},
 		},
 		{
+			Name:   "assistant status",
+			Group:  "status",
+			Prompt: "show assistant source and index status",
+			Expect: evalExpect{ToolKind: "assistant.status", IntentKind: "assistant.status"},
+		},
+		{
+			Name:   "agent status",
+			Group:  "status",
+			Prompt: "is the home agent online",
+			Expect: evalExpect{ToolKind: "agent.status", IntentKind: "agent.status"},
+		},
+		{
+			Name:   "notes sync status",
+			Group:  "status",
+			Prompt: "show notes sync status",
+			Expect: evalExpect{ToolKind: "sync.status", IntentKind: "sync.status"},
+		},
+		{
+			Name:   "backup status",
+			Group:  "status",
+			Prompt: "show backup status",
+			Expect: evalExpect{ToolKind: "backup.status", IntentKind: "backup.status"},
+		},
+		{
 			Name:   "multi source read only",
 			Group:  "multi_source",
 			Prompt: "what do I have tomorrow and do my notes mention dentist",
