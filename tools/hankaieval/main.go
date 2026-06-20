@@ -298,10 +298,11 @@ func defaultEvalCases() []evalCase {
 			Expect: evalExpect{ToolKind: "project_docs", IntentKind: "project_docs"},
 		},
 		{
-			Name:   "notes search",
-			Group:  "notes",
-			Prompt: "find information in my notes about SMB",
-			Expect: evalExpect{ToolKind: "notes.search", IntentKind: "notes.search", MinCards: 1, CardKind: "note"},
+			Name:    "notes search",
+			Group:   "notes",
+			Prompt:  "find information in my notes about SMB",
+			Prepare: prepareNotesFixture,
+			Expect:  evalExpect{ToolKind: "notes.search", IntentKind: "notes.search", MinCards: 1, CardKind: "note"},
 		},
 		{
 			Name:   "files tax folder search",
@@ -366,9 +367,10 @@ func defaultEvalCases() []evalCase {
 			Expect: evalExpect{ToolKind: "backup.status", IntentKind: "backup.status"},
 		},
 		{
-			Name:   "multi source read only",
-			Group:  "multi_source",
-			Prompt: "what do I have tomorrow and do my notes mention dentist",
+			Name:    "multi source read only",
+			Group:   "multi_source",
+			Prompt:  "what do I have tomorrow and do my notes mention dentist",
+			Prepare: prepareMultiSourceFixture,
 			Expect: evalExpect{
 				ToolKind:             "read_only.synthesis",
 				IntentKind:           "read_only.synthesis",
@@ -626,6 +628,38 @@ func (c *liveClient) sendPrompt(ctx context.Context, sessionID string, prompt st
 	}
 	err := c.doJSON(ctx, http.MethodPost, "/v1/home/assistant/sessions/"+url.PathEscape(sessionID)+"/messages", body, http.StatusCreated, &run)
 	return run, err
+}
+
+func (c *liveClient) putProfileNote(ctx context.Context, noteID string, title string, bodyMarkdown string) error {
+	body := map[string]any{
+		"note_id":       noteID,
+		"title":         title,
+		"body_markdown": bodyMarkdown,
+		"body_format":   "markdown",
+		"page_type":     "text",
+	}
+	return c.doJSON(ctx, http.MethodPut, "/v1/me/notes/"+url.PathEscape(noteID), body, http.StatusOK, nil)
+}
+
+func prepareNotesFixture(ctx context.Context, client *liveClient) error {
+	return client.putProfileNote(
+		ctx,
+		"hankai-eval-smb.md",
+		"HankAI Eval SMB",
+		"SMB access should stay behind the Hank Remote cloud-and-agent API. Never expose SMB directly to the internet.",
+	)
+}
+
+func prepareMultiSourceFixture(ctx context.Context, client *liveClient) error {
+	if err := prepareCalendarFixture(ctx, client); err != nil {
+		return err
+	}
+	return client.putProfileNote(
+		ctx,
+		"hankai-eval-dentist.md",
+		"HankAI Eval Dentist",
+		"The dentist note says tomorrow's appointment needs a follow-up reminder and insurance card check.",
+	)
 }
 
 func prepareCalendarFixture(ctx context.Context, client *liveClient) error {

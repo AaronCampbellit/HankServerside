@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +118,9 @@ func TestDefaultEvalCasesHaveNamesGroupsAndExpectations(t *testing.T) {
 			t.Fatalf("duplicate case name %q", item.Name)
 		}
 		seen[item.Name] = true
+		if (item.Name == "notes search" || item.Name == "multi source read only") && item.Prepare == nil {
+			t.Fatalf("%s case has no fixture prepare step", item.Name)
+		}
 	}
 }
 
@@ -124,5 +132,42 @@ func TestCalendarFixturePayloadUsesFutureDentistEvent(t *testing.T) {
 	}
 	if !strings.Contains(entries[0]["starts_at"].(string), "2026-07-12") {
 		t.Fatalf("fixture starts_at = %#v", entries[0]["starts_at"])
+	}
+}
+
+func TestPutProfileNoteUsesAuthenticatedProfileNotesAPI(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method=%s want PUT", r.Method)
+		}
+		if r.URL.Path != "/v1/me/notes/hankai-eval-smb.md" {
+			t.Fatalf("path=%s want profile note route", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("authorization header=%q", got)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["note_id"] != "hankai-eval-smb.md" || body["title"] != "SMB Fixture" || !strings.Contains(body["body_markdown"], "SMB access") {
+			t.Fatalf("body = %#v", body)
+		}
+		if body["body_format"] != "markdown" || body["page_type"] != "text" {
+			t.Fatalf("body metadata = %#v", body)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &liveClient{baseURL: baseURL, token: "test-token", http: server.Client()}
+	if err := client.putProfileNote(context.Background(), "hankai-eval-smb.md", "SMB Fixture", "SMB access stays local."); err != nil {
+		t.Fatalf("putProfileNote returned error: %v", err)
 	}
 }
