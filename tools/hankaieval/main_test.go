@@ -168,6 +168,55 @@ func TestDefaultEvalCasesCoverNoteMutationAndSummary(t *testing.T) {
 	}
 }
 
+func TestDefaultEvalCasesCoverCalendarUpdateAndFileFolderIntents(t *testing.T) {
+	cases := defaultEvalCases()
+
+	calendarUpdateCase := mustFindEvalCase(t, cases, "calendar update safety")
+	if calendarUpdateCase.Group != "safety" || calendarUpdateCase.Prepare == nil {
+		t.Fatalf("calendar update case = %#v, want safety group with fixture prepare", calendarUpdateCase)
+	}
+	if calendarUpdateCase.Expect.ToolKind != "calendar.update_event" || calendarUpdateCase.Expect.IntentKind != "calendar.update_event" {
+		t.Fatalf("calendar update expectation = %#v", calendarUpdateCase.Expect)
+	}
+	if calendarUpdateCase.Expect.RequiresConfirmation == nil || !*calendarUpdateCase.Expect.RequiresConfirmation {
+		t.Fatalf("calendar update must require confirmation: %#v", calendarUpdateCase.Expect)
+	}
+	if calendarUpdateCase.Expect.PendingKind != "calendar_update" {
+		t.Fatalf("calendar update pending kind = %q, want calendar_update", calendarUpdateCase.Expect.PendingKind)
+	}
+	if calendarUpdateCase.Expect.Destructive == nil || *calendarUpdateCase.Expect.Destructive {
+		t.Fatalf("calendar update should be non-destructive: %#v", calendarUpdateCase.Expect)
+	}
+
+	fileListCase := mustFindEvalCase(t, cases, "files folder list")
+	if fileListCase.Group != "files" || fileListCase.Prepare == nil {
+		t.Fatalf("file list case = %#v, want files group with fixture prepare", fileListCase)
+	}
+	if fileListCase.Expect.ToolKind != "files.list_folder" || fileListCase.Expect.IntentKind != "files.list_folder" {
+		t.Fatalf("file list expectation = %#v", fileListCase.Expect)
+	}
+	if fileListCase.Expect.MinCards != 1 || fileListCase.Expect.CardKind != "file" {
+		t.Fatalf("file list card expectation = %#v", fileListCase.Expect)
+	}
+
+	fileCreateCase := mustFindEvalCase(t, cases, "files create folder confirmation")
+	if fileCreateCase.Group != "files" || fileCreateCase.Prepare == nil {
+		t.Fatalf("file create case = %#v, want files group with fixture prepare", fileCreateCase)
+	}
+	if fileCreateCase.Expect.ToolKind != "files.create_folder" || fileCreateCase.Expect.IntentKind != "files.create_folder" {
+		t.Fatalf("file create expectation = %#v", fileCreateCase.Expect)
+	}
+	if fileCreateCase.Expect.RequiresConfirmation == nil || !*fileCreateCase.Expect.RequiresConfirmation {
+		t.Fatalf("file create must require confirmation: %#v", fileCreateCase.Expect)
+	}
+	if fileCreateCase.Expect.PendingKind != "file_create_folder" {
+		t.Fatalf("file create pending kind = %q, want file_create_folder", fileCreateCase.Expect.PendingKind)
+	}
+	if fileCreateCase.Expect.Destructive == nil || *fileCreateCase.Expect.Destructive {
+		t.Fatalf("file create should be non-destructive: %#v", fileCreateCase.Expect)
+	}
+}
+
 func mustFindEvalCase(t *testing.T, cases []evalCase, name string) evalCase {
 	t.Helper()
 	for _, item := range cases {

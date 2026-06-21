@@ -605,6 +605,13 @@ func (s *Server) resolveAssistantFileDirectory(ctx context.Context, homeID strin
 		matches = filtered
 	}
 	if len(matches) == 0 {
+		fileMatches, err := s.searchFiles(ctx, homeID, query)
+		if err != nil {
+			return "", "", nil, err
+		}
+		if path, sourceID, ok := inferUniqueFileMatchParentDirectory(fileMatches); ok {
+			return path, sourceID, nil, nil
+		}
 		return "", "", nil, nil
 	}
 	exact := make([]domain.AssistantFileIndex, 0)
@@ -624,6 +631,34 @@ func (s *Server) resolveAssistantFileDirectory(ctx context.Context, homeID strin
 		return strings.Trim(matches[0].Path, "/"), strings.TrimSpace(matches[0].ServiceProfileID), nil, nil
 	}
 	return "", "", matches, nil
+}
+
+func inferUniqueFileMatchParentDirectory(matches []protocol.FileItem) (string, string, bool) {
+	type parentKey struct {
+		sourceID string
+		path     string
+	}
+	parents := make(map[parentKey]bool)
+	for _, match := range matches {
+		if match.IsDirectory {
+			continue
+		}
+		parent := parentPath(match.Path)
+		if parent == "" {
+			continue
+		}
+		parents[parentKey{
+			sourceID: strings.TrimSpace(match.SourceID),
+			path:     strings.Trim(parent, "/"),
+		}] = true
+	}
+	if len(parents) != 1 {
+		return "", "", false
+	}
+	for parent := range parents {
+		return parent.path, parent.sourceID, true
+	}
+	return "", "", false
 }
 
 func stripFileSourceSuffix(value string) (string, string) {

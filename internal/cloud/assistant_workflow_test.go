@@ -1591,6 +1591,36 @@ func TestAssistantYDownloadCommandInvokesInstalledApp(t *testing.T) {
 	}
 }
 
+func TestInferUniqueFileMatchParentDirectory(t *testing.T) {
+	matches := []protocol.FileItem{
+		{
+			SourceID:    "local",
+			Path:        "Documents/Taxes/2025 Taxes/hankai-eval.txt",
+			Name:        "hankai-eval.txt",
+			IsDirectory: false,
+		},
+	}
+
+	path, sourceID, ok := inferUniqueFileMatchParentDirectory(matches)
+	if !ok {
+		t.Fatal("inferUniqueFileMatchParentDirectory returned ok=false")
+	}
+	if path != "Documents/Taxes/2025 Taxes" || sourceID != "local" {
+		t.Fatalf("inferred path/source = %q/%q", path, sourceID)
+	}
+}
+
+func TestInferUniqueFileMatchParentDirectoryRejectsAmbiguousParents(t *testing.T) {
+	matches := []protocol.FileItem{
+		{SourceID: "local", Path: "Documents/Taxes/2025 Taxes/hankai-eval.txt", Name: "hankai-eval.txt"},
+		{SourceID: "local", Path: "Documents/Archive/2025 Taxes/old.txt", Name: "old.txt"},
+	}
+
+	if path, sourceID, ok := inferUniqueFileMatchParentDirectory(matches); ok {
+		t.Fatalf("inferred ambiguous path/source = %q/%q", path, sourceID)
+	}
+}
+
 func TestAssistantGenericInstalledAppSlashInvokesApp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
