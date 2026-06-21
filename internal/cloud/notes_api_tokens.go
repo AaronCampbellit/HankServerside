@@ -98,6 +98,28 @@ func (s *Server) rejectNotesAPIToken(w http.ResponseWriter, r *http.Request, aut
 	return true
 }
 
+func (s *Server) requireNoteAttachmentScope(w http.ResponseWriter, r *http.Request, auth notesAuthContext, attachmentID string) bool {
+	switch r.Method {
+	case http.MethodGet:
+		return s.requireNotesScope(w, r, auth, domain.NotesAPIScopeRead)
+	case http.MethodPost:
+		if attachmentID != "" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return false
+		}
+		return s.requireNotesScope(w, r, auth, domain.NotesAPIScopeAppend, domain.NotesAPIScopeWrite)
+	case http.MethodDelete:
+		if attachmentID == "" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return false
+		}
+		return s.requireNotesScope(w, r, auth, domain.NotesAPIScopeDelete, domain.NotesAPIScopeWrite)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+}
+
 func (s *Server) handleHomeNotesWithNotesAuth(w http.ResponseWriter, r *http.Request, parts []string) bool {
 	if len(parts) == 0 || parts[0] != "notes" {
 		return false

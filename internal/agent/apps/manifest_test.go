@@ -56,6 +56,32 @@ func TestValidateManifestAcceptsHermesShape(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAcceptsCurrentFirstPartyPackageManifests(t *testing.T) {
+	t.Parallel()
+	paths := []string{
+		"../../../packages/hermes/app.json",
+		"../../../packages/gramaton/app.json",
+		"../../../packages/ydownload/app.json",
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(filepath.Base(filepath.Dir(path)), func(t *testing.T) {
+			t.Parallel()
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read manifest: %v", err)
+			}
+			var manifest Manifest
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				t.Fatalf("decode manifest: %v", err)
+			}
+			if err := ValidateManifest(manifest); err != nil {
+				t.Fatalf("ValidateManifest error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateManifestAcceptsTypedSettingsAndFileSourcePermission(t *testing.T) {
 	t.Parallel()
 	manifest := validHermesManifest()

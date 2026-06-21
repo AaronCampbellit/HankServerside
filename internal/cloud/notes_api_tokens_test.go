@@ -33,6 +33,7 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_notes_api_admin", UserID: user.ID, TokenHash: hashToken(adminToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server.ConfigureNoteAttachmentStorage(t.TempDir())
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
@@ -73,6 +74,65 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 		"content":           "from token",
 		"expected_revision": save.Revision,
 	}, nil)
+
+	uploadReq, err := http.NewRequest(http.MethodPost, testServer.URL+"/v1/me/notes/api-token-note.md/attachments?filename=screenshot.png", strings.NewReader("fake-png-bytes"))
+	if err != nil {
+		t.Fatalf("new upload request: %v", err)
+	}
+	uploadReq.Header.Set("Authorization", "Bearer "+created.Token)
+	uploadReq.Header.Set("Content-Type", "image/png")
+	uploadResp, err := testServer.Client().Do(uploadReq)
+	if err != nil {
+		t.Fatalf("upload attachment: %v", err)
+	}
+	defer uploadResp.Body.Close()
+	if uploadResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(uploadResp.Body)
+		t.Fatalf("upload status = %d body = %s", uploadResp.StatusCode, body)
+	}
+	var uploaded protocol.NoteAttachment
+	if err := json.NewDecoder(uploadResp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode uploaded attachment: %v", err)
+	}
+	if uploaded.Filename != "screenshot.png" || uploaded.ContentType != "image/png" || uploaded.SizeBytes != int64(len("fake-png-bytes")) {
+		t.Fatalf("uploaded attachment = %#v", uploaded)
+	}
+	if !strings.HasPrefix(uploaded.MarkdownRef, "![screenshot.png](hank-note-attachment://") {
+		t.Fatalf("uploaded markdown reference = %q, want inline image reference", uploaded.MarkdownRef)
+	}
+
+	requestJSON(t, testServer, created.Token, http.MethodGet, "/v1/me/notes/api-token-note.md", nil, &fetched)
+	if !strings.Contains(fetched.BodyMarkdown, "![screenshot.png](hank-note-attachment://") {
+		t.Fatalf("fetched body did not include inline image reference: %q", fetched.BodyMarkdown)
+	}
+	if len(fetched.Attachments) != 1 || fetched.Attachments[0].ID != uploaded.ID {
+		t.Fatalf("fetched attachments = %#v, want uploaded attachment", fetched.Attachments)
+	}
+
+	downloadReq, err := http.NewRequest(http.MethodGet, testServer.URL+uploaded.DownloadURL, nil)
+	if err != nil {
+		t.Fatalf("new download request: %v", err)
+	}
+	downloadReq.Header.Set("Authorization", "Bearer "+created.Token)
+	downloadResp, err := testServer.Client().Do(downloadReq)
+	if err != nil {
+		t.Fatalf("download attachment: %v", err)
+	}
+	defer downloadResp.Body.Close()
+	if downloadResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(downloadResp.Body)
+		t.Fatalf("download status = %d body = %s", downloadResp.StatusCode, body)
+	}
+	if got := downloadResp.Header.Get("Content-Disposition"); !strings.HasPrefix(got, "inline;") {
+		t.Fatalf("Content-Disposition = %q, want inline image", got)
+	}
+	downloaded, err := io.ReadAll(downloadResp.Body)
+	if err != nil {
+		t.Fatalf("read downloaded attachment: %v", err)
+	}
+	if string(downloaded) != "fake-png-bytes" {
+		t.Fatalf("downloaded attachment = %q", downloaded)
+	}
 
 	response := requestJSONStatus(t, testServer, created.Token, http.MethodDelete, "/v1/me/notes/api-token-note.md", nil, http.StatusForbidden)
 	response.Body.Close()

@@ -86,6 +86,7 @@ type NoteAttachment struct {
 	SizeBytes      int64     `json:"size_bytes"`
 	ChecksumSHA256 string    `json:"checksum_sha256"`
 	DownloadURL    string    `json:"download_url,omitempty"`
+	MarkdownRef    string    `json:"markdown_reference,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

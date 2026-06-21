@@ -64,6 +64,9 @@ Use the current task docs and repair plan rather than the old initial-build orde
 ## Technical Principles
 
 - Prefer one stable app-facing API instead of protocol-specific app networking.
+- Treat `HankServerside` like Hank's stable OS/runtime.
+- Treat Hank apps as installable first-party extensions for optional workflows, not as replacements for core Hank services.
+- Keep the `.hankapp` package format and app runtime APIs as a strict compatibility contract; breaking changes need a new schema version or migration path.
 - The home agent should own local credentials and local network access.
 - The cloud should relay and route, not require raw SMB credentials.
 - Never expose SMB directly to the internet.
@@ -89,6 +92,7 @@ For non-trivial features, bug fixes, cleanup, database work, security changes, o
 - `internal/storageops`: backup/restore operation coordination
 - `internal/observability`: metrics aggregation
 - `docs/architecture.md`: system design notes
+- `docs/hank-app-platform-contract.md`: stable runtime vs installable app boundary and `.hankapp` compatibility rules
 - `docs/project-knowledge-index.md`: markdown index used by HankAI
 
 ## Local Development Commands
@@ -181,6 +185,7 @@ Read these first when starting work:
 
 - `README.md`
 - `docs/architecture.md`
+- `docs/hank-app-platform-contract.md`
 - `docs/agent-change-guardrails.md`
 - `docs/backend-production-repair-plan.md`
 - `internal/protocol/messages.go`

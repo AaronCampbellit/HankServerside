@@ -46,6 +46,8 @@ The phase-era documents are archived under [archive/phases](archive/phases). The
 
 ## App Contract Notes
 
+- [hank-app-platform-contract.md](hank-app-platform-contract.md): stable runtime vs installable app boundary and `.hankapp` compatibility rules.
+- [hank-app-repo-separation-checklist.md](hank-app-repo-separation-checklist.md): task list for moving optional first-party Hank apps into independent repositories while keeping HankServerside as the runtime.
 - [hank-app-auth-migration.md](hank-app-auth-migration.md)
 - [hank-app-home-sync-checklist.md](hank-app-home-sync-checklist.md)
 

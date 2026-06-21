@@ -540,7 +540,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 
 	if len(parts) >= 2 {
 		if noteID, attachmentID, ok := splitNoteAttachmentRoute(parts); ok {
-			if s.rejectNotesAPIToken(w, r, auth) {
+			if !s.requireNoteAttachmentScope(w, r, auth, attachmentID) {
 				return true
 			}
 			s.handleHomeNoteAttachmentsHTTP(w, r, home, auth.authContext, noteID, attachmentID)
@@ -841,7 +841,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 
 	if parts := strings.Split(path, "/"); len(parts) >= 2 {
 		if noteID, attachmentID, ok := splitNoteAttachmentRoute(append([]string{"notes"}, parts...)); ok {
-			if s.rejectNotesAPIToken(w, r, auth) {
+			if !s.requireNoteAttachmentScope(w, r, auth, attachmentID) {
 				return
 			}
 			s.handleProfileNoteAttachmentsHTTP(w, r, auth.authContext, noteID, attachmentID)

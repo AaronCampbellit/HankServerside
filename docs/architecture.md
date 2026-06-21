@@ -31,6 +31,8 @@ Home Assistant     NAS / TrueNAS
 
 ## Current System Shape
 
+HankServerside is Hank's stable OS/runtime. It owns auth, routing, protocol, persistence, core cloud/agent capabilities, operator surfaces, and the generic installable-app runtime. Hank apps are installable first-party extensions for optional workflows that run on top of this runtime. The app/runtime boundary and `.hankapp` compatibility rules are documented in `docs/hank-app-platform-contract.md`.
+
 ### Cloud
 
 - authenticate app clients
@@ -58,6 +60,13 @@ Home Assistant     NAS / TrueNAS
 - command and event schemas
 - error format
 - long-running file and media workflows report status through job/event payloads
+
+### Installable Apps
+
+- apps are optional first-party extensions, not replacements for core Hank services
+- `.hankapp` packages are imported, validated, configured, and invoked through the generic app runtime
+- Settings > Apps renders app configuration from package manifests rather than app-specific settings panes
+- the app package format and `apps.*` commands are compatibility surfaces that require versioning or migration paths for breaking changes
 
 ## Operator Surfaces
 

@@ -485,6 +485,7 @@ func noteAttachmentToProtocol(attachment domain.NoteAttachment, note domain.User
 		SizeBytes:      attachment.SizeBytes,
 		ChecksumSHA256: attachment.ChecksumSHA256,
 		DownloadURL:    noteAttachmentDownloadPath(note, scope, attachment.ID),
+		MarkdownRef:    noteAttachmentMarkdownReference(note, scope, attachment),
 		CreatedAt:      attachment.CreatedAt,
 		UpdatedAt:      attachment.UpdatedAt,
 	}
