@@ -5,12 +5,8 @@ const state = {
   status: null,
   assistant: null,
   settings: null,
-  media: null,
   models: null,
   statusTimer: null,
-  mediaTimer: null,
-  highlightedMediaJobID: new URLSearchParams(window.location.search).get("media_job") || "",
-  highlightedMediaJobScrolled: false,
 };
 
 const els = {
@@ -28,10 +24,6 @@ const els = {
   settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
   assistantHarnessOutput: document.getElementById("assistant-harness-output"),
   assistantToolsOutput: document.getElementById("assistant-tools-output"),
-  mediaWorkflowPill: document.getElementById("media-workflow-pill"),
-  mediaWorkflowMeta: document.getElementById("media-workflow-meta"),
-  refreshMediaSettingsButton: document.getElementById("refresh-media-settings-button"),
-  mediaJobsOutput: document.getElementById("media-jobs-output"),
   harnessProfileNotesEnabled: document.getElementById("harness-profile-notes-enabled"),
   harnessHomeNotesEnabled: document.getElementById("harness-home-notes-enabled"),
   harnessFilesEnabled: document.getElementById("harness-files-enabled"),
@@ -64,151 +56,6 @@ function escapeHTML(value) {
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : "Never";
-}
-
-function formatBytes(value) {
-  const bytes = Number(value || 0);
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function normalizeMediaDestinationPath(value) {
-  return String(value || "")
-    .trim()
-    .replaceAll("\\", "/")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "")
-    .replace(/\/{2,}/g, "/");
-}
-
-function mediaDestinationLabel(value, fallback = "", sourceID = "") {
-  const cleaned = normalizeMediaDestinationPath(value);
-  if (fallback) return fallback;
-  const prefix = sourceID ? `SMB share ${sourceID}` : "SMB share";
-  return cleaned ? `${prefix}/${cleaned}` : `${prefix} root`;
-}
-
-function mediaPathBaseName(value) {
-  const cleaned = normalizeMediaDestinationPath(value);
-  if (!cleaned) return "SMB share root";
-  const parts = cleaned.split("/");
-  return parts[parts.length - 1] || cleaned;
-}
-
-function mediaPathParent(value) {
-  const cleaned = normalizeMediaDestinationPath(value);
-  if (!cleaned || !cleaned.includes("/")) return "";
-  return cleaned.split("/").slice(0, -1).join("/");
-}
-
-function mediaPathIsSameOrChild(value, base) {
-  const cleaned = normalizeMediaDestinationPath(value);
-  const root = normalizeMediaDestinationPath(base);
-  return !root || cleaned === root || cleaned.startsWith(`${root}/`);
-}
-
-function mediaDestinationValues(payload, sourceID = "") {
-  const values = new Set([""]);
-  (payload.destination_options || []).forEach((option) => {
-    if (String(option.source_id || "") !== String(sourceID || "")) return;
-    values.add(normalizeMediaDestinationPath(option.value));
-  });
-  return values;
-}
-
-function mediaDestinationChildren(values, parent) {
-  const root = normalizeMediaDestinationPath(parent);
-  return Array.from(values)
-    .filter((value) => value && mediaPathParent(value) === root)
-    .sort((left, right) => mediaPathBaseName(left).localeCompare(mediaPathBaseName(right)));
-}
-
-function renderMediaDestinationSelect(select, payload, currentValue, baseValue = "", sourceID = "") {
-  const values = mediaDestinationValues(payload, sourceID);
-  const base = normalizeMediaDestinationPath(baseValue);
-  let current = normalizeMediaDestinationPath(currentValue || base);
-  if (!mediaPathIsSameOrChild(current, base)) {
-    current = base;
-  }
-  values.add(base);
-  values.add(current);
-
-  const options = [];
-  const addOption = (value, label) => {
-    const cleaned = normalizeMediaDestinationPath(value);
-    if (options.some((option) => option.value === cleaned)) return;
-    options.push({ value: cleaned, label });
-  };
-
-  addOption(current, mediaDestinationLabel(current, "", sourceID));
-  const parent = mediaPathParent(current);
-  if (current !== base && mediaPathIsSameOrChild(parent, base)) {
-    addOption(parent, `Up to ${mediaDestinationLabel(parent, "", sourceID)}`);
-  }
-  mediaDestinationChildren(values, current).forEach((child) => {
-    addOption(child, mediaPathBaseName(child));
-  });
-
-  select.innerHTML = options.map((option) => (
-    `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`
-  )).join("");
-  select.value = current;
-}
-
-function renderMediaSourceOptions(payload, settings) {
-  const selected = String(settings.source_id || "").trim();
-  const sources = new Map([["", "Default SMB share"]]);
-  (payload.destination_options || []).forEach((option) => {
-    const sourceID = String(option.source_id || "").trim();
-    if (!sourceID || sources.has(sourceID)) return;
-    sources.set(sourceID, `SMB share ${sourceID}`);
-  });
-  if (selected && !sources.has(selected)) {
-    sources.set(selected, `SMB share ${selected}`);
-  }
-  els.mediaSourceID.innerHTML = Array.from(sources.entries()).map(([value, label]) => (
-    `<option value="${escapeHTML(value)}">${escapeHTML(label)}</option>`
-  )).join("");
-  els.mediaSourceID.value = selected;
-}
-
-function renderMediaDestinationOptions(payload, settings) {
-  renderMediaSourceOptions(payload, settings);
-  const sourceID = String(settings.source_id || "").trim();
-  const destination = normalizeMediaDestinationPath(settings.destination_path || "");
-  renderMediaDestinationSelect(els.mediaDestinationPath, payload, destination, "", sourceID);
-  renderMediaDestinationSelect(els.mediaMovieDestinationPath, payload, settings.movie_destination_path || destination, destination, sourceID);
-  renderMediaDestinationSelect(els.mediaTVDestinationPath, payload, settings.tv_destination_path || destination, destination, sourceID);
-}
-
-function refreshScopedMediaDestinationOptions(overrides = {}) {
-  const media = state.media || {};
-  const settings = media.settings || {};
-  renderMediaDestinationOptions(media, {
-    ...settings,
-    source_id: els.mediaSourceID.value,
-    destination_path: els.mediaDestinationPath.value,
-    movie_destination_path: els.mediaMovieDestinationPath.value,
-    tv_destination_path: els.mediaTVDestinationPath.value,
-    ...overrides,
-  });
-}
-
-function isActiveMediaJob(job) {
-  const status = String(job?.status || "").toLowerCase();
-  return status === "queued" || status === "running";
-}
-
-function mediaJobProgress(job) {
-  const written = Number(job.bytes_written || 0);
-  const total = Number(job.bytes_total || 0);
-  if (total <= 0) {
-    return written ? formatBytes(written) : "";
-  }
-  const percent = Math.min(100, Math.max(0, (written / total) * 100));
-  return `${formatBytes(written)} / ${formatBytes(total)} (${Math.round(percent)}%)`;
 }
 
 function showToast(message, isError = false) {
@@ -519,13 +366,6 @@ function renderToolSettings(tools) {
       status: els.harnessFilesEnabled.checked ? "Ready" : "Off",
       description: "Search file names and route approved file work through the home agent.",
     },
-    {
-      label: "Media Downloads",
-      enabled: false,
-      status: els.harnessFilesEnabled.checked ? "Agent setup needed" : "Files off",
-      description: "Search authorized media sources, prepare a confirmed download plan, and save approved files to the configured Media destination.",
-      requirements: ["Files enabled", "Media source enabled on the home agent", "Agent file backend pointed at the Media share"],
-    },
   ];
   const cards = (tools.length ? tools : fallbackTools).map((tool) => {
     const statusClass = tool.enabled ? "status-chip" : "status-chip offline";
@@ -552,92 +392,6 @@ function renderToolSettings(tools) {
       <div class="meta">Enable Hank sources before using agent-backed workflows.</div>
     </article>
   `;
-}
-
-function renderMediaWorkflowSettings() {
-  if (!state.media) {
-    els.mediaWorkflowPill.textContent = "Checking";
-    els.mediaWorkflowPill.className = "status-chip offline";
-    els.mediaWorkflowMeta.textContent = "Loading agent-backed media job state.";
-    els.mediaJobsOutput.className = "card-list empty-state";
-    els.mediaJobsOutput.textContent = "Checking media jobs.";
-    els.refreshMediaSettingsButton.disabled = true;
-    return;
-  }
-  const payload = state.media || {};
-  const settings = payload.settings || {};
-  const online = payload.online === true;
-  const canEdit = payload.can_edit === true;
-  const enabled = settings.enabled === true;
-
-  els.mediaWorkflowPill.textContent = !canEdit ? "Admin Only" : online ? (enabled ? "Enabled" : "Configured Off") : "Agent Offline";
-  els.mediaWorkflowPill.className = online && enabled ? "status-chip" : "status-chip offline";
-  if (!canEdit) {
-    els.mediaWorkflowMeta.textContent = "Only Home admins can view full media job controls.";
-  } else if (!online) {
-    els.mediaWorkflowMeta.textContent = payload.error || "The home agent is offline.";
-  } else {
-    els.mediaWorkflowMeta.textContent = "Media app configuration is managed from Apps.";
-  }
-
-  els.refreshMediaSettingsButton.disabled = !online;
-  renderMediaJobs(payload.jobs || []);
-}
-
-function renderMediaJobs(jobs) {
-  if (!state.media?.online) {
-    els.mediaJobsOutput.className = "card-list empty-state";
-    els.mediaJobsOutput.textContent = state.media?.error || "The home agent is offline.";
-    return;
-  }
-  if (!jobs.length) {
-    els.mediaJobsOutput.className = "card-list empty-state";
-    els.mediaJobsOutput.textContent = "No media jobs reported.";
-    return;
-  }
-  els.mediaJobsOutput.className = "card-list";
-  els.mediaJobsOutput.innerHTML = jobs.map((job) => {
-    const status = String(job.status || "unknown");
-    const active = status === "queued" || status === "running";
-    const statusClass = active || status === "completed" ? "status-chip" : "status-chip offline";
-    const selected = state.highlightedMediaJobID && state.highlightedMediaJobID === job.job_id;
-    const current = job.current_file ? `<div class="meta">Current: ${escapeHTML(job.current_file)}${job.bytes_written ? ` (${escapeHTML(formatBytes(job.bytes_written))})` : ""}</div>` : "";
-    const progress = mediaJobProgress(job);
-    return `
-      <article class="card media-job-card${selected ? " selected" : ""}" data-media-job-id="${escapeHTML(job.job_id || "")}">
-        <div class="card-head">
-          <div>
-            <div class="card-title">${escapeHTML(job.title || job.job_id || "Media job")}</div>
-            <div class="media-job-meta">
-              <span>${escapeHTML(job.completed_count || 0)}/${escapeHTML(job.total_count || 0)} complete</span>
-              <span>${escapeHTML(job.skipped_count || 0)} skipped</span>
-              <span>${escapeHTML(job.failed_count || 0)} failed</span>
-            </div>
-          </div>
-          <span class="${statusClass}">${escapeHTML(status)}</span>
-        </div>
-        ${current}
-        ${progress ? `<div class="meta">Progress: ${escapeHTML(progress)}</div>` : ""}
-        ${job.download_mode ? `<div class="meta">Mode: ${escapeHTML(job.download_mode)}${job.verification_status ? ` · Verify: ${escapeHTML(job.verification_status)}` : ""}${job.fallback_used ? " · Fallback used" : ""}</div>` : ""}
-        ${job.error_message ? `<div class="meta">${escapeHTML(job.error_message)}</div>` : ""}
-        ${active ? `<div class="actions wrap"><button type="button" class="secondary" data-cancel-media-job="${escapeHTML(job.job_id)}">Cancel Job</button></div>` : ""}
-      </article>
-    `;
-  }).join("");
-  scrollHighlightedMediaJob();
-}
-
-function scrollHighlightedMediaJob() {
-  if (!state.highlightedMediaJobID || state.highlightedMediaJobScrolled) {
-    return;
-  }
-  const selected = Array.from(els.mediaJobsOutput.querySelectorAll("[data-media-job-id]"))
-    .find((element) => element.dataset.mediaJobId === state.highlightedMediaJobID);
-  if (!selected) {
-    return;
-  }
-  state.highlightedMediaJobScrolled = true;
-  selected.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function setSettingsSection(nextSection, options = {}) {
@@ -671,7 +425,7 @@ function assistantSettingsFormPayload() {
   };
 }
 
-async function loadStatus(options = {}) {
+async function loadStatus() {
   clearTimeout(state.statusTimer);
   const wasLinked = state.status?.linked === true;
   const [status, assistant, settings] = await Promise.all([
@@ -690,11 +444,8 @@ async function loadStatus(options = {}) {
   if (status.pending?.state === "pending") {
     const waitSeconds = Math.max(Number(status.pending.poll_after_seconds || 3), 2);
     state.statusTimer = window.setTimeout(() => {
-      loadStatus({ includeMedia: false }).catch((error) => showToast(error.message, true));
+      loadStatus().catch((error) => showToast(error.message, true));
     }, waitSeconds * 1000);
-  }
-  if (options.includeMedia !== false) {
-    loadMediaStatus().catch((error) => showToast(error.message, true));
   }
 }
 
@@ -716,26 +467,6 @@ async function loadModelOptions() {
   }
 }
 
-async function loadMediaStatus() {
-  clearTimeout(state.mediaTimer);
-  const media = await api("/v1/home/assistant/media-settings").catch((error) => ({
-    online: false,
-    can_edit: false,
-    settings: { base_url: "https://gramaton.io", preferred_quality: "1080p", require_confirmation: true },
-    destination_options: [{ value: "", label: "SMB share root" }],
-    jobs: [],
-    error: error.message,
-  }));
-  state.media = media;
-  renderMediaWorkflowSettings();
-  const hasActiveMediaJobs = (media.jobs || []).some(isActiveMediaJob);
-  if (hasActiveMediaJobs) {
-    state.mediaTimer = window.setTimeout(() => {
-      loadMediaStatus().catch((error) => showToast(error.message, true));
-    }, 3000);
-  }
-}
-
 async function saveAssistantSettings(event) {
   event.preventDefault();
   try {
@@ -743,20 +474,10 @@ async function saveAssistantSettings(event) {
       method: "PUT",
       body: JSON.stringify(assistantSettingsFormPayload()),
     });
-    await loadStatus({ includeMedia: false });
+    await loadStatus();
     state.models = null;
     await loadModelOptions();
     showToast("HankAI settings saved.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function cancelMediaJob(jobID) {
-  try {
-    await api(`/v1/home/assistant/media-jobs/${encodeURIComponent(jobID)}/cancel`, { method: "POST" });
-    await loadMediaStatus();
-    showToast("Media job cancelled.");
   } catch (error) {
     showToast(error.message, true);
   }
@@ -768,7 +489,7 @@ async function linkOpenAI() {
     if (payload.auth_mode === "device_code" && payload.verification_url && payload.user_code) {
       showToast(`Enter code ${payload.user_code} to finish linking.`);
       window.open(payload.verification_url, "_blank", "noopener");
-      await loadStatus({ includeMedia: false });
+      await loadStatus();
       loadModelOptions().catch((error) => showToast(error.message, true));
       return;
     }
@@ -792,8 +513,8 @@ async function hydrate() {
     state.user = me.user;
     renderSession();
     const params = new URLSearchParams(window.location.search);
-    if (params.get("settings_tab") || state.highlightedMediaJobID) {
-      setSettingsSection(params.get("settings_tab") || "tools");
+    if (params.get("settings_tab")) {
+      setSettingsSection(params.get("settings_tab"));
     }
     await loadStatus();
     loadModelOptions().catch((error) => showToast(error.message, true));
@@ -805,12 +526,6 @@ async function hydrate() {
 els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
-els.refreshMediaSettingsButton.addEventListener("click", () => loadMediaStatus().then(() => showToast("Media jobs refreshed.")).catch((error) => showToast(error.message, true)));
-els.mediaJobsOutput.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-cancel-media-job]");
-  if (!button) return;
-  cancelMediaJob(button.dataset.cancelMediaJob);
-});
 els.settingsSectionButtons.forEach((button) => {
   button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));
 });

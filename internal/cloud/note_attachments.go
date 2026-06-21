@@ -23,6 +23,11 @@ import (
 
 const maxNoteAttachmentBytes = 100 << 20
 
+const (
+	noteAttachmentDirMode  os.FileMode = 0o755
+	noteAttachmentFileMode os.FileMode = 0o644
+)
+
 var unsafeAttachmentFilenameRunes = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
 
 func splitNoteAttachmentRoute(parts []string) (noteID string, attachmentID string, ok bool) {
@@ -153,7 +158,13 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 	if err != nil {
 		return domain.NoteAttachment{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetPath), noteAttachmentDirMode); err != nil {
+		return domain.NoteAttachment{}, err
+	}
+	if err := os.Chmod(s.noteAttachmentRoot, noteAttachmentDirMode); err != nil {
+		return domain.NoteAttachment{}, err
+	}
+	if err := os.Chmod(filepath.Dir(targetPath), noteAttachmentDirMode); err != nil {
 		return domain.NoteAttachment{}, err
 	}
 	tempPath := targetPath + ".tmp"
@@ -180,6 +191,9 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 		return domain.NoteAttachment{}, err
 	}
 	if err := os.Rename(tempPath, targetPath); err != nil {
+		return domain.NoteAttachment{}, err
+	}
+	if err := os.Chmod(targetPath, noteAttachmentFileMode); err != nil {
 		return domain.NoteAttachment{}, err
 	}
 
@@ -355,6 +369,25 @@ func (s *Server) pruneNoteAttachmentFiles(ctx context.Context, now time.Time, re
 	return nil
 }
 
+func (s *Server) repairNoteAttachmentBackupPermissions() error {
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.noteAttachmentRoot))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, noteAttachmentDirMode)
+		}
+		return os.Chmod(path, noteAttachmentFileMode)
+	})
+}
+
 func (s *Server) resolveNoteAttachmentPath(storageKey string, forWrite bool) (string, error) {
 	cleaned := filepath.Clean(strings.TrimSpace(storageKey))
 	if cleaned == "." || filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || cleaned == ".." {
@@ -363,7 +396,7 @@ func (s *Server) resolveNoteAttachmentPath(storageKey string, forWrite bool) (st
 	root, err := filepath.EvalSymlinks(filepath.Clean(s.noteAttachmentRoot))
 	if err != nil {
 		if forWrite && errors.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(s.noteAttachmentRoot, 0o700); err != nil {
+			if err := os.MkdirAll(s.noteAttachmentRoot, noteAttachmentDirMode); err != nil {
 				return "", err
 			}
 			root, err = filepath.EvalSymlinks(filepath.Clean(s.noteAttachmentRoot))

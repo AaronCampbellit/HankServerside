@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
-	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
 
@@ -79,7 +78,7 @@ func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.assistantSettingsPayload(home.ID, settings))
+		writeJSON(w, http.StatusOK, s.assistantSettingsPayload(settings))
 	case http.MethodPut:
 		current, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
 		if err != nil {
@@ -106,7 +105,7 @@ func (s *Server) handleAssistantSettings(w http.ResponseWriter, r *http.Request,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.assistantSettingsPayload(home.ID, updated))
+		writeJSON(w, http.StatusOK, s.assistantSettingsPayload(updated))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -407,9 +406,8 @@ func assistantProviderOptions() []map[string]string {
 	}
 }
 
-func (s *Server) assistantSettingsPayload(homeID string, settings domain.AssistantSettings) assistantSettingsResponse {
+func (s *Server) assistantSettingsPayload(settings domain.AssistantSettings) assistantSettingsResponse {
 	settings = normalizeAssistantSettings(settings)
-	capabilities := s.agentCapabilities(homeID)
 	cfg := s.assistantAI
 	cfg.normalize()
 	return assistantSettingsResponse{
@@ -429,7 +427,7 @@ func (s *Server) assistantSettingsPayload(homeID string, settings domain.Assista
 			"embedding_model_options": assistantEmbeddingModelOptions(cfg),
 		},
 		Sources: assistantSettingsSources(settings),
-		Tools:   assistantSettingsTools(settings, capabilities),
+		Tools:   assistantSettingsTools(settings),
 	}
 }
 
@@ -491,27 +489,8 @@ func assistantSettingsSources(settings domain.AssistantSettings) []assistantSett
 	}
 }
 
-func assistantSettingsTools(settings domain.AssistantSettings, capabilities []string) []assistantSettingsTool {
+func assistantSettingsTools(settings domain.AssistantSettings) []assistantSettingsTool {
 	settings = normalizeAssistantSettings(settings)
-	mediaConfigurable := hasCapabilities(capabilities,
-		protocol.CommandMediaSettingsStatus,
-		protocol.CommandMediaSettingsApply,
-	)
-	mediaReady := settings.FilesEnabled &&
-		hasCapabilities(capabilities,
-			protocol.CommandMediaSearch,
-			protocol.CommandMediaPlanDownload,
-			protocol.CommandMediaDownloadStart,
-			protocol.CommandMediaDownloadStatus,
-		)
-	mediaStatus := "Agent setup needed"
-	if !settings.FilesEnabled {
-		mediaStatus = "Files off"
-	} else if mediaReady {
-		mediaStatus = "Ready"
-	} else if mediaConfigurable {
-		mediaStatus = "Needs Gramaton credentials"
-	}
 	notesReady := settings.ProfileNotesEnabled || settings.HomeNotesEnabled
 	return []assistantSettingsTool{
 		{
@@ -527,18 +506,6 @@ func assistantSettingsTools(settings domain.AssistantSettings, capabilities []st
 			Enabled:     settings.FilesEnabled,
 			Status:      enabledStatus(settings.FilesEnabled),
 			Description: "Search file names and route approved file work through the home agent.",
-		},
-		{
-			Key:         "media_download",
-			Label:       "Media Downloads",
-			Enabled:     mediaReady,
-			Status:      mediaStatus,
-			Description: "Search authorized media sources, prepare a confirmed download plan, and save approved files to the configured Media destination.",
-			Requirements: []string{
-				"Files enabled",
-				"Media source enabled on the home agent",
-				"Agent file backend pointed at the Media share",
-			},
 		},
 		{
 			Key:         "calendar",

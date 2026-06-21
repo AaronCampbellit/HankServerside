@@ -1,9 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "url": { "type": "string" },
-    "content_type": { "type": "string" },
-    "content_base64": { "type": "string" }
-  }
-}

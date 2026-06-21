@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +111,8 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 		t.Fatalf("fetched attachments = %#v, want uploaded attachment", fetched.Attachments)
 	}
 
+	assertNoteAttachmentBackupReadable(t, root)
+
 	downloadReq, err := http.NewRequest(http.MethodGet, testServer.URL+uploaded.DownloadURL, nil)
 	if err != nil {
 		t.Fatalf("new download request: %v", err)
@@ -151,6 +155,53 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 	requestJSON(t, testServer, adminToken, http.MethodDelete, "/v1/home/notes-api-tokens/"+created.APIToken.ID, nil, nil)
 	response = requestJSONStatus(t, testServer, created.Token, http.MethodGet, "/v1/me/notes/api-token-note.md", nil, http.StatusUnauthorized)
 	response.Body.Close()
+}
+
+func assertNoteAttachmentBackupReadable(t *testing.T, root string) {
+	t.Helper()
+
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		mode := info.Mode().Perm()
+		if entry.IsDir() {
+			if mode&0o005 != 0o005 {
+				t.Fatalf("attachment directory %s mode = %o, want other read/execute for backup", path, mode)
+			}
+			return nil
+		}
+		if mode&0o004 != 0o004 {
+			t.Fatalf("attachment file %s mode = %o, want other read for backup", path, mode)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk attachment root: %v", err)
+	}
+}
+
+func TestRepairNoteAttachmentBackupPermissionsFixesLegacyModes(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	noteDir := filepath.Join(root, "note_legacy")
+	if err := os.MkdirAll(noteDir, 0o700); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(noteDir, "natt_legacy-receipt.png"), []byte("receipt"), 0o600); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	server := &Server{noteAttachmentRoot: root}
+	if err := server.repairNoteAttachmentBackupPermissions(); err != nil {
+		t.Fatalf("repairNoteAttachmentBackupPermissions: %v", err)
+	}
+
+	assertNoteAttachmentBackupReadable(t, root)
 }
 
 func TestNotesAPITokenReadScopeCannotWrite(t *testing.T) {

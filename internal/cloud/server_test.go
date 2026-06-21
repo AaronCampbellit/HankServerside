@@ -1173,7 +1173,7 @@ func TestInstallableAppUIIsPackageDriven(t *testing.T) {
 			t.Fatalf("read %s: %v", asset, err)
 		}
 		body := string(data)
-		for _, forbidden := range []string{"Hermes Agent", "hermes-form", "Save Hermes", "Enable Gramaton source", "media-gramaton"} {
+		for _, forbidden := range []string{"Hermes Agent", "hermes-form", "Save Hermes", "Enable Gramaton source", "media-gramaton", "Media Downloads", "Agent setup needed"} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s should not contain legacy installable app UI marker %q", asset, forbidden)
 			}

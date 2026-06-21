@@ -242,6 +242,9 @@ func (s *Server) StartRuntime(ctx context.Context, version string) error {
 	if err := s.store.MarkInterruptedFileOperationJobs(ctx, time.Now().UTC()); err != nil {
 		s.logger.Warn("failed to mark interrupted file operation jobs", "runtime_id", s.runtimeID, "error", err)
 	}
+	if err := s.repairNoteAttachmentBackupPermissions(); err != nil {
+		s.logger.Warn("failed to repair note attachment backup permissions", "runtime_id", s.runtimeID, "error", err)
+	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
 	s.runtimeCancel = cancel
 	go func() {

@@ -28,20 +28,20 @@ Keep these in `HankServerside`:
 - core Hank features: Home Assistant, files, notes, storage, backup, restore,
   dashboard infrastructure, and the assistant shell
 
-Move these to per-app repos:
+Moved to sibling per-app repos under `/Volumes/CampbellDrive/Projects`:
 
-- `cmd/hank-app-hermes` and `packages/hermes`
-- `cmd/hank-app-gramaton` and `packages/gramaton`
-- `cmd/hank-app-ydownload` and `packages/ydownload`
+- `hermes`
+- `gramaton`
+- `ydownload`
 - app-specific tests, schemas, READMEs, and package scripts
 
-## Current Inventory
+## Extracted Repo Inventory
 
-| App | Current source | Current package metadata | Package script | Runtime binary |
-| --- | --- | --- | --- | --- |
-| Hermes | `cmd/hank-app-hermes` | `packages/hermes` | `scripts/package-hermes-app.sh` | `bin/hank-app-hermes` |
-| Gramaton | `cmd/hank-app-gramaton` | `packages/gramaton` | `scripts/package-gramaton-app.sh` | `bin/hank-app-gramaton` |
-| YDownload | `cmd/hank-app-ydownload` | `packages/ydownload` | `scripts/package-ydownload-app.sh` | `bin/hank-app-ydownload` |
+| App | Repo | Package script | Runtime binary |
+| --- | --- | --- | --- |
+| Hermes | `/Volumes/CampbellDrive/Projects/hermes` | `scripts/package-hermes-app.sh` | `bin/hank-app-hermes` |
+| Gramaton | `/Volumes/CampbellDrive/Projects/gramaton` | `scripts/package-gramaton-app.sh` | `bin/hank-app-gramaton` |
+| YDownload | `/Volumes/CampbellDrive/Projects/ydownload` | `scripts/package-ydownload-app.sh` | `bin/hank-app-ydownload` |
 
 Runtime/platform files that stay in this repo:
 
@@ -77,11 +77,11 @@ Runtime/platform files that stay in this repo:
 
 ### Phase 2: Prepare Extraction Repositories
 
-- [ ] Create `hank-app-hermes` with app source, schemas, tests, package script,
+- [x] Create `hank-app-hermes` with app source, schemas, tests, package script,
   README, and release workflow.
-- [ ] Create `hank-app-gramaton` with app source, schemas, tests, package
+- [x] Create `hank-app-gramaton` with app source, schemas, tests, package
   script, README, and release workflow.
-- [ ] Create `hank-app-ydownload` with app source, schemas, tests, package
+- [x] Create `hank-app-ydownload` with app source, schemas, tests, package
   script, README, and release workflow.
 - [ ] Give each repo a small CI path that runs `go test ./...`, builds the
   Linux amd64 stdio binary, creates the `.hankapp`, and validates it against the
@@ -94,11 +94,11 @@ Runtime/platform files that stay in this repo:
 
 ### Phase 3: Make HankServerside Consume Packages, Not Source Trees
 
-- [ ] Replace app-source package scripts in this repo with fixture-only scripts
+- [x] Replace app-source package scripts in this repo with fixture-only scripts
   or remove them after external package builds are proven.
-- [ ] Move current app source out of `cmd/hank-app-*` after external repos build
+- [x] Move current app source out of `cmd/hank-app-*` after external repos build
   equivalent packages.
-- [ ] Move current app manifests, schemas, and app READMEs out of
+- [x] Move current app manifests, schemas, and app READMEs out of
   `packages/<app>` after equivalent external repos exist.
 - [ ] Keep only minimal test fixtures under `testdata/apps/<app>` if runtime
   tests need stable package examples.
@@ -155,9 +155,9 @@ Runtime/platform files that stay in this repo:
 
 ### Phase 7: Cleanup And Publish
 
-- [ ] Remove duplicated app source from `HankServerside` after external package
+- [x] Remove duplicated app source from `HankServerside` after external package
   installs are proven.
-- [ ] Remove stale package scripts from `HankServerside` or convert them into
+- [x] Remove stale package scripts from `HankServerside` or convert them into
   fixture builders that do not contain first-party app source assumptions.
 - [ ] Keep a small compatibility fixture set for runtime regression tests.
 - [ ] Update `README.md`, `docs/architecture.md`,

@@ -64,8 +64,8 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if !strings.Contains(defaults.Settings.SystemPrompt, "You are HankAI") || !strings.Contains(defaults.Settings.SystemPrompt, "privacy boundary") {
 		t.Fatalf("default prompt does not include harness guidance: %q", defaults.Settings.SystemPrompt)
 	}
-	if toolStatus(defaults.Tools, "media_download") != "Agent setup needed" {
-		t.Fatalf("default media tool status = %#v", defaults.Tools)
+	if hasTool(defaults.Tools, "media_download") {
+		t.Fatalf("default tools still include app-owned media workflow: %#v", defaults.Tools)
 	}
 	legacySettings := normalizeAssistantSettings(domain.AssistantSettings{SystemPrompt: legacyAssistantSystemPrompt})
 	if legacySettings.SystemPrompt != defaultAssistantSystemPrompt {
@@ -101,8 +101,8 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	if updated.Settings.AIProvider != "ollama" || updated.Settings.OllamaBaseURL != "http://ollama:11434" || updated.Settings.EmbeddingModel != "nomic-embed-text" || updated.Settings.PromptProfile != "local" || !updated.Settings.PlannerEnabled || updated.Settings.PlannerModel != "qwen3:4b" {
 		t.Fatalf("provider/model profile settings = %#v", updated.Settings)
 	}
-	if toolStatus(updated.Tools, "media_download") != "Files off" {
-		t.Fatalf("media tool status after disabling files = %#v", updated.Tools)
+	if hasTool(updated.Tools, "media_download") {
+		t.Fatalf("updated tools still include app-owned media workflow: %#v", updated.Tools)
 	}
 
 	var persisted assistantSettingsResponse
@@ -112,13 +112,13 @@ func TestAssistantSettingsEndpointUpdatesHarness(t *testing.T) {
 	}
 }
 
-func toolStatus(tools []assistantSettingsTool, key string) string {
+func hasTool(tools []assistantSettingsTool, key string) bool {
 	for _, tool := range tools {
 		if tool.Key == key {
-			return tool.Status
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 func TestAssistantSessionCanBeDeleted(t *testing.T) {

@@ -8,10 +8,23 @@ import (
 )
 
 func TestYDownloadSettingsUseDropdownsForBoundedInputs(t *testing.T) {
-	data, err := os.ReadFile("../../packages/ydownload/app.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := []byte(`{
+		"config": {
+			"settings_schema": {
+				"fields": [
+					{"key": "destination_path", "type": "select", "options": [{"value": "YouTube", "label": "YouTube"}]},
+					{"key": "format", "type": "select", "options": [{"value": "best", "label": "Best"}]},
+					{"key": "output_template", "type": "select", "options": [{"value": "%(title)s.%(ext)s", "label": "Title"}]},
+					{"key": "subtitle_languages", "type": "select", "options": [{"value": "en.*,all,-live_chat", "label": "English"}]},
+					{"key": "subtitle_format", "type": "select", "options": [{"value": "srt/best", "label": "SRT"}]},
+					{"key": "rate_limit", "type": "select", "options": [{"value": "", "label": "Unlimited"}]},
+					{"key": "cookies_file_path", "type": "select", "options": [{"value": "", "label": "None"}]},
+					{"key": "yt_dlp_path", "type": "select", "options": [{"value": "yt-dlp", "label": "yt-dlp"}]},
+					{"key": "timeout_seconds", "type": "select", "options": [{"value": 900, "label": "15 minutes"}]}
+				]
+			}
+		}
+	}`)
 	var manifest struct {
 		Config struct {
 			SettingsSchema struct {

@@ -9,30 +9,30 @@ import (
 	"testing"
 )
 
-func validHermesManifest() Manifest {
+func validContractManifest() Manifest {
 	return Manifest{
 		SchemaVersion: "hank.app.v1",
-		ID:            "hermes",
-		Name:          "Hermes",
+		ID:            "sample_app",
+		Name:          "Sample App",
 		Version:       "1.0.0",
 		Publisher:     "Hank",
-		Description:   "Route explicit /Hermes prompts to a local Hermes API server.",
+		Description:   "Exercise the installable app manifest contract.",
 		Runtime: Runtime{
 			Type:    "stdio",
-			Command: "bin/hermes-app",
+			Command: "bin/sample-app",
 		},
 		Assistant: Assistant{
 			SlashCommands: []SlashCommand{{
-				Command:     "/Hermes",
-				CommandID:   "chat",
-				Description: "Send a prompt to Hermes.",
+				Command:     "/sample",
+				CommandID:   "run",
+				Description: "Run the sample command.",
 			}},
 		},
 		Commands: []Command{{
-			ID:             "chat",
+			ID:             "run",
 			Mode:           "request_response",
-			InputSchema:    "schemas/chat.input.schema.json",
-			OutputSchema:   "schemas/chat.output.schema.json",
+			InputSchema:    "schemas/run.input.schema.json",
+			OutputSchema:   "schemas/run.output.schema.json",
 			TimeoutSeconds: 120,
 			AdminOnly:      true,
 		}},
@@ -49,32 +49,19 @@ func validHermesManifest() Manifest {
 	}
 }
 
-func TestValidateManifestAcceptsHermesShape(t *testing.T) {
+func TestValidateManifestAcceptsContractShape(t *testing.T) {
 	t.Parallel()
-	if err := ValidateManifest(validHermesManifest()); err != nil {
+	if err := ValidateManifest(validContractManifest()); err != nil {
 		t.Fatalf("ValidateManifest error: %v", err)
 	}
 }
 
-func TestValidateManifestAcceptsCurrentFirstPartyPackageManifests(t *testing.T) {
+func TestValidateManifestAcceptsNeutralContractFixtures(t *testing.T) {
 	t.Parallel()
-	paths := []string{
-		"../../../packages/hermes/app.json",
-		"../../../packages/gramaton/app.json",
-		"../../../packages/ydownload/app.json",
-	}
-	for _, path := range paths {
-		path := path
-		t.Run(filepath.Base(filepath.Dir(path)), func(t *testing.T) {
+	for name, manifest := range neutralContractManifestFixtures() {
+		manifest := manifest
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read manifest: %v", err)
-			}
-			var manifest Manifest
-			if err := json.Unmarshal(data, &manifest); err != nil {
-				t.Fatalf("decode manifest: %v", err)
-			}
 			if err := ValidateManifest(manifest); err != nil {
 				t.Fatalf("ValidateManifest error: %v", err)
 			}
@@ -82,14 +69,53 @@ func TestValidateManifestAcceptsCurrentFirstPartyPackageManifests(t *testing.T) 
 	}
 }
 
+func neutralContractManifestFixtures() map[string]Manifest {
+	withConfiguredPermissions := validContractManifest()
+	withConfiguredPermissions.Config.Settings = SettingsSchema{Fields: []SettingsField{
+		{Key: "enabled", Label: "Enabled", Type: "boolean", Default: json.RawMessage(`true`), Order: 10},
+		{Key: "api_base_url", Label: "API URL", Type: "url", Required: true, Default: json.RawMessage(`"https://example.test"`), Order: 20},
+		{Key: "api_key", Label: "API key", Type: "password", Secret: true, SecretKey: "api_key", Order: 30},
+		{Key: "source_id", Label: "File source", Type: "select", Source: "file_sources", Order: 40},
+		{Key: "destination_path", Label: "Destination", Type: "path", Placeholder: "Inbox", Order: 50},
+		{Key: "mode", Label: "Mode", Type: "select", Default: json.RawMessage(`"standard"`), Options: []SettingsOption{
+			{Value: json.RawMessage(`"standard"`), Label: "Standard"},
+			{Value: json.RawMessage(`"advanced"`), Label: "Advanced"},
+		}, Order: 60},
+		{Key: "timeout_seconds", Label: "Timeout", Type: "number", Default: json.RawMessage(`120`), Order: 70},
+	}}
+	withConfiguredPermissions.Permissions = Permissions{
+		Network: []NetworkPermission{{Kind: "configured_base_url", Field: "api_base_url"}},
+		Files:   []FilePermission{{Kind: "configured_source", Field: "source_id"}},
+	}
+
+	multiCommand := validContractManifest()
+	multiCommand.ID = "workflow_app"
+	multiCommand.Name = "Workflow App"
+	multiCommand.Assistant.SlashCommands = []SlashCommand{{
+		Command:     "/workflow",
+		CommandID:   "start",
+		Description: "Start a workflow.",
+	}}
+	multiCommand.Commands = []Command{
+		{ID: "start", Mode: "request_response", InputSchema: "schemas/start.input.schema.json", OutputSchema: "schemas/start.output.schema.json", TimeoutSeconds: 30},
+		{ID: "status", Mode: "request_response", InputSchema: "schemas/status.input.schema.json", OutputSchema: "schemas/status.output.schema.json", TimeoutSeconds: 30},
+		{ID: "cancel", Mode: "request_response", InputSchema: "schemas/cancel.input.schema.json", OutputSchema: "schemas/cancel.output.schema.json", TimeoutSeconds: 30, AdminOnly: true},
+	}
+
+	return map[string]Manifest{
+		"configured_permissions": withConfiguredPermissions,
+		"multi_command":          multiCommand,
+	}
+}
+
 func TestValidateManifestAcceptsTypedSettingsAndFileSourcePermission(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	manifest.Config.Settings = SettingsSchema{
 		Fields: []SettingsField{
 			{
 				Key:      "api_base_url",
-				Label:    "Hermes URL",
+				Label:    "API URL",
 				Type:     "url",
 				Required: true,
 			},
@@ -120,7 +146,7 @@ func TestValidateManifestAcceptsTypedSettingsAndFileSourcePermission(t *testing.
 
 func TestValidateManifestRejectsInvalidSettingsFields(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	manifest.Config.Settings = SettingsSchema{
 		Fields: []SettingsField{{
 			Key:  "../bad",
@@ -149,7 +175,7 @@ func TestValidateManifestRejectsUnsafeIDsAndPaths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manifest := validHermesManifest()
+			manifest := validContractManifest()
 			tt.mutate(&manifest)
 			err := ValidateManifest(manifest)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -161,10 +187,10 @@ func TestValidateManifestRejectsUnsafeIDsAndPaths(t *testing.T) {
 
 func TestValidateManifestRejectsDuplicateSlashCommands(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	manifest.Assistant.SlashCommands = append(manifest.Assistant.SlashCommands, SlashCommand{
-		Command:     "/Hermes",
-		CommandID:   "chat",
+		Command:     "/sample",
+		CommandID:   "run",
 		Description: "Duplicate route.",
 	})
 	err := ValidateManifest(manifest)
@@ -175,7 +201,7 @@ func TestValidateManifestRejectsDuplicateSlashCommands(t *testing.T) {
 
 func TestValidateManifestRejectsReservedSlashCommands(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	manifest.Assistant.SlashCommands[0].Command = "/files"
 	err := ValidateManifest(manifest)
 	if err == nil || !strings.Contains(err.Error(), "reserved slash command") {
@@ -246,7 +272,7 @@ func TestValidateManifestRejectsInvalidSettingsDefaultsAndOptions(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manifest := validHermesManifest()
+			manifest := validContractManifest()
 			manifest.Config.Settings = SettingsSchema{Fields: []SettingsField{tt.field}}
 			err := ValidateManifest(manifest)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -258,7 +284,7 @@ func TestValidateManifestRejectsInvalidSettingsDefaultsAndOptions(t *testing.T) 
 
 func TestValidateManifestAcceptsScalarSelectDefaultsAndEmptyOptions(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	manifest.Config.Settings = SettingsSchema{
 		Fields: []SettingsField{
 			{
@@ -316,13 +342,13 @@ func TestPreviewArchiveRejectsTraversal(t *testing.T) {
 
 func TestPreviewArchiveRejectsTrailingManifestJSON(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	archivePath := filepath.Join(t.TempDir(), "trailing-json.hankapp")
-	writeArchiveEntries(t, archivePath, hermesPackageEntries(string(rawManifest)+"\n{}"))
+	writeArchiveEntries(t, archivePath, samplePackageEntries(string(rawManifest)+"\n{}"))
 
 	_, err = PreviewArchive(archivePath)
 	if err == nil || !strings.Contains(err.Error(), "trailing JSON") {
@@ -332,13 +358,13 @@ func TestPreviewArchiveRejectsTrailingManifestJSON(t *testing.T) {
 
 func TestPreviewArchiveRejectsOversizedManifest(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	archivePath := filepath.Join(t.TempDir(), "oversized-manifest.hankapp")
-	writeArchiveEntries(t, archivePath, hermesPackageEntries(string(rawManifest)+strings.Repeat(" ", 128*1024)))
+	writeArchiveEntries(t, archivePath, samplePackageEntries(string(rawManifest)+strings.Repeat(" ", 128*1024)))
 
 	_, err = PreviewArchive(archivePath)
 	if err == nil || !strings.Contains(err.Error(), "app.json too large") {
@@ -346,35 +372,35 @@ func TestPreviewArchiveRejectsOversizedManifest(t *testing.T) {
 	}
 }
 
-func TestPreviewArchiveAcceptsHermesPackage(t *testing.T) {
+func TestPreviewArchiveAcceptsSamplePackage(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	archivePath := filepath.Join(dir, "hermes.hankapp")
-	writeArchiveEntries(t, archivePath, hermesPackageEntries(string(rawManifest)))
+	archivePath := filepath.Join(dir, "sample.hankapp")
+	writeArchiveEntries(t, archivePath, samplePackageEntries(string(rawManifest)))
 
 	preview, err := PreviewArchive(archivePath)
 	if err != nil {
 		t.Fatalf("PreviewArchive error: %v", err)
 	}
-	if preview.Manifest.ID != "hermes" || preview.Manifest.Commands[0].ID != "chat" {
+	if preview.Manifest.ID != "sample_app" || preview.Manifest.Commands[0].ID != "run" {
 		t.Fatalf("preview = %#v", preview)
 	}
 }
 
 func TestPreviewArchiveRejectsUnsafeArchivePaths(t *testing.T) {
 	t.Parallel()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	validEntries := func() []archiveEntry {
-		return archiveEntriesFromMap(hermesPackageEntries(string(rawManifest)))
+		return archiveEntriesFromMap(samplePackageEntries(string(rawManifest)))
 	}
 	tests := []struct {
 		name    string
@@ -495,7 +521,7 @@ func TestPreviewArchiveRejectsDuplicateAndSymlinkEntries(t *testing.T) {
 func TestPreviewArchiveRequiresReferencedFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	manifest := validHermesManifest()
+	manifest := validContractManifest()
 	rawManifest, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -516,7 +542,7 @@ func TestPreviewArchiveRequiresReferencedFiles(t *testing.T) {
 			name: "missing schema",
 			entries: map[string]string{
 				"app.json":       string(rawManifest),
-				"bin/hermes-app": "#!/bin/sh\n",
+				"bin/sample-app": "#!/bin/sh\n",
 			},
 			want: "schema path",
 		},
@@ -538,13 +564,13 @@ type archiveEntry struct {
 	Body string
 }
 
-func hermesPackageEntries(rawManifest string) map[string]string {
+func samplePackageEntries(rawManifest string) map[string]string {
 	return map[string]string{
 		"app.json":                        rawManifest,
-		"bin/hermes-app":                  "#!/bin/sh\n",
+		"bin/sample-app":                  "#!/bin/sh\n",
 		"schemas/config.schema.json":      `{"type":"object"}`,
-		"schemas/chat.input.schema.json":  `{"type":"object"}`,
-		"schemas/chat.output.schema.json": `{"type":"object"}`,
+		"schemas/run.input.schema.json":   `{"type":"object"}`,
+		"schemas/run.output.schema.json":  `{"type":"object"}`,
 	}
 }
 

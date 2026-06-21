@@ -41,7 +41,6 @@ The phase-era documents are archived under [archive/phases](archive/phases). The
 - [hankai-chat-tool-improvement-plan.md](hankai-chat-tool-improvement-plan.md)
 - [hankai-intents-rollout.md](hankai-intents-rollout.md)
 - [hankai-local-model-evals.md](hankai-local-model-evals.md)
-- [hermes-chat-workflow.md](hermes-chat-workflow.md)
 - [notes-api.md](notes-api.md): external application guide for profile and shared Home notes over scoped, revocable Notes API tokens.
 
 ## App Contract Notes
