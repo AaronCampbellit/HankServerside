@@ -310,6 +310,32 @@ func defaultEvalCases() []evalCase {
 			Expect:  evalExpect{ToolKind: "notes.search", IntentKind: "notes.search", MinCards: 1, CardKind: "note"},
 		},
 		{
+			Name:   "notes create confirmation",
+			Group:  "notes",
+			Prompt: "create a note called HankAI Eval Draft with local intent coverage",
+			Expect: evalExpect{
+				ToolKind:             "notes.create",
+				IntentKind:           "notes.create",
+				RequiresConfirmation: boolPtr(true),
+				PendingKind:          "note_create",
+				Destructive:          boolPtr(false),
+			},
+		},
+		{
+			Name:    "notes append fixture",
+			Group:   "notes",
+			Prompt:  "add call plumber to the HankAI eval list note",
+			Prepare: prepareNoteAppendFixture,
+			Expect:  evalExpect{ToolKind: "notes.append", IntentKind: "notes.append", MinCards: 1, CardKind: "note"},
+		},
+		{
+			Name:    "notes summarize fixture",
+			Group:   "notes",
+			Prompt:  "summarize my HankAI eval project note",
+			Prepare: prepareNoteSummaryFixture,
+			Expect:  evalExpect{ToolKind: "notes.summarize", IntentKind: "notes.summarize", MinCards: 1, CardKind: "note"},
+		},
+		{
 			Name:    "files tax folder search",
 			Group:   "files",
 			Prompt:  "find the 2025 tax folder",
@@ -700,6 +726,24 @@ func prepareNotesFixture(ctx context.Context, client *liveClient) error {
 		"hankai-eval-smb.md",
 		"HankAI Eval SMB",
 		"SMB access should stay behind the Hank Remote cloud-and-agent API. Never expose SMB directly to the internet.",
+	)
+}
+
+func prepareNoteAppendFixture(ctx context.Context, client *liveClient) error {
+	return client.putProfileNote(
+		ctx,
+		"hankai-eval-list.md",
+		"HankAI Eval List",
+		"Eval list:\n- check local model routing",
+	)
+}
+
+func prepareNoteSummaryFixture(ctx context.Context, client *liveClient) error {
+	return client.putProfileNote(
+		ctx,
+		"hankai-eval-project-note.md",
+		"HankAI Eval Project Note",
+		"The HankAI local model intent harness should verify note search, note creation confirmation, note append, and note summary behavior.",
 	)
 }
 

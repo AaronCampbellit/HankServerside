@@ -125,6 +125,60 @@ func TestDefaultEvalCasesHaveNamesGroupsAndExpectations(t *testing.T) {
 	}
 }
 
+func TestDefaultEvalCasesCoverNoteMutationAndSummary(t *testing.T) {
+	cases := defaultEvalCases()
+
+	createCase := mustFindEvalCase(t, cases, "notes create confirmation")
+	if createCase.Group != "notes" {
+		t.Fatalf("create case group = %q, want notes", createCase.Group)
+	}
+	if createCase.Expect.ToolKind != "notes.create" || createCase.Expect.IntentKind != "notes.create" {
+		t.Fatalf("create case expectation = %#v", createCase.Expect)
+	}
+	if createCase.Expect.RequiresConfirmation == nil || !*createCase.Expect.RequiresConfirmation {
+		t.Fatalf("create case must require confirmation: %#v", createCase.Expect)
+	}
+	if createCase.Expect.PendingKind != "note_create" {
+		t.Fatalf("create pending kind = %q, want note_create", createCase.Expect.PendingKind)
+	}
+	if createCase.Expect.Destructive == nil || *createCase.Expect.Destructive {
+		t.Fatalf("create case should be non-destructive: %#v", createCase.Expect)
+	}
+
+	appendCase := mustFindEvalCase(t, cases, "notes append fixture")
+	if appendCase.Group != "notes" || appendCase.Prepare == nil {
+		t.Fatalf("append case = %#v, want notes group with fixture prepare", appendCase)
+	}
+	if appendCase.Expect.ToolKind != "notes.append" || appendCase.Expect.IntentKind != "notes.append" {
+		t.Fatalf("append case expectation = %#v", appendCase.Expect)
+	}
+	if appendCase.Expect.MinCards != 1 || appendCase.Expect.CardKind != "note" {
+		t.Fatalf("append card expectation = %#v", appendCase.Expect)
+	}
+
+	summaryCase := mustFindEvalCase(t, cases, "notes summarize fixture")
+	if summaryCase.Group != "notes" || summaryCase.Prepare == nil {
+		t.Fatalf("summary case = %#v, want notes group with fixture prepare", summaryCase)
+	}
+	if summaryCase.Expect.ToolKind != "notes.summarize" || summaryCase.Expect.IntentKind != "notes.summarize" {
+		t.Fatalf("summary case expectation = %#v", summaryCase.Expect)
+	}
+	if summaryCase.Expect.MinCards != 1 || summaryCase.Expect.CardKind != "note" {
+		t.Fatalf("summary card expectation = %#v", summaryCase.Expect)
+	}
+}
+
+func mustFindEvalCase(t *testing.T, cases []evalCase, name string) evalCase {
+	t.Helper()
+	for _, item := range cases {
+		if item.Name == name {
+			return item
+		}
+	}
+	t.Fatalf("missing eval case %q", name)
+	return evalCase{}
+}
+
 func TestCalendarFixturePayloadUsesFutureDentistEvent(t *testing.T) {
 	payload := calendarFixturePayload(time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC))
 	entries := payload["entries"].([]map[string]any)
