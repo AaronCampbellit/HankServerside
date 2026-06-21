@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -118,7 +119,7 @@ func TestDefaultEvalCasesHaveNamesGroupsAndExpectations(t *testing.T) {
 			t.Fatalf("duplicate case name %q", item.Name)
 		}
 		seen[item.Name] = true
-		if (item.Name == "notes search" || item.Name == "multi source read only") && item.Prepare == nil {
+		if (item.Name == "notes search" || item.Name == "files tax folder search" || item.Name == "multi source read only") && item.Prepare == nil {
 			t.Fatalf("%s case has no fixture prepare step", item.Name)
 		}
 	}
@@ -169,5 +170,66 @@ func TestPutProfileNoteUsesAuthenticatedProfileNotesAPI(t *testing.T) {
 	client := &liveClient{baseURL: baseURL, token: "test-token", http: server.Client()}
 	if err := client.putProfileNote(context.Background(), "hankai-eval-smb.md", "SMB Fixture", "SMB access stays local."); err != nil {
 		t.Fatalf("putProfileNote returned error: %v", err)
+	}
+}
+
+func TestUploadFileFixtureUsesLocalFileTransfer(t *testing.T) {
+	t.Parallel()
+
+	var setupAuthorized bool
+	var uploadAuthorized bool
+	var uploadedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/home/files/uploads":
+			if r.Method != http.MethodPost {
+				t.Fatalf("setup method=%s want POST", r.Method)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+				t.Fatalf("setup authorization=%q", got)
+			}
+			setupAuthorized = true
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode setup body: %v", err)
+			}
+			if body["source_id"] != "local" || body["path"] != "Documents/Taxes/2025 Taxes/eval.txt" {
+				t.Fatalf("setup body = %#v", body)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"url":"/v1/file-transfers/tfr_eval","transfer_token":"transfer-token"}`))
+		case "/v1/file-transfers/tfr_eval":
+			if r.Method != http.MethodPut {
+				t.Fatalf("upload method=%s want PUT", r.Method)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer transfer-token" {
+				t.Fatalf("upload authorization=%q", got)
+			}
+			uploadAuthorized = true
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read upload body: %v", err)
+			}
+			uploadedBody = string(data)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &liveClient{baseURL: baseURL, token: "test-token", http: server.Client()}
+	if err := client.uploadFileFixture(context.Background(), "local", "Documents/Taxes/2025 Taxes/eval.txt", "2025 tax fixture"); err != nil {
+		t.Fatalf("uploadFileFixture returned error: %v", err)
+	}
+	if !setupAuthorized || !uploadAuthorized {
+		t.Fatalf("setupAuthorized=%t uploadAuthorized=%t", setupAuthorized, uploadAuthorized)
+	}
+	if uploadedBody != "2025 tax fixture" {
+		t.Fatalf("uploaded body = %q", uploadedBody)
 	}
 }

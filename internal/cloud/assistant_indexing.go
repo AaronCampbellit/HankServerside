@@ -273,9 +273,22 @@ func (s *Server) indexAssistantFiles(ctx context.Context, home domain.Home, memb
 	if err := s.requireHomeFeature(ctx, home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {
 		return nil
 	}
-	items, err := s.crawlFilesForAssistantIndex(ctx, home.ID, 300)
-	if err != nil {
-		return err
+	sourceIDs := s.assistantFileIndexSourceIDs(ctx, home.ID)
+	items := make([]protocol.FileItem, 0)
+	var firstErr error
+	for _, sourceID := range sourceIDs {
+		sourceItems, err := s.crawlFilesForAssistantIndex(ctx, home.ID, sourceID, 300)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			s.logger.Warn("assistant file source indexing failed", "source_id", sourceID, "error", err)
+			continue
+		}
+		items = append(items, sourceItems...)
+	}
+	if len(items) == 0 && firstErr != nil {
+		return firstErr
 	}
 	now := time.Now().UTC()
 	for _, item := range items {
@@ -308,7 +321,85 @@ func (s *Server) indexAssistantFiles(ctx context.Context, home domain.Home, memb
 	return nil
 }
 
-func (s *Server) crawlFilesForAssistantIndex(ctx context.Context, homeID string, maxItems int) ([]protocol.FileItem, error) {
+func (s *Server) assistantFileIndexSourceIDs(ctx context.Context, homeID string) []string {
+	profile, err := s.store.GetHomeServiceProfile(ctx, homeID, domain.ServiceTypeSMB)
+	if err != nil {
+		return []string{""}
+	}
+	return assistantFileIndexSourceIDsFromProfileConfig(profile.PublicConfigJSON)
+}
+
+type assistantFileSourceProfile struct {
+	ActiveSourceID   string                      `json:"active_source_id"`
+	FileSources      []assistantFileSourceConfig `json:"file_sources"`
+	Sources          []assistantFileSourceConfig `json:"sources"`
+	Shares           []assistantFileSourceConfig `json:"shares"`
+	LocalRootEnabled bool                        `json:"local_root_enabled"`
+}
+
+type assistantFileSourceConfig struct {
+	ID               string `json:"id"`
+	SourceID         string `json:"source_id"`
+	Type             string `json:"type"`
+	SMBEnabled       bool   `json:"smb_enabled"`
+	LocalRootEnabled bool   `json:"local_root_enabled"`
+	Host             string `json:"host"`
+	Share            string `json:"share"`
+	SMBHost          string `json:"smb_host"`
+	SMBShare         string `json:"smb_share"`
+}
+
+func assistantFileIndexSourceIDsFromProfileConfig(raw string) []string {
+	var profile assistantFileSourceProfile
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &profile); err != nil {
+		return []string{""}
+	}
+	seen := map[string]bool{}
+	sourceIDs := make([]string, 0)
+	appendSourceID := func(sourceID string) {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" || seen[sourceID] {
+			return
+		}
+		seen[sourceID] = true
+		sourceIDs = append(sourceIDs, sourceID)
+	}
+
+	for _, item := range append(append(profile.FileSources, profile.Sources...), profile.Shares...) {
+		sourceID := firstNonBlank(item.SourceID, item.ID)
+		sourceType := strings.ToLower(strings.TrimSpace(item.Type))
+		switch sourceType {
+		case "local":
+			if item.LocalRootEnabled || sourceID == "local" {
+				appendSourceID(sourceID)
+			}
+		case "smb":
+			if item.SMBEnabled || strings.TrimSpace(firstNonBlank(item.Host, item.SMBHost)) != "" || strings.TrimSpace(firstNonBlank(item.Share, item.SMBShare)) != "" {
+				appendSourceID(sourceID)
+			}
+		default:
+			if sourceID != "" && (item.SMBEnabled || item.LocalRootEnabled || strings.TrimSpace(firstNonBlank(item.Host, item.SMBHost)) != "" || strings.TrimSpace(firstNonBlank(item.Share, item.SMBShare)) != "") {
+				appendSourceID(sourceID)
+			}
+		}
+	}
+	if profile.LocalRootEnabled {
+		appendSourceID("local")
+	}
+	if len(sourceIDs) == 0 {
+		appendSourceID(profile.ActiveSourceID)
+	}
+	if len(sourceIDs) == 0 {
+		return []string{""}
+	}
+	return sourceIDs
+}
+
+func assistantFileIndexListRequest(sourceID string, path string) protocol.FilesListRequest {
+	return protocol.FilesListRequest{SourceID: strings.TrimSpace(sourceID), Path: path}
+}
+
+func (s *Server) crawlFilesForAssistantIndex(ctx context.Context, homeID string, sourceID string, maxItems int) ([]protocol.FileItem, error) {
 	type queueItem struct {
 		path  string
 		depth int
@@ -320,7 +411,7 @@ func (s *Server) crawlFilesForAssistantIndex(ctx context.Context, homeID string,
 		current := queue[0]
 		queue = queue[1:]
 		visited++
-		envelope, err := s.sendAgentCommand(ctx, homeID, "files.list", protocol.FilesListRequest{Path: current.path})
+		envelope, err := s.sendAgentCommand(ctx, homeID, "files.list", assistantFileIndexListRequest(sourceID, current.path))
 		if err != nil {
 			return nil, err
 		}

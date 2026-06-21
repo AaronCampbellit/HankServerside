@@ -3295,7 +3295,39 @@ func (s *Server) executeConfirmedAssistantAction(
 }
 
 func (s *Server) searchFiles(ctx context.Context, homeID string, query string) ([]protocol.FileItem, error) {
-	envelope, err := s.sendAgentCommand(ctx, homeID, "files.search", protocol.FilesSearchRequest{Query: query, Limit: 25})
+	sourceIDs := s.assistantFileIndexSourceIDs(ctx, homeID)
+	matches := make([]protocol.FileItem, 0)
+	var firstErr error
+	for _, sourceID := range sourceIDs {
+		sourceMatches, err := s.searchFilesSource(ctx, homeID, sourceID, query)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			s.logger.Warn("assistant file source search failed", "source_id", sourceID, "error", err)
+			continue
+		}
+		matches = append(matches, sourceMatches...)
+	}
+	if len(matches) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		left := fileMatchScore(matches[i], query)
+		right := fileMatchScore(matches[j], query)
+		if left == right {
+			if matches[i].SourceID == matches[j].SourceID {
+				return matches[i].Path < matches[j].Path
+			}
+			return matches[i].SourceID < matches[j].SourceID
+		}
+		return left > right
+	})
+	return dedupeFileItems(matches), nil
+}
+
+func (s *Server) searchFilesSource(ctx context.Context, homeID string, sourceID string, query string) ([]protocol.FileItem, error) {
+	envelope, err := s.sendAgentCommand(ctx, homeID, "files.search", protocol.FilesSearchRequest{SourceID: strings.TrimSpace(sourceID), Query: query, Limit: 25})
 	if err != nil {
 		return nil, err
 	}
@@ -3328,7 +3360,7 @@ func (s *Server) searchFiles(ctx context.Context, homeID string, query string) (
 		queue = queue[1:]
 		visited++
 
-		envelope, err := s.sendAgentCommand(ctx, homeID, "files.list", protocol.FilesListRequest{Path: current.path})
+		envelope, err := s.sendAgentCommand(ctx, homeID, "files.list", protocol.FilesListRequest{SourceID: strings.TrimSpace(sourceID), Path: current.path})
 		if err != nil {
 			return nil, err
 		}
@@ -3360,6 +3392,20 @@ func (s *Server) searchFiles(ctx context.Context, homeID string, query string) (
 		return left > right
 	})
 	return matches, nil
+}
+
+func dedupeFileItems(items []protocol.FileItem) []protocol.FileItem {
+	seen := map[string]bool{}
+	deduped := make([]protocol.FileItem, 0, len(items))
+	for _, item := range items {
+		key := strings.TrimSpace(item.SourceID) + "\x00" + strings.TrimSpace(item.Path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		deduped = append(deduped, item)
+	}
+	return deduped
 }
 
 func (s *Server) planCalendarTool(prompt string, timezone string, deviceID string) (assistantCalendarPlan, bool) {

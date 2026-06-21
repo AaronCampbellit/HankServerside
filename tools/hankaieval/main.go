@@ -157,6 +157,11 @@ type liveClient struct {
 	http    *http.Client
 }
 
+type fileUploadSetupResponse struct {
+	URL           string `json:"url"`
+	TransferToken string `json:"transfer_token"`
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "hankai eval failed: %v\n", err)
@@ -305,10 +310,11 @@ func defaultEvalCases() []evalCase {
 			Expect:  evalExpect{ToolKind: "notes.search", IntentKind: "notes.search", MinCards: 1, CardKind: "note"},
 		},
 		{
-			Name:   "files tax folder search",
-			Group:  "files",
-			Prompt: "find the 2025 tax folder",
-			Expect: evalExpect{ToolKind: "files.search", IntentKind: "files.search", MinCards: 1, CardKind: "file"},
+			Name:    "files tax folder search",
+			Group:   "files",
+			Prompt:  "find the 2025 tax folder",
+			Prepare: prepareFilesFixture,
+			Expect:  evalExpect{ToolKind: "files.search", IntentKind: "files.search", MinCards: 1, CardKind: "file"},
 		},
 		{
 			Name:    "calendar tomorrow",
@@ -422,7 +428,7 @@ func selectCases(cases []evalCase, groups string) []evalCase {
 }
 
 func skipReason(test evalCase, report evalReport) string {
-	if test.Group == "files" && report.Status != nil && report.Status.Index.FileCount == 0 {
+	if test.Group == "files" && test.Prepare == nil && report.Status != nil && report.Status.Index.FileCount == 0 {
 		return "assistant file index has no files"
 	}
 	return ""
@@ -630,6 +636,44 @@ func (c *liveClient) sendPrompt(ctx context.Context, sessionID string, prompt st
 	return run, err
 }
 
+func (c *liveClient) uploadFileFixture(ctx context.Context, sourceID string, path string, content string) error {
+	var setup fileUploadSetupResponse
+	body := map[string]any{
+		"source_id": sourceID,
+		"path":      path,
+		"size":      len(content),
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/home/files/uploads", body, http.StatusCreated, &setup); err != nil {
+		return err
+	}
+	if strings.TrimSpace(setup.URL) == "" || strings.TrimSpace(setup.TransferToken) == "" {
+		return errors.New("file upload setup response missing transfer URL or token")
+	}
+	target, err := c.baseURL.Parse(setup.URL)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, target.String(), strings.NewReader(content))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+setup.TransferToken)
+	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("PUT %s status=%d want=%d body=%s", setup.URL, resp.StatusCode, http.StatusOK, redactSensitiveText(string(data)))
+	}
+	return nil
+}
+
 func (c *liveClient) putProfileNote(ctx context.Context, noteID string, title string, bodyMarkdown string) error {
 	body := map[string]any{
 		"note_id":       noteID,
@@ -639,6 +683,15 @@ func (c *liveClient) putProfileNote(ctx context.Context, noteID string, title st
 		"page_type":     "text",
 	}
 	return c.doJSON(ctx, http.MethodPut, "/v1/me/notes/"+url.PathEscape(noteID), body, http.StatusOK, nil)
+}
+
+func prepareFilesFixture(ctx context.Context, client *liveClient) error {
+	return client.uploadFileFixture(
+		ctx,
+		"local",
+		"Documents/Taxes/2025 Taxes/hankai-eval.txt",
+		"2025 tax folder fixture for HankAI local model eval.",
+	)
 }
 
 func prepareNotesFixture(ctx context.Context, client *liveClient) error {
