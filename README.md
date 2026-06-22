@@ -389,7 +389,7 @@ pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside &&
 - agent and app auth are separate
 - the cloud and agent run on the same machine under one Compose stack, but the agent starts only after a token exists
 - the dashboard issues tokens and generates the `.env.agent` file content; deployment changes are applied by editing `.env.agent` and refreshing the `agent` profile
-- file access can use either the Docker-managed `hank_agent_files` volume or one or more direct SMB shares configured in dashboard Settings; SMB env storage uses `HANK_REMOTE_SMB_SHARES_JSON`
+- file access can use the Docker-managed `hank_agent_files` volume, one or more direct SMB shares, or host folders (directories on the home connector itself), all configured in dashboard Settings; SMB env storage uses `HANK_REMOTE_SMB_SHARES_JSON` and host folders use `HANK_REMOTE_AGENT_FILES_ROOTS_JSON`
 - remote notes now expose additive metadata for `page_type`, preview text, extracted tags, remote search, tag rollups, and kanban board payloads
 
 ## Operations Docs

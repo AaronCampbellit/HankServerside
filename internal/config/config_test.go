@@ -289,6 +289,39 @@ func TestLoadAgentIgnoresLegacySingleShareSMBEnv(t *testing.T) {
 	}
 }
 
+func TestLoadAgentParsesLocalFoldersJSON(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_AGENT_FILES_ROOTS_JSON", `[
+		{"id":"media","name":"Media","root":"/srv/media"},
+		{"root":" /srv/docs "}
+	]`)
+
+	cfg, err := LoadAgent()
+	if err != nil {
+		t.Fatalf("LoadAgent error: %v", err)
+	}
+	if len(cfg.LocalFolders) != 2 {
+		t.Fatalf("LocalFolders count = %d, want 2", len(cfg.LocalFolders))
+	}
+	if cfg.LocalFolders[0].ID != "media" || cfg.LocalFolders[0].Root != "/srv/media" {
+		t.Fatalf("first folder = %#v, want media", cfg.LocalFolders[0])
+	}
+	if cfg.LocalFolders[1].Root != "/srv/docs" {
+		t.Fatalf("second folder root = %q, want trimmed /srv/docs", cfg.LocalFolders[1].Root)
+	}
+}
+
+func TestLoadAgentRejectsInvalidLocalFoldersJSON(t *testing.T) {
+	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
+	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")
+	t.Setenv("HANK_REMOTE_AGENT_FILES_ROOTS_JSON", `{not valid json`)
+
+	if _, err := LoadAgent(); err == nil {
+		t.Fatal("LoadAgent accepted invalid HANK_REMOTE_AGENT_FILES_ROOTS_JSON, want error")
+	}
+}
+
 func TestLoadAgentParsesMultipleSMBSharesJSON(t *testing.T) {
 	t.Setenv("HANK_REMOTE_AGENT_ID", "home-main")
 	t.Setenv("HANK_REMOTE_AGENT_TOKEN", "secret-token")

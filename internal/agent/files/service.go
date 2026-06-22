@@ -63,10 +63,28 @@ func (c SMBConfig) Enabled() bool {
 	return strings.TrimSpace(c.Host) != "" && strings.TrimSpace(c.Share) != ""
 }
 
-type Config struct {
+// LocalConfig describes a directory on the host that the agent serves as a file
+// source. The directory may live anywhere on the host filesystem; access stays
+// confined to the directory tree by the resolve helpers.
+type LocalConfig struct {
+	ID     string
+	Name   string
 	Root   string
-	Shares []SMBConfig
 	Policy AccessPolicy
+}
+
+func (c LocalConfig) Enabled() bool {
+	return strings.TrimSpace(c.Root) != ""
+}
+
+type Config struct {
+	// Root configures the default local source (id "local"). It is kept for
+	// backward compatibility with the single-root deployments; additional host
+	// folders are configured through LocalSources.
+	Root         string
+	LocalSources []LocalConfig
+	Shares       []SMBConfig
+	Policy       AccessPolicy
 }
 
 type AccessPolicy struct {
@@ -107,10 +125,16 @@ type smbShareSnapshot struct {
 	PasswordSet bool   `json:"password_set"`
 }
 
+type localSourceSnapshot struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Root    string `json:"root"`
+	Enabled bool   `json:"enabled"`
+}
+
 type Service struct {
 	mu             sync.RWMutex
-	root           string
-	localPolicy    AccessPolicy
+	localSources   []LocalConfig
 	smbShares      []SMBConfig
 	smbConnections map[string]*smbConnection
 	searchCacheMu  sync.Mutex
@@ -126,6 +150,7 @@ type fileSearchCacheEntry struct {
 type fileSourceSelection struct {
 	ID     string
 	Type   string
+	Root   string
 	Policy AccessPolicy
 }
 
@@ -134,9 +159,18 @@ func New(root string) *Service {
 }
 
 func NewWithConfig(cfg Config) *Service {
+	locals := make([]LocalConfig, 0, len(cfg.LocalSources)+1)
+	if strings.TrimSpace(cfg.Root) != "" {
+		locals = append(locals, LocalConfig{
+			ID:     LocalSourceID,
+			Name:   "Home connector files",
+			Root:   cfg.Root,
+			Policy: cfg.Policy,
+		})
+	}
+	locals = append(locals, cfg.LocalSources...)
 	return &Service{
-		root:           strings.TrimSpace(cfg.Root),
-		localPolicy:    cfg.Policy,
+		localSources:   normalizeLocalConfigs(locals),
 		smbShares:      normalizeSMBConfigs(cfg.Shares),
 		smbConnections: make(map[string]*smbConnection),
 		searchCache:    make(map[string]fileSearchCacheEntry),
@@ -147,7 +181,7 @@ func NewWithConfig(cfg Config) *Service {
 func (s *Service) Enabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.root != "" || hasEnabledSMBConfig(s.smbShares)
+	return hasEnabledLocalConfig(s.localSources) || hasEnabledSMBConfig(s.smbShares)
 }
 
 func (s *Service) defaultSourceLocked() (fileSourceSelection, error) {
@@ -156,8 +190,10 @@ func (s *Service) defaultSourceLocked() (fileSourceSelection, error) {
 			return fileSourceSelection{ID: cfg.ID, Type: fileSourceTypeSMB, Policy: cfg.Policy}, nil
 		}
 	}
-	if s.root != "" {
-		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal, Policy: s.localPolicy}, nil
+	for _, cfg := range s.localSources {
+		if cfg.Enabled() {
+			return fileSourceSelection{ID: cfg.ID, Type: fileSourceTypeLocal, Root: cfg.Root, Policy: cfg.Policy}, nil
+		}
 	}
 	return fileSourceSelection{}, ErrDisabled
 }
@@ -170,11 +206,13 @@ func (s *Service) sourceForID(sourceID string) (fileSourceSelection, error) {
 	if sourceID == "" {
 		return s.defaultSourceLocked()
 	}
-	if sourceID == LocalSourceID {
-		if s.root == "" {
-			return fileSourceSelection{}, ErrDisabled
+	for _, cfg := range s.localSources {
+		if cfg.ID == sourceID {
+			if !cfg.Enabled() {
+				return fileSourceSelection{}, ErrDisabled
+			}
+			return fileSourceSelection{ID: cfg.ID, Type: fileSourceTypeLocal, Root: cfg.Root, Policy: cfg.Policy}, nil
 		}
-		return fileSourceSelection{ID: LocalSourceID, Type: fileSourceTypeLocal, Policy: s.localPolicy}, nil
 	}
 	for _, cfg := range s.smbShares {
 		if cfg.ID == sourceID {
@@ -183,6 +221,9 @@ func (s *Service) sourceForID(sourceID string) (fileSourceSelection, error) {
 			}
 			return fileSourceSelection{ID: sourceID, Type: fileSourceTypeSMB, Policy: cfg.Policy}, nil
 		}
+	}
+	if sourceID == LocalSourceID {
+		return fileSourceSelection{}, ErrDisabled
 	}
 	return fileSourceSelection{}, fmt.Errorf("file source %q is not configured", sourceID)
 }
@@ -226,6 +267,67 @@ func (s *Service) SMBConfigs() []SMBConfig {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneSMBConfigs(s.smbShares)
+}
+
+// ApplyLocalConfigs replaces the configured host folder sources. Callers are
+// responsible for validating and creating the directories before applying.
+func (s *Service) ApplyLocalConfigs(configs []LocalConfig) {
+	next := normalizeLocalConfigs(configs)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.localSources = next
+}
+
+func (s *Service) LocalConfigs() []LocalConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneLocalConfigs(s.localSources)
+}
+
+func normalizeLocalConfigs(configs []LocalConfig) []LocalConfig {
+	normalized := make([]LocalConfig, 0, len(configs))
+	seen := map[string]int{}
+	for index, cfg := range configs {
+		cfg.Root = strings.TrimSpace(cfg.Root)
+		cfg.Name = strings.TrimSpace(cfg.Name)
+
+		fallbackID := LocalSourceID
+		if index > 0 {
+			fallbackID = fmt.Sprintf("%s-%d", LocalSourceID, index+1)
+		}
+		if cfg.ID == "" {
+			cfg.ID = firstNonBlank(cfg.Name, filepath.Base(cfg.Root), fallbackID)
+		}
+		cfg.ID = cleanSourceID(cfg.ID)
+		if cfg.ID == "" {
+			cfg.ID = fallbackID
+		}
+		baseID := cfg.ID
+		if count := seen[baseID]; count > 0 {
+			cfg.ID = fmt.Sprintf("%s-%d", baseID, count+1)
+		}
+		seen[baseID]++
+		if cfg.Name == "" {
+			cfg.Name = firstNonBlank(filepath.Base(cfg.Root), cfg.ID)
+		}
+		normalized = append(normalized, cfg)
+	}
+	return normalized
+}
+
+func hasEnabledLocalConfig(configs []LocalConfig) bool {
+	for _, cfg := range configs {
+		if cfg.Enabled() {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneLocalConfigs(configs []LocalConfig) []LocalConfig {
+	cloned := make([]LocalConfig, len(configs))
+	copy(cloned, configs)
+	return cloned
 }
 
 func normalizeSMBConfigs(configs []SMBConfig) []SMBConfig {
@@ -346,24 +448,29 @@ func (s *Service) Snapshot() map[string]any {
 	if len(s.smbShares) > 0 {
 		primary = s.smbShares[0]
 	}
+	primaryLocalRoot := ""
+	if len(s.localSources) > 0 {
+		primaryLocalRoot = s.localSources[0].Root
+	}
 	return map[string]any{
-		"root":               s.root,
+		"root":               primaryLocalRoot,
 		"smb_host":           primary.Host,
 		"smb_share":          primary.Share,
 		"smb_username":       primary.Username,
 		"smb_domain":         primary.Domain,
 		"smb_enabled":        primary.Enabled(),
 		"smb_password_set":   primary.Password != "",
-		"local_root_enabled": s.root != "",
+		"local_root_enabled": hasEnabledLocalConfig(s.localSources),
 		"active_source_id":   defaultSourceID(sources),
 		"file_sources":       sources,
 		"sources":            sources,
 		"shares":             s.smbShareSnapshotsLocked(),
+		"folders":            s.localSourceSnapshotsLocked(),
 	}
 }
 
 func (s *Service) sourceSnapshotsLocked() []SourceSnapshot {
-	sources := make([]SourceSnapshot, 0, len(s.smbShares)+1)
+	sources := make([]SourceSnapshot, 0, len(s.smbShares)+len(s.localSources))
 	for _, cfg := range s.smbShares {
 		sources = append(sources, SourceSnapshot{
 			ID:             cfg.ID,
@@ -377,16 +484,29 @@ func (s *Service) sourceSnapshotsLocked() []SourceSnapshot {
 			SMBPasswordSet: cfg.Password != "",
 		})
 	}
-	if s.root != "" {
+	for _, cfg := range s.localSources {
 		sources = append(sources, SourceSnapshot{
-			ID:               LocalSourceID,
-			Name:             "Home connector files",
+			ID:               cfg.ID,
+			Name:             firstNonBlank(cfg.Name, cfg.ID),
 			Type:             fileSourceTypeLocal,
-			Root:             s.root,
-			LocalRootEnabled: true,
+			Root:             cfg.Root,
+			LocalRootEnabled: cfg.Enabled(),
 		})
 	}
 	return sources
+}
+
+func (s *Service) localSourceSnapshotsLocked() []localSourceSnapshot {
+	folders := make([]localSourceSnapshot, 0, len(s.localSources))
+	for _, cfg := range s.localSources {
+		folders = append(folders, localSourceSnapshot{
+			ID:      cfg.ID,
+			Name:    firstNonBlank(cfg.Name, cfg.ID),
+			Root:    cfg.Root,
+			Enabled: cfg.Enabled(),
+		})
+	}
+	return folders
 }
 
 func (s *Service) smbShareSnapshotsLocked() []smbShareSnapshot {
@@ -498,7 +618,7 @@ func (s *Service) ListSource(ctx context.Context, sourceID string, path string) 
 	if source.Type == fileSourceTypeSMB {
 		items, err = s.listSMB(ctx, source.ID, path)
 	} else {
-		items, err = s.listLocal(ctx, path)
+		items, err = s.listLocal(ctx, source.Root, path)
 	}
 	if err != nil {
 		return nil, err
@@ -522,7 +642,7 @@ func (s *Service) StatSource(ctx context.Context, sourceID string, path string) 
 	if source.Type == fileSourceTypeSMB {
 		item, err = s.statSMB(ctx, source.ID, path)
 	} else {
-		item, err = s.statLocal(ctx, path)
+		item, err = s.statLocal(ctx, source.Root, path)
 	}
 	if err != nil {
 		return protocol.FileItem{}, err
@@ -669,7 +789,7 @@ func (s *Service) CreateDirectorySource(ctx context.Context, sourceID string, pa
 	if source.Type == fileSourceTypeSMB {
 		createErr = s.createDirectorySMB(ctx, source.ID, path)
 	} else {
-		createErr = s.createDirectoryLocal(ctx, path)
+		createErr = s.createDirectoryLocal(ctx, source.Root, path)
 	}
 	if createErr == nil {
 		s.invalidateSearchIndex(source.ID)
@@ -696,7 +816,7 @@ func (s *Service) RenameSource(ctx context.Context, sourceID string, from string
 	if source.Type == fileSourceTypeSMB {
 		renameErr = s.renameSMB(ctx, source.ID, from, to)
 	} else {
-		renameErr = s.renameLocal(ctx, from, to)
+		renameErr = s.renameLocal(ctx, source.Root, from, to)
 	}
 	if renameErr == nil {
 		s.invalidateSearchIndex(source.ID)
@@ -817,7 +937,7 @@ func (s *Service) DeleteSource(ctx context.Context, sourceID string, path string
 	if source.Type == fileSourceTypeSMB {
 		deleteErr = s.deleteSMB(ctx, source.ID, path, isDirectory)
 	} else {
-		deleteErr = s.deleteLocal(ctx, path, isDirectory)
+		deleteErr = s.deleteLocal(ctx, source.Root, path, isDirectory)
 	}
 	if deleteErr == nil {
 		s.invalidateSearchIndex(source.ID)
@@ -854,7 +974,7 @@ func (s *Service) DownloadSource(ctx context.Context, sourceID string, path stri
 	if source.Type == fileSourceTypeSMB {
 		return s.downloadSMB(ctx, source.ID, path)
 	}
-	return s.downloadLocal(ctx, path)
+	return s.downloadLocal(ctx, source.Root, path)
 }
 
 func (s *Service) Upload(ctx context.Context, path string, contentBase64 string) error {
@@ -873,7 +993,7 @@ func (s *Service) UploadSource(ctx context.Context, sourceID string, path string
 	if source.Type == fileSourceTypeSMB {
 		uploadErr = s.uploadSMB(ctx, source.ID, path, contentBase64)
 	} else {
-		uploadErr = s.uploadLocal(ctx, path, contentBase64)
+		uploadErr = s.uploadLocal(ctx, source.Root, path, contentBase64)
 	}
 	if uploadErr == nil {
 		s.invalidateSearchIndex(source.ID)
@@ -896,7 +1016,7 @@ func (s *Service) OpenReaderSource(ctx context.Context, sourceID string, path st
 	if source.Type == fileSourceTypeSMB {
 		return s.openReaderSMB(ctx, source.ID, path, offset)
 	}
-	return s.openReaderLocal(ctx, path, offset)
+	return s.openReaderLocal(ctx, source.Root, path, offset)
 }
 
 func (s *Service) OpenWriter(ctx context.Context, path string, offset int64) (WriteHandle, int64, error) {
@@ -919,7 +1039,7 @@ func (s *Service) OpenWriterSource(ctx context.Context, sourceID string, path st
 		}
 		return s.invalidateSearchOnClose(source.ID, limitWriteHandle(writer, maxBytes, offset)), size, nil
 	}
-	writer, size, err := s.openWriterLocal(ctx, path, offset)
+	writer, size, err := s.openWriterLocal(ctx, source.Root, path, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -955,15 +1075,15 @@ func (s *Service) OpenRandomWriterSource(ctx context.Context, sourceID string, p
 		}
 		return limitRandomWriteHandle(writer, maxBytes), nil
 	}
-	writer, err := s.openRandomWriterLocal(ctx, path)
+	writer, err := s.openRandomWriterLocal(ctx, source.Root, path)
 	if err != nil {
 		return nil, err
 	}
 	return limitRandomWriteHandle(writer, maxBytes), nil
 }
 
-func (s *Service) listLocal(ctx context.Context, path string) ([]protocol.FileItem, error) {
-	resolved, err := s.resolveLocal(path)
+func (s *Service) listLocal(ctx context.Context, root string, path string) ([]protocol.FileItem, error) {
+	resolved, err := s.resolveLocal(root, path)
 	if err != nil {
 		return nil, err
 	}
@@ -993,8 +1113,8 @@ func (s *Service) listLocal(ctx context.Context, path string) ([]protocol.FileIt
 	return items, nil
 }
 
-func (s *Service) statLocal(_ context.Context, path string) (protocol.FileItem, error) {
-	resolved, err := s.resolveLocal(path)
+func (s *Service) statLocal(_ context.Context, root string, path string) (protocol.FileItem, error) {
+	resolved, err := s.resolveLocal(root, path)
 	if err != nil {
 		return protocol.FileItem{}, err
 	}
@@ -1007,20 +1127,20 @@ func (s *Service) statLocal(_ context.Context, path string) (protocol.FileItem, 
 	return fileItem(cleanPath(path), info), nil
 }
 
-func (s *Service) createDirectoryLocal(_ context.Context, path string) error {
-	resolved, err := s.resolveLocalForWrite(path)
+func (s *Service) createDirectoryLocal(_ context.Context, root string, path string) error {
+	resolved, err := s.resolveLocalForWrite(root, path)
 	if err != nil {
 		return err
 	}
 	return os.MkdirAll(resolved, 0o755)
 }
 
-func (s *Service) renameLocal(_ context.Context, from string, to string) error {
-	resolvedFrom, err := s.resolveLocal(from)
+func (s *Service) renameLocal(_ context.Context, root string, from string, to string) error {
+	resolvedFrom, err := s.resolveLocal(root, from)
 	if err != nil {
 		return err
 	}
-	resolvedTo, err := s.resolveLocalForWrite(to)
+	resolvedTo, err := s.resolveLocalForWrite(root, to)
 	if err != nil {
 		return err
 	}
@@ -1030,8 +1150,8 @@ func (s *Service) renameLocal(_ context.Context, from string, to string) error {
 	return os.Rename(resolvedFrom, resolvedTo)
 }
 
-func (s *Service) deleteLocal(_ context.Context, path string, isDirectory bool) error {
-	resolved, err := s.resolveLocal(path)
+func (s *Service) deleteLocal(_ context.Context, root string, path string, isDirectory bool) error {
+	resolved, err := s.resolveLocal(root, path)
 	if err != nil {
 		return err
 	}
@@ -1041,8 +1161,8 @@ func (s *Service) deleteLocal(_ context.Context, path string, isDirectory bool) 
 	return os.Remove(resolved)
 }
 
-func (s *Service) downloadLocal(_ context.Context, path string) (string, error) {
-	resolved, err := s.resolveLocal(path)
+func (s *Service) downloadLocal(_ context.Context, root string, path string) (string, error) {
+	resolved, err := s.resolveLocal(root, path)
 	if err != nil {
 		return "", err
 	}
@@ -1055,8 +1175,8 @@ func (s *Service) downloadLocal(_ context.Context, path string) (string, error) 
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
-func (s *Service) uploadLocal(_ context.Context, path string, contentBase64 string) error {
-	resolved, err := s.resolveLocalForWrite(path)
+func (s *Service) uploadLocal(_ context.Context, root string, path string, contentBase64 string) error {
+	resolved, err := s.resolveLocalForWrite(root, path)
 	if err != nil {
 		return err
 	}
@@ -1073,8 +1193,8 @@ func (s *Service) uploadLocal(_ context.Context, path string, contentBase64 stri
 	return os.WriteFile(resolved, data, 0o644)
 }
 
-func (s *Service) openReaderLocal(_ context.Context, path string, offset int64) (ReadHandle, fs.FileInfo, error) {
-	resolved, err := s.resolveLocal(path)
+func (s *Service) openReaderLocal(_ context.Context, root string, path string, offset int64) (ReadHandle, fs.FileInfo, error) {
+	resolved, err := s.resolveLocal(root, path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1105,8 +1225,8 @@ func (s *Service) openReaderLocal(_ context.Context, path string, offset int64) 
 	return file, info, nil
 }
 
-func (s *Service) openWriterLocal(_ context.Context, path string, offset int64) (WriteHandle, int64, error) {
-	resolved, err := s.resolveLocalForWrite(path)
+func (s *Service) openWriterLocal(_ context.Context, root string, path string, offset int64) (WriteHandle, int64, error) {
+	resolved, err := s.resolveLocalForWrite(root, path)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1153,8 +1273,8 @@ func (s *Service) openWriterLocal(_ context.Context, path string, offset int64) 
 	return file, size, nil
 }
 
-func (s *Service) openRandomWriterLocal(_ context.Context, path string) (RandomWriteHandle, error) {
-	resolved, err := s.resolveLocalForWrite(path)
+func (s *Service) openRandomWriterLocal(_ context.Context, root string, path string) (RandomWriteHandle, error) {
+	resolved, err := s.resolveLocalForWrite(root, path)
 	if err != nil {
 		return nil, err
 	}
@@ -1235,18 +1355,16 @@ func (w *maxRandomWriteHandle) Close() error {
 	return w.inner.Close()
 }
 
-func (s *Service) resolveLocal(path string) (string, error) {
-	if !s.Enabled() {
-		return "", ErrDisabled
-	}
-	if s.root == "" {
+func (s *Service) resolveLocal(rootDir string, path string) (string, error) {
+	rootDir = strings.TrimSpace(rootDir)
+	if rootDir == "" {
 		return "", ErrDisabled
 	}
 
 	cleaned := cleanPath(path)
-	joined := filepath.Join(s.root, filepath.FromSlash(cleaned))
+	joined := filepath.Join(rootDir, filepath.FromSlash(cleaned))
 	resolved := filepath.Clean(joined)
-	root, err := filepath.EvalSymlinks(filepath.Clean(s.root))
+	root, err := filepath.EvalSymlinks(filepath.Clean(rootDir))
 	if err != nil {
 		return "", err
 	}
@@ -1265,8 +1383,12 @@ func (s *Service) resolveLocal(path string) (string, error) {
 	return resolved, nil
 }
 
-func (s *Service) resolveLocalForWrite(path string) (string, error) {
-	resolved, err := s.resolveLocal(path)
+func (s *Service) resolveLocalForWrite(rootDir string, path string) (string, error) {
+	rootDir = strings.TrimSpace(rootDir)
+	if rootDir == "" {
+		return "", ErrDisabled
+	}
+	resolved, err := s.resolveLocal(rootDir, path)
 	if err == nil {
 		return resolved, nil
 	}
@@ -1274,8 +1396,8 @@ func (s *Service) resolveLocalForWrite(path string) (string, error) {
 		return "", err
 	}
 	cleaned := cleanPath(path)
-	joined := filepath.Join(s.root, filepath.FromSlash(cleaned))
-	root, err := filepath.EvalSymlinks(filepath.Clean(s.root))
+	joined := filepath.Join(rootDir, filepath.FromSlash(cleaned))
+	root, err := filepath.EvalSymlinks(filepath.Clean(rootDir))
 	if err != nil {
 		return "", err
 	}

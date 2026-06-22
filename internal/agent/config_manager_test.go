@@ -1,0 +1,162 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
+	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
+	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
+)
+
+func TestPrepareLocalConfigsCreatesAndValidates(t *testing.T) {
+	t.Parallel()
+
+	created := filepath.Join(t.TempDir(), "new-folder")
+	configs, err := prepareLocalConfigs([]localFolderPayload{
+		{ID: "media", Name: "Media", Root: created, Create: true},
+	})
+	if err != nil {
+		t.Fatalf("prepareLocalConfigs: %v", err)
+	}
+	if len(configs) != 1 || configs[0].ID != "media" || configs[0].Root != filepath.Clean(created) {
+		t.Fatalf("configs = %#v, want single created media folder", configs)
+	}
+	if info, err := os.Stat(created); err != nil || !info.IsDir() {
+		t.Fatalf("created folder missing: err=%v", err)
+	}
+}
+
+func TestPrepareLocalConfigsRejectsRelativeMissingAndFile(t *testing.T) {
+	t.Parallel()
+
+	if _, err := prepareLocalConfigs([]localFolderPayload{{Root: "relative/path"}}); err == nil {
+		t.Fatal("relative path accepted, want error")
+	}
+
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if _, err := prepareLocalConfigs([]localFolderPayload{{Root: missing}}); err == nil {
+		t.Fatal("missing path without create accepted, want error")
+	}
+
+	file := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if _, err := prepareLocalConfigs([]localFolderPayload{{Root: file}}); err == nil {
+		t.Fatal("file path accepted, want error")
+	}
+}
+
+func TestConfigManagerApplyCreatesAndPersistsHostFolders(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env.agent")
+	files := agentfiles.New("")
+	manager := newConfigManager(envPath, agentha.New("", "", 0), files)
+
+	folderRoot := filepath.Join(dir, "media")
+	public, err := json.Marshal(map[string]any{
+		"shares": []any{},
+		"folders": []map[string]any{
+			{"id": "media", "name": "Media", "root": folderRoot, "create": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal public config: %v", err)
+	}
+
+	if _, err := manager.Apply(context.Background(), protocol.ConfigApplyRequest{
+		ServiceType:  domain.ServiceTypeSMB,
+		PublicConfig: public,
+		Persist:      true,
+	}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if info, err := os.Stat(folderRoot); err != nil || !info.IsDir() {
+		t.Fatalf("host folder not created on apply: err=%v", err)
+	}
+
+	configs := files.LocalConfigs()
+	if len(configs) != 1 || configs[0].ID != "media" || configs[0].Root != folderRoot {
+		t.Fatalf("LocalConfigs = %#v, want media applied", configs)
+	}
+
+	if shares := files.SMBConfigs(); len(shares) != 0 {
+		t.Fatalf("SMBConfigs = %#v, want no phantom share from a folder-only save", shares)
+	}
+
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	if !strings.Contains(string(data), "HANK_REMOTE_AGENT_FILES_ROOTS_JSON=") {
+		t.Fatalf("env file missing roots json:\n%s", data)
+	}
+}
+
+func TestConfigManagerApplyLeavesHostFoldersWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	existingRoot := t.TempDir()
+	files := agentfiles.NewWithConfig(agentfiles.Config{
+		LocalSources: []agentfiles.LocalConfig{{ID: "media", Root: existingRoot}},
+	})
+	manager := newConfigManager(filepath.Join(dir, ".env.agent"), agentha.New("", "", 0), files)
+
+	// An SMB-only save (no "folders" key) must leave host folders untouched.
+	public, err := json.Marshal(map[string]any{
+		"shares": []map[string]any{
+			{"id": "share", "host": "192.0.2.10", "share": "media"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal public config: %v", err)
+	}
+
+	if _, err := manager.Apply(context.Background(), protocol.ConfigApplyRequest{
+		ServiceType:  domain.ServiceTypeSMB,
+		PublicConfig: public,
+		Persist:      true,
+	}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	configs := files.LocalConfigs()
+	if len(configs) != 1 || configs[0].ID != "media" {
+		t.Fatalf("LocalConfigs = %#v, want existing media folder preserved", configs)
+	}
+}
+
+func TestConfigManagerApplyFailsForMissingHostFolder(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	files := agentfiles.New("")
+	manager := newConfigManager(filepath.Join(dir, ".env.agent"), agentha.New("", "", 0), files)
+
+	public, err := json.Marshal(map[string]any{
+		"folders": []map[string]any{
+			{"id": "media", "root": filepath.Join(dir, "missing")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal public config: %v", err)
+	}
+
+	if _, err := manager.Apply(context.Background(), protocol.ConfigApplyRequest{
+		ServiceType:  domain.ServiceTypeSMB,
+		PublicConfig: public,
+		Persist:      true,
+	}); err == nil {
+		t.Fatal("Apply accepted a missing host folder without create, want error")
+	}
+}

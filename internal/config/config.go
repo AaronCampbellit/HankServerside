@@ -82,7 +82,15 @@ type Agent struct {
 	HA            HomeAssistant
 	SMBShares     []SMB
 	FilesRoot     string
+	LocalFolders  []LocalFolder
 	NotesRoot     string
+}
+
+type LocalFolder struct {
+	ID     string           `json:"id,omitempty"`
+	Name   string           `json:"name,omitempty"`
+	Root   string           `json:"root"`
+	Policy FileAccessPolicy `json:"policy,omitempty"`
 }
 
 type HomeAssistant struct {
@@ -229,6 +237,10 @@ func LoadAgent() (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
+	localFolders, err := loadLocalFolders(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOTS_JSON"))
+	if err != nil {
+		return Agent{}, err
+	}
 
 	cfg := Agent{
 		CloudURL:      envOrDefault("HANK_REMOTE_AGENT_CLOUD_URL", "ws://127.0.0.1:8080/ws/agent"),
@@ -239,6 +251,7 @@ func LoadAgent() (Agent, error) {
 		AppsDir:       envOrDefault("HANK_REMOTE_AGENT_APPS_DIR", "/var/lib/hank/apps"),
 		AppStagingDir: envOrDefault("HANK_REMOTE_AGENT_APP_STAGING_DIR", "/var/lib/hank/app-staging"),
 		FilesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
+		LocalFolders:  localFolders,
 		NotesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),
@@ -269,6 +282,21 @@ func loadSMBShares(rawJSON string) ([]SMB, error) {
 		}
 	}
 	return shares, nil
+}
+
+func loadLocalFolders(rawJSON string) ([]LocalFolder, error) {
+	var folders []LocalFolder
+	if strings.TrimSpace(rawJSON) != "" {
+		if err := json.Unmarshal([]byte(rawJSON), &folders); err != nil {
+			return nil, fmt.Errorf("HANK_REMOTE_AGENT_FILES_ROOTS_JSON: %w", err)
+		}
+		for i := range folders {
+			folders[i].ID = strings.TrimSpace(folders[i].ID)
+			folders[i].Name = strings.TrimSpace(folders[i].Name)
+			folders[i].Root = strings.TrimSpace(folders[i].Root)
+		}
+	}
+	return folders, nil
 }
 
 func normalizeSMBEnv(value SMB) SMB {

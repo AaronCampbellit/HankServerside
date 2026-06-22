@@ -351,6 +351,7 @@ func assistantFileIndexSourceIDsFromProfileConfig(raw string) []string {
 	}
 	seen := map[string]bool{}
 	sourceIDs := make([]string, 0)
+	localFound := false
 	appendSourceID := func(sourceID string) {
 		sourceID = strings.TrimSpace(sourceID)
 		if sourceID == "" || seen[sourceID] {
@@ -367,6 +368,7 @@ func assistantFileIndexSourceIDsFromProfileConfig(raw string) []string {
 		case "local":
 			if item.LocalRootEnabled || sourceID == "local" {
 				appendSourceID(sourceID)
+				localFound = true
 			}
 		case "smb":
 			if item.SMBEnabled || strings.TrimSpace(firstNonBlank(item.Host, item.SMBHost)) != "" || strings.TrimSpace(firstNonBlank(item.Share, item.SMBShare)) != "" {
@@ -375,10 +377,16 @@ func assistantFileIndexSourceIDsFromProfileConfig(raw string) []string {
 		default:
 			if sourceID != "" && (item.SMBEnabled || item.LocalRootEnabled || strings.TrimSpace(firstNonBlank(item.Host, item.SMBHost)) != "" || strings.TrimSpace(firstNonBlank(item.Share, item.SMBShare)) != "") {
 				appendSourceID(sourceID)
+				if item.LocalRootEnabled {
+					localFound = true
+				}
 			}
 		}
 	}
-	if profile.LocalRootEnabled {
+	// Legacy fallback: older snapshots flagged a single host root at the top
+	// level without enumerating it as a source. Only synthesize the "local" id
+	// when no host folder source was already discovered.
+	if profile.LocalRootEnabled && !localFound {
 		appendSourceID("local")
 	}
 	if len(sourceIDs) == 0 {
