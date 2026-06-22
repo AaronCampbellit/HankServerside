@@ -7,6 +7,8 @@ const state = {
   profiles: [],
   smbShares: [],
   editingSMBShareID: "",
+  folders: [],
+  editingFolderID: "",
 };
 
 const els = {
@@ -34,6 +36,14 @@ const els = {
   smbUsername: document.getElementById("smb-username"),
   smbPassword: document.getElementById("smb-password"),
   smbPersist: document.getElementById("smb-persist"),
+  folderForm: document.getElementById("folder-form"),
+  folderList: document.getElementById("folder-list"),
+  folderAddButton: document.getElementById("folder-add-button"),
+  folderRemoveButton: document.getElementById("folder-remove-button"),
+  folderName: document.getElementById("folder-name"),
+  folderRoot: document.getElementById("folder-root"),
+  folderCreate: document.getElementById("folder-create"),
+  folderPersist: document.getElementById("folder-persist"),
   toast: document.getElementById("toast"),
 };
 
@@ -206,6 +216,100 @@ function shareLabel(share) {
   return share.name && share.name !== share.share ? `${share.name} (${target || share.id})` : target || share.name || share.id;
 }
 
+function normalizeFolder(entry, index) {
+  const root = String(entry?.root || "").trim();
+  const id = cleanSourceID(entry?.id || entry?.source_id || entry?.name || `folder-${index + 1}`);
+  if (!id && !root) return null;
+  return {
+    id: id || `folder-${index + 1}`,
+    name: entry?.name || root || `Host Folder ${index + 1}`,
+    root,
+  };
+}
+
+function foldersFromConfig(config) {
+  const folders = [];
+  const rawFolders = Array.isArray(config.folders) ? config.folders : [];
+  rawFolders.forEach((entry, index) => {
+    const folder = normalizeFolder(entry, index);
+    if (folder) folders.push(folder);
+  });
+
+  if (!folders.length) {
+    const rawSources = Array.isArray(config.file_sources) ? config.file_sources
+      : Array.isArray(config.sources) ? config.sources
+        : [];
+    rawSources.forEach((entry, index) => {
+      if (entry.type !== "local") return;
+      const folder = normalizeFolder({
+        id: entry.id || entry.source_id,
+        name: entry.name,
+        root: entry.root,
+      }, folders.length + index);
+      if (folder && !folders.some((candidate) => candidate.id === folder.id)) {
+        folders.push(folder);
+      }
+    });
+  }
+
+  return folders;
+}
+
+function currentFolder() {
+  return state.folders.find((folder) => folder.id === state.editingFolderID) || null;
+}
+
+function folderLabel(folder) {
+  if (!folder) return "New Folder";
+  return folder.name && folder.name !== folder.root ? `${folder.name} (${folder.root || folder.id})` : folder.root || folder.name || folder.id;
+}
+
+function folderIDFromParts(folder, existingIDs = new Set()) {
+  const base = cleanSourceID(folder.id || folder.name || folder.root || "folder");
+  let candidate = base || "folder";
+  let index = 2;
+  while (existingIDs.has(candidate)) {
+    candidate = `${base || "folder"}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function validHostPath(value) {
+  return String(value || "").trim().startsWith("/");
+}
+
+// fileServerPublicConfig builds the public config for the shared "smb" service
+// profile, carrying both network shares and host folders so a save of one does
+// not drop the other.
+function fileServerPublicConfig(shares, folders) {
+  const publicShares = (shares || []).map((share) => ({
+    id: share.id,
+    name: share.name,
+    host: share.host,
+    share: share.share,
+    domain: share.domain,
+    username: share.username,
+  }));
+  const publicFolders = (folders || []).map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+    type: "local",
+    root: folder.root,
+    create: Boolean(folder.create),
+  }));
+  const primary = publicShares[0] || {};
+  return {
+    active_source_id: primary.id || publicFolders[0]?.id || "",
+    host: primary.host || "",
+    share: primary.share || "",
+    domain: primary.domain || "",
+    username: primary.username || "",
+    shares: publicShares,
+    folders: publicFolders,
+  };
+}
+
 function renderSession() {
   document.body.classList.add("signed-in");
   els.sessionState.textContent = `Signed in as ${state.user?.email || "unknown"}`;
@@ -255,6 +359,11 @@ function renderSummary() {
   });
   els.smbAddShareButton.disabled = !admin;
   els.smbRemoveShareButton.disabled = !admin || !currentSMBShare();
+  els.folderForm.querySelectorAll("input, button").forEach((element) => {
+    element.disabled = !admin;
+  });
+  els.folderAddButton.disabled = !admin;
+  els.folderRemoveButton.disabled = !admin || !currentFolder();
 
   if (!home) {
     els.profilesSummary.className = "card-list empty-state";
@@ -307,6 +416,13 @@ function renderForms() {
   }
   renderSMBSharesList();
   fillSMBForm(currentSMBShare());
+
+  state.folders = foldersFromConfig(smbConfig);
+  if (!state.folders.some((folder) => folder.id === state.editingFolderID)) {
+    state.editingFolderID = state.folders[0]?.id || "";
+  }
+  renderFolderList();
+  fillFolderForm(currentFolder());
 }
 
 function renderSMBSharesList() {
@@ -471,7 +587,7 @@ async function saveSMBSettings(event) {
   });
   nextShares.sort((left, right) => shareLabel(left).localeCompare(shareLabel(right), undefined, { sensitivity: "base" }));
 
-  const publicConfig = publicConfigForSMBShares(nextShares);
+  const publicConfig = fileServerPublicConfig(nextShares, state.folders);
   const payload = {
     public_config: publicConfig,
     persist: els.smbPersist.checked,
@@ -493,24 +609,124 @@ async function saveSMBSettings(event) {
   }
 }
 
-function publicConfigForSMBShares(shares) {
-  const publicShares = shares.map((share) => ({
-    id: share.id,
-    name: share.name,
-    host: share.host,
-    share: share.share,
-    domain: share.domain,
-    username: share.username,
-  }));
-  const primary = publicShares[0] || {};
-  return {
-    active_source_id: primary.id || "",
-    host: primary.host || "",
-    share: primary.share || "",
-    domain: primary.domain || "",
-    username: primary.username || "",
-    shares: publicShares,
+function renderFolderList() {
+  const admin = isAdmin();
+  if (!state.folders.length) {
+    els.folderList.className = "card-list empty-state";
+    els.folderList.textContent = "No host folders saved.";
+    els.folderRemoveButton.disabled = true;
+    return;
+  }
+
+  els.folderList.className = "card-list";
+  els.folderList.innerHTML = "";
+  state.folders.forEach((folder) => {
+    const card = document.createElement("article");
+    card.className = `card split-card ${folder.id === state.editingFolderID ? "selected" : ""}`;
+    card.innerHTML = `
+      <div class="card-head">
+        <div>
+          <div class="card-title">${escapeHTML(folderLabel(folder))}</div>
+          <div class="meta">${folder.id === state.editingFolderID ? "Editing" : "Saved folder"}</div>
+        </div>
+        <span class="status-chip">host folder</span>
+      </div>
+      <div class="kv-grid">
+        <div class="kv-row"><div class="kv-label">Host Path</div><div>${escapeHTML(folder.root || "Not set")}</div></div>
+      </div>
+      <div class="item-actions">
+        <button type="button" data-folder-id="${escapeHTML(folder.id)}" class="secondary" ${admin ? "" : "disabled"}>${folder.id === state.editingFolderID ? "Selected" : "Edit"}</button>
+      </div>
+    `;
+    els.folderList.appendChild(card);
+  });
+  els.folderList.querySelectorAll("[data-folder-id]").forEach((button) => {
+    button.addEventListener("click", () => selectFolder(button.dataset.folderId));
+  });
+  els.folderRemoveButton.disabled = !admin || !currentFolder();
+}
+
+function fillFolderForm(folder) {
+  els.folderName.value = folder?.name || "";
+  els.folderRoot.value = folder?.root || "";
+  els.folderCreate.checked = true;
+}
+
+function selectFolder(id) {
+  state.editingFolderID = id || "";
+  renderFolderList();
+  fillFolderForm(currentFolder());
+}
+
+function addFolder() {
+  state.editingFolderID = "";
+  fillFolderForm(null);
+  renderFolderList();
+  els.folderName.focus();
+}
+
+async function saveFolderSettings(event) {
+  event.preventDefault();
+  if (!isAdmin()) {
+    showToast("Only admins can change file server settings.", true);
+    return;
+  }
+  const root = els.folderRoot.value.trim();
+  if (!validHostPath(root)) {
+    showToast("Enter an absolute host path that starts with /.", true);
+    return;
+  }
+  const existingIDs = new Set(state.folders.map((folder) => folder.id).filter((id) => id !== state.editingFolderID));
+  const draft = {
+    id: state.editingFolderID || folderIDFromParts({ name: els.folderName.value.trim(), root }, existingIDs),
+    name: els.folderName.value.trim() || root,
+    root,
+    create: els.folderCreate.checked,
   };
+
+  const nextFolders = state.folders
+    .filter((folder) => folder.id !== state.editingFolderID && folder.id !== draft.id)
+    .concat(draft)
+    .sort((left, right) => folderLabel(left).localeCompare(folderLabel(right), undefined, { sensitivity: "base" }));
+
+  try {
+    await api("/v1/home/service-profiles/smb", {
+      method: "PUT",
+      body: JSON.stringify({
+        public_config: fileServerPublicConfig(state.smbShares, nextFolders),
+        persist: els.folderPersist.checked,
+      }),
+    });
+    state.editingFolderID = draft.id;
+    await loadProfiles();
+    showToast("Host folder saved.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function removeFolder() {
+  if (!isAdmin()) {
+    showToast("Only admins can change file server settings.", true);
+    return;
+  }
+  const folder = currentFolder();
+  if (!folder) return;
+  const nextFolders = state.folders.filter((candidate) => candidate.id !== folder.id);
+  try {
+    await api("/v1/home/service-profiles/smb", {
+      method: "PUT",
+      body: JSON.stringify({
+        public_config: fileServerPublicConfig(state.smbShares, nextFolders),
+        persist: els.folderPersist.checked,
+      }),
+    });
+    state.editingFolderID = nextFolders[0]?.id || "";
+    await loadProfiles();
+    showToast("Host folder removed.");
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 async function removeSMBShare() {
@@ -525,7 +741,7 @@ async function removeSMBShare() {
     await api("/v1/home/service-profiles/smb", {
       method: "PUT",
       body: JSON.stringify({
-        public_config: publicConfigForSMBShares(nextShares),
+        public_config: fileServerPublicConfig(nextShares, state.folders),
         persist: els.smbPersist.checked,
       }),
     });
@@ -568,5 +784,8 @@ els.haForm.addEventListener("submit", saveHomeAssistant);
 els.smbForm.addEventListener("submit", saveSMBSettings);
 els.smbAddShareButton.addEventListener("click", addSMBShare);
 els.smbRemoveShareButton.addEventListener("click", removeSMBShare);
+els.folderForm.addEventListener("submit", saveFolderSettings);
+els.folderAddButton.addEventListener("click", addFolder);
+els.folderRemoveButton.addEventListener("click", removeFolder);
 
 hydrate();

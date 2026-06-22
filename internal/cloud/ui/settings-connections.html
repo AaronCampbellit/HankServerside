@@ -92,6 +92,8 @@
             <h2>File Server</h2>
             <span id="settings-role" class="pill">Loading</span>
           </div>
+          <h3>Network (SMB) Shares</h3>
+          <p class="hint">Connect Hank to an SMB/CIFS share hosted on a NAS or another machine on your network.</p>
           <form id="smb-form" class="settings-form">
             <div id="smb-shares-list" class="card-list empty-state">No file server shares saved.</div>
             <div class="actions wrap compact">
@@ -130,6 +132,38 @@
             </div>
             <div class="actions wrap">
               <button type="submit">Save Share</button>
+              <a class="button-link secondary" href="/dashboard/file-server">Open File Server</a>
+            </div>
+          </form>
+
+          <h3>Host Folders</h3>
+          <p class="hint">Serve a directory on the home connector itself. The folder can live anywhere on the host and is created if it does not exist.</p>
+          <form id="folder-form" class="settings-form">
+            <div id="folder-list" class="card-list empty-state">No host folders saved.</div>
+            <div class="actions wrap compact">
+              <button type="button" id="folder-add-button" class="secondary">Add Folder</button>
+              <button type="button" id="folder-remove-button" class="ghost" disabled>Remove Folder</button>
+            </div>
+            <div class="settings-grid">
+              <label class="setting-field">
+                <span>Folder Label</span>
+                <input id="folder-name" type="text" placeholder="Downloads" autocomplete="off">
+              </label>
+              <label class="setting-field">
+                <span>Host Path</span>
+                <input id="folder-root" type="text" placeholder="/srv/hank/downloads" autocomplete="off">
+              </label>
+              <label class="toggle-field">
+                <input id="folder-create" type="checkbox" checked>
+                <span>Create folder if it does not exist</span>
+              </label>
+              <label class="toggle-field">
+                <input id="folder-persist" type="checkbox" checked>
+                <span>Save on home connector</span>
+              </label>
+            </div>
+            <div class="actions wrap">
+              <button type="submit">Save Folder</button>
               <a class="button-link secondary" href="/dashboard/file-server">Open File Server</a>
             </div>
           </form>

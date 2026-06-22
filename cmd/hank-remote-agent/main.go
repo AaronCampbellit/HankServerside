@@ -33,8 +33,9 @@ func main() {
 
 	ha := agentha.New(cfg.HA.BaseURL, cfg.HA.Token, cfg.HA.Timeout)
 	files := agentfiles.NewWithConfig(agentfiles.Config{
-		Root:   cfg.FilesRoot,
-		Shares: agentSMBShares(cfg.SMBShares),
+		Root:         cfg.FilesRoot,
+		LocalSources: agentLocalFolders(cfg.LocalFolders),
+		Shares:       agentSMBShares(cfg.SMBShares),
 	})
 	notes := agentnotes.New(cfg.NotesRoot)
 	appManager := agentapps.NewManager(cfg.AppsDir, cfg.AppStagingDir, agentapps.Runner{
@@ -68,6 +69,19 @@ func agentSMBShares(shares []config.SMB) []agentfiles.SMBConfig {
 			Password: share.Password,
 			Domain:   share.Domain,
 			Policy:   agentFilePolicy(share.Policy),
+		})
+	}
+	return configs
+}
+
+func agentLocalFolders(folders []config.LocalFolder) []agentfiles.LocalConfig {
+	configs := make([]agentfiles.LocalConfig, 0, len(folders))
+	for _, folder := range folders {
+		configs = append(configs, agentfiles.LocalConfig{
+			ID:     folder.ID,
+			Name:   folder.Name,
+			Root:   folder.Root,
+			Policy: agentFilePolicy(folder.Policy),
 		})
 	}
 	return configs

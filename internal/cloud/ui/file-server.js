@@ -284,12 +284,20 @@ function fileSourcesFromConfig(cfg) {
       : [];
   rawSources.forEach((entry, index) => {
     const source = normalizeSourceEntry(entry, index);
-    if (source?.type === "smb") sources.push(source);
+    if (source) sources.push(source);
   });
 
   const rawShares = Array.isArray(cfg.shares) ? cfg.shares : [];
   rawShares.forEach((entry, index) => {
     const source = normalizeShareEntry(entry, index);
+    if (source && !sources.some((candidate) => candidate.id === source.id)) {
+      sources.push(source);
+    }
+  });
+
+  const rawFolders = Array.isArray(cfg.folders) ? cfg.folders : [];
+  rawFolders.forEach((entry, index) => {
+    const source = normalizeLocalEntry(entry, index);
     if (source && !sources.some((candidate) => candidate.id === source.id)) {
       sources.push(source);
     }
@@ -318,9 +326,14 @@ function fileSourcesFromConfig(cfg) {
 
 function normalizeSourceEntry(entry, index) {
   if (!entry) return null;
-  const type = entry.type || (entry.smb_host || entry.host || entry.smb_share || entry.share ? "smb" : "local");
+  const type = entry.type || (entry.smb_host || entry.host || entry.smb_share || entry.share ? "smb" : (entry.root ? "local" : "smb"));
   if (type === "local") {
-    return null;
+    return normalizeLocalEntry({
+      id: entry.id || entry.source_id,
+      name: entry.name,
+      root: entry.root,
+      enabled: entry.enabled ?? entry.local_root_enabled,
+    }, index);
   }
   return normalizeShareEntry({
     id: entry.id || entry.source_id,
@@ -332,6 +345,25 @@ function normalizeSourceEntry(entry, index) {
     enabled: entry.enabled ?? entry.smb_enabled,
     password_set: entry.password_set ?? entry.smb_password_set,
   }, index);
+}
+
+function normalizeLocalEntry(entry, index) {
+  const root = entry?.root || "";
+  const id = cleanSourceID(entry?.id || entry?.source_id || entry?.name || root || `folder-${index + 1}`);
+  if (!id && !root) return null;
+  return {
+    id: id || `folder-${index + 1}`,
+    name: entry?.name || root || "Host folder",
+    type: "local",
+    host: "",
+    share: "",
+    username: "",
+    domain: "",
+    root,
+    smbEnabled: false,
+    localRootEnabled: Boolean(entry?.enabled ?? Boolean(root)),
+    passwordSet: false,
+  };
 }
 
 function normalizeShareEntry(entry, index) {
@@ -529,14 +561,14 @@ async function sendCommand(command, body = {}) {
 function withSourceID(body = {}) {
   const sourceID = selectedSourceID();
   if (!sourceID) {
-    throw new Error("No SMB share is configured for this home.");
+    throw new Error("No file source is configured for this home.");
   }
   return withExplicitSourceID(sourceID, body);
 }
 
 function withExplicitSourceID(sourceID, body = {}) {
   if (!sourceID) {
-    throw new Error("No SMB share is configured for this home.");
+    throw new Error("No file source is configured for this home.");
   }
   return { ...body, source_id: sourceID };
 }
@@ -607,7 +639,7 @@ function renderSourceSummary() {
 
   if (!profile || !config.sources.length) {
     els.sourceSummary.className = "card-list empty-state";
-    els.sourceSummary.textContent = "No file server shares have been saved for this home yet.";
+    els.sourceSummary.textContent = "No file sources have been saved for this home yet.";
     return;
   }
 
@@ -618,15 +650,12 @@ function renderSourceSummary() {
       <div class="card-head">
         <div>
           <div class="card-title">${escapeHTML(sourceLabel(source))}</div>
-          <div class="meta">Active share - Updated ${escapeHTML(formatDate(profile.updated_at))}</div>
+          <div class="meta">${source.type === "local" ? "Host folder" : "Network share"} - Updated ${escapeHTML(formatDate(profile.updated_at))}</div>
         </div>
         <span class="status-chip ${profile.status === "healthy" && sourceEnabled(source) ? "" : "offline"}">${escapeHTML(sourceEnabled(source) ? profile.status || "unknown" : "not configured")}</span>
       </div>
       <div class="kv-grid">
-        <div class="kv-row"><div class="kv-label">Server</div><div>${escapeHTML(source.host || "Not set")}</div></div>
-        <div class="kv-row"><div class="kv-label">Share</div><div>${escapeHTML(source.share || "Not set")}</div></div>
-        <div class="kv-row"><div class="kv-label">Username</div><div>${escapeHTML(source.username || "Not set")}</div></div>
-        <div class="kv-row"><div class="kv-label">Password</div><div>${source.passwordSet ? "Saved" : "Not saved"}</div></div>
+        ${sourceSummaryRows(source)}
         <div class="kv-row"><div class="kv-label">Last Error</div><div>${escapeHTML(profile.last_error || "None")}</div></div>
       </div>
       <div class="item-actions">
@@ -669,13 +698,31 @@ function renderSourceSelect(sources) {
 }
 
 function sourceEnabled(source) {
-  return Boolean(source?.smbEnabled);
+  return Boolean(source?.smbEnabled || source?.localRootEnabled);
 }
 
 function sourceLabel(source) {
   if (!source) return "Not connected";
+  if (source.type === "local") {
+    return source.name && source.name !== source.root ? `${source.name} (${source.root || source.id})` : source.root || source.name || source.id;
+  }
   const target = [source.host, source.share].filter(Boolean).join("/");
   return source.name && source.name !== source.share ? `${source.name} (${target || source.id})` : target || source.name || source.id;
+}
+
+function sourceSummaryRows(source) {
+  if (source.type === "local") {
+    return `
+      <div class="kv-row"><div class="kv-label">Type</div><div>Host folder</div></div>
+      <div class="kv-row"><div class="kv-label">Host Path</div><div>${escapeHTML(source.root || "Not set")}</div></div>
+    `;
+  }
+  return `
+    <div class="kv-row"><div class="kv-label">Server</div><div>${escapeHTML(source.host || "Not set")}</div></div>
+    <div class="kv-row"><div class="kv-label">Share</div><div>${escapeHTML(source.share || "Not set")}</div></div>
+    <div class="kv-row"><div class="kv-label">Username</div><div>${escapeHTML(source.username || "Not set")}</div></div>
+    <div class="kv-row"><div class="kv-label">Password</div><div>${source.passwordSet ? "Saved" : "Not saved"}</div></div>
+  `;
 }
 
 async function switchSource(sourceID) {
@@ -1115,12 +1162,12 @@ async function browseFiles(path = state.currentFilesPath, options = {}) {
       renderFolderTree();
       renderSelectionState();
       renderPreview();
-      setFilesLoading("No SMB share is configured for this home.");
+      setFilesLoading("No file source is configured for this home.");
       return;
     }
     const normalized = normalizePath(path);
     if (!options.keepSearch) resetSearch();
-    setFilesLoading("Loading folder.", "First launch can take a minute while the home connector warms the SMB cache.");
+    setFilesLoading("Loading folder.", "First launch can take a minute while the home connector warms its file source cache.");
     const payload = await sendFileCommandForSource(sourceID, "files.list", { path: normalized });
     if (requestID !== state.browseRequestID || sourceID !== selectedSourceID()) return;
     state.currentFilesPath = normalized;
@@ -1340,7 +1387,7 @@ async function openMoveDialog(items) {
   }
   const activeSourceID = selectedSourceID();
   if (!activeSourceID) {
-    showToast("Choose an SMB share first.", true);
+    showToast("Choose a file source first.", true);
     return;
   }
   state.moveItems = targets;

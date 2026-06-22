@@ -318,6 +318,85 @@ func mustDecodeBase64(t *testing.T, content string) []byte {
 	return decoded
 }
 
+func TestLocalSourcesServeMultipleHostFolders(t *testing.T) {
+	t.Parallel()
+
+	mediaRoot := t.TempDir()
+	docsRoot := t.TempDir()
+	service := NewWithConfig(Config{
+		LocalSources: []LocalConfig{
+			{ID: "media", Name: "Media", Root: mediaRoot},
+			{ID: "docs", Name: "Docs", Root: docsRoot},
+		},
+	})
+
+	if !service.Enabled() {
+		t.Fatal("Enabled = false, want true with host folders configured")
+	}
+
+	content := base64.StdEncoding.EncodeToString([]byte("hi"))
+	if err := service.UploadSource(context.Background(), "media", "a.txt", content); err != nil {
+		t.Fatalf("UploadSource media: %v", err)
+	}
+
+	// A file written to one host folder must not leak into another.
+	items, err := service.ListSource(context.Background(), "docs", "/")
+	if err != nil {
+		t.Fatalf("ListSource docs: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("docs items = %#v, want empty isolated root", items)
+	}
+
+	if _, err := os.Stat(filepath.Join(mediaRoot, "a.txt")); err != nil {
+		t.Fatalf("media file not written to its host folder: %v", err)
+	}
+}
+
+func TestSnapshotIncludesHostFolders(t *testing.T) {
+	t.Parallel()
+
+	defaultRoot := t.TempDir()
+	service := NewWithConfig(Config{
+		Root:         defaultRoot,
+		LocalSources: []LocalConfig{{ID: "media", Name: "Media", Root: t.TempDir()}},
+	})
+
+	snapshot := service.Snapshot()
+	if enabled, _ := snapshot["local_root_enabled"].(bool); !enabled {
+		t.Fatal("local_root_enabled = false, want true")
+	}
+	folders, ok := snapshot["folders"].([]localSourceSnapshot)
+	if !ok {
+		t.Fatalf("folders type = %T, want []localSourceSnapshot", snapshot["folders"])
+	}
+	if len(folders) != 2 {
+		t.Fatalf("folders count = %d, want 2 (default local + media)", len(folders))
+	}
+	if folders[0].ID != LocalSourceID || folders[0].Root != defaultRoot {
+		t.Fatalf("first folder = %#v, want default local root", folders[0])
+	}
+	if folders[1].ID != "media" {
+		t.Fatalf("second folder = %#v, want media", folders[1])
+	}
+}
+
+func TestApplyLocalConfigsReplacesHostFolders(t *testing.T) {
+	t.Parallel()
+
+	service := NewWithConfig(Config{LocalSources: []LocalConfig{{ID: "old", Root: t.TempDir()}}})
+	newRoot := t.TempDir()
+	service.ApplyLocalConfigs([]LocalConfig{{ID: "fresh", Root: newRoot}})
+
+	configs := service.LocalConfigs()
+	if len(configs) != 1 || configs[0].ID != "fresh" || configs[0].Root != newRoot {
+		t.Fatalf("LocalConfigs = %#v, want single fresh source", configs)
+	}
+	if _, err := service.sourceForID("old"); err == nil {
+		t.Fatal("old source still resolvable after ApplyLocalConfigs, want error")
+	}
+}
+
 func TestSMBConfigEnablesService(t *testing.T) {
 	t.Parallel()
 

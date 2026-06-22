@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -116,6 +117,18 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 		}
 		configs := smbConfigsFromApply(public, secrets, m.files.SMBConfigs())
 		m.files.ApplySMBConfigs(configs)
+
+		applyLocal := public.Folders != nil
+		if applyLocal {
+			locals, err := prepareLocalConfigs(public.Folders)
+			if err != nil {
+				profile := m.smbProfile(request.SecretVersion, request.SecretVersion, err.Error())
+				m.profiles[request.ServiceType] = profile
+				return profile, err
+			}
+			m.files.ApplyLocalConfigs(locals)
+		}
+
 		profile := m.smbProfile(request.SecretVersion, request.SecretVersion, "")
 		m.profiles[request.ServiceType] = profile
 		if request.Persist {
@@ -124,6 +137,14 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 				profile.LastError = err.Error()
 				m.profiles[request.ServiceType] = profile
 				return profile, err
+			}
+			if applyLocal {
+				if err := m.persistLocalConfigs(m.files.LocalConfigs()); err != nil {
+					profile.Status = domain.SyncStatusDegraded
+					profile.LastError = err.Error()
+					m.profiles[request.ServiceType] = profile
+					return profile, err
+				}
 			}
 		}
 		return profile, nil
@@ -178,6 +199,19 @@ type smbPublicConfig struct {
 	Shares      []smbSharePayload       `json:"shares"`
 	FileSources []smbSharePayload       `json:"file_sources"`
 	Sources     []smbSharePayload       `json:"sources"`
+	// Folders carries host directory sources. A nil slice means the request did
+	// not manage folders (leave them untouched); a non-nil slice replaces them.
+	Folders []localFolderPayload `json:"folders"`
+}
+
+type localFolderPayload struct {
+	ID       string                  `json:"id"`
+	SourceID string                  `json:"source_id"`
+	Name     string                  `json:"name"`
+	Root     string                  `json:"root"`
+	Path     string                  `json:"path"`
+	Create   bool                    `json:"create"`
+	Policy   agentfiles.AccessPolicy `json:"policy"`
 }
 
 type smbSecretConfig struct {
@@ -234,7 +268,10 @@ func smbConfigsFromApply(public smbPublicConfig, secrets smbSecretConfig, existi
 			Policy:   policy,
 		})
 	}
-	if len(configs) == 0 {
+	// Fall back to the legacy single-share top-level fields only when they
+	// actually carry a target; otherwise an SMB-free save (for example one that
+	// only manages host folders) would synthesize a phantom empty share.
+	if len(configs) == 0 && (strings.TrimSpace(public.Host) != "" || strings.TrimSpace(public.Share) != "") {
 		configs = append(configs, agentfiles.SMBConfig{
 			ID:       strings.TrimSpace(public.ID),
 			Name:     strings.TrimSpace(public.Name),
@@ -284,6 +321,46 @@ func filterSMBSourcePayloads(sources []smbSharePayload) []smbSharePayload {
 		}
 	}
 	return filtered
+}
+
+// prepareLocalConfigs validates host folder payloads, optionally creating the
+// directories, and returns the configs ready to apply. The host folder may live
+// anywhere on the host filesystem; per-folder access is confined to the tree by
+// the files service resolve helpers.
+func prepareLocalConfigs(payloads []localFolderPayload) ([]agentfiles.LocalConfig, error) {
+	configs := make([]agentfiles.LocalConfig, 0, len(payloads))
+	for _, payload := range payloads {
+		root := strings.TrimSpace(firstNonEmpty(payload.Root, payload.Path))
+		if root == "" {
+			continue
+		}
+		if !filepath.IsAbs(root) {
+			return nil, fmt.Errorf("host folder %q must be an absolute path", root)
+		}
+		root = filepath.Clean(root)
+		if payload.Create {
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				return nil, fmt.Errorf("create host folder %q: %w", root, err)
+			}
+		}
+		info, err := os.Stat(root)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("host folder %q does not exist", root)
+			}
+			return nil, fmt.Errorf("host folder %q: %w", root, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("host folder %q is not a directory", root)
+		}
+		configs = append(configs, agentfiles.LocalConfig{
+			ID:     strings.TrimSpace(firstNonEmpty(payload.ID, payload.SourceID)),
+			Name:   strings.TrimSpace(payload.Name),
+			Root:   root,
+			Policy: payload.Policy,
+		})
+	}
+	return configs, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -368,6 +445,46 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 		env["HANK_REMOTE_SMB_SHARES_JSON"] = string(encoded)
 	} else {
 		delete(env, "HANK_REMOTE_SMB_SHARES_JSON")
+	}
+	return writeEnvFile(m.envPath, env)
+}
+
+func (m *configManager) persistLocalConfigs(configs []agentfiles.LocalConfig) error {
+	if m.envPath == "" {
+		return nil
+	}
+	env, err := m.readEnvFile()
+	if err != nil {
+		return err
+	}
+	// The single-root legacy key is consolidated into the JSON list.
+	delete(env, "HANK_REMOTE_AGENT_FILES_ROOT")
+	type envFolder struct {
+		ID     string                  `json:"id,omitempty"`
+		Name   string                  `json:"name,omitempty"`
+		Root   string                  `json:"root"`
+		Policy agentfiles.AccessPolicy `json:"policy,omitempty"`
+	}
+	folders := make([]envFolder, 0, len(configs))
+	for _, cfg := range configs {
+		if !cfg.Enabled() {
+			continue
+		}
+		folders = append(folders, envFolder{
+			ID:     strings.TrimSpace(cfg.ID),
+			Name:   strings.TrimSpace(cfg.Name),
+			Root:   strings.TrimSpace(cfg.Root),
+			Policy: cfg.Policy,
+		})
+	}
+	if len(folders) > 0 {
+		encoded, err := json.Marshal(folders)
+		if err != nil {
+			return err
+		}
+		env["HANK_REMOTE_AGENT_FILES_ROOTS_JSON"] = string(encoded)
+	} else {
+		delete(env, "HANK_REMOTE_AGENT_FILES_ROOTS_JSON")
 	}
 	return writeEnvFile(m.envPath, env)
 }
