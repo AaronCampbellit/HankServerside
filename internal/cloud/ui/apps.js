@@ -22,6 +22,7 @@ const els = {
   packageForm: document.getElementById("app-package-form"),
   installCancelButton: document.getElementById("app-install-cancel-button"),
   packageInput: document.getElementById("app-package-input"),
+  folderInput: document.getElementById("app-folder-input"),
   preview: document.getElementById("app-preview"),
   previewStatus: document.getElementById("app-preview-status"),
   previewBody: document.getElementById("app-preview-body"),
@@ -414,15 +415,139 @@ function normalizeFileSource(source, index) {
   return { ...source, id, label };
 }
 
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// Strip the top-level folder segment so app.json lands at the archive root,
+// which is what the import endpoint requires.
+function archiveEntryName(relativePath) {
+  const parts = String(relativePath).split("/");
+  if (parts.length <= 1) return parts[0] || "";
+  return parts.slice(1).join("/");
+}
+
+function shouldSkipEntry(name) {
+  if (!name) return true;
+  return name.split("/").some((part) => part === ".DS_Store" || part === "__MACOSX");
+}
+
+// Build a store-only (uncompressed) ZIP. Go's archive/zip reads stored entries,
+// so no client-side compression dependency is needed.
+async function buildHankAppFromFiles(fileList) {
+  const encoder = new TextEncoder();
+  const entries = [];
+  for (const file of fileList) {
+    const name = archiveEntryName(file.webkitRelativePath || file.name);
+    if (shouldSkipEntry(name)) continue;
+    const data = new Uint8Array(await file.arrayBuffer());
+    entries.push({ name: encoder.encode(name), data, crc: crc32(data) });
+  }
+  if (!entries.some((entry) => new TextDecoder().decode(entry.name) === "app.json")) {
+    throw new Error("Folder must contain app.json at its top level.");
+  }
+
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const header = new Uint8Array(30 + entry.name.length);
+    const dv = new DataView(header.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true); // version needed
+    dv.setUint16(6, 0, true); // flags
+    dv.setUint16(8, 0, true); // method: store
+    dv.setUint16(10, 0, true); // mod time
+    dv.setUint16(12, 0x21, true); // mod date (1980-01-01)
+    dv.setUint32(14, entry.crc, true);
+    dv.setUint32(18, entry.data.length, true);
+    dv.setUint32(22, entry.data.length, true);
+    dv.setUint16(26, entry.name.length, true);
+    dv.setUint16(28, 0, true);
+    header.set(entry.name, 30);
+    chunks.push(header, entry.data);
+    entry.offset = offset;
+    offset += header.length + entry.data.length;
+  }
+
+  for (const entry of entries) {
+    const record = new Uint8Array(46 + entry.name.length);
+    const dv = new DataView(record.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true); // version made by
+    dv.setUint16(6, 20, true); // version needed
+    dv.setUint16(8, 0, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint16(12, 0, true);
+    dv.setUint16(14, 0x21, true);
+    dv.setUint32(16, entry.crc, true);
+    dv.setUint32(20, entry.data.length, true);
+    dv.setUint32(24, entry.data.length, true);
+    dv.setUint16(28, entry.name.length, true);
+    dv.setUint32(42, entry.offset, true);
+    record.set(entry.name, 46);
+    central.push(record);
+  }
+
+  const centralSize = central.reduce((sum, record) => sum + record.length, 0);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, entries.length, true);
+  endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, offset, true);
+
+  return new Blob([...chunks, ...central, end], { type: "application/vnd.hank.app-package" });
+}
+
+async function resolvePackageUpload() {
+  const file = els.packageInput.files?.[0];
+  if (file) {
+    return { blob: file, filename: file.name };
+  }
+  const folderFiles = els.folderInput?.files;
+  if (folderFiles?.length) {
+    const top = (folderFiles[0].webkitRelativePath || "").split("/")[0] || "app";
+    const blob = await buildHankAppFromFiles(folderFiles);
+    return { blob, filename: `${top}.hankapp` };
+  }
+  return null;
+}
+
 async function previewPackage(event) {
   event.preventDefault();
-  const file = els.packageInput.files?.[0];
-  if (!file) {
-    showToast("Choose a .hankapp package.", true);
+  let upload;
+  try {
+    upload = await resolvePackageUpload();
+  } catch (error) {
+    showToast(error.message, true);
     return;
   }
+  if (!upload) {
+    showToast("Choose a .hankapp package or an app folder.", true);
+    return;
+  }
+  const file = upload.blob;
   const formData = new FormData();
-  formData.set("package", file);
+  formData.set("package", file, upload.filename);
   const headers = new Headers();
   const csrf = window.HankAPI.csrfToken?.();
   if (csrf) {
@@ -458,6 +583,7 @@ async function installPreview() {
     });
     state.preview = null;
     els.packageInput.value = "";
+    if (els.folderInput) els.folderInput.value = "";
     renderPreview();
     await loadApps();
     showToast("App installed.");

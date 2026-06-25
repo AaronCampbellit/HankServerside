@@ -100,8 +100,13 @@
             <span class="pill">.hankapp</span>
           </div>
           <label class="setting-field">
-            <span>Package</span>
+            <span>Package (.hankapp)</span>
             <input id="app-package-input" type="file" accept=".hankapp,application/zip,application/octet-stream">
+          </label>
+          <label class="setting-field">
+            <span>Or app folder</span>
+            <input id="app-folder-input" type="file" webkitdirectory directory multiple>
+            <span class="meta">Select the top-level app folder (must contain app.json). It will be packaged into a .hankapp.</span>
           </label>
           <div class="actions wrap">
             <button id="app-install-cancel-button" type="button" class="secondary">Cancel</button>
@@ -116,7 +121,7 @@
     <script src="/assets/api-client.js" defer></script>
     <script src="/assets/ui-helpers.js" defer></script>
     <script src="/assets/settings-nav.js" defer></script>
-    <script src="/assets/apps.js?v=20260612-app-settings-flow" defer></script>
+    <script src="/assets/apps.js?v=20260625-folder-upload" defer></script>
     <script src="/assets/admin-nav.js?v=20260608-apps" defer></script>
   </body>
 </html>
