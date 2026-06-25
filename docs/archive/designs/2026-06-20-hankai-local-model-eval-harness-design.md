@@ -1,6 +1,7 @@
 # HankAI Local Model Eval Harness Design
 
 Date: 2026-06-20
+Status: Implemented. Current operator usage lives in [hankai-local-model-evals.md](../../hankai-local-model-evals.md); this file is historical design context.
 
 ## Goal
 

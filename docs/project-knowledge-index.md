@@ -1,6 +1,16 @@
 # Hank Remote Project Knowledge Index
 
-This file is the central map for project markdown that HankAI should use when answering questions about Hank Remote.
+This file is the central map for project markdown. It is the one place to start
+when answering questions about Hank Remote or deciding where a new doc belongs.
+
+Layout at a glance:
+
+- **Active reference docs** live flat in `docs/`.
+- **Operator runbooks** live in `docs/runbooks/`.
+- **Hank app (client) integration** docs live in `docs/app-integration/`.
+- **Historical material** (completed or superseded phases, dated audits,
+  implemented designs, finished plans/tasklists) lives under `docs/archive/`
+  and should not be read as current guidance.
 
 ## Root Documents
 
@@ -8,49 +18,38 @@ This file is the central map for project markdown that HankAI should use when an
 - [AGENTS.md](../AGENTS.md): Codex working rules and repo boundaries.
 - [SERVER_SYNC.md](../SERVER_SYNC.md): app/server contract ledger.
 
-These documents stay in the repo root because common tooling expects them there. They are still part of the HankAI project-docs source.
+These stay in the repo root because common tooling expects them there. They are
+still part of the HankAI project-docs source.
 
-## Architecture And Setup
+## Architecture, Setup, and Operations
 
-- [architecture.md](architecture.md)
-- [deployment.md](deployment.md)
-- [roadmap.md](roadmap.md)
-- [backend-production-repair-plan.md](backend-production-repair-plan.md)
-- [project-cleanup-audit-2026-06-06.md](project-cleanup-audit-2026-06-06.md): dated cleanup audit with 2026-06-06 repair status, remaining follow-up tests, and stale-doc context.
-- [backend-architecture-audit.md](backend-architecture-audit.md): dated 2026-05-30 point-in-time audit; use the repair plan, deployment guide, and runbooks for current operator actions.
-- [legacy-code-audit.md](legacy-code-audit.md): dated 2026-06-01 cleanup audit with implementation resolution status.
+- [architecture.md](architecture.md): current system design and surface map.
+- [deployment.md](deployment.md): setup, env, and deployment guide.
+- [roadmap.md](roadmap.md): delivery order and cross-phase rules.
+- [backend-production-repair-plan.md](backend-production-repair-plan.md): **active** production-readiness hardening plan (remaining items still apply).
+- [security-hardening-todo.md](security-hardening-todo.md): security hardening status; implemented items are historical rationale, each section's current-risk line is the remaining work.
+- [agent-change-guardrails.md](agent-change-guardrails.md): pre-change/pre-finish checklist and core invariants for coding agents.
 
-## Historical Phase Archive
+## Feature and Interface Docs
 
-The phase-era documents are archived under [archive/phases](archive/phases). They are retained as historical implementation context only and should not be treated as current setup, operator, or repair guidance.
-
-- [archive/phases/phase-1-identity-and-routing.md](archive/phases/phase-1-identity-and-routing.md)
-- [archive/phases/phase-1-tasklist.md](archive/phases/phase-1-tasklist.md)
-- [archive/phases/phase-2-home-assistant.md](archive/phases/phase-2-home-assistant.md)
-- [archive/phases/phase-2-tasklist.md](archive/phases/phase-2-tasklist.md)
-- [archive/phases/phase-3-files.md](archive/phases/phase-3-files.md)
-- [archive/phases/phase-3-tasklist.md](archive/phases/phase-3-tasklist.md)
-- [archive/phases/phase-4-notes.md](archive/phases/phase-4-notes.md)
-- [archive/phases/phase-4-tasklist.md](archive/phases/phase-4-tasklist.md)
-- [archive/phases/phase-5-operations.md](archive/phases/phase-5-operations.md)
-- [archive/phases/phase-5-tasklist.md](archive/phases/phase-5-tasklist.md)
-- [archive/phases/phase-6-hank-assistant.md](archive/phases/phase-6-hank-assistant.md)
-
-## Feature Notes
-
-- [hankai-chat-tool-improvement-plan.md](hankai-chat-tool-improvement-plan.md)
-- [hankai-intents-rollout.md](hankai-intents-rollout.md)
-- [hankai-local-model-evals.md](hankai-local-model-evals.md)
-- [notes-api.md](notes-api.md): external application guide for profile and shared Home notes over scoped, revocable Notes API tokens.
-
-## App Contract Notes
-
+- [mcp.md](mcp.md): optional remote MCP endpoint — routes, OAuth, scopes, the `code-reference/` source snapshot, and connecting a client.
+- [notes-api.md](notes-api.md): external app guide for profile and shared Home notes over scoped, revocable Notes API tokens.
 - [hank-app-platform-contract.md](hank-app-platform-contract.md): stable runtime vs installable app boundary and `.hankapp` compatibility rules.
-- [hank-app-repo-separation-checklist.md](hank-app-repo-separation-checklist.md): task list for moving optional first-party Hank apps into independent repositories while keeping HankServerside as the runtime.
-- [hank-app-auth-migration.md](hank-app-auth-migration.md)
-- [hank-app-home-sync-checklist.md](hank-app-home-sync-checklist.md)
+- [hankai-vector-index.md](hankai-vector-index.md): current inventory of HankAI vector-index sources, provider embedding behavior, and retrieval boundaries.
+- [hankai-local-model-evals.md](hankai-local-model-evals.md): checks to run when changing Ollama models, local prompt profiles, planner settings, or vector context packaging.
+- [demo-validation.md](demo-validation.md): how demo-server validation stays separate from production code.
 
-## Runbooks
+## Hank App Integration (`app-integration/`)
+
+Client-side contracts and checklists for the separate Hank app repo. The durable
+boundary lives in `hank-app-platform-contract.md` above; these track in-progress
+app-side work.
+
+- [app-integration/hank-app-auth-migration.md](app-integration/hank-app-auth-migration.md)
+- [app-integration/hank-app-home-sync-checklist.md](app-integration/hank-app-home-sync-checklist.md)
+- [app-integration/hank-app-repo-separation-checklist.md](app-integration/hank-app-repo-separation-checklist.md)
+
+## Runbooks (`runbooks/`)
 
 - [runbooks/agent-offline.md](runbooks/agent-offline.md)
 - [runbooks/auth-failures.md](runbooks/auth-failures.md)
@@ -60,8 +59,25 @@ The phase-era documents are archived under [archive/phases](archive/phases). The
 - [runbooks/storage-failures.md](runbooks/storage-failures.md)
 - [runbooks/token-rotation.md](runbooks/token-rotation.md)
 
+## Browser Surface Scope
+
+- [PWA/current-scope.md](PWA/current-scope.md): records that Hank Remote intentionally serves no standalone PWA, and the conditions for any future mobile-web work.
+
+## Archive (`archive/`) — historical only
+
+Everything below is retained for implementation context and traceability. It is
+**not** current setup, operator, or repair guidance — use the active docs above.
+See [archive/README.md](archive/README.md) for the full archive map.
+
+- **archive/phases**: the original phase plans and per-phase tasklists from the initial build.
+- **archive/audits**: dated point-in-time audits (backend architecture, legacy code, the 2026-06-06 cleanup snapshot).
+- **archive/designs**: implemented or superseded design specs (installable agent apps, invite/password reset, redacted settings recovery, first-party app platform readiness, HankAI local-model eval harness).
+- **archive/plans**: completed or superseded implementation plans and one-off tasklists (app platform readiness, HankAI eval harness, HankAI chat-tool/intents plans, the Codex production-readiness task pass).
+
 ## HankAI Indexing
 
-HankAI indexes root markdown files and every markdown file under `docs/` as the `Project docs` source. The cloud Docker image copies those files into `/app`, and local development defaults to the repo root. Override with `HANK_REMOTE_PROJECT_DOCS_DIR` if the markdown lives somewhere else.
-
-Use `docs/hankai-vector-index.md` as the current inventory of HankAI vector-index sources, provider embedding behavior, and retrieval boundaries.
+HankAI indexes root markdown files and every markdown file under `docs/` as the
+`Project docs` source, including `docs/archive/`; archived paths are flagged as
+historical so they rank below active docs. The cloud Docker image copies these
+files into `/app`, and local development defaults to the repo root. Override with
+`HANK_REMOTE_PROJECT_DOCS_DIR` if the markdown lives elsewhere.

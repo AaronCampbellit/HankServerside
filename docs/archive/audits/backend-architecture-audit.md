@@ -2,7 +2,7 @@
 
 Date: 2026-05-30
 
-Status as of 2026-06-01: this is a point-in-time audit artifact, not the current operator guide. Several findings have since been resolved in code through versioned migrations, bearer file-transfer tokens, header-only agent auth, canonical dashboard Settings routes, and legacy note/SMB cleanup. Use [backend-production-repair-plan.md](backend-production-repair-plan.md), [deployment.md](deployment.md), and the runbooks for current implementation and setup work. Multi-home SaaS and multi-node cloud warnings below describe out-of-scope expansion risk, not the current single-home product target.
+Status as of 2026-06-01: this is a point-in-time audit artifact, not the current operator guide. Several findings have since been resolved in code through versioned migrations, bearer file-transfer tokens, header-only agent auth, canonical dashboard Settings routes, and legacy note/SMB cleanup. Use [backend-production-repair-plan.md](../../backend-production-repair-plan.md), [deployment.md](../../deployment.md), and the runbooks for current implementation and setup work. Multi-home SaaS and multi-node cloud warnings below describe out-of-scope expansion risk, not the current single-home product target.
 
 ## Current Status Snapshot
 

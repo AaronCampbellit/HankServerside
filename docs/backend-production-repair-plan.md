@@ -2,7 +2,7 @@
 
 Date: 2026-05-30
 
-Related audit: `docs/backend-architecture-audit.md`
+Related audit: `docs/archive/audits/backend-architecture-audit.md`
 
 Status note, 2026-06-01: the legacy cleanup pass resolved the schema-migration framework, note-body canonicalization, `home_notes` archival/removal, legacy single-share SMB env fallback, public legacy dashboard routes, shared dashboard API helper, browser-redirect OpenAI OAuth removal, phase-doc archival, and production pgvector guidance. Remaining items in this plan still apply unless marked resolved below.
 

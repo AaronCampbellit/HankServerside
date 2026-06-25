@@ -2,7 +2,7 @@
 
 This document turns the singleton Home backend changes in `hankserverside` into concrete Hank app work.
 
-Use [SERVER_SYNC.md](/Users/aaroncampbell/Documents/HankServerside/SERVER_SYNC.md) as the shared contract ledger. Use this file to implement the Hank side.
+Use [SERVER_SYNC.md](../../SERVER_SYNC.md) as the shared contract ledger. Use this file to implement the Hank side.
 
 ## Summary
 

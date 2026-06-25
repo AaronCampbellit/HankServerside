@@ -1,7 +1,7 @@
 # First-Party App Platform Readiness Design
 
 Date: 2026-06-14
-Status: Draft for user review
+Status: Implemented/superseded. Retained as historical design context; the current app platform contract and runtime behavior live in the codebase and active docs.
 
 ## TL;DR
 

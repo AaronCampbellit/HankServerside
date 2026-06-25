@@ -1,5 +1,7 @@
 # HankAI Local Model Eval Harness Implementation Plan
 
+Status: Superseded by the implemented `tools/hankaieval` harness and the active usage guide in [hankai-local-model-evals.md](../../hankai-local-model-evals.md). The unchecked boxes below are historical execution scaffolding, not current open tasks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a repeatable live eval CLI that verifies HankAI local Ollama provider behavior, typed intent routing, structured cards, confirmation gates, and safety expectations before adding more intents.

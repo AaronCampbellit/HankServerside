@@ -1,5 +1,7 @@
 # HankAI Chat Tool Improvement Plan
 
+Status: Superseded by current HankAI implementation and active eval guidance. Retained only as historical planning context; use [hankai-local-model-evals.md](../../hankai-local-model-evals.md) and current code for live validation.
+
 ## Goal
 
 Make Hank chat better at common personal-data and operator asks by tightening the

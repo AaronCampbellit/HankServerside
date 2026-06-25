@@ -1,5 +1,7 @@
 # HankAI Intent Rollout
 
+Status: Superseded by current assistant intent/tool implementation and active eval guidance. Retained only as historical rollout context; it is not the current task tracker.
+
 ## Goal
 
 Make HankAI reliable for simple asks and commands inside Hank by routing common requests through deterministic intents before falling back to general model reasoning.

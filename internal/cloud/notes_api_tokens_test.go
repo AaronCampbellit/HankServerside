@@ -35,7 +35,8 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_notes_api_admin", UserID: user.ID, TokenHash: hashToken(adminToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	server.ConfigureNoteAttachmentStorage(t.TempDir())
+	root := t.TempDir()
+	server.ConfigureNoteAttachmentStorage(root)
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
