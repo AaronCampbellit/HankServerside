@@ -193,7 +193,7 @@ The cloud service now also serves a management dashboard at `/` and `/dashboard`
   - `config.status`
   - `config.apply`
 
-Installed first-party `.hankapp` packages can add HankAI slash commands without rebuilding HankServerside when they use the existing app runtime contract. Admins import and configure packages in Settings > Apps. Each installed app has one access mode: `admins_only` or `home_members`; when `home_members` is selected, every command in that app is available to regular home members.
+Installed first-party `.hankapp` packages can add HankAI slash commands without rebuilding HankServerside when they use the existing app runtime contract. Admins can import a generated `.hankapp` file in Settings > Apps, or upload an app source folder and let the connected agent package it before preview and activation. Each installed app has one access mode: `admins_only` or `home_members`; when `home_members` is selected, every command in that app is available to regular home members.
 
 HankServerside is the stable OS/runtime for Hank remote access. Hank apps are installable first-party extensions for optional workflows on top of that runtime. The `.hankapp` package format, manifest schema, Settings > Apps rendering, and `apps.*` commands are compatibility surfaces; breaking changes require a new schema version or a documented migration path. See `docs/hank-app-platform-contract.md`.
 

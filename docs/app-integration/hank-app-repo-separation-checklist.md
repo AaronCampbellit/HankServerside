@@ -104,13 +104,13 @@ Runtime/platform files that stay in this repo:
   tests need stable package examples.
 - [ ] Update `go build ./...` expectations so HankServerside no longer builds
   app binaries.
-- [ ] Update docs that currently point at `scripts/package-*-app.sh` or
+- [x] Update docs that currently point at `scripts/package-*-app.sh` or
   `packages/<app>` to point at external app repos and release artifacts.
 
 ### Phase 4: Install And Update Flow
 
-- [ ] Add or document a supported install path for local `.hankapp` upload or
-  server-side package import.
+- [x] Add or document a supported install path for local `.hankapp` upload and
+  admin-only source-folder packaging through the connected agent.
 - [ ] Add or document checksum verification for external app packages.
 - [ ] Define upgrade behavior for reinstalling a newer package with the same app
   ID: config preservation, secret preservation, command replacement, and access

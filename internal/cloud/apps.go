@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -164,7 +167,7 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline"})
 			return true
 		}
-		data, err := readAppPackageUpload(r)
+		upload, err := readAppPackageUpload(w, r)
 		if err != nil {
 			status := http.StatusBadRequest
 			if errors.Is(err, errAppPackageTooLarge) {
@@ -173,12 +176,13 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			http.Error(w, err.Error(), status)
 			return true
 		}
-		staged := s.appPackages.Put(home.ID, data)
+		staged := s.appPackages.Put(home.ID, upload.Bytes)
 		downloadURL := absoluteRequestURL(r, "/v1/home/apps/packages/"+staged.StagingID)
 		envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandAppsPackagePreview, protocol.AppsPackagePreviewRequest{
 			StagingID:     staged.StagingID,
 			DownloadURL:   downloadURL,
 			DownloadToken: staged.DownloadToken,
+			PackageKind:   upload.PackageKind,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -518,24 +522,45 @@ func unmarshalAppMetadata(raw string, target any) error {
 
 var errAppPackageTooLarge = errors.New("app package too large")
 
-func readAppPackageUpload(r *http.Request) ([]byte, error) {
+type appPackageUpload struct {
+	Bytes       []byte
+	PackageKind string
+}
+
+func readAppPackageUpload(w http.ResponseWriter, r *http.Request) (appPackageUpload, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxAppPackageBytes+1<<20)
 	contentType := r.Header.Get("Content-Type")
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 	if mediaType == "multipart/form-data" {
 		if err := r.ParseMultipartForm(maxAppPackageBytes); err != nil {
-			return nil, err
+			return appPackageUpload{}, err
+		}
+		if files := r.MultipartForm.File["source_files"]; len(files) > 0 {
+			data, err := zipAppSourceUpload(files)
+			if err != nil {
+				return appPackageUpload{}, err
+			}
+			return appPackageUpload{Bytes: data, PackageKind: protocol.AppPackageKindSourceArchive}, nil
 		}
 		file, _, err := r.FormFile("package")
 		if err != nil {
 			file, _, err = r.FormFile("file")
 		}
 		if err != nil {
-			return nil, fmt.Errorf("package file is required")
+			return appPackageUpload{}, fmt.Errorf("package file is required")
 		}
 		defer file.Close()
-		return readBoundedAppPackage(file)
+		data, err := readBoundedAppPackage(file)
+		if err != nil {
+			return appPackageUpload{}, err
+		}
+		return appPackageUpload{Bytes: data, PackageKind: protocol.AppPackageKindArchive}, nil
 	}
-	return readBoundedAppPackage(r.Body)
+	data, err := readBoundedAppPackage(r.Body)
+	if err != nil {
+		return appPackageUpload{}, err
+	}
+	return appPackageUpload{Bytes: data, PackageKind: protocol.AppPackageKindArchive}, nil
 }
 
 func readBoundedAppPackage(reader io.Reader) ([]byte, error) {
@@ -551,6 +576,82 @@ func readBoundedAppPackage(reader io.Reader) ([]byte, error) {
 		return nil, errAppPackageTooLarge
 	}
 	return buf.Bytes(), nil
+}
+
+func zipAppSourceUpload(files []*multipart.FileHeader) ([]byte, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("source folder is empty")
+	}
+	var buf bytes.Buffer
+	archive := zip.NewWriter(&buf)
+	seen := make(map[string]struct{}, len(files))
+	total := int64(0)
+	for _, header := range files {
+		cleaned, err := cleanAppSourceUploadPath(header.Filename)
+		if err != nil {
+			_ = archive.Close()
+			return nil, err
+		}
+		if _, ok := seen[cleaned]; ok {
+			_ = archive.Close()
+			return nil, fmt.Errorf("duplicate source path %q", cleaned)
+		}
+		seen[cleaned] = struct{}{}
+		file, err := header.Open()
+		if err != nil {
+			_ = archive.Close()
+			return nil, err
+		}
+		writer, err := archive.CreateHeader(&zip.FileHeader{
+			Name:   cleaned,
+			Method: zip.Deflate,
+		})
+		if err != nil {
+			_ = file.Close()
+			_ = archive.Close()
+			return nil, err
+		}
+		limited := io.LimitReader(file, maxAppPackageBytes-total+1)
+		written, err := io.Copy(writer, limited)
+		_ = file.Close()
+		if err != nil {
+			_ = archive.Close()
+			return nil, err
+		}
+		total += written
+		if total > maxAppPackageBytes {
+			_ = archive.Close()
+			return nil, errAppPackageTooLarge
+		}
+	}
+	if err := archive.Close(); err != nil {
+		return nil, err
+	}
+	if buf.Len() == 0 {
+		return nil, fmt.Errorf("source folder is empty")
+	}
+	if buf.Len() > maxAppPackageBytes {
+		return nil, errAppPackageTooLarge
+	}
+	return buf.Bytes(), nil
+}
+
+func cleanAppSourceUploadPath(value string) (string, error) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" || strings.Contains(value, "\x00") {
+		return "", fmt.Errorf("unsafe source path %q", value)
+	}
+	cleaned := path.Clean(value)
+	if cleaned == "." || strings.HasPrefix(cleaned, "../") || cleaned == ".." || path.IsAbs(cleaned) {
+		return "", fmt.Errorf("unsafe source path %q", value)
+	}
+	parts := strings.Split(cleaned, "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("unsafe source path %q", value)
+		}
+	}
+	return cleaned, nil
 }
 
 func absoluteRequestURL(r *http.Request, path string) string {

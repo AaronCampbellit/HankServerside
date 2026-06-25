@@ -13,6 +13,9 @@ const (
 	AppSchemaVersion = "hank.app.v1"
 	AppRuntimeStdio  = "stdio"
 
+	AppPackageKindArchive       = "archive"
+	AppPackageKindSourceArchive = "source_archive"
+
 	AppUserAccessAdminsOnly  = "admins_only"
 	AppUserAccessHomeMembers = "home_members"
 )
@@ -82,6 +85,7 @@ type AppsPackagePreviewRequest struct {
 	StagingID     string `json:"staging_id"`
 	DownloadURL   string `json:"download_url"`
 	DownloadToken string `json:"download_token"`
+	PackageKind   string `json:"package_kind,omitempty"`
 }
 
 type AppsPackagePreviewResponse struct {

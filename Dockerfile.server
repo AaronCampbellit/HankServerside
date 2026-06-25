@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hank-remote-cloud ./cmd/hank-remote-cloud \
 	&& CGO_ENABLED=0 GOOS=linux go build -o /out/hank-remote-agent ./cmd/hank-remote-agent
 
-FROM alpine:3.22
+FROM alpine:3.22 AS server
 RUN apk add --no-cache ca-certificates ffmpeg yt-dlp \
 	&& addgroup -S hank \
 	&& adduser -S -G hank hank \
@@ -40,3 +40,12 @@ RUN printf '%s\n' \
 USER hank
 EXPOSE 8080
 CMD ["/usr/local/bin/hank-remote-cloud"]
+
+FROM server AS agent
+USER root
+ENV PATH="/usr/local/go/bin:${PATH}"
+COPY --from=build /usr/local/go /usr/local/go
+USER hank
+CMD ["/usr/local/bin/hank-remote-agent"]
+
+FROM server AS final

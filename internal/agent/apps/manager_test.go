@@ -123,6 +123,38 @@ func TestManagerPreviewHTTPDownloadUsesAgentAndPackageTokens(t *testing.T) {
 	}
 }
 
+func TestManagerPreviewPackagesSourceArchive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	appsDir := filepath.Join(t.TempDir(), "apps")
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	sourcePath := writeManagerHermesSourceArchive(t, t.TempDir(), hermesRuntimeScript(`{"installed":true}`))
+	manager := NewManager(appsDir, stagingDir, Runner{})
+
+	preview, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:   "stage_1",
+		DownloadURL: fileURL(t, sourcePath),
+		PackageKind: protocol.AppPackageKindSourceArchive,
+	})
+	if err != nil {
+		t.Fatalf("PreviewPackage error: %v", err)
+	}
+	if preview.StagingID != "stage_1" || preview.App.ID != "hermes" || preview.Replacing {
+		t.Fatalf("preview = %#v", preview)
+	}
+
+	activated, err := manager.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{StagingID: "stage_1"})
+	if err != nil {
+		t.Fatalf("ActivatePackage error: %v", err)
+	}
+	if activated.App.ID != "hermes" || activated.App.Enabled {
+		t.Fatalf("activated app = %#v, want installed disabled hermes app", activated.App)
+	}
+	if _, err := os.Stat(filepath.Join(appsDir, "hermes", "bin", "hermes-app")); err != nil {
+		t.Fatalf("installed runtime missing: %v", err)
+	}
+}
+
 func TestManagerConfigApplyEnablesAppAndTracksSecrets(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -481,6 +513,33 @@ func writeManagerHermesPackage(t *testing.T, dir string, script string) string {
 	writeZipEntry(t, zw, "schemas/config.schema.json", `{"type":"object"}`, 0o600)
 	writeZipEntry(t, zw, "schemas/chat.input.schema.json", `{"type":"object"}`, 0o600)
 	writeZipEntry(t, zw, "schemas/chat.output.schema.json", `{"type":"object"}`, 0o600)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return archivePath
+}
+
+func writeManagerHermesSourceArchive(t *testing.T, dir string, script string) string {
+	t.Helper()
+	manifest := validHermesManifest()
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(dir, "hermes-source.zip")
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(file)
+	writeZipEntry(t, zw, "hermes/app.json", string(rawManifest), 0o600)
+	writeZipEntry(t, zw, "hermes/bin/hermes-app", script, 0o700)
+	writeZipEntry(t, zw, "hermes/schemas/config.schema.json", `{"type":"object"}`, 0o600)
+	writeZipEntry(t, zw, "hermes/schemas/chat.input.schema.json", `{"type":"object"}`, 0o600)
+	writeZipEntry(t, zw, "hermes/schemas/chat.output.schema.json", `{"type":"object"}`, 0o600)
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ const els = {
   packageForm: document.getElementById("app-package-form"),
   installCancelButton: document.getElementById("app-install-cancel-button"),
   packageInput: document.getElementById("app-package-input"),
+  sourceFolderInput: document.getElementById("app-source-folder-input"),
   preview: document.getElementById("app-preview"),
   previewStatus: document.getElementById("app-preview-status"),
   previewBody: document.getElementById("app-preview-body"),
@@ -417,12 +418,23 @@ function normalizeFileSource(source, index) {
 async function previewPackage(event) {
   event.preventDefault();
   const file = els.packageInput.files?.[0];
-  if (!file) {
-    showToast("Choose a .hankapp package.", true);
+  const sourceFiles = Array.from(els.sourceFolderInput.files || []);
+  if (!file && !sourceFiles.length) {
+    showToast("Choose a .hankapp package or source folder.", true);
+    return;
+  }
+  if (file && sourceFiles.length) {
+    showToast("Choose either a .hankapp package or a source folder.", true);
     return;
   }
   const formData = new FormData();
-  formData.set("package", file);
+  if (file) {
+    formData.set("package", file);
+  } else {
+    sourceFiles.forEach((sourceFile) => {
+      formData.append("source_files", sourceFile, sourceFile.webkitRelativePath || sourceFile.name);
+    });
+  }
   const headers = new Headers();
   const csrf = window.HankAPI.csrfToken?.();
   if (csrf) {
@@ -458,6 +470,7 @@ async function installPreview() {
     });
     state.preview = null;
     els.packageInput.value = "";
+    els.sourceFolderInput.value = "";
     renderPreview();
     await loadApps();
     showToast("App installed.");

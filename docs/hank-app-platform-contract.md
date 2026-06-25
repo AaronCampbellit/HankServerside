@@ -28,7 +28,7 @@ Do not move core Hank responsibilities into apps just to make feature developmen
 
 ## Compatibility Contract
 
-The `.hankapp` package format is a compatibility surface, not an internal implementation detail. Changes to the app runtime must preserve existing valid packages unless there is an explicit migration plan.
+The `.hankapp` package format is a compatibility surface, not an internal implementation detail. Settings > Apps may accept an app source folder as an admin convenience, but the agent must convert that source into a `.hankapp` package before preview, activation, and install. Changes to the app runtime must preserve existing valid packages unless there is an explicit migration plan.
 
 Compatibility-sensitive surfaces include:
 

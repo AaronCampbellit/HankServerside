@@ -54,6 +54,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
+      target: server
     logging: *default-logging
     env_file:
       - path: ${HANK_REMOTE_CLOUD_ENV_FILE:-./.env.cloud}
@@ -152,7 +153,11 @@ services:
       - hank_restore
 
   agent:
-    image: hankserverside
+    image: hankserverside-agent
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+      target: agent
     profiles:
       - agent
     user: "${HANK_REMOTE_AGENT_CONTAINER_USER:-0:0}"

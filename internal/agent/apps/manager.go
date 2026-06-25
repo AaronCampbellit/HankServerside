@@ -171,8 +171,25 @@ func (m *Manager) PreviewPackage(ctx context.Context, request protocol.AppsPacka
 		return protocol.AppsPackagePreviewResponse{}, err
 	}
 	agentID, agentToken := m.packageDownloadAuth()
-	if err := downloadPackage(ctx, request, stagePath, agentID, agentToken); err != nil {
-		return protocol.AppsPackagePreviewResponse{}, err
+	switch normalizePackageKind(request.PackageKind) {
+	case protocol.AppPackageKindArchive:
+		if err := downloadPackage(ctx, request, stagePath, agentID, agentToken); err != nil {
+			return protocol.AppsPackagePreviewResponse{}, err
+		}
+	case protocol.AppPackageKindSourceArchive:
+		sourcePath, err := m.sourceStagingPath(stagingID)
+		if err != nil {
+			return protocol.AppsPackagePreviewResponse{}, err
+		}
+		defer os.Remove(sourcePath)
+		if err := downloadPackage(ctx, request, sourcePath, agentID, agentToken); err != nil {
+			return protocol.AppsPackagePreviewResponse{}, err
+		}
+		if err := packageSourceArchive(ctx, sourcePath, stagePath); err != nil {
+			return protocol.AppsPackagePreviewResponse{}, fmt.Errorf("%w: %v", ErrPackageValidation, err)
+		}
+	default:
+		return protocol.AppsPackagePreviewResponse{}, fmt.Errorf("%w: unsupported package kind %q", ErrPackageValidation, request.PackageKind)
 	}
 	preview, err := PreviewArchive(stagePath)
 	if err != nil {
@@ -460,6 +477,24 @@ func (m *Manager) stagingPath(stagingID string) (string, error) {
 		return "", fmt.Errorf("%w: invalid staging id %q", ErrPermissionRefused, stagingID)
 	}
 	return containedPath(m.stagingDir, stagingID+".hankapp")
+}
+
+func (m *Manager) sourceStagingPath(stagingID string) (string, error) {
+	if stagingID == "" || !stagingIdentifierPattern.MatchString(stagingID) {
+		return "", fmt.Errorf("%w: invalid staging id %q", ErrPermissionRefused, stagingID)
+	}
+	return containedPath(m.stagingDir, stagingID+".source.zip")
+}
+
+func normalizePackageKind(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", protocol.AppPackageKindArchive:
+		return protocol.AppPackageKindArchive
+	case protocol.AppPackageKindSourceArchive:
+		return protocol.AppPackageKindSourceArchive
+	default:
+		return ""
+	}
 }
 
 func (m *Manager) packageDownloadAuth() (string, string) {

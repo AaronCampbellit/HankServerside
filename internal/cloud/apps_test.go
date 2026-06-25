@@ -1,11 +1,13 @@
 package cloud
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -299,6 +301,57 @@ func TestAppsImportPreviewRoutesPackageToAgent(t *testing.T) {
 	}
 }
 
+func TestAppsImportPreviewRoutesSourceFolderToAgent(t *testing.T) {
+	ctx := context.Background()
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "test done")
+
+	body, contentType := appSourceFolderUpload(t, map[string]string{
+		"hermes/app.json":                         `{"schema_version":"hank.app.v1","id":"hermes","name":"Hermes","version":"1.0.0","runtime":{"type":"stdio","command":"bin/hank-app-hermes"},"commands":[{"id":"chat","mode":"request_response","input_schema":"schemas/chat.input.schema.json","output_schema":"schemas/chat.output.schema.json"}]}`,
+		"hermes/schemas/chat.input.schema.json":  `{"type":"object"}`,
+		"hermes/schemas/chat.output.schema.json": `{"type":"object"}`,
+	})
+	resultCh := make(chan testJSONResponse, 1)
+	go func() {
+		resultCh <- doRawRequestWithContentType(t, testServer, sessionToken, http.MethodPost, "/v1/home/apps/import/preview", body, contentType)
+	}()
+
+	envelope := readAgentCommandEnvelope(t, ctx, agentConn, protocol.CommandAppsPackagePreview)
+	request := decodeRoutedCommandBody[protocol.AppsPackagePreviewRequest](t, envelope)
+	if request.PackageKind != protocol.AppPackageKindSourceArchive {
+		t.Fatalf("PackageKind = %q, want %q", request.PackageKind, protocol.AppPackageKindSourceArchive)
+	}
+	packageRequest, err := http.NewRequest(http.MethodGet, request.DownloadURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packageRequest.Header.Set("Authorization", "Bearer agent-token")
+	packageRequest.Header.Set("X-Hank-Agent-ID", agentID)
+	packageRequest.Header.Set("X-Hank-App-Package-Token", request.DownloadToken)
+	packageResponse, err := http.DefaultClient.Do(packageRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceData, _ := io.ReadAll(packageResponse.Body)
+	packageResponse.Body.Close()
+	if packageResponse.StatusCode != http.StatusOK {
+		t.Fatalf("source archive status=%d body=%q", packageResponse.StatusCode, string(sourceData))
+	}
+	if !zipArchiveContains(t, sourceData, "hermes/app.json") {
+		t.Fatalf("source archive did not contain uploaded app.json")
+	}
+
+	writeAgentResponse(t, ctx, agentConn, envelope, agentID, homeID, protocol.AppsPackagePreviewResponse{
+		StagingID: request.StagingID,
+		App:       protocol.AppSummary{ID: "hermes", Name: "Hermes", Version: "1.0.0", Status: "preview"},
+	})
+	result := <-resultCh
+	if result.StatusCode != http.StatusOK {
+		t.Fatalf("preview status = %d body=%s", result.StatusCode, result.Body)
+	}
+}
+
 func TestAppsActivatePersistsReturnedAppMetadata(t *testing.T) {
 	ctx := context.Background()
 	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
@@ -476,6 +529,58 @@ func doRawRequest(t *testing.T, server *httptest.Server, sessionToken string, me
 	defer response.Body.Close()
 	data, _ := io.ReadAll(response.Body)
 	return testJSONResponse{StatusCode: response.StatusCode, Body: string(data)}
+}
+
+func doRawRequestWithContentType(t *testing.T, server *httptest.Server, sessionToken string, method string, path string, body []byte, contentType string) testJSONResponse {
+	t.Helper()
+	request, err := http.NewRequest(method, server.URL+path, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionToken != "" {
+		request.Header.Set("Authorization", "Bearer "+sessionToken)
+	}
+	request.Header.Set("Content-Type", contentType)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(response.Body)
+	return testJSONResponse{StatusCode: response.StatusCode, Body: string(data)}
+}
+
+func appSourceFolderUpload(t *testing.T, files map[string]string) ([]byte, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, contents := range files {
+		part, err := writer.CreateFormFile("source_files", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes(), writer.FormDataContentType()
+}
+
+func zipArchiveContains(t *testing.T, data []byte, name string) bool {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	for _, file := range reader.File {
+		if file.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func readAgentCommandEnvelope(t *testing.T, ctx context.Context, conn *websocket.Conn, command string) protocol.Envelope {

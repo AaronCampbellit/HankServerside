@@ -90,6 +90,7 @@ func TestAppsSettingsUIUsesInstallModalAndAppDropdown(t *testing.T) {
 	for _, required := range []string{
 		`id="app-install-open-button"`,
 		`id="app-install-dialog"`,
+		`id="app-source-folder-input"`,
 		`id="installed-app-select"`,
 		`id="selected-app-panel"`,
 	} {
@@ -111,6 +112,7 @@ func TestAppsSettingsUIUsesInstallModalAndAppDropdown(t *testing.T) {
 		"renderAppSelector",
 		"renderSelectedAppPanel",
 		"installedAppSelect",
+		"sourceFolderInput",
 	} {
 		if !strings.Contains(js, required) {
 			t.Fatalf("apps.js missing %s", required)

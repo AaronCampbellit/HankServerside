@@ -314,7 +314,27 @@ After the agent is online, use Settings > Connections to save Home Assistant and
 
 When no SMB shares are configured, the agent uses the Docker-managed `hank_agent_files` volume for file operations. For SMB shares, use Settings > Connections in the dashboard; the agent persists the share list in `HANK_REMOTE_SMB_SHARES_JSON`.
 
-For optional HankAI app workflows such as Hermes, Gramaton, or other trusted first-party command apps, build the app package with the matching `scripts/package-*-app.sh` helper, then open Settings > Apps and import the generated `.hankapp` archive. Configure the installed app from its Apps-page Configure action; the fields come from the package `config.settings_schema`. Secrets stay agent-side and are shown in the dashboard only as set/unset metadata. HankAI slash commands such as `/Hermes` and `/gramaton` appear from installed enabled app metadata, not from built-in dashboard command lists. Each installed app also has an access setting: `admins_only` keeps all commands in that app admin-only, while `home_members` makes every command in that app available to regular home members who can use HankAI. If a new app needs a server-side primitive HankServerside does not expose yet, add that primitive to the cloud/agent protocol before relying on the package.
+For optional HankAI app workflows such as Hermes, Gramaton, YDownload, or other trusted first-party command apps, Settings > Apps supports two admin-only install inputs:
+
+- Upload a generated `.hankapp` package.
+- Upload the app source folder and let the connected agent build and package it before the normal preview and install step.
+
+The installed artifact is still a `.hankapp` package either way. Source-folder packaging is a convenience path for trusted first-party app repos; it does not change the app runtime contract. The standard HankServerside agent image includes the Go toolchain for this agent-side build path. If a custom agent runtime is used and the source folder does not already contain the manifest's `runtime.command` file, that runtime must have `go` available on its `PATH`.
+
+To package the apps yourself first, run:
+
+```bash
+cd /Volumes/CampbellDrive/Projects/hermes
+scripts/package-hermes-app.sh
+
+cd /Volumes/CampbellDrive/Projects/gramaton
+scripts/package-gramaton-app.sh
+
+cd /Volumes/CampbellDrive/Projects/ydownload
+scripts/package-ydownload-app.sh
+```
+
+The scripts write `dist/hermes.hankapp`, `dist/gramaton.hankapp`, and `dist/ydownload.hankapp` in their respective app repos. In the dashboard, open Settings > Apps, choose Install App, select either the generated `.hankapp` or the app source folder, review the preview, and install it. Configure the installed app from its Apps-page Configure action; the fields come from the package `config.settings_schema`. Secrets stay agent-side and are shown in the dashboard only as set/unset metadata. HankAI slash commands such as `/Hermes` and `/gramaton` appear from installed enabled app metadata, not from built-in dashboard command lists. Each installed app also has an access setting: `admins_only` keeps all commands in that app admin-only, while `home_members` makes every command in that app available to regular home members who can use HankAI. If a new app needs a server-side primitive HankServerside does not expose yet, add that primitive to the cloud/agent protocol before relying on the package.
 
 If you have an older `.env.agent` with legacy single-share SMB keys, convert it before updating the agent:
 
