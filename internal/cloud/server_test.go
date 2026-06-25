@@ -1651,8 +1651,8 @@ func TestLoginSetsStrictHTTPOnlySessionCookie(t *testing.T) {
 	if !sessionCookie.HttpOnly {
 		t.Fatal("session cookie should be HttpOnly")
 	}
-	if sessionCookie.SameSite != http.SameSiteStrictMode {
-		t.Fatalf("session cookie SameSite = %v, want %v", sessionCookie.SameSite, http.SameSiteStrictMode)
+	if sessionCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("session cookie SameSite = %v, want %v", sessionCookie.SameSite, http.SameSiteLaxMode)
 	}
 	if sessionCookie.Path != "/" {
 		t.Fatalf("session cookie path = %q, want /", sessionCookie.Path)

@@ -100,6 +100,11 @@ func main() {
 	})
 	server.ConfigureStorageOps(cfg.DBOpsStateDir, cfg.DBOpsLogDir, cfg.DBOpsIntentSecret)
 	server.ConfigureNoteAttachmentStorage(cfg.NoteAttachmentDir)
+	server.ConfigureMCP(cloud.MCPConfig{
+		Enabled:       cfg.MCPEnabled,
+		PublicBaseURL: cfg.MCPPublicBaseURL,
+		DocsDir:       cfg.MCPDocsDir,
+	})
 	if err := server.StartRuntime(ctx, "dev"); err != nil {
 		logger.Error("failed to start runtime coordination", "error", err)
 		os.Exit(1)

@@ -65,7 +65,10 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expi
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		// Lax (not Strict) so the session is sent on top-level cross-site
+		// navigations like the MCP OAuth authorize redirect from ChatGPT/Claude.
+		// Cross-site writes are still blocked (Lax) and CSRF tokens gate writes.
+		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsHTTPS(r),
 		Expires:  expiresAt,
 		MaxAge:   max(0, int(time.Until(expiresAt).Seconds())),
@@ -95,10 +98,12 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 
 func setCSRFCookie(w http.ResponseWriter, r *http.Request, token string, expiresAt time.Time) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     csrfCookieName,
-		Value:    token,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
+		Name:  csrfCookieName,
+		Value: token,
+		Path:  "/",
+		// Lax so the CSRF cookie accompanies the session on the cross-site OAuth
+		// authorize navigation, letting the consent page render a valid token.
+		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsHTTPS(r),
 		Expires:  expiresAt,
 		MaxAge:   max(0, int(time.Until(expiresAt).Seconds())),

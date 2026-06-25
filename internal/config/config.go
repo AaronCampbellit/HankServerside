@@ -24,6 +24,9 @@ type Cloud struct {
 	AllowPlaintextSecrets bool
 	AssistantAI           AssistantAI
 	APNS                  APNS
+	MCPEnabled            bool
+	MCPPublicBaseURL      string
+	MCPDocsDir            string
 }
 
 type AssistantAI struct {
@@ -158,6 +161,9 @@ func LoadCloud() (Cloud, error) {
 		NoteAttachmentDir:     envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
 		SecretKey:             secretKey,
 		AllowPlaintextSecrets: allowPlaintextSecrets,
+		MCPEnabled:            boolEnvOrDefault("HANK_REMOTE_MCP_ENABLED", false),
+		MCPPublicBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_PUBLIC_BASE_URL", ""), "/"),
+		MCPDocsDir:            envOrDefault("HANK_REMOTE_MCP_DOCS_DIR", envOrDefault("HANK_REMOTE_PROJECT_DOCS_DIR", ".")),
 		APNS: APNS{
 			TeamID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TEAM_ID")),
 			KeyID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_KEY_ID")),

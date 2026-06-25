@@ -71,6 +71,10 @@ type Server struct {
 	runtimeCancel              context.CancelFunc
 	maintenanceCancel          context.CancelFunc
 	httpBaseCancel             context.CancelFunc
+	mcpEnabled                 bool
+	mcpPublicBaseURL           string
+	mcpDocsDir                 string
+	mcpDocs                    *mcpDocsIndex
 }
 
 type authContext struct {
@@ -168,6 +172,16 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/me/notification-settings", server.handleNotificationSettings)
 	mux.HandleFunc("/v1/oauth/openai/status", server.handleOpenAIOAuthStatus)
 	mux.HandleFunc("/v1/oauth/openai/start", server.handleOpenAIOAuthStart)
+	mux.HandleFunc("/.well-known/oauth-protected-resource", server.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("/.well-known/oauth-protected-resource/", server.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("/.well-known/oauth-authorization-server", server.handleMCPAuthServerMetadata)
+	mux.HandleFunc("/.well-known/oauth-authorization-server/", server.handleMCPAuthServerMetadata)
+	mux.HandleFunc("/v1/oauth/mcp/register", server.handleMCPRegister)
+	mux.HandleFunc("/v1/oauth/mcp/authorize", server.handleMCPAuthorize)
+	mux.HandleFunc("/v1/oauth/mcp/token", server.handleMCPToken)
+	mux.HandleFunc("/v1/mcp", server.handleMCPEndpoint)
+	mux.HandleFunc("/v1/me/mcp", server.handleProfileMCP)
+	mux.HandleFunc("/v1/me/mcp/", server.handleProfileMCP)
 	mux.HandleFunc("/v1/me/notes", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/notes/", server.handleProfileNotesHTTP)
 	mux.HandleFunc("/v1/me/profile", server.handleProfileSettingsHTTP)

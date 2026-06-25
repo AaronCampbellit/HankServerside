@@ -1393,6 +1393,45 @@ button.button-link {
   padding: 0;
 }
 
+.mcp-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mcp-connection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+}
+
+.mcp-connection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mcp-connection-scopes {
+  word-break: break-word;
+}
+
+.mcp-connection-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+.mcp-connection-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
 .toast {
   position: fixed;
   bottom: 14px;

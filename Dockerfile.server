@@ -19,6 +19,24 @@ COPY --from=build /out/hank-remote-cloud /usr/local/bin/hank-remote-cloud
 COPY --from=build /out/hank-remote-agent /usr/local/bin/hank-remote-agent
 COPY --from=build /src/README.md /src/AGENTS.md /src/SERVER_SYNC.md /app/
 COPY --from=build /src/docs /app/docs
+COPY --from=build /src/schemas /app/schemas
+# Curated, read-only source snapshot exposed via the MCP docs tools (code-reference/).
+# This is a build-time copy for search/brainstorming, NOT the running source. .env,
+# .git, data, and *.db are already excluded by .dockerignore, so /src holds source
+# only. Pass --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) to stamp provenance.
+ARG SOURCE_COMMIT=unknown
+COPY --from=build /src/cmd /app/code-reference/cmd
+COPY --from=build /src/internal /app/code-reference/internal
+COPY --from=build /src/go.mod /app/code-reference/go.mod
+RUN printf '%s\n' \
+	'# Project code reference (read-only snapshot)' \
+	'' \
+	'A point-in-time copy of the HankServerside Go source (cmd/, internal/, go.mod),' \
+	'exposed through the MCP docs tools for searching and brainstorming about the' \
+	'codebase. It is shipped in the image at build time and may lag the live source.' \
+	'' \
+	"Source commit: ${SOURCE_COMMIT}" \
+	> /app/code-reference/REFERENCE.md
 USER hank
 EXPOSE 8080
 CMD ["/usr/local/bin/hank-remote-cloud"]

@@ -17,6 +17,8 @@ const els = {
   openAIConfigPill: document.getElementById("openai-config-pill"),
   openAIAccountOutput: document.getElementById("openai-account-output"),
   openAIConfigOutput: document.getElementById("openai-config-output"),
+  mcpPill: document.getElementById("mcp-pill"),
+  mcpOutput: document.getElementById("mcp-output"),
   linkOpenAIButton: document.getElementById("link-openai-button"),
   assistantSettingsPill: document.getElementById("assistant-settings-pill"),
   assistantSettingsForm: document.getElementById("assistant-settings-form"),
@@ -322,7 +324,9 @@ function renderAssistantSettings() {
   renderPromptProfileSelect(settings, defaults);
   els.harnessSystemPrompt.value = settings.system_prompt || defaults.system_prompt || "";
   renderToolSettings(tools);
-  renderMediaWorkflowSettings();
+  if (typeof renderMediaWorkflowSettings === "function") {
+    renderMediaWorkflowSettings();
+  }
   const index = state.assistant?.index || {};
 
   els.assistantHarnessOutput.className = "card-list";
@@ -507,6 +511,80 @@ async function logout() {
   window.location.replace("/");
 }
 
+function renderMCP(data) {
+  const url = data.resource_url || "";
+  const scopes = (data.scopes_supported || []).join(", ");
+  const connections = data.connections || [];
+  const connectionRows = connections.length
+    ? `<div class="mcp-connections">${connections.map((conn) => {
+        const connected = conn.connected !== false;
+        const statusLabel = connected ? "Connected" : "Disconnected";
+        const statusClass = connected ? "pill ok" : "pill";
+        return `
+        <div class="mcp-connection">
+          <div class="mcp-connection-head">
+            <strong>${escapeHTML(conn.client_name || conn.client_id || "Connected app")}</strong>
+            <span class="${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="mcp-connection-scopes meta">${escapeHTML((conn.scopes || []).join(", "))}</div>
+          <div class="mcp-connection-meta meta">
+            <span>Added ${escapeHTML(formatDate(conn.created_at))}</span>
+            <span>Last used ${escapeHTML(formatDate(conn.last_used_at))}</span>
+          </div>
+          <div class="mcp-connection-actions">
+            <button class="ghost" data-mcp-revoke="${escapeHTML(conn.id)}" type="button">Disconnect</button>
+          </div>
+        </div>`;
+      }).join("")}</div>`
+    : `<div class="empty-state">No AI apps are connected yet.</div>`;
+
+  els.mcpOutput.innerHTML = `
+    <div class="kv-row">
+      <div class="kv-label">Connector URL</div>
+      <div>
+        <code>${escapeHTML(url)}</code>
+        <button class="ghost" data-mcp-copy="${escapeHTML(url)}" type="button">Copy</button>
+      </div>
+    </div>
+    <div class="kv-row">
+      <div class="kv-label">Scopes</div>
+      <div>${escapeHTML(scopes)}</div>
+    </div>
+    <div class="kv-row">
+      <div class="kv-label">How to connect</div>
+      <div>In ChatGPT or Claude: Settings → Connectors → add a custom connector with the URL above, then sign in and approve the scopes.</div>
+    </div>
+    <div class="kv-row">
+      <div class="kv-label">Connected apps</div>
+      <div>${connectionRows}</div>
+    </div>
+  `;
+  els.mcpPill.textContent = "Ready";
+  els.mcpPill.className = "pill ok";
+}
+
+async function loadMCP() {
+  if (!els.mcpOutput) return;
+  try {
+    const data = await api("/v1/me/mcp");
+    renderMCP(data);
+  } catch (_) {
+    els.mcpPill.textContent = "Disabled";
+    els.mcpPill.className = "pill";
+    els.mcpOutput.innerHTML = `<div class="empty-state">The MCP connector is not enabled on this server.</div>`;
+  }
+}
+
+async function revokeMCPConnection(id) {
+  try {
+    await api(`/v1/me/mcp/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
+    showToast("Disconnected.");
+    loadMCP();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 async function hydrate() {
   try {
     const me = await api("/v1/me");
@@ -518,6 +596,7 @@ async function hydrate() {
     }
     await loadStatus();
     loadModelOptions().catch((error) => showToast(error.message, true));
+    loadMCP();
   } catch (_) {
     window.location.replace("/");
   }
@@ -525,6 +604,25 @@ async function hydrate() {
 
 els.logoutButton.addEventListener("click", logout);
 els.linkOpenAIButton.addEventListener("click", linkOpenAI);
+if (els.mcpOutput) {
+  els.mcpOutput.addEventListener("click", (event) => {
+    const copyButton = event.target.closest("[data-mcp-copy]");
+    if (copyButton) {
+      const url = copyButton.getAttribute("data-mcp-copy");
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(
+          () => showToast("Connector URL copied."),
+          () => showToast("Copy failed", true),
+        );
+      }
+      return;
+    }
+    const revokeButton = event.target.closest("[data-mcp-revoke]");
+    if (revokeButton) {
+      revokeMCPConnection(revokeButton.getAttribute("data-mcp-revoke"));
+    }
+  });
+}
 els.assistantSettingsForm.addEventListener("submit", saveAssistantSettings);
 els.settingsSectionButtons.forEach((button) => {
   button.addEventListener("click", () => setSettingsSection(button.dataset.settingsSection));

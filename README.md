@@ -298,6 +298,16 @@ make run-agent
 
 6. Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/) for the management dashboard.
 
+## Remote MCP endpoint (optional)
+
+Hank Remote can expose an authenticated [MCP](https://modelcontextprotocol.io) endpoint so AI apps
+(ChatGPT, Claude) can read this project's docs and read/write the signed-in user's notes. It is
+**off by default**; enable with `HANK_REMOTE_MCP_ENABLED=true` and set
+`HANK_REMOTE_PUBLIC_BASE_URL=https://your-host`. This adds an OAuth 2.1 surface
+(`/.well-known/oauth-*`, `/v1/oauth/mcp/{register,authorize,token}`) and the MCP endpoint at
+`POST /v1/mcp`; only docs (read) and profile notes (read/write/delete) are exposed. See
+[docs/mcp.md](docs/mcp.md) for routes, scopes, and connecting a client.
+
 ## Development Commands
 
 ```bash
