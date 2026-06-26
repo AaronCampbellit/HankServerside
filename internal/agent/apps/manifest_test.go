@@ -392,6 +392,37 @@ func TestPreviewArchiveAcceptsSamplePackage(t *testing.T) {
 	}
 }
 
+func TestPreviewArchiveAcceptsWrappedFolderPackage(t *testing.T) {
+	t.Parallel()
+	manifest := validContractManifest()
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mimic a folder compressed by Finder: every payload entry nested under a
+	// single top-level directory, alongside macOS "__MACOSX"/AppleDouble junk.
+	entries := []archiveEntry{{Name: "sample_app/", Body: ""}}
+	for name, body := range samplePackageEntries(string(rawManifest)) {
+		entries = append(entries, archiveEntry{Name: "sample_app/" + name, Body: body})
+	}
+	entries = append(entries,
+		archiveEntry{Name: "__MACOSX/", Body: ""},
+		archiveEntry{Name: "__MACOSX/sample_app/._app.json", Body: "junk"},
+		archiveEntry{Name: "sample_app/.DS_Store", Body: "junk"},
+		archiveEntry{Name: "sample_app/._app.json", Body: "junk"},
+	)
+	archivePath := filepath.Join(t.TempDir(), "wrapped.hankapp")
+	writeArchiveEntryList(t, archivePath, entries)
+
+	preview, err := PreviewArchive(archivePath)
+	if err != nil {
+		t.Fatalf("PreviewArchive error: %v", err)
+	}
+	if preview.Manifest.ID != "sample_app" || preview.Manifest.Commands[0].ID != "run" {
+		t.Fatalf("preview = %#v", preview)
+	}
+}
+
 func TestPreviewArchiveRejectsUnsafeArchivePaths(t *testing.T) {
 	t.Parallel()
 	manifest := validContractManifest()
@@ -608,5 +639,45 @@ func writeArchiveEntryList(t *testing.T, archivePath string, entries []archiveEn
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func validHermesManifest() Manifest {
+	return Manifest{
+		SchemaVersion: "hank.app.v1",
+		ID:            "hermes",
+		Name:          "Hermes",
+		Version:       "1.0.0",
+		Publisher:     "Hank",
+		Description:   "Route explicit /Hermes prompts to a local Hermes API server.",
+		Runtime: Runtime{
+			Type:    "stdio",
+			Command: "bin/hermes-app",
+		},
+		Assistant: Assistant{
+			SlashCommands: []SlashCommand{{
+				Command:     "/Hermes",
+				CommandID:   "chat",
+				Description: "Send a prompt to Hermes.",
+			}},
+		},
+		Commands: []Command{{
+			ID:             "chat",
+			Mode:           "request_response",
+			InputSchema:    "schemas/chat.input.schema.json",
+			OutputSchema:   "schemas/chat.output.schema.json",
+			TimeoutSeconds: 120,
+			AdminOnly:      true,
+		}},
+		Config: Config{
+			Schema:       "schemas/config.schema.json",
+			SecretFields: []string{"api_key"},
+		},
+		Permissions: Permissions{
+			Network: []NetworkPermission{{
+				Kind:  "configured_base_url",
+				Field: "api_base_url",
+			}},
+		},
 	}
 }

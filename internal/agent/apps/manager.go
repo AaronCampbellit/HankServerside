@@ -622,11 +622,16 @@ func extractArchive(archivePath string, destination string) error {
 	}
 	defer reader.Close()
 
+	rootPrefix := archiveRootPrefix(reader.File)
 	for _, file := range reader.File {
+		name, keep := normalizeArchiveName(file.Name, rootPrefix)
+		if !keep {
+			continue
+		}
 		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%w: archive contains symlink entry %q", ErrPackageValidation, file.Name)
 		}
-		cleaned, isDir, err := cleanArchivePath(file.Name)
+		cleaned, isDir, err := cleanArchivePath(name)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrPackageValidation, err)
 		}

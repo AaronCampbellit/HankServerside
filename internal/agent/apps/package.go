@@ -23,13 +23,18 @@ func PreviewArchive(path string) (PackagePreview, error) {
 	}
 	defer reader.Close()
 
+	rootPrefix := archiveRootPrefix(reader.File)
 	paths := make(map[string]bool, len(reader.File))
 	files := make(map[string]*zip.File, len(reader.File))
 	for _, file := range reader.File {
+		name, keep := normalizeArchiveName(file.Name, rootPrefix)
+		if !keep {
+			continue
+		}
 		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
 			return PackagePreview{}, fmt.Errorf("archive contains symlink entry %q", file.Name)
 		}
-		cleaned, isDir, err := cleanArchivePath(file.Name)
+		cleaned, isDir, err := cleanArchivePath(name)
 		if err != nil {
 			return PackagePreview{}, err
 		}
@@ -96,6 +101,81 @@ func cleanArchivePath(value string) (string, bool, error) {
 		return "", false, fmt.Errorf("unsafe archive path %q", value)
 	}
 	return cleaned, strings.HasSuffix(value, "/"), nil
+}
+
+// isIgnoredArchiveEntry reports entries that archivers add but that are not part
+// of the app payload (macOS "Compress" artifacts). Skipping them lets a folder
+// zipped from Finder be treated the same as a purpose-built package.
+func isIgnoredArchiveEntry(name string) bool {
+	trimmed := strings.TrimSuffix(name, "/")
+	if trimmed == "" {
+		return true
+	}
+	for _, part := range strings.Split(trimmed, "/") {
+		if part == "__MACOSX" || part == ".DS_Store" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
+}
+
+// archiveRootPrefix returns a single top-level directory shared by every
+// meaningful entry, e.g. "myapp/" when the archive was produced by compressing a
+// folder ("myapp/app.json", "myapp/schemas/..."). It returns "" when entries
+// already live at the archive root or span multiple top-level directories, so a
+// purpose-built flat package is unaffected.
+func archiveRootPrefix(files []*zip.File) string {
+	prefix := ""
+	for _, file := range files {
+		if isIgnoredArchiveEntry(file.Name) {
+			continue
+		}
+		trimmed := strings.TrimSuffix(file.Name, "/")
+		idx := strings.Index(trimmed, "/")
+		var top string
+		switch {
+		case idx >= 0:
+			top = trimmed[:idx]
+		case strings.HasSuffix(file.Name, "/"):
+			// A bare top-level directory entry (e.g. "myapp/"): candidate wrapper.
+			top = trimmed
+		default:
+			// A file sits directly at the archive root: no shared wrapper.
+			return ""
+		}
+		// Only strip a wrapper whose own name is a safe path component; never let
+		// prefix handling mask an unsafe entry such as "..", "C:", or ".".
+		if cleaned, ok := cleanPackagePath(top); !ok || cleaned != top {
+			return ""
+		}
+		switch prefix {
+		case "":
+			prefix = top
+		case top:
+		default:
+			return ""
+		}
+	}
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "/"
+}
+
+// normalizeArchiveName drops ignored entries and strips the shared root prefix.
+// It returns ok=false for entries that must be skipped entirely (junk or the
+// wrapper directory itself).
+func normalizeArchiveName(name string, rootPrefix string) (string, bool) {
+	if isIgnoredArchiveEntry(name) {
+		return "", false
+	}
+	if rootPrefix != "" {
+		name = strings.TrimPrefix(name, rootPrefix)
+	}
+	if strings.TrimSuffix(name, "/") == "" {
+		return "", false
+	}
+	return name, true
 }
 
 func decodeManifest(file *zip.File) (Manifest, error) {
