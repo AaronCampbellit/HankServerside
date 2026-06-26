@@ -26,6 +26,8 @@ func (e *noteConflictError) Error() string { return "note conflict" }
 var (
 	errNoteAppendContentRequired     = errors.New("append content is required")
 	errNoteAppendUnsupportedPageType = errors.New("append is only supported for text notes")
+	errNotebookCannotHaveParent      = errors.New("notebooks cannot be placed inside another notebook")
+	errInvalidNotebookParent         = errors.New("parent_id must refer to a notebook owned by the same user")
 )
 
 type collabScalar struct {
@@ -73,12 +75,12 @@ func (s *cloudNotesService) ListHome(ctx context.Context, homeID string, userID 
 	return noteSummaries(notes), nil
 }
 
-func (s *cloudNotesService) SearchProfile(ctx context.Context, userID string, query string, limit int) ([]protocol.NoteSearchResult, error) {
+func (s *cloudNotesService) SearchProfile(ctx context.Context, userID string, query string, limit int, parentID string) ([]protocol.NoteSearchResult, error) {
 	notes, err := s.store.ListProfileNotes(ctx, userID, false)
 	if err != nil {
 		return nil, err
 	}
-	return searchNotes(notes, query, limit), nil
+	return searchNotes(notes, query, limit, parentID), nil
 }
 
 func (s *cloudNotesService) TagsProfile(ctx context.Context, userID string) ([]protocol.NoteTagCount, error) {
@@ -339,12 +341,12 @@ func (s *cloudNotesService) Sync(ctx context.Context, homeID string) ([]protocol
 	return noteSummaries(notes), nil
 }
 
-func (s *cloudNotesService) SearchHome(ctx context.Context, homeID string, userID string, query string, limit int) ([]protocol.NoteSearchResult, error) {
+func (s *cloudNotesService) SearchHome(ctx context.Context, homeID string, userID string, query string, limit int, parentID string) ([]protocol.NoteSearchResult, error) {
 	notes, err := s.store.ListVisibleHomeNotes(ctx, homeID, userID, false)
 	if err != nil {
 		return nil, err
 	}
-	return searchNotes(notes, query, limit), nil
+	return searchNotes(notes, query, limit, parentID), nil
 }
 
 func (s *cloudNotesService) TagsHome(ctx context.Context, homeID string, userID string) ([]protocol.NoteTagCount, error) {
@@ -430,6 +432,14 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 		pageType = protocol.NotePageTypeText
 	}
 
+	parentID := existing.ParentID
+	if request.ParentID != nil {
+		parentID = strings.TrimSpace(*request.ParentID)
+	}
+	if err := s.validateNotebookParent(ctx, homeID, actorUserID, existing, pageType, parentID); err != nil {
+		return protocol.NotesSaveResponse{}, err
+	}
+
 	_, board, err := encodeBoard(pageType, request.Board)
 	if err != nil {
 		return protocol.NotesSaveResponse{}, err
@@ -437,6 +447,9 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 	content := request.Content
 	if request.BodyMarkdown != "" {
 		content = request.BodyMarkdown
+	}
+	if pageType == protocol.NotePageTypeNotebook {
+		content = ""
 	}
 	if pageType == protocol.NotePageTypeKanban && content == "" && board != nil {
 		content = kanbanMarkdown(request.Title, *board)
@@ -456,14 +469,14 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 	state := collabState{
 		Title:         collabScalar{Value: title, Version: existing.CollabVersion + 1, UserID: actorUserID},
 		PageType:      collabScalar{Value: pageType, Version: existing.CollabVersion + 1, UserID: actorUserID},
-		ParentID:      collabScalar{Value: existing.ParentID, Version: existing.CollabVersion, UserID: actorUserID},
+		ParentID:      collabScalar{Value: parentID, Version: existing.CollabVersion, UserID: actorUserID},
 		SortOrder:     existing.SortOrder,
 		Content:       content,
 		Board:         board,
 		CollabVersion: existing.CollabVersion + 1,
 	}
 	if request.ParentID != nil {
-		state.ParentID = collabScalar{Value: strings.TrimSpace(*request.ParentID), Version: state.CollabVersion, UserID: actorUserID}
+		state.ParentID = collabScalar{Value: parentID, Version: state.CollabVersion, UserID: actorUserID}
 	}
 	if request.SortOrder != nil {
 		state.SortOrder = *request.SortOrder
@@ -492,6 +505,38 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 		UpdatedAt: updated.UpdatedAt,
 		PageType:  updated.PageType,
 	}, nil
+}
+
+func (s *cloudNotesService) validateNotebookParent(ctx context.Context, homeID string, actorUserID string, note domain.UserNote, pageType string, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if pageType == protocol.NotePageTypeNotebook {
+		return errNotebookCannotHaveParent
+	}
+	if parentID == note.NoteID {
+		return errInvalidNotebookParent
+	}
+
+	var (
+		parent domain.UserNote
+		err    error
+	)
+	if homeID != "" {
+		parent, err = s.store.GetHomeNoteVisibleToUser(ctx, homeID, actorUserID, parentID)
+	} else {
+		parent, err = s.store.GetProfileNote(ctx, note.OwnerUserID, parentID)
+	}
+	if err != nil {
+		return err
+	}
+	if parent.DeletedAt != nil {
+		return store.ErrNotFound
+	}
+	if parent.OwnerUserID != note.OwnerUserID || normalizePageType(parent.PageType) != protocol.NotePageTypeNotebook {
+		return errInvalidNotebookParent
+	}
+	return nil
 }
 
 func (s *cloudNotesService) generateNoteID(ctx context.Context, ownerUserID string, homeID string, requested string, title string) (string, error) {
@@ -712,6 +757,9 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 		return domain.UserNote{}, "", err
 	}
 	content := state.Content
+	if pageType == protocol.NotePageTypeNotebook {
+		content = ""
+	}
 	if pageType == protocol.NotePageTypeKanban && content == "" && board != nil {
 		content = kanbanMarkdown(state.Title.Value, *board)
 	}
@@ -795,6 +843,8 @@ func normalizePageType(pageType string) string {
 		return protocol.NotePageTypeText
 	case protocol.NotePageTypeKanban, "board":
 		return protocol.NotePageTypeKanban
+	case protocol.NotePageTypeNotebook:
+		return protocol.NotePageTypeNotebook
 	default:
 		return protocol.NotePageTypeText
 	}
@@ -854,7 +904,7 @@ func previewFromContent(content string) string {
 	return ""
 }
 
-func searchNotes(notes []domain.UserNote, query string, limit int) []protocol.NoteSearchResult {
+func searchNotes(notes []domain.UserNote, query string, limit int, parentID string) []protocol.NoteSearchResult {
 	needle := strings.TrimSpace(query)
 	if needle == "" {
 		return []protocol.NoteSearchResult{}
@@ -863,13 +913,18 @@ func searchNotes(notes []domain.UserNote, query string, limit int) []protocol.No
 		limit = 50
 	}
 	loweredNeedle := strings.ToLower(needle)
+	parentID = strings.TrimSpace(parentID)
 	results := make([]protocol.NoteSearchResult, 0)
 	for _, note := range notes {
-		if note.PageType != protocol.NotePageTypeText {
+		if parentID != "" && note.ParentID != parentID {
 			continue
 		}
 		titleMatch := strings.Index(strings.ToLower(note.Title), loweredNeedle)
-		bodyMatch := strings.Index(strings.ToLower(note.Content), loweredNeedle)
+		body := noteBodyText(note)
+		bodyMatch := -1
+		if normalizePageType(note.PageType) != protocol.NotePageTypeNotebook {
+			bodyMatch = strings.Index(strings.ToLower(body), loweredNeedle)
+		}
 		if titleMatch < 0 && bodyMatch < 0 {
 			continue
 		}
@@ -877,14 +932,15 @@ func searchNotes(notes []domain.UserNote, query string, limit int) []protocol.No
 		matchLocation := 0
 		lineIndex := 0
 		if bodyMatch >= 0 {
-			preview = snippetAround(note.Content, bodyMatch, len(needle))
+			preview = snippetAround(body, bodyMatch, len(needle))
 			matchLocation = bodyMatch
-			lineIndex = strings.Count(note.Content[:bodyMatch], "\n")
+			lineIndex = strings.Count(body[:bodyMatch], "\n")
 		}
 		results = append(results, protocol.NoteSearchResult{
 			NoteID:        note.NoteID,
 			Title:         note.Title,
 			PageType:      note.PageType,
+			ParentID:      note.ParentID,
 			Preview:       preview,
 			MatchLocation: matchLocation,
 			LineIndex:     lineIndex,

@@ -8,9 +8,10 @@
     { href: "/dashboard/settings/apps", label: "Apps", adminOnly: true },
     { href: "/dashboard/settings/backups", label: "Backups", adminOnly: true },
     { href: "/dashboard/settings/recovery", label: "Recovery", adminOnly: true },
+    { href: "/dashboard/settings/logs", label: "Logs", adminOnly: true },
     { href: "/dashboard/settings/join-home", label: "Join Home" },
   ];
-  const adminRoutes = ["/dashboard/settings/apps", "/dashboard/settings/backups", "/dashboard/settings/recovery"];
+  const adminRoutes = ["/dashboard/settings/apps", "/dashboard/settings/backups", "/dashboard/settings/recovery", "/dashboard/settings/logs"];
 
   function currentPath() {
     if (window.location.pathname === "/dashboard/settings") {

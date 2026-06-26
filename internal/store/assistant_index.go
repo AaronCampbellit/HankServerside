@@ -77,6 +77,15 @@ func (s *Store) UpsertAssistantDocumentWithChunks(ctx context.Context, document 
 	return tx.Commit()
 }
 
+func (s *Store) DeleteAssistantDocumentForSource(ctx context.Context, homeID string, userID string, sourceType string, sourceID string) error {
+	_, err := s.exec(ctx, `DELETE FROM assistant_documents
+		WHERE home_id = ?
+			AND source_type = ?
+			AND source_id = ?
+			AND (user_id IS NULL OR user_id = ?)`, homeID, sourceType, sourceID, userID)
+	return err
+}
+
 func (s *Store) UpsertAssistantFileIndex(ctx context.Context, item domain.AssistantFileIndex) error {
 	if item.MetadataJSON == "" {
 		item.MetadataJSON = "{}"
@@ -356,6 +365,14 @@ func (s *Store) AssistantIndexStats(ctx context.Context, homeID string, userID s
 	if err := row.Scan(&stats.FileCount, &stats.EmbeddedFileCount); err != nil {
 		return domain.AssistantIndexStats{}, err
 	}
+
+	queued, running, failed, err := s.AssistantIndexJobCounts(ctx, homeID, userID)
+	if err != nil {
+		return domain.AssistantIndexStats{}, err
+	}
+	stats.QueuedJobCount = queued
+	stats.RunningJobCount = running
+	stats.FailedJobCount = failed
 
 	return stats, nil
 }

@@ -204,6 +204,10 @@ func (h *noteCollaborationHub) submitOps(ctx context.Context, homeID string, req
 		}, nil
 	}
 
+	if err := h.validateNotebookParent(ctx, scope, homeID, app.userID, note, normalizePageType(state.PageType.Value), strings.TrimSpace(state.ParentID.Value)); err != nil {
+		return protocol.NoteCollaborationAck{}, err
+	}
+
 	updated, _, err := materializeNoteFromState(note, state, app.userID, now)
 	if err != nil {
 		return protocol.NoteCollaborationAck{}, err
@@ -222,6 +226,38 @@ func (h *noteCollaborationHub) submitOps(ctx context.Context, homeID string, req
 		AcceptedOps:    len(appliedOps),
 		Revision:       updated.Revision,
 	}, nil
+}
+
+func (h *noteCollaborationHub) validateNotebookParent(ctx context.Context, scope string, homeID string, actorUserID string, note domain.UserNote, pageType string, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if pageType == protocol.NotePageTypeNotebook {
+		return errNotebookCannotHaveParent
+	}
+	if parentID == note.NoteID {
+		return errInvalidNotebookParent
+	}
+
+	var (
+		parent domain.UserNote
+		err    error
+	)
+	if scope == "home" {
+		parent, err = h.store.GetHomeNoteVisibleToUser(ctx, homeID, actorUserID, parentID)
+	} else {
+		parent, err = h.store.GetProfileNote(ctx, note.OwnerUserID, parentID)
+	}
+	if err != nil {
+		return err
+	}
+	if parent.DeletedAt != nil {
+		return store.ErrNotFound
+	}
+	if parent.OwnerUserID != note.OwnerUserID || normalizePageType(parent.PageType) != protocol.NotePageTypeNotebook {
+		return errInvalidNotebookParent
+	}
+	return nil
 }
 
 func (h *noteCollaborationHub) revokeUser(homeID string, userID string, reason string) {

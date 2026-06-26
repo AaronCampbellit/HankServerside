@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -347,9 +348,20 @@ func (s *Store) CreateAuditEvent(ctx context.Context, event AuditEvent) error {
 	return err
 }
 
-func (s *Store) ListAuditEvents(ctx context.Context, homeID string, eventType string, severity string, targetType string, limit int) ([]AuditEvent, error) {
+func (s *Store) ListAuditEvents(ctx context.Context, homeID string, eventType string, severity string, targetType string, limit int, sortField string, sortOrder string) ([]AuditEvent, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
+	}
+	orderBy := "occurred_at"
+	validSort := sortField == "" || sortField == "occurred_at"
+	switch sortField {
+	case "event_type", "severity", "target_type":
+		orderBy = sortField
+		validSort = true
+	}
+	order := "DESC"
+	if validSort && strings.EqualFold(sortOrder, "asc") {
+		order = "ASC"
 	}
 	rows, err := s.query(ctx, `SELECT id, occurred_at, actor_user_id, actor_agent_id, home_id,
 			event_type, severity, request_id, ip_hash, target_type, target_id, metadata_json
@@ -358,7 +370,7 @@ func (s *Store) ListAuditEvents(ctx context.Context, homeID string, eventType st
 			AND (? = '' OR event_type = ?)
 			AND (? = '' OR severity = ?)
 			AND (? = '' OR target_type = ?)
-		ORDER BY occurred_at DESC
+		ORDER BY `+orderBy+` `+order+`, occurred_at DESC
 		LIMIT ?`, homeID, homeID, eventType, eventType, severity, severity, targetType, targetType, limit)
 	if err != nil {
 		return nil, err

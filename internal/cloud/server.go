@@ -146,6 +146,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/settings/apps", server.handleSettingsAppsPage)
 	mux.HandleFunc("/dashboard/settings/backups", server.handleSettingsBackupsPage)
 	mux.HandleFunc("/dashboard/settings/recovery", server.handleSettingsRecoveryPage)
+	mux.HandleFunc("/dashboard/settings/logs", server.handleSettingsLogsPage)
 	mux.HandleFunc("/dashboard/settings/join-home", server.handleSettingsJoinHomePage)
 	mux.HandleFunc("/dashboard/settings/people-pane", redirectToSettingsRoute("/dashboard/settings/people"))
 	mux.HandleFunc("/dashboard/settings/connections-pane", redirectToSettingsRoute("/dashboard/settings/connections"))
@@ -153,6 +154,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/settings/backups-pane", redirectToSettingsRoute("/dashboard/settings/backups"))
 	mux.HandleFunc("/dashboard/settings/recovery-pane", redirectToSettingsRoute("/dashboard/settings/recovery"))
 	mux.HandleFunc("/dashboard/settings/apps-pane", redirectToSettingsRoute("/dashboard/settings/apps"))
+	mux.HandleFunc("/dashboard/settings/logs-pane", redirectToSettingsRoute("/dashboard/settings/logs"))
 	mux.HandleFunc("/dashboard/settings/join-home-pane", redirectToSettingsRoute("/dashboard/settings/join-home"))
 	mux.HandleFunc("/docs/deployment", serveDeploymentGuide)
 	mux.HandleFunc("/favicon.ico", serveUIFavicon)
@@ -261,6 +263,7 @@ func (s *Server) StartRuntime(ctx context.Context, version string) error {
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
 	s.runtimeCancel = cancel
+	s.startAssistantIndexWorker(runtimeCtx)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -548,6 +551,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if blocked {
 		s.metrics.IncAuthFailure("login_email_backoff")
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", "", requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "login_backoff"})
 		s.logger.Warn("login email backoff active", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email, "retry_after", retryAfter.String())
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
@@ -559,6 +563,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed {
 		s.metrics.IncAuthFailure("login_rate_limited")
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", "", requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "rate_limited"})
 		s.logger.Warn("login rate limited", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email)
 		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
 		return
@@ -1254,6 +1259,11 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		if maxUploadBytes > 0 && body.Size > maxUploadBytes {
+			metadata := auditPathMetadata(body.SourceID, body.Path)
+			metadata["operation"] = operation
+			metadata["reason"] = "upload_size_limit"
+			metadata["requested_size"] = body.Size
+			s.audit(r.Context(), "file_transfer.setup_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_policy", operation, metadata)
 			http.Error(w, "file source policy upload size limit exceeded", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -1261,6 +1271,10 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 
 	agentConn, ok := s.router.GetAgent(home.ID)
 	if !ok {
+		metadata := auditPathMetadata(body.SourceID, body.Path)
+		metadata["operation"] = operation
+		metadata["reason"] = "agent_offline"
+		s.audit(r.Context(), "file_transfer.setup_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_transfer", operation, metadata)
 		http.Error(w, "target home agent is offline", http.StatusBadGateway)
 		return
 	}
@@ -1298,7 +1312,10 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 	}); err != nil {
 		s.logger.Warn("failed to persist file transfer lease", "transfer_id", transfer.ID, "error", err)
 	}
-	s.audit(r.Context(), "file_operation.requested", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_transfer", transfer.ID, map[string]any{"operation": operation, "source_id": body.SourceID})
+	requestMetadata := auditPathMetadata(body.SourceID, body.Path)
+	requestMetadata["operation"] = operation
+	requestMetadata["job_id"] = jobID
+	s.audit(r.Context(), "file_transfer.requested", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "file_transfer", transfer.ID, requestMetadata)
 
 	method := http.MethodGet
 	if operation == protocol.FileTransferOperationUpload {
@@ -1611,6 +1628,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 
 		agentConn, ok := s.router.GetAgent(transfer.HomeID)
 		if !ok {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_offline", auditSeverityWarning)
 			http.Error(w, "target home agent is offline", http.StatusBadGateway)
 			return
 		}
@@ -1626,18 +1644,21 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := agentConn.peer.Write(r.Context(), open); err != nil {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_write_failed", auditSeverityWarning)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 
 		ready, protocolErr, err := s.waitTransferReady(r.Context(), attempt)
 		if err != nil {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "ready_timeout", auditSeverityWarning)
 			http.Error(w, err.Error(), http.StatusGatewayTimeout)
 			return
 		}
 		if protocolErr != nil {
 			transfer.Fail(protocolErr)
 			s.persistTransferStatus(r.Context(), transfer, "failed")
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, protocolErr.Code, auditSeverityWarning)
 			http.Error(w, protocolErr.Message, http.StatusBadGateway)
 			return
 		}
@@ -1661,11 +1682,13 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 				if frame.Error != nil {
 					transfer.Fail(frame.Error)
 					s.persistTransferStatus(r.Context(), transfer, "failed")
+					s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, frame.Error.Code, auditSeverityWarning)
 					return
 				}
 				if frame.Offset != currentOffset {
 					transfer.Fail(&protocol.ErrorPayload{Code: "transfer_offset_mismatch", Message: "download stream offset mismatch"})
 					s.persistTransferStatus(r.Context(), transfer, "failed")
+					s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "transfer_offset_mismatch", auditSeverityWarning)
 					return
 				}
 				if len(frame.Data) == 0 {
@@ -1690,6 +1713,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 				if protocolErr != nil {
 					transfer.Fail(protocolErr)
 					s.persistTransferStatus(r.Context(), transfer, "failed")
+					s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, protocolErr.Code, auditSeverityWarning)
 					return
 				}
 				complete := result.Complete
@@ -1721,6 +1745,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		if maxUploadBytes > 0 && r.ContentLength > 0 && offset+r.ContentLength > maxUploadBytes {
 			transfer.Fail(&protocol.ErrorPayload{Code: "upload_too_large", Message: "file source policy upload size limit exceeded"})
 			s.persistTransferStatus(r.Context(), transfer, "failed")
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "upload_too_large", auditSeverityWarning)
 			http.Error(w, "file source policy upload size limit exceeded", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -1734,6 +1759,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 
 		agentConn, ok := s.router.GetAgent(transfer.HomeID)
 		if !ok {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_offline", auditSeverityWarning)
 			http.Error(w, "target home agent is offline", http.StatusBadGateway)
 			return
 		}
@@ -1749,18 +1775,21 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := agentConn.peer.Write(r.Context(), open); err != nil {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_write_failed", auditSeverityWarning)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 
 		ready, protocolErr, err := s.waitTransferReady(r.Context(), attempt)
 		if err != nil {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "ready_timeout", auditSeverityWarning)
 			http.Error(w, err.Error(), http.StatusGatewayTimeout)
 			return
 		}
 		if protocolErr != nil {
 			transfer.Fail(protocolErr)
 			s.persistTransferStatus(r.Context(), transfer, "failed")
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, protocolErr.Code, auditSeverityWarning)
 			http.Error(w, protocolErr.Message, http.StatusBadGateway)
 			return
 		}
@@ -1782,6 +1811,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 				if maxUploadBytes > 0 && currentOffset+int64(n) > maxUploadBytes {
 					transfer.Fail(&protocol.ErrorPayload{Code: "upload_too_large", Message: "file source policy upload size limit exceeded"})
 					s.persistTransferStatus(r.Context(), transfer, "failed")
+					s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "upload_too_large", auditSeverityWarning)
 					http.Error(w, "file source policy upload size limit exceeded", http.StatusRequestEntityTooLarge)
 					return
 				}
@@ -1794,6 +1824,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if err := agentConn.peer.Write(r.Context(), envelope); err != nil {
+					s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_write_failed", auditSeverityWarning)
 					http.Error(w, err.Error(), http.StatusBadGateway)
 					return
 				}
@@ -1804,6 +1835,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if err != nil {
+				s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "request_body_read_failed", auditSeverityWarning)
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1821,18 +1853,21 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := agentConn.peer.Write(r.Context(), complete); err != nil {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_write_failed", auditSeverityWarning)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 
 		done, protocolErr, err := s.waitTransferComplete(r.Context(), attempt)
 		if err != nil {
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "complete_timeout", auditSeverityWarning)
 			http.Error(w, err.Error(), http.StatusGatewayTimeout)
 			return
 		}
 		if protocolErr != nil {
 			transfer.Fail(protocolErr)
 			s.persistTransferStatus(r.Context(), transfer, "failed")
+			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, protocolErr.Code, auditSeverityWarning)
 			http.Error(w, protocolErr.Message, http.StatusBadGateway)
 			return
 		}
@@ -1901,6 +1936,30 @@ func (s *Server) persistTransferStatus(ctx context.Context, transfer *transferSe
 		s.logger.Warn("failed to persist file transfer status", "transfer_id", transfer.ID, "status", status, "error", err)
 	}
 	s.persistTransferJobStatus(ctx, transfer, status, done, completedAt)
+}
+
+func (s *Server) auditFileTransfer(ctx context.Context, eventType string, transfer *transferSession, reason string, severity string) {
+	if transfer == nil {
+		return
+	}
+	metadata := auditPathMetadata(transfer.SourceID, transfer.Path)
+	metadata["operation"] = transfer.Operation
+	if strings.TrimSpace(reason) != "" {
+		metadata["reason"] = strings.TrimSpace(reason)
+	}
+	if transfer.JobID != "" {
+		metadata["job_id"] = transfer.JobID
+	}
+	record, err := s.store.GetFileTransfer(ctx, transfer.ID)
+	actorUserID := ""
+	homeID := transfer.HomeID
+	agentID := transfer.AgentID
+	if err == nil {
+		actorUserID = record.UserID
+		homeID = record.HomeID
+		agentID = record.AgentID
+	}
+	s.audit(ctx, eventType, severity, actorUserID, agentID, homeID, "", "file_transfer", transfer.ID, metadata)
 }
 
 func (s *Server) persistTransferJobStatus(ctx context.Context, transfer *transferSession, transferStatus string, bytesDone int64, completedAt *time.Time) {

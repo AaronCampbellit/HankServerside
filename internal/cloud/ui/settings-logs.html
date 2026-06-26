@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Hank Remote Logs</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260606-mobile-responsive">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  </head>
+  <body>
+    <div class="shell dashboard-shell settings-page">
+      <header class="hero">
+        <div>
+          <div class="brand-lockup">
+            <img class="brand-icon" src="/assets/hank-icon-192.png" alt="" aria-hidden="true">
+            <p class="eyebrow">Hank Remote</p>
+          </div>
+          <h1>Logs</h1>
+        </div>
+        <div class="hero-card">
+          <div class="panel-head">
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="session-state">Checking login</span>
+            </div>
+            <button id="logout-button" class="ghost">Log Out</button>
+          </div>
+          <p id="session-meta">Checking your Hank account.</p>
+        </div>
+      </header>
+
+      <nav class="tab-strip" aria-label="Dashboard Sections"></nav>
+
+      <main class="grid">
+        <section class="panel settings-index-panel" aria-label="Settings sections">
+          <div data-settings-nav></div>
+        </section>
+
+        <section class="panel wide-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Audit Logs</h2>
+              <p class="meta">Retention follows the configured maintenance window.</p>
+            </div>
+            <span id="log-count" class="pill">Loading</span>
+          </div>
+          <form id="log-filter-form" class="settings-form compact">
+            <div class="settings-grid">
+              <label class="setting-field">
+                <span>Event</span>
+                <input id="log-event-type" type="text" placeholder="login.succeeded">
+              </label>
+              <label class="setting-field">
+                <span>Severity</span>
+                <select id="log-severity">
+                  <option value="">Any</option>
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label class="setting-field">
+                <span>Target</span>
+                <input id="log-target-type" type="text" placeholder="file_transfer">
+              </label>
+              <label class="setting-field">
+                <span>Sort By</span>
+                <select id="log-sort">
+                  <option value="occurred_at">Time</option>
+                  <option value="event_type">Event</option>
+                  <option value="severity">Severity</option>
+                  <option value="target_type">Target</option>
+                </select>
+              </label>
+              <label class="setting-field">
+                <span>Order</span>
+                <select id="log-order">
+                  <option value="desc">Newest first</option>
+                  <option value="asc">Oldest first</option>
+                </select>
+              </label>
+              <label class="setting-field">
+                <span>Limit</span>
+                <input id="log-limit" type="number" min="1" max="200" step="1" value="100">
+              </label>
+            </div>
+            <button id="log-refresh-button" type="submit">Refresh</button>
+          </form>
+          <div id="log-output" class="card-list empty-state">Loading logs.</div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+
+    <script src="/assets/api-client.js" defer></script>
+    <script src="/assets/ui-helpers.js" defer></script>
+    <script src="/assets/settings-nav.js" defer></script>
+    <script src="/assets/settings-logs.js" defer></script>
+    <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
+  </body>
+</html>

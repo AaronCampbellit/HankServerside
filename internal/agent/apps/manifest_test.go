@@ -39,6 +39,10 @@ func validContractManifest() Manifest {
 		Config: Config{
 			Schema:       "schemas/config.schema.json",
 			SecretFields: []string{"api_key"},
+			Settings: SettingsSchema{Fields: []SettingsField{
+				{Key: "api_base_url", Label: "API URL", Type: "url", Required: true},
+				{Key: "api_key", Label: "API key", Type: "password", Secret: true, SecretKey: "api_key"},
+			}},
 		},
 		Permissions: Permissions{
 			Network: []NetworkPermission{{
@@ -144,6 +148,63 @@ func TestValidateManifestAcceptsTypedSettingsAndFileSourcePermission(t *testing.
 	}
 }
 
+func TestValidateManifestRejectsSecretAndPermissionFieldDrift(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		mutate func(*Manifest)
+		want   string
+	}{
+		{
+			name: "secret field missing from config secret_fields",
+			mutate: func(m *Manifest) {
+				m.Config.SecretFields = nil
+				m.Config.Settings = SettingsSchema{Fields: []SettingsField{{
+					Key:       "api_key",
+					Type:      "password",
+					Secret:    true,
+					SecretKey: "api_key",
+				}}}
+			},
+			want: "secret_fields",
+		},
+		{
+			name: "file permission references missing settings field",
+			mutate: func(m *Manifest) {
+				m.Config.Settings = SettingsSchema{Fields: []SettingsField{{Key: "source_id", Type: "select", Source: "file_sources"}}}
+				m.Permissions.Files = []FilePermission{{Kind: "configured_source", Field: "missing_source"}}
+			},
+			want: "file permission",
+		},
+		{
+			name: "file permission references non file source field",
+			mutate: func(m *Manifest) {
+				m.Config.Settings = SettingsSchema{Fields: []SettingsField{{Key: "source_id", Type: "text"}}}
+				m.Permissions.Files = []FilePermission{{Kind: "configured_source", Field: "source_id"}}
+			},
+			want: "file_sources",
+		},
+		{
+			name: "network permission references non url field",
+			mutate: func(m *Manifest) {
+				m.Config.Settings = SettingsSchema{Fields: []SettingsField{{Key: "api_base_url", Type: "text"}}}
+				m.Permissions.Network = []NetworkPermission{{Kind: "configured_base_url", Field: "api_base_url"}}
+			},
+			want: "network permission",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := validContractManifest()
+			tt.mutate(&manifest)
+			err := ValidateManifest(manifest)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateManifest error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateManifestRejectsInvalidSettingsFields(t *testing.T) {
 	t.Parallel()
 	manifest := validContractManifest()
@@ -172,6 +233,36 @@ func TestValidateManifestRejectsUnsafeIDsAndPaths(t *testing.T) {
 		{"bad schema path", func(m *Manifest) { m.Commands[0].InputSchema = "/tmp/schema.json" }, "schema path"},
 		{"unknown permission", func(m *Manifest) { m.Permissions.Network[0].Kind = "internet" }, "permission"},
 		{"missing command", func(m *Manifest) { m.Commands = nil }, "command"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := validContractManifest()
+			tt.mutate(&manifest)
+			err := ValidateManifest(manifest)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateManifest error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateManifestRejectsWeakMetadataAndUnsupportedCommands(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		mutate func(*Manifest)
+		want   string
+	}{
+		{"missing name", func(m *Manifest) { m.Name = "" }, "name is required"},
+		{"long name", func(m *Manifest) { m.Name = strings.Repeat("x", 81) }, "name exceeds"},
+		{"missing version", func(m *Manifest) { m.Version = "" }, "version is required"},
+		{"long version", func(m *Manifest) { m.Version = strings.Repeat("1", 65) }, "version exceeds"},
+		{"long publisher", func(m *Manifest) { m.Publisher = strings.Repeat("x", 81) }, "publisher exceeds"},
+		{"long description", func(m *Manifest) { m.Description = strings.Repeat("x", 501) }, "description exceeds"},
+		{"unsupported command mode", func(m *Manifest) { m.Commands[0].Mode = "stream" }, "mode"},
+		{"zero timeout", func(m *Manifest) { m.Commands[0].TimeoutSeconds = 0 }, "timeout_seconds"},
+		{"huge timeout", func(m *Manifest) { m.Commands[0].TimeoutSeconds = 301 }, "timeout_seconds"},
+		{"long slash description", func(m *Manifest) { m.Assistant.SlashCommands[0].Description = strings.Repeat("x", 161) }, "slash command"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -556,6 +647,24 @@ func TestPreviewArchiveRequiresReferencedFiles(t *testing.T) {
 				t.Fatalf("PreviewArchive error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestPreviewArchiveRejectsInvalidReferencedSchemaJSON(t *testing.T) {
+	t.Parallel()
+	manifest := validContractManifest()
+	rawManifest, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := samplePackageEntries(string(rawManifest))
+	entries["schemas/run.input.schema.json"] = `{"type":"object"`
+	archivePath := filepath.Join(t.TempDir(), "bad-schema.hankapp")
+	writeArchiveEntries(t, archivePath, entries)
+
+	_, err = PreviewArchive(archivePath)
+	if err == nil || !strings.Contains(err.Error(), "schema path") {
+		t.Fatalf("PreviewArchive error = %v, want schema path validation error", err)
 	}
 }
 

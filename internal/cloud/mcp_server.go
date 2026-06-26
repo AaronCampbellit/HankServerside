@@ -239,7 +239,7 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		if a.Limit <= 0 {
 			a.Limit = 20
 		}
-		results, err := s.notes.SearchProfile(ctx, userID, a.Query, a.Limit)
+		results, err := s.notes.SearchProfile(ctx, userID, a.Query, a.Limit, "")
 		if err != nil {
 			return "", err
 		}

@@ -1211,7 +1211,7 @@ func fileSearchScore(item protocol.FileItem, query string) int {
 			score++
 		}
 	}
-	if item.IsDirectory {
+	if score > 0 && item.IsDirectory {
 		score++
 	}
 	return score

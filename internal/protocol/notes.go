@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	NotePageTypeText   = "text"
-	NotePageTypeKanban = "kanban"
+	NotePageTypeText     = "text"
+	NotePageTypeKanban   = "kanban"
+	NotePageTypeNotebook = "notebook"
 )
 
 type KanbanCard struct {
@@ -132,14 +133,17 @@ type NotesDeleteRequest struct {
 }
 
 type NotesSearchRequest struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
+	Query      string `json:"query"`
+	Limit      int    `json:"limit,omitempty"`
+	NotebookID string `json:"notebook_id,omitempty"`
+	ParentID   string `json:"parent_id,omitempty"`
 }
 
 type NoteSearchResult struct {
 	NoteID        string `json:"note_id"`
 	Title         string `json:"title"`
 	PageType      string `json:"page_type,omitempty"`
+	ParentID      string `json:"parent_id,omitempty"`
 	Preview       string `json:"preview"`
 	MatchLocation int    `json:"match_location"`
 	LineIndex     int    `json:"line_index"`

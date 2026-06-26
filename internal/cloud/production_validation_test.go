@@ -429,6 +429,17 @@ func TestFilePolicyDeniesBlockedPrefixesDeleteAndMaxUpload(t *testing.T) {
 		"size":      5,
 	}, http.StatusRequestEntityTooLarge)
 	response.Body.Close()
+
+	events, err := db.ListAuditEvents(ctx, homeID, "file_transfer.setup_failed", auditSeverityWarning, "file_policy", 10, "occurred_at", "desc")
+	if err != nil {
+		t.Fatalf("ListAuditEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].TargetID != protocol.FileTransferOperationUpload {
+		t.Fatalf("upload setup audit events = %#v", events)
+	}
+	if strings.Contains(events[0].MetadataJSON, "/Allowed/too-large.txt") || !strings.Contains(events[0].MetadataJSON, "path_hash") {
+		t.Fatalf("upload setup audit metadata = %s", events[0].MetadataJSON)
+	}
 }
 
 func TestFilePolicyDefaultsAllowDelete(t *testing.T) {
@@ -462,8 +473,9 @@ func TestAuditEventsCanBeFilteredAndRedacted(t *testing.T) {
 
 	var payload struct {
 		Events []struct {
-			EventType string         `json:"event_type"`
-			Metadata  map[string]any `json:"metadata"`
+			EventType  string         `json:"event_type"`
+			HelperText string         `json:"helper_text"`
+			Metadata   map[string]any `json:"metadata"`
 		} `json:"events"`
 	}
 	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/audit-events?event_type=service_profile.changed", nil, &payload)
@@ -475,6 +487,39 @@ func TestAuditEventsCanBeFilteredAndRedacted(t *testing.T) {
 	}
 	if payload.Events[0].Metadata["safe"] != "ok" {
 		t.Fatalf("safe metadata changed: %#v", payload.Events[0].Metadata)
+	}
+	if payload.Events[0].HelperText == "" || !strings.Contains(payload.Events[0].HelperText, "Connection settings changed") {
+		t.Fatalf("helper text = %q, want connection settings diagnosis", payload.Events[0].HelperText)
+	}
+}
+
+func TestAuditEventsCanBeSorted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, testServer, homeID, _, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	now := time.Now().UTC()
+	for _, event := range []store.AuditEvent{
+		{ID: "audit_sort_z", OccurredAt: now, ActorUserID: stringPtr("usr_1"), HomeID: stringPtr(homeID), EventType: "z.download.failed", Severity: auditSeverityWarning, TargetType: "file_transfer", TargetID: "z", MetadataJSON: "{}"},
+		{ID: "audit_sort_a", OccurredAt: now.Add(-time.Minute), ActorUserID: stringPtr("usr_1"), HomeID: stringPtr(homeID), EventType: "a.app_package.preview_failed", Severity: auditSeverityWarning, TargetType: "app_package", TargetID: "a", MetadataJSON: "{}"},
+	} {
+		must(t, db.CreateAuditEvent(ctx, event))
+	}
+
+	var payload struct {
+		Events []struct {
+			EventType string `json:"event_type"`
+		} `json:"events"`
+	}
+	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/audit-events?sort=event_type&order=asc", nil, &payload)
+	if len(payload.Events) < 2 {
+		t.Fatalf("audit event count = %d, want at least 2", len(payload.Events))
+	}
+	if payload.Events[0].EventType != "a.app_package.preview_failed" || payload.Events[1].EventType != "z.download.failed" {
+		t.Fatalf("sorted audit events = %#v", payload.Events)
 	}
 }
 

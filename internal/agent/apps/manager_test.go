@@ -3,6 +3,8 @@ package apps
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +48,9 @@ func TestManagerPreviewAndActivateHermesPackage(t *testing.T) {
 	if preview.StagingID != "stage_1" || preview.App.ID != "hermes" || preview.Replacing {
 		t.Fatalf("preview = %#v", preview)
 	}
+	if preview.PackageSHA256 != fileSHA256(t, archivePath) {
+		t.Fatalf("PackageSHA256 = %q, want archive hash", preview.PackageSHA256)
+	}
 
 	activated, err := manager.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{StagingID: "stage_1"})
 	if err != nil {
@@ -56,6 +61,57 @@ func TestManagerPreviewAndActivateHermesPackage(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(appsDir, "hermes", "app.json")); err != nil {
 		t.Fatalf("installed app.json missing: %v", err)
+	}
+}
+
+func TestManagerActivateRebuildsPreviewFromStagedPackageAfterRestart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	appsDir := filepath.Join(t.TempDir(), "apps")
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	archivePath := writeManagerHermesPackage(t, t.TempDir(), hermesRuntimeScript(`{"installed":true}`))
+	manager := NewManager(appsDir, stagingDir, Runner{})
+	preview, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:   "stage_1",
+		DownloadURL: fileURL(t, archivePath),
+	})
+	if err != nil {
+		t.Fatalf("PreviewPackage error: %v", err)
+	}
+
+	restarted := NewManager(appsDir, stagingDir, Runner{})
+	activated, err := restarted.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{
+		StagingID:     "stage_1",
+		PackageSHA256: preview.PackageSHA256,
+	})
+	if err != nil {
+		t.Fatalf("ActivatePackage after restart error: %v", err)
+	}
+	if activated.App.ID != "hermes" {
+		t.Fatalf("activated app = %#v", activated.App)
+	}
+}
+
+func TestManagerActivateRejectsPackageHashMismatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	appsDir := filepath.Join(t.TempDir(), "apps")
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	archivePath := writeManagerHermesPackage(t, t.TempDir(), hermesRuntimeScript(`{"installed":true}`))
+	manager := NewManager(appsDir, stagingDir, Runner{})
+	if _, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+		StagingID:   "stage_1",
+		DownloadURL: fileURL(t, archivePath),
+	}); err != nil {
+		t.Fatalf("PreviewPackage error: %v", err)
+	}
+
+	_, err := manager.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{
+		StagingID:     "stage_1",
+		PackageSHA256: strings.Repeat("0", 64),
+	})
+	if err == nil || !strings.Contains(err.Error(), "package hash mismatch") {
+		t.Fatalf("ActivatePackage error = %v, want package hash mismatch", err)
 	}
 }
 
@@ -461,6 +517,49 @@ func assertHermesReceivesAPIKey(t *testing.T, manager *Manager, want string) {
 func fileURL(t *testing.T, path string) string {
 	t.Helper()
 	return (&url.URL{Scheme: "file", Path: path}).String()
+}
+
+func fileSHA256(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func validHermesManifest() Manifest {
+	return Manifest{
+		SchemaVersion: "hank.app.v1",
+		ID:            "hermes",
+		Name:          "Hermes",
+		Version:       "1.0.0",
+		Publisher:     "Hank",
+		Description:   "Chat with Hermes.",
+		Runtime: Runtime{
+			Type:    "stdio",
+			Command: "bin/hermes-app",
+		},
+		Commands: []Command{{
+			ID:             "chat",
+			Mode:           "request_response",
+			InputSchema:    "schemas/chat.input.schema.json",
+			OutputSchema:   "schemas/chat.output.schema.json",
+			TimeoutSeconds: 30,
+		}},
+		Config: Config{
+			Schema:       "schemas/config.schema.json",
+			SecretFields: []string{"api_key"},
+			Settings: SettingsSchema{Fields: []SettingsField{
+				{Key: "api_base_url", Label: "API URL", Type: "url", Required: true},
+				{Key: "api_key", Label: "API key", Type: "password", Secret: true, SecretKey: "api_key"},
+			}},
+		},
+		Permissions: Permissions{
+			Network: []NetworkPermission{{Kind: "configured_base_url", Field: "api_base_url"}},
+		},
+	}
 }
 
 func writeManagerHermesPackage(t *testing.T, dir string, script string) string {

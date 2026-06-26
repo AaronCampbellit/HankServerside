@@ -579,7 +579,11 @@ async function installPreview() {
   try {
     await api("/v1/home/apps/import/activate", {
       method: "POST",
-      body: JSON.stringify({ staging_id: state.preview.staging_id, enable: false }),
+      body: JSON.stringify({
+        staging_id: state.preview.staging_id,
+        package_sha256: state.preview.package_sha256 || "",
+        enable: false,
+      }),
     });
     state.preview = null;
     els.packageInput.value = "";

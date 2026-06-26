@@ -372,6 +372,7 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/settings/backups",
 		"/dashboard/settings/recovery",
 		"/dashboard/settings/apps",
+		"/dashboard/settings/logs",
 		"/dashboard/settings/join-home",
 	}
 
@@ -401,6 +402,7 @@ func TestLegacySettingsPaneRoutesRedirectToCanonicalRoutes(t *testing.T) {
 		"/dashboard/settings/backups-pane":     "/dashboard/settings/backups",
 		"/dashboard/settings/recovery-pane":    "/dashboard/settings/recovery",
 		"/dashboard/settings/apps-pane":        "/dashboard/settings/apps",
+		"/dashboard/settings/logs-pane":        "/dashboard/settings/logs",
 		"/dashboard/settings/join-home-pane":   "/dashboard/settings/join-home",
 	}
 	for from, to := range routes {
@@ -537,6 +539,14 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 		t.Fatalf("member apps status = %d, want %d body=%s", appsResponse.StatusCode, http.StatusForbidden, string(data))
 	}
 	appsResponse.Body.Close()
+
+	logsResponse := requestDashboardPage(t, testServer, "/dashboard/settings/logs", "member-token")
+	if logsResponse.StatusCode != http.StatusForbidden {
+		data, _ := io.ReadAll(logsResponse.Body)
+		logsResponse.Body.Close()
+		t.Fatalf("member logs status = %d, want %d body=%s", logsResponse.StatusCode, http.StatusForbidden, string(data))
+	}
+	logsResponse.Body.Close()
 }
 
 func TestCanonicalSettingsRoutesAreServed(t *testing.T) {
@@ -568,6 +578,7 @@ func TestCanonicalSettingsRoutesAreServed(t *testing.T) {
 		"/dashboard/settings/apps":        "Hank Remote Apps",
 		"/dashboard/settings/backups":     "Hank Remote Storage",
 		"/dashboard/settings/recovery":    "Hank Remote Recovery",
+		"/dashboard/settings/logs":        "Hank Remote Logs",
 		"/dashboard/settings/join-home":   "Hank Remote Join Home",
 	}
 	for routePath, title := range routes {
@@ -604,6 +615,7 @@ func TestCanonicalSettingsRoutesAreRegistered(t *testing.T) {
 		"/dashboard/settings/apps":        "handleSettingsAppsPage",
 		"/dashboard/settings/backups":     "handleSettingsBackupsPage",
 		"/dashboard/settings/recovery":    "handleSettingsRecoveryPage",
+		"/dashboard/settings/logs":        "handleSettingsLogsPage",
 		"/dashboard/settings/join-home":   "handleSettingsJoinHomePage",
 	}
 	for routePath, handler := range routes {
@@ -674,6 +686,9 @@ func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
 	}
 	if !strings.Contains(navBody, `href: "/dashboard/settings/apps"`) || !strings.Contains(navBody, `adminOnly: true`) {
 		t.Fatal("admin nav must expose app settings as an admin-only search result")
+	}
+	if !strings.Contains(navBody, `href: "/dashboard/settings/logs"`) || !strings.Contains(navBody, `adminOnly: true`) {
+		t.Fatal("admin nav must expose logs settings as an admin-only search result")
 	}
 	if strings.Contains(navBody, `<span>Search Settings</span>`) || strings.Contains(navBody, `placeholder="Search settings"`) || !strings.Contains(navBody, `aria-label="Search"`) {
 		t.Fatal("admin nav search should use a short placeholder and aria label without a visible title")
@@ -746,6 +761,7 @@ func TestSettingsNavigationIncludesAdminRecoveryAndAppsRoutes(t *testing.T) {
 		`{ href: "/dashboard/settings/apps", label: "Apps", adminOnly: true }`,
 		`{ href: "/dashboard/settings/backups", label: "Backups", adminOnly: true }`,
 		`{ href: "/dashboard/settings/recovery", label: "Recovery", adminOnly: true }`,
+		`{ href: "/dashboard/settings/logs", label: "Logs", adminOnly: true }`,
 		`window.location.replace("/dashboard/settings/home")`,
 	} {
 		if !strings.Contains(body, required) {
@@ -753,12 +769,19 @@ func TestSettingsNavigationIncludesAdminRecoveryAndAppsRoutes(t *testing.T) {
 		}
 	}
 
-	for _, asset := range []string{"recovery.html", "recovery.js", "apps.html", "apps.js"} {
+	for _, asset := range []string{"recovery.html", "recovery.js", "apps.html", "apps.js", "settings-logs.html", "settings-logs.js"} {
 		if _, err := fs.ReadFile(uiAssets, "ui/"+asset); err != nil {
 			t.Fatalf("%s read: %v", asset, err)
 		}
 	}
-	for _, assetPath := range []string{"/assets/recovery.js", "/assets/apps.js"} {
+	logs, err := fs.ReadFile(uiAssets, "ui/settings-logs.js")
+	if err != nil {
+		t.Fatalf("settings-logs.js read: %v", err)
+	}
+	if !strings.Contains(string(logs), "event.helper_text") {
+		t.Fatal("settings-logs.js should render audit helper text")
+	}
+	for _, assetPath := range []string{"/assets/recovery.js", "/assets/apps.js", "/assets/settings-logs.js"} {
 		request := httptest.NewRequest(http.MethodGet, assetPath, nil)
 		response := httptest.NewRecorder()
 		serveUIAsset(response, request)
@@ -869,7 +892,7 @@ func TestSettingsNavGatesAdminRoutes(t *testing.T) {
 	}
 	body := string(data)
 	for _, required := range []string{
-		`const adminRoutes = ["/dashboard/settings/apps", "/dashboard/settings/backups", "/dashboard/settings/recovery"]`,
+		`const adminRoutes = ["/dashboard/settings/apps", "/dashboard/settings/backups", "/dashboard/settings/recovery", "/dashboard/settings/logs"]`,
 		`.filter((page) => !page.adminOnly || canViewAdmin)`,
 		`current?.role === "admin"`,
 		`adminRoutes.includes(window.location.pathname)`,
@@ -1866,6 +1889,20 @@ func TestLoginRateLimitIsEnforced(t *testing.T) {
 
 	if response.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("rate limit status = %d, want %d", response.StatusCode, http.StatusTooManyRequests)
+	}
+	events, err := db.ListAuditEvents(ctx, "", "login.failed", auditSeverityWarning, "email", 50, "occurred_at", "desc")
+	if err != nil {
+		t.Fatalf("ListAuditEvents: %v", err)
+	}
+	foundThrottleAudit := false
+	for _, event := range events {
+		if strings.Contains(event.MetadataJSON, "login_backoff") || strings.Contains(event.MetadataJSON, "rate_limited") {
+			foundThrottleAudit = true
+			break
+		}
+	}
+	if !foundThrottleAudit {
+		t.Fatalf("login throttle audit event missing: %#v", events)
 	}
 }
 

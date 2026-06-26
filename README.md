@@ -53,6 +53,8 @@ The cloud service now also serves a management dashboard at `/` and `/dashboard`
   - `PUT /v1/home/members/{userID}/permissions`
   - `GET /v1/home/quick-links`
   - `POST /v1/home/quick-links`
+  - `POST /v1/home/quick-links/checks`
+  - `PUT /v1/home/quick-links/order`
   - `PUT /v1/home/quick-links/{linkID}`
   - `DELETE /v1/home/quick-links/{linkID}`
   - `GET /v1/home/audit-events`
@@ -75,9 +77,6 @@ The cloud service now also serves a management dashboard at `/` and `/dashboard`
   - `PUT /v1/home/notes/{noteID}`
   - `POST /v1/home/notes/{noteID}/append`
   - `DELETE /v1/home/notes/{noteID}`
-  - `GET /v1/home/notes-api-tokens`
-  - `POST /v1/home/notes-api-tokens`
-  - `DELETE /v1/home/notes-api-tokens/{tokenID}`
   - `GET /v1/home/sync`
   - `GET /v1/home/service-profiles`
   - `PUT /v1/home/service-profiles/{serviceType}`

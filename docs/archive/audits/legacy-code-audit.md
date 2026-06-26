@@ -20,7 +20,7 @@ For the next cleanup snapshot and the 2026-06-06 repair status, see [project-cle
 - Dashboard scripts use the shared `/assets/api-client.js` helper for credentials, CSRF, JSON headers, and error handling.
 - Browser-redirect OpenAI OAuth was removed. OpenAI API-key provider support remains, and ChatGPT/Codex linking uses device code through the existing `/v1/oauth/openai/start` and `/v1/oauth/openai/status` contract.
 - pgvector is the production vector mode. JSON embedding fallback remains only for local/development resilience when pgvector is unavailable.
-- Phase-era docs are archived under `docs/archive/phases`; current guidance points to deployment docs, runbooks, the repair plan, and the single-home scope.
+- Phase-era docs were removed from the active docs tree; current guidance points to deployment docs, runbooks, the repair plan, and the single-home scope.
 
 ## High Priority Cleanup
 

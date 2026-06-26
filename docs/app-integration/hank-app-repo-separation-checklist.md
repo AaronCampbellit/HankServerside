@@ -61,7 +61,7 @@ Runtime/platform files that stay in this repo:
 ### Phase 1: Lock The Platform Contract
 
 - [x] Document that `HankServerside` is the stable runtime and `.hankapp` is a
-  compatibility surface in `docs/hank-app-platform-contract.md`.
+  compatibility surface in [`docs/hank-app-platform-contract.md`](../hank-app-platform-contract.md).
 - [x] Inventory first-party apps and the runtime files that must remain in this
   repo.
 - [x] Add a machine-readable manifest schema file for `hank.app.v1` in this
@@ -161,8 +161,8 @@ Runtime/platform files that stay in this repo:
   fixture builders that do not contain first-party app source assumptions.
 - [ ] Keep a small compatibility fixture set for runtime regression tests.
 - [ ] Update `README.md`, `docs/architecture.md`,
-  `docs/hank-app-platform-contract.md`, and
-  `docs/project-knowledge-index.md`.
+  [`docs/hank-app-platform-contract.md`](../hank-app-platform-contract.md), and
+  [`docs/project-knowledge-index.md`](../project-knowledge-index.md).
 - [ ] Run `gofmt -w ./cmd ./internal`.
 - [ ] Run `go build ./...`.
 - [ ] Run `go test ./...`.

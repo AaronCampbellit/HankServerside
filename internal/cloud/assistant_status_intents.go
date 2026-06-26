@@ -24,6 +24,9 @@ func executeAssistantAssistantStatusTool(ctx context.Context, server *Server, ru
 		fmt.Sprintf("- Planner: %s", enabledLabel(settings.PlannerEnabled)),
 		fmt.Sprintf("- Prompt profile: %s", assistantStatusValue(settings.PromptProfile)),
 	}
+	if !status.EmbeddingConfigured || status.EmbeddingModel == "local-hash" {
+		rows = append(rows, "- Embedding quality: local hash fallback; semantic retrieval quality is degraded")
+	}
 	if err != nil {
 		rows = append(rows, "- Index: unavailable")
 	} else {
@@ -31,6 +34,7 @@ func executeAssistantAssistantStatusTool(ctx context.Context, server *Server, ru
 			fmt.Sprintf("- Vector mode: %s", assistantStatusValue(indexStats.VectorMode)),
 			fmt.Sprintf("- Indexed chunks: %d (%d embedded)", indexStats.ChunkCount, indexStats.EmbeddedChunkCount),
 			fmt.Sprintf("- Indexed files: %d (%d embedded)", indexStats.FileCount, indexStats.EmbeddedFileCount),
+			fmt.Sprintf("- Index queue: %d queued, %d running, %d failed", indexStats.QueuedJobCount, indexStats.RunningJobCount, indexStats.FailedJobCount),
 			fmt.Sprintf("- Past conversations: %d", indexStats.ConversationCount),
 		)
 	}

@@ -1,15 +1,10 @@
 # Hank Remote Roadmap
 
-This roadmap records the original implementation shape for `Hank Remote`. The phase plans have been completed or superseded and are now archived as historical context. Current work should follow [backend-production-repair-plan.md](backend-production-repair-plan.md), [deployment.md](deployment.md), and the runbooks.
+This roadmap records the current delivery priorities for `Hank Remote`. The original phase plans have been completed or superseded and removed from the active documentation tree. Current work should follow [backend-production-repair-plan.md](backend-production-repair-plan.md), [deployment.md](deployment.md), and the runbooks.
 
-## Archived Phase List
+## Removed Historical Phase Plans
 
-1. [Phase 1: Identity And Routing](./archive/phases/phase-1-identity-and-routing.md)
-2. [Phase 2: Home Assistant Remote Access](./archive/phases/phase-2-home-assistant.md)
-3. [Phase 3: File API And NAS Access](./archive/phases/phase-3-files.md)
-4. [Phase 4: Notes Sync And Background Flows](./archive/phases/phase-4-notes.md)
-5. [Phase 5: Operations, Security, And Production Readiness](./archive/phases/phase-5-operations.md)
-6. [Phase 6: Hank Assistant](./archive/phases/phase-6-hank-assistant.md)
+The phase-era documents were useful during the initial build, but they should not be used as current setup, operator, or repair guidance.
 
 ## Current Delivery Order
 

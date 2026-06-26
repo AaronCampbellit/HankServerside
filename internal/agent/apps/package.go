@@ -10,6 +10,7 @@ import (
 )
 
 const maxManifestBytes = 64 * 1024
+const maxSchemaBytes = 128 * 1024
 
 type PackagePreview struct {
 	Manifest Manifest
@@ -65,12 +66,45 @@ func PreviewArchive(path string) (PackagePreview, error) {
 		return PackagePreview{}, fmt.Errorf("runtime command %q is missing from archive", manifest.Runtime.Command)
 	}
 	for _, schemaPath := range referencedSchemaPaths(manifest) {
-		if _, ok := files[schemaPath]; !ok {
+		schemaFile, ok := files[schemaPath]
+		if !ok {
 			return PackagePreview{}, fmt.Errorf("schema path %q is missing from archive", schemaPath)
+		}
+		if err := validateSchemaFile(schemaPath, schemaFile); err != nil {
+			return PackagePreview{}, err
 		}
 	}
 
 	return PackagePreview{Manifest: manifest}, nil
+}
+
+func validateSchemaFile(schemaPath string, file *zip.File) error {
+	if file.UncompressedSize64 > maxSchemaBytes {
+		return fmt.Errorf("schema path %q too large: %d bytes exceeds %d", schemaPath, file.UncompressedSize64, maxSchemaBytes)
+	}
+	reader, err := file.Open()
+	if err != nil {
+		return fmt.Errorf("open schema path %q: %w", schemaPath, err)
+	}
+	defer reader.Close()
+	limited := &io.LimitedReader{R: reader, N: maxSchemaBytes + 1}
+	decoder := json.NewDecoder(limited)
+	var schema map[string]any
+	if err := decoder.Decode(&schema); err != nil {
+		return fmt.Errorf("schema path %q must be a valid JSON object: %w", schemaPath, err)
+	}
+	var trailing json.RawMessage
+	switch err := decoder.Decode(&trailing); {
+	case err == nil:
+		return fmt.Errorf("schema path %q has trailing JSON token", schemaPath)
+	case err == io.EOF:
+		if limited.N == 0 {
+			return fmt.Errorf("schema path %q too large: exceeds %d bytes", schemaPath, maxSchemaBytes)
+		}
+		return nil
+	default:
+		return fmt.Errorf("schema path %q must be valid JSON: %w", schemaPath, err)
+	}
 }
 
 func validateArchivePathCollision(paths map[string]bool, cleaned string, isDir bool) error {

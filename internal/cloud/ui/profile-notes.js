@@ -11,12 +11,16 @@ const mapPositionThroughOrderedListChanges = notesEditor.mapPositionThroughOrder
 const AUTOSAVE_DELAY_MS = 700;
 const HISTORY_LIMIT = 20;
 const SELECTED_NOTE_STORAGE_KEY = "hank.remote.profileNotes.selectedNoteID";
+const SELECTED_NOTEBOOK_STORAGE_KEY = "hank.remote.profileNotes.selectedNotebookID";
 const DRAFT_HISTORY_KEY = "__draft__";
+const ROOT_NOTEBOOK_FILTER = "__root__";
 
 const state = {
   user: null,
   notes: [],
   selectedNoteID: "",
+  selectedNotebookID: "",
+  currentParentID: "",
   currentRevision: "",
   appSocket: null,
   appSocketPromise: null,
@@ -38,13 +42,19 @@ const els = {
   sessionState: document.getElementById("session-state"),
   sessionMeta: document.getElementById("session-meta"),
   noteSearch: document.getElementById("note-search"),
+  notebookFilter: document.getElementById("notebook-filter"),
   refreshButton: document.getElementById("refresh-button"),
   newButton: document.getElementById("new-button"),
+  newNotebookButton: document.getElementById("new-notebook-button"),
   noteTabs: document.getElementById("note-tabs") || document.getElementById("note-list"),
   noteTitle: document.getElementById("note-title"),
+  noteNotebook: document.getElementById("note-notebook"),
   noteContent: document.getElementById("note-content"),
   noteInline: document.getElementById("note-inline-layer"),
   kanbanBoard: document.getElementById("kanban-board"),
+  notebookPanel: document.getElementById("notebook-panel"),
+  notebookCount: document.getElementById("notebook-count"),
+  notebookNewNoteButton: document.getElementById("notebook-new-note-button"),
   saveState: document.getElementById("save-state"),
   lastSaved: document.getElementById("last-saved"),
   deleteButton: document.getElementById("delete-button"),
@@ -111,6 +121,25 @@ function rememberNoteID(noteID) {
       window.localStorage.setItem(SELECTED_NOTE_STORAGE_KEY, noteID);
     } else {
       window.localStorage.removeItem(SELECTED_NOTE_STORAGE_KEY);
+    }
+  } catch (_) {
+  }
+}
+
+function rememberedNotebookID() {
+  try {
+    return window.localStorage.getItem(SELECTED_NOTEBOOK_STORAGE_KEY) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function rememberNotebookID(notebookID) {
+  try {
+    if (notebookID) {
+      window.localStorage.setItem(SELECTED_NOTEBOOK_STORAGE_KEY, notebookID);
+    } else {
+      window.localStorage.removeItem(SELECTED_NOTEBOOK_STORAGE_KEY);
     }
   } catch (_) {
   }
@@ -285,6 +314,10 @@ function isKanbanMode() {
   return state.currentPageType === "kanban";
 }
 
+function isNotebookMode() {
+  return state.currentPageType === "notebook";
+}
+
 function emptyKanbanBoard() {
   const now = nowISOString();
   return {
@@ -333,7 +366,7 @@ function setEditorValue(value) {
 
 function currentEditorHash() {
   const boardHash = isKanbanMode() ? JSON.stringify(state.currentBoard || {}) : "";
-  return `${state.selectedNoteID}\n${normalizedTitle()}\n${state.currentPageType || "text"}\n${currentMarkdown()}\n${boardHash}`;
+  return `${state.selectedNoteID}\n${normalizedTitle()}\n${state.currentPageType || "text"}\n${state.currentParentID || ""}\n${currentMarkdown()}\n${boardHash}`;
 }
 
 function activeHistoryKey() {
@@ -493,6 +526,7 @@ function clearEditor() {
   window.clearTimeout(state.autosaveTimer);
   state.selectedNoteID = "";
   state.currentRevision = "";
+  state.currentParentID = activeNotebookID();
   state.isDirty = false;
   state.isSaving = false;
   state.suppressInput = true;
@@ -500,20 +534,98 @@ function clearEditor() {
   state.currentPageType = "text";
   state.currentBoard = emptyKanbanBoard();
   document.body.classList.remove("kanban-note");
+  document.body.classList.remove("notebook-note");
   setEditorValue("");
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
   els.deleteButton.disabled = true;
   setHistoryCurrent(DRAFT_HISTORY_KEY);
   renderEditorExtras();
+  renderNotebookControls();
   setSaveState("Saved");
   setLastSaved("");
   renderNotes();
 }
 
+function isNotebookSummary(note) {
+  return note?.page_type === "notebook";
+}
+
+function notebooks() {
+  return sortNotesByTitle(state.notes.filter(isNotebookSummary));
+}
+
+function notebookTitle(notebookID) {
+  const notebook = notebooks().find((note) => noteIdentifier(note) === notebookID);
+  return notebook?.title || "";
+}
+
+function activeNotebookID() {
+  const selected = findListedNote(state.selectedNoteID);
+  if (isNotebookSummary(selected)) {
+    return noteIdentifier(selected);
+  }
+  if (state.selectedNotebookID && state.selectedNotebookID !== ROOT_NOTEBOOK_FILTER) {
+    return state.selectedNotebookID;
+  }
+  return "";
+}
+
+function notebookChildCount(notebookID) {
+  return state.notes.filter((note) => note.parent_id === notebookID).length;
+}
+
+function renderNotebookControls() {
+  const notebookItems = notebooks();
+  const validNotebookIDs = new Set(notebookItems.map(noteIdentifier));
+  if (state.selectedNotebookID && state.selectedNotebookID !== ROOT_NOTEBOOK_FILTER && !validNotebookIDs.has(state.selectedNotebookID)) {
+    state.selectedNotebookID = "";
+    rememberNotebookID("");
+  }
+
+  if (els.notebookFilter) {
+    const options = [
+      { value: "", label: "All Notes" },
+      { value: ROOT_NOTEBOOK_FILTER, label: "No Notebook" },
+      ...notebookItems.map((note) => ({ value: noteIdentifier(note), label: note.title || noteIdentifier(note) })),
+    ];
+    els.notebookFilter.innerHTML = options
+      .map((option) => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`)
+      .join("");
+    els.notebookFilter.value = state.selectedNotebookID || "";
+  }
+
+  if (els.noteNotebook) {
+    const parentValid = !state.currentParentID || validNotebookIDs.has(state.currentParentID);
+    const options = [
+      { value: "", label: "No Notebook" },
+      ...notebookItems.map((note) => ({ value: noteIdentifier(note), label: note.title || noteIdentifier(note) })),
+    ];
+    if (!parentValid) {
+      options.push({ value: state.currentParentID, label: state.currentParentID });
+    }
+    els.noteNotebook.innerHTML = options
+      .map((option) => `<option value="${escapeHTML(option.value)}">${escapeHTML(option.label)}</option>`)
+      .join("");
+    els.noteNotebook.value = isNotebookMode() ? "" : (state.currentParentID || "");
+    els.noteNotebook.disabled = isNotebookMode() || (!state.selectedNoteID && !els.noteTitle.value.trim() && !els.noteContent.value.trim());
+  }
+
+  if (els.notebookPanel && els.notebookCount) {
+    const count = notebookChildCount(state.selectedNoteID);
+    els.notebookCount.textContent = `${count} ${count === 1 ? "note" : "notes"}`;
+    els.notebookPanel.hidden = !isNotebookMode();
+  }
+}
+
 function filteredNotes() {
   const query = els.noteSearch.value.trim().toLowerCase();
-  const notes = sortNotesByRecency(state.notes);
+  let notes = sortNotesByRecency(state.notes);
+  if (state.selectedNotebookID === ROOT_NOTEBOOK_FILTER) {
+    notes = notes.filter((note) => !note.parent_id && !isNotebookSummary(note));
+  } else if (state.selectedNotebookID) {
+    notes = notes.filter((note) => note.parent_id === state.selectedNotebookID);
+  }
   if (!query) {
     return notes;
   }
@@ -522,6 +634,7 @@ function filteredNotes() {
       note.title,
       note.id,
       note.preview,
+      notebookTitle(note.parent_id),
       ...(note.tags || []),
     ].join(" ").toLowerCase();
     return haystack.includes(query);
@@ -544,7 +657,12 @@ function sortNotesByRecency(notes) {
   });
 }
 
+function sortNotesByTitle(notes) {
+  return [...notes].sort((left, right) => String(left.title || left.id || "").localeCompare(String(right.title || right.id || "")));
+}
+
 function renderNotes() {
+  renderNotebookControls();
   const notes = filteredNotes();
   if (!state.notes.length) {
     els.noteTabs.className = "note-tabs empty-state";
@@ -562,10 +680,15 @@ function renderNotes() {
   notes.forEach((note) => {
     const tab = document.createElement("button");
     tab.type = "button";
-    tab.className = `note-tab${note.id === state.selectedNoteID ? " active" : ""}`;
+    tab.className = `note-tab${isNotebookSummary(note) ? " notebook" : ""}${note.id === state.selectedNoteID ? " active" : ""}`;
+    const parentTitle = notebookTitle(note.parent_id);
+    const meta = isNotebookSummary(note)
+      ? `Notebook • ${notebookChildCount(noteIdentifier(note))} ${notebookChildCount(noteIdentifier(note)) === 1 ? "note" : "notes"}`
+      : parentTitle || formatDate(note.updated_at);
     tab.innerHTML = `
       <span class="note-tab-title">${escapeHTML(note.title || note.id)}</span>
       <span class="note-tab-meta">${escapeHTML(formatDate(note.updated_at))}</span>
+      <span class="note-tab-parent">${escapeHTML(meta)}</span>
     `;
     tab.addEventListener("click", () => {
       selectNote(note.id).catch((error) => showToast(error.message, true));
@@ -583,7 +706,9 @@ function updateSelectedSummaryDraft() {
     return;
   }
   note.title = normalizedTitle();
-  note.preview = isKanbanMode() ? "Kanban board" : previewFromMarkdown(currentMarkdown());
+  note.page_type = state.currentPageType || "text";
+  note.parent_id = isNotebookMode() ? "" : (state.currentParentID || "");
+  note.preview = isNotebookMode() ? "Notebook" : (isKanbanMode() ? "Kanban board" : previewFromMarkdown(currentMarkdown()));
   note.updated_at = new Date().toISOString();
   renderNotes();
 }
@@ -593,19 +718,22 @@ function fillEditor(note) {
   state.selectedNoteID = note.note_id;
   rememberNoteID(state.selectedNoteID);
   state.currentRevision = note.revision || "";
+  state.currentParentID = note.parent_id || "";
   state.isDirty = false;
   state.isSaving = false;
   state.suppressInput = true;
   els.noteTitle.value = note.title || "";
-  state.currentPageType = note.page_type === "kanban" ? "kanban" : "text";
+  state.currentPageType = note.page_type === "kanban" || note.page_type === "notebook" ? note.page_type : "text";
   state.currentBoard = normalizeBoard(note.board);
   document.body.classList.toggle("kanban-note", isKanbanMode());
+  document.body.classList.toggle("notebook-note", isNotebookMode());
   setEditorValue(note.body_markdown || "");
   state.suppressInput = false;
   state.lastSavedHash = currentEditorHash();
   els.deleteButton.disabled = false;
   setHistoryCurrent(state.selectedNoteID);
   renderEditorExtras();
+  renderNotebookControls();
   setSaveState("Saved");
   setLastSaved(note.updated_at);
   renderNotes();
@@ -672,7 +800,7 @@ function markDirty() {
   if (state.suppressInput) {
     return;
   }
-  const hasDraft = Boolean(state.selectedNoteID || els.noteTitle.value.trim() || els.noteContent.value.trim() || isKanbanMode());
+  const hasDraft = Boolean(state.selectedNoteID || els.noteTitle.value.trim() || els.noteContent.value.trim() || isKanbanMode() || isNotebookMode());
   if (!hasDraft) {
     return;
   }
@@ -699,22 +827,24 @@ async function saveNote(options = {}) {
   if (!force && (!state.isDirty || nextHash === state.lastSavedHash)) {
     return true;
   }
-  if (!state.selectedNoteID && !els.noteTitle.value.trim() && !els.noteContent.value.trim() && !isKanbanMode()) {
+  if (!state.selectedNoteID && !els.noteTitle.value.trim() && !els.noteContent.value.trim() && !isKanbanMode() && !isNotebookMode()) {
     return true;
   }
 
   state.isSaving = true;
   setSaveState("Saving", "saving");
   const previousNoteID = state.selectedNoteID;
+  const parentID = isNotebookMode() ? "" : (state.currentParentID || "");
 
   const payload = {
     note_id: state.selectedNoteID,
     title: normalizedTitle(),
-    content: currentMarkdown(),
-    body_markdown: currentMarkdown(),
+    content: isNotebookMode() ? "" : currentMarkdown(),
+    body_markdown: isNotebookMode() ? "" : currentMarkdown(),
     body_format: "markdown",
     expected_revision: state.currentRevision,
     page_type: state.currentPageType || "text",
+    parent_id: parentID,
   };
   if (payload.page_type === "kanban") {
     payload.board = currentBoard();
@@ -748,6 +878,7 @@ async function saveNote(options = {}) {
     setSaveState("Saved");
     setLastSaved(response.updated_at || new Date().toISOString());
     await loadNotes();
+    renderNotebookControls();
     return true;
   } catch (error) {
     setSaveState("Not saved", "error");
@@ -764,17 +895,43 @@ async function saveNote(options = {}) {
   }
 }
 
-async function createNote() {
+async function createNote(parentID = activeNotebookID()) {
   if (state.isDirty) {
     await saveNote({ force: true });
   }
   clearEditor();
+  state.currentParentID = parentID || "";
+  renderNotebookControls();
   els.noteContent.focus();
+}
+
+async function createNotebook() {
+  if (state.isDirty) {
+    await saveNote({ force: true });
+  }
+  clearEditor();
+  state.currentPageType = "notebook";
+  state.currentParentID = "";
+  state.currentBoard = emptyKanbanBoard();
+  state.suppressInput = true;
+  els.noteTitle.value = "Untitled Notebook";
+  setEditorValue("");
+  state.suppressInput = false;
+  document.body.classList.remove("kanban-note");
+  document.body.classList.add("notebook-note");
+  markDirty();
+  await saveNote({ force: true });
+  els.noteTitle.focus();
+  els.noteTitle.select();
 }
 
 async function uploadPastedImage(file) {
   if (!file?.type?.startsWith("image/") || file.type === "image/svg+xml") {
     return false;
+  }
+  if (isNotebookMode()) {
+    showToast("Choose or create a note inside this notebook before adding images.", true);
+    return true;
   }
   if (isKanbanMode()) {
     showToast("Convert this Kanban note to text before adding images.", true);
@@ -865,6 +1022,7 @@ async function hydrate() {
     const me = await api("/v1/me");
     state.user = me.user;
     renderSession();
+    state.selectedNotebookID = rememberedNotebookID();
     clearEditor();
     await loadNotes();
     const openedRequested = await openRequestedNote();
@@ -1038,45 +1196,12 @@ function inlineLinkHTML(label, rawURL, image = false) {
   return `<a class="note-inline-link" href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(text)}</a>`;
 }
 
-function renderBareLinks(text) {
-  const source = String(text || "");
-  const barePattern = /\b((?:https?:\/\/|www\.)[^\s<>()]+|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9-]+)+(?:\/[^\s<>()]*)?)/g;
-  let html = "";
-  let lastIndex = 0;
-  for (const match of source.matchAll(barePattern)) {
-    const raw = match[1];
-    const index = match.index || 0;
-    html += escapeHTML(source.slice(lastIndex, index));
-    html += inlineLinkHTML(raw, raw);
-    lastIndex = index + raw.length;
-  }
-  html += escapeHTML(source.slice(lastIndex));
-  return html;
-}
-
 function renderInlineText(text) {
-  const source = String(text || "");
-  const markdownLinkPattern = /(!?)\[([^\]\n]+)\]\(([^)\s]+)\)/g;
-  let html = "";
-  let lastIndex = 0;
-  for (const match of source.matchAll(markdownLinkPattern)) {
-    const index = match.index || 0;
-    html += renderBareLinks(source.slice(lastIndex, index));
-    html += inlineLinkHTML(match[2], match[3], match[1] === "!");
-    lastIndex = index + match[0].length;
-  }
-  html += renderBareLinks(source.slice(lastIndex));
-  return html || "&nbsp;";
+  return notesEditor.renderInlineText(text, { escapeHTML, renderLink: inlineLinkHTML });
 }
 
 function renderInlineLine(line, lineIndex) {
-  const checklist = String(line || "").match(/^(\s*)((?:[-*]\s+\[)([ xX])(?:\]\s+)|[○●]\s+)(.*)$/);
-  if (!checklist) {
-    return renderInlineText(line);
-  }
-  const checked = checklist[2].startsWith("●") || (checklist[3] || "").toLowerCase() === "x";
-  const text = checklist[4] || "Checklist item";
-  return `${escapeHTML(checklist[1])}<button type="button" class="note-check-toggle inline${checked ? " checked" : ""}" data-line-index="${lineIndex}" aria-pressed="${checked ? "true" : "false"}" title="${checked ? "Mark incomplete" : "Mark complete"}"><span class="note-check-circle" aria-hidden="true"></span></button><span class="note-check-text">${renderInlineText(text)}</span>`;
+  return notesEditor.renderInlineLine(line, lineIndex, { escapeHTML, renderLink: inlineLinkHTML });
 }
 
 function renderInlineEditor() {
@@ -1094,6 +1219,7 @@ function syncEditorScroll() {
 function renderEditorExtras() {
   renderInlineEditor();
   renderKanbanBoard();
+  renderNotebookControls();
   syncEditorScroll();
 }
 
@@ -1243,6 +1369,9 @@ function kanbanMarkdown(title) {
 }
 
 function convertToKanban() {
+  if (isNotebookMode()) {
+    return;
+  }
   state.currentPageType = "kanban";
   if (!state.currentBoard?.columns?.length) {
     state.currentBoard = emptyKanbanBoard();
@@ -1357,8 +1486,27 @@ els.refreshButton.addEventListener("click", async () => {
 els.newButton.addEventListener("click", () => {
   createNote().catch((error) => showToast(error.message, true));
 });
+els.newNotebookButton?.addEventListener("click", () => {
+  createNotebook().catch((error) => showToast(error.message, true));
+});
+els.notebookNewNoteButton?.addEventListener("click", () => {
+  createNote(state.selectedNoteID).catch((error) => showToast(error.message, true));
+});
 els.deleteButton.addEventListener("click", deleteNote);
 els.noteSearch.addEventListener("input", renderNotes);
+els.notebookFilter?.addEventListener("change", () => {
+  state.selectedNotebookID = els.notebookFilter.value || "";
+  rememberNotebookID(state.selectedNotebookID);
+  renderNotes();
+});
+els.noteNotebook?.addEventListener("change", () => {
+  if (isNotebookMode()) {
+    return;
+  }
+  state.currentParentID = els.noteNotebook.value || "";
+  markDirty();
+  saveNote({ force: true }).catch((error) => showToast(error.message, true));
+});
 function handleEditorInput() {
   normalizeOrderedLists();
   recordEditorHistoryChange();

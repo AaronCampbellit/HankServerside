@@ -36,6 +36,7 @@ Compatibility-sensitive surfaces include:
 - `schemas/hank-app-v1.schema.json`, which external app repos should use for
   local manifest validation
 - manifest fields in `app.json`
+- the app folder / `.hankapp` archive layout, including root-level `app.json`
 - package archive validation rules
 - command IDs, slash-command declarations, and reserved built-in command names
 - `apps.list`, `apps.package_preview`, `apps.package_activate`, `apps.config_status`, `apps.config_apply`, and `apps.invoke`
@@ -61,6 +62,40 @@ Keep app-specific settings inside Settings > Apps through manifest-driven schema
 
 Keep first-party apps aligned with the contract. When the contract changes, update the runtime, manifest validation, package docs, package examples, and existing first-party packages together.
 
+## Package Layout
+
+Settings > Apps accepts either a prebuilt `.hankapp` archive or a selected app
+folder. The app folder is packaged in the browser before upload. The selected
+folder name is stripped while packaging, so `my-app/app.json` becomes
+`app.json` at the archive root.
+
+The folder or archive root must contain `app.json`:
+
+```text
+my-app/
+  app.json
+  bin/my-app
+  schemas/config.schema.json
+  schemas/run.input.schema.json
+  schemas/run.output.schema.json
+  README.md
+```
+
+`app.json` must use `schema_version: "hank.app.v1"`. `runtime.command` must be
+a clean relative path to a file in the package, such as `bin/my-app`. Every
+schema path referenced by `config.schema`, `commands[].input_schema`, or
+`commands[].output_schema` must exist in the package and be a valid JSON object.
+
+Package paths must be clean relative paths. Do not use absolute paths, `../`,
+`.` path segments, double slashes, backslashes, Windows drive paths, symlinks,
+or duplicate archive paths. Settings > Apps skips `.DS_Store` and `__MACOSX`
+entries when packaging a folder.
+
+The current `hank.app.v1` stdio runtime supports `runtime.type` and
+`runtime.command`. It does not support `runtime.args`; package authors should
+wrap arguments in the app executable or add runtime support before depending on
+manifest-provided args.
+
 ## Authoring Validation
 
 External app repositories should validate `app.json` against
@@ -70,3 +105,10 @@ runtime validation. The runtime validator remains authoritative because it also
 checks cross-field rules such as slash-command command references, reserved
 commands, package path containment, default/option compatibility, and supported
 permission semantics.
+
+When using Codex to create or update an installable Hank app, use the
+`hank-create-app` skill, shown as "Hank App Builder" in the local skill list.
+That skill should leave the app with a non-empty `dist/<id>.hankapp` artifact
+after running the app tests, build, and package script. Treat that archive as
+the install-ready artifact for Settings > Apps. If packaging cannot run, the
+app is not install-ready yet.

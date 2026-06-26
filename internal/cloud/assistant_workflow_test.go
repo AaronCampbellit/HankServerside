@@ -144,6 +144,23 @@ func TestAssistantParsingHelpers(t *testing.T) {
 	}
 }
 
+func TestFileMatchScoreRequiresTextMatch(t *testing.T) {
+	t.Parallel()
+
+	item := protocol.FileItem{
+		Path:        "docs/recipes",
+		Name:        "recipes",
+		IsDirectory: true,
+	}
+
+	if score := fileMatchScore(item, "needle-not-present"); score != 0 {
+		t.Fatalf("fileMatchScore unrelated directory score = %d, want 0", score)
+	}
+	if score := fileMatchScore(item, "recipes"); score <= 0 {
+		t.Fatalf("fileMatchScore matching directory score = %d, want positive", score)
+	}
+}
+
 func TestAssistantToolRegistryShape(t *testing.T) {
 	t.Parallel()
 
@@ -361,6 +378,9 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	settings := defaultAssistantSettings(home.ID, user.ID)
 	settings.ProjectDocsEnabled = false
+	settings.FilesEnabled = false
+	settings.HomeAssistantEnabled = false
+	settings.CalendarEnabled = false
 	auth := authContext{User: user}
 	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
 
@@ -403,6 +423,9 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	}
 	if !strings.Contains(updated.Content, "- eggs") || !strings.Contains(updated.BodyMarkdown, "- eggs") {
 		t.Fatalf("updated note did not include appended item: %#v", updated)
+	}
+	if !server.processNextAssistantIndexJob(ctx) {
+		t.Fatal("expected queued assistant index job after append")
 	}
 	results, err := db.SearchAssistantContext(ctx, home.ID, user.ID, "eggs grocery", nil, 5)
 	if err != nil {
@@ -471,6 +494,78 @@ func TestAssistantNotesSearchAppendAndReindex(t *testing.T) {
 	}
 	if strings.Contains(updatedWorkBody.Content, "- call patrick") {
 		t.Fatalf("body-only work note received exact-title append: %#v", updatedWorkBody)
+	}
+}
+
+func TestConfirmedAssistantNoteAppendReindexesNote(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_assistant_confirm_append", Email: "assistant-confirm-append@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_assistant_confirm_append", UserID: user.ID, Name: "Home", CreatedAt: now, UpdatedAt: now}
+	session := domain.AssistantSession{
+		ID:            "asess_confirm_append",
+		HomeID:        home.ID,
+		UserID:        user.ID,
+		Title:         "Note append confirmation",
+		LastMessageAt: now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	note := domain.UserNote{
+		ID:           "note_confirm_append",
+		NoteID:       "confirm-append-note",
+		OwnerUserID:  user.ID,
+		Title:        "Projects",
+		Content:      "- initial",
+		BodyMarkdown: "- initial",
+		BodyFormat:   "markdown",
+		PageType:     protocol.NotePageTypeText,
+		Revision:     "rev_initial",
+		Checksum:     "checksum_initial",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		UpdatedBy:    user.ID,
+	}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateAssistantSession(ctx, session))
+	must(t, db.UpsertUserNote(ctx, note))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	pending := assistantPendingAction{
+		Kind: "note_append",
+		NoteAppend: &assistantPendingNoteAppend{
+			TargetNoteID: note.ID,
+			TargetTitle:  note.Title,
+			AppendedText: "ship vector audit",
+		},
+	}
+	run := domain.AssistantRun{
+		ID:                   "arun_confirm_append",
+		SessionID:            session.ID,
+		State:                assistantStateWaitingConfirm,
+		RequiresConfirmation: true,
+		CreatedAt:            now,
+	}
+	must(t, db.CreateAssistantRun(ctx, run))
+
+	if _, err := server.executeConfirmedAssistantAction(ctx, session, run, pending, user.ID); err != nil {
+		t.Fatalf("executeConfirmedAssistantAction: %v", err)
+	}
+	if !server.processNextAssistantIndexJob(ctx) {
+		t.Fatal("expected queued assistant index job after confirmed append")
+	}
+	results, err := db.SearchAssistantContext(ctx, home.ID, user.ID, "ship vector audit", nil, 5)
+	if err != nil {
+		t.Fatalf("SearchAssistantContext: %v", err)
+	}
+	if len(results) == 0 || results[0].SourceType != "profile_note" || results[0].Title != "Projects" {
+		t.Fatalf("confirmed append was not reindexed: %#v", results)
 	}
 }
 

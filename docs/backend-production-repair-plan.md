@@ -265,7 +265,7 @@ Add `CHECK` constraints for:
 - `home_service_profiles.service_type IN ('homeassistant', 'smb', 'hermes')`
 - `home_permissions.feature IN ('homeassistant', 'files', 'notes')`
 - `home_member_permissions.feature IN ('homeassistant', 'files', 'notes')`
-- `user_notes.page_type IN ('text', 'board')`
+- `user_notes.page_type IN ('text', 'kanban', 'notebook')`
 - `note_shares.permission IN ('read', 'write')`
 - `note_operations.operation_type IN ('save', 'rename', 'delete', 'collab')`
 - `note_attachments.status IN ('pending', 'ready', 'deleted')` if status column exists or is added.
@@ -879,7 +879,7 @@ Repair:
 - Remove query-parameter agent auth after compatibility window.
 - Remove ambiguous or bypass-prone singleton helper paths after `DeploymentHomeResolver` is in place.
 - Remove any UI/API affordance that suggests multiple homes are supported in one deployment.
-- Keep archived phase docs under `docs/archive/phases` and current guidance in deployment docs, runbooks, and this repair plan.
+- Keep deleted/superseded phase-plan guidance out of the active docs tree; current guidance belongs in deployment docs, runbooks, and this repair plan.
 
 Acceptance:
 

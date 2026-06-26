@@ -157,19 +157,24 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 
 	if len(parts) == 3 && parts[0] == "apps" && parts[1] == "import" && parts[2] == "preview" && r.Method == http.MethodPost {
 		if membership.Role != domain.HomeRoleAdmin {
+			s.audit(r.Context(), "app_package.preview_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", "preview", map[string]any{"reason": "admin_required"})
 			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 			return true
 		}
 		if _, ok := s.router.GetAgent(home.ID); !ok {
+			s.audit(r.Context(), "app_package.preview_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", "preview", map[string]any{"reason": "agent_offline"})
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline"})
 			return true
 		}
 		data, err := readAppPackageUpload(r)
 		if err != nil {
 			status := http.StatusBadRequest
+			reason := "invalid_package_upload"
 			if errors.Is(err, errAppPackageTooLarge) {
 				status = http.StatusRequestEntityTooLarge
+				reason = "package_too_large"
 			}
+			s.audit(r.Context(), "app_package.preview_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", "preview", map[string]any{"reason": reason})
 			http.Error(w, err.Error(), status)
 			return true
 		}
@@ -181,52 +186,63 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			DownloadToken: staged.DownloadToken,
 		})
 		if err != nil {
+			s.audit(r.Context(), "app_package.preview_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", staged.StagingID, map[string]any{"reason": "agent_command_failed"})
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return true
 		}
 		if envelope.Error != nil {
-			http.Error(w, envelope.Error.Message, http.StatusBadGateway)
+			s.audit(r.Context(), "app_package.preview_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", staged.StagingID, map[string]any{"reason": envelope.Error.Code})
+			writeAppAgentError(w, "agent_preview", envelope.Error)
 			return true
 		}
 		response, err := protocol.DecodePayload[protocol.AppsPackagePreviewResponse](envelope)
 		if err != nil {
+			s.audit(r.Context(), "app_package.preview_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", staged.StagingID, map[string]any{"reason": "agent_response_decode_failed"})
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return true
 		}
+		s.audit(r.Context(), "app_package.previewed", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", staged.StagingID, map[string]any{"app_id": response.App.ID})
 		writeJSON(w, http.StatusOK, response)
 		return true
 	}
 
 	if len(parts) == 3 && parts[0] == "apps" && parts[1] == "import" && parts[2] == "activate" && r.Method == http.MethodPost {
 		if membership.Role != domain.HomeRoleAdmin {
+			s.audit(r.Context(), "app_package.activate_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", "activate", map[string]any{"reason": "admin_required"})
 			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
 			return true
 		}
 		var body protocol.AppsPackageActivateRequest
 		if err := parseJSON(w, r, &body); err != nil {
+			s.audit(r.Context(), "app_package.activate_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", "activate", map[string]any{"reason": "invalid_request"})
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return true
 		}
 		envelope, err := s.sendAgentCommand(r.Context(), home.ID, protocol.CommandAppsPackageActivate, body)
 		if err != nil {
+			s.audit(r.Context(), "app_package.activate_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", body.StagingID, map[string]any{"reason": "agent_command_failed"})
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return true
 		}
 		if envelope.Error != nil {
-			http.Error(w, envelope.Error.Message, http.StatusBadGateway)
+			s.audit(r.Context(), "app_package.activate_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", body.StagingID, map[string]any{"reason": envelope.Error.Code})
+			writeAppAgentError(w, "agent_activate", envelope.Error)
 			return true
 		}
 		response, err := protocol.DecodePayload[protocol.AppsPackageActivateResponse](envelope)
 		if err != nil {
+			s.audit(r.Context(), "app_package.activate_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", body.StagingID, map[string]any{"reason": "agent_response_decode_failed"})
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return true
 		}
 		response.App.UserAccess = domain.HomeAgentAppUserAccessAdminsOnly
 		if err := s.persistAgentApp(r, home.ID, auth.User.ID, response.App); err != nil {
+			s.audit(r.Context(), "app_package.activate_failed", auditSeverityWarning, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app_package", body.StagingID, map[string]any{"reason": "persist_failed", "app_id": response.App.ID})
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
 		s.appPackages.Delete(body.StagingID)
+		s.audit(r.Context(), "app_package.activated", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "app", response.App.ID, map[string]any{"staging_id": body.StagingID})
 		writeJSON(w, http.StatusOK, response)
 		return true
 	}
@@ -257,7 +273,7 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			return true
 		}
 		if envelope.Error != nil {
-			http.Error(w, envelope.Error.Message, http.StatusBadGateway)
+			writeAppAgentError(w, "config_apply", envelope.Error)
 			return true
 		}
 		response, err := protocol.DecodePayload[protocol.AppsConfigApplyResponse](envelope)
@@ -277,6 +293,55 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 	}
 
 	return false
+}
+
+func writeAppAgentError(w http.ResponseWriter, stage string, payload *protocol.ErrorPayload) {
+	if payload == nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "agent_error",
+			"message": "agent returned an error",
+			"details": map[string]any{"stage": stage},
+		})
+		return
+	}
+	code := strings.TrimSpace(payload.Code)
+	if code == "" {
+		code = "agent_error"
+	}
+	message := strings.TrimSpace(payload.Message)
+	if message == "" {
+		message = "agent returned an error"
+	}
+	details := map[string]any{"stage": stage}
+	for key, value := range payload.Details {
+		details[key] = value
+	}
+	writeJSON(w, statusForAppAgentError(code), map[string]any{
+		"error":   code,
+		"message": message,
+		"details": details,
+	})
+}
+
+func statusForAppAgentError(code string) int {
+	switch code {
+	case "app_package_invalid":
+		return http.StatusBadRequest
+	case "app_staging_missing", "app_staging_expired":
+		return http.StatusGone
+	case "app_not_found", "app_command_not_found":
+		return http.StatusNotFound
+	case "app_disabled":
+		return http.StatusConflict
+	case "app_permission_refused":
+		return http.StatusForbidden
+	case "app_invocation_failed":
+		return http.StatusBadRequest
+	case "app_invocation_timeout", "request_timeout":
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusBadGateway
+	}
 }
 
 func (s *Server) authenticateAgentPackageDownload(r *http.Request, homeID string) (domain.Agent, bool) {

@@ -85,15 +85,17 @@ type AppsPackagePreviewRequest struct {
 }
 
 type AppsPackagePreviewResponse struct {
-	StagingID string     `json:"staging_id"`
-	App       AppSummary `json:"app"`
-	Warnings  []string   `json:"warnings,omitempty"`
-	Replacing bool       `json:"replacing"`
+	StagingID     string     `json:"staging_id"`
+	PackageSHA256 string     `json:"package_sha256,omitempty"`
+	App           AppSummary `json:"app"`
+	Warnings      []string   `json:"warnings,omitempty"`
+	Replacing     bool       `json:"replacing"`
 }
 
 type AppsPackageActivateRequest struct {
-	StagingID string `json:"staging_id"`
-	Enable    bool   `json:"enable"`
+	StagingID     string `json:"staging_id"`
+	PackageSHA256 string `json:"package_sha256,omitempty"`
+	Enable        bool   `json:"enable"`
 }
 
 type AppsPackageActivateResponse struct {

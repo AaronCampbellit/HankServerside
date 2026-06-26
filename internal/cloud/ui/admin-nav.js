@@ -121,6 +121,16 @@
       searchOnly: true,
     },
     {
+      href: "/dashboard/settings/logs",
+      label: "Log Settings",
+      mobileLabel: "Logs",
+      detail: "Review login, resource access, transfer, package, and security events.",
+      keywords: ["logs", "audit", "events", "login", "failed actions", "downloads", "uploads", "installs", "security"],
+      adminOnly: true,
+      group: "Settings",
+      searchOnly: true,
+    },
+    {
       href: "/dashboard/settings/join-home",
       label: "Join Home",
       detail: "Use an invite code to join a home.",

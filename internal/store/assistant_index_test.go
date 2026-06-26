@@ -334,6 +334,63 @@ func TestDeleteAssistantSessionRemovesConversationDocument(t *testing.T) {
 	}
 }
 
+func TestAssistantIndexJobsDedupeClaimAndComplete(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	user, home := createAssistantIndexUserHome(t, ctx, db, "jobs")
+	first, err := db.EnqueueAssistantIndexJob(ctx, domain.AssistantIndexJob{
+		HomeID:     home.ID,
+		UserID:     user.ID,
+		SourceType: "profile_note",
+		SourceID:   "note-jobs",
+	})
+	if err != nil {
+		t.Fatalf("EnqueueAssistantIndexJob first: %v", err)
+	}
+	second, err := db.EnqueueAssistantIndexJob(ctx, domain.AssistantIndexJob{
+		HomeID:     home.ID,
+		UserID:     user.ID,
+		SourceType: "profile_note",
+		SourceID:   "note-jobs",
+	})
+	if err != nil {
+		t.Fatalf("EnqueueAssistantIndexJob second: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("deduped job IDs differ: %q != %q", first.ID, second.ID)
+	}
+
+	queued, running, failed, err := db.AssistantIndexJobCounts(ctx, home.ID, user.ID)
+	if err != nil {
+		t.Fatalf("AssistantIndexJobCounts: %v", err)
+	}
+	if queued != 1 || running != 0 || failed != 0 {
+		t.Fatalf("job counts = queued %d running %d failed %d, want 1/0/0", queued, running, failed)
+	}
+
+	claimed, err := db.ClaimAssistantIndexJob(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ClaimAssistantIndexJob: %v", err)
+	}
+	if claimed.ID != first.ID || claimed.Status != AssistantIndexJobStatusRunning || claimed.Attempts != 1 || claimed.StartedAt == nil {
+		t.Fatalf("claimed job = %#v", claimed)
+	}
+	if err := db.CompleteAssistantIndexJob(ctx, claimed.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("CompleteAssistantIndexJob: %v", err)
+	}
+	queued, running, failed, err = db.AssistantIndexJobCounts(ctx, home.ID, user.ID)
+	if err != nil {
+		t.Fatalf("AssistantIndexJobCounts after complete: %v", err)
+	}
+	if queued != 0 || running != 0 || failed != 0 {
+		t.Fatalf("job counts after complete = queued %d running %d failed %d, want 0/0/0", queued, running, failed)
+	}
+}
+
 func createAssistantIndexUserHome(t *testing.T, ctx context.Context, db *Store, suffix string) (domain.User, domain.Home) {
 	t.Helper()
 

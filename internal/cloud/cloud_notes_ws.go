@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
@@ -32,6 +33,11 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		request, err = decodeBody[protocol.NotesSaveRequest](command.Body)
 		if err == nil {
 			payload, err = s.notes.SaveHome(ctx, envelope.HomeID, auth.User.ID, request.NoteID, request)
+			if err == nil {
+				if response, ok := payload.(protocol.NotesSaveResponse); ok {
+					s.enqueueAssistantNoteIndexJob(ctx, envelope.HomeID, auth.User.ID, response.NoteID, assistantIndexSourceSharedNote)
+				}
+			}
 		}
 
 	case "notes.rename":
@@ -40,6 +46,7 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		if err == nil {
 			err = s.notes.RenameHome(ctx, envelope.HomeID, auth.User.ID, request.NoteID, request.Title)
 			if err == nil {
+				s.enqueueAssistantNoteIndexJob(ctx, envelope.HomeID, auth.User.ID, request.NoteID, assistantIndexSourceSharedNote)
 				payload = map[string]any{"ok": true, "note_id": request.NoteID}
 			}
 		}
@@ -49,6 +56,9 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		request, err = decodeBody[protocol.NotesDeleteRequest](command.Body)
 		if err == nil {
 			err = s.notes.DeleteHome(ctx, envelope.HomeID, auth.User.ID, request.NoteID)
+			if err == nil {
+				s.enqueueAssistantNoteIndexJob(ctx, envelope.HomeID, auth.User.ID, request.NoteID, assistantIndexSourceSharedNote)
+			}
 			payload = protocol.EmptyResponse{OK: err == nil}
 		}
 
@@ -102,7 +112,11 @@ func (s *Server) handleCloudNotesCommand(ctx context.Context, appPeer *wsPeer, e
 		request, err = decodeBody[protocol.NotesSearchRequest](command.Body)
 		if err == nil {
 			var results []protocol.NoteSearchResult
-			results, err = s.notes.SearchHome(ctx, envelope.HomeID, auth.User.ID, request.Query, request.Limit)
+			parentID := strings.TrimSpace(request.NotebookID)
+			if parentID == "" {
+				parentID = strings.TrimSpace(request.ParentID)
+			}
+			results, err = s.notes.SearchHome(ctx, envelope.HomeID, auth.User.ID, request.Query, request.Limit, parentID)
 			if err == nil {
 				payload = protocol.NotesSearchResponse{Results: results}
 			}

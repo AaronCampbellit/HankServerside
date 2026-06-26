@@ -61,6 +61,16 @@ func stableAuditTarget(value string) string {
 	return hex.EncodeToString(sum[:12])
 }
 
+func auditPathMetadata(sourceID string, path string) map[string]any {
+	metadata := map[string]any{
+		"path_hash": stableAuditTarget(path),
+	}
+	if strings.TrimSpace(sourceID) != "" {
+		metadata["source_id"] = strings.TrimSpace(sourceID)
+	}
+	return metadata
+}
+
 func (s *Server) handleHomeAuditEvents(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {
 	if len(parts) != 1 || parts[0] != "audit-events" {
 		return false
@@ -81,6 +91,8 @@ func (s *Server) handleHomeAuditEvents(w http.ResponseWriter, r *http.Request, h
 		strings.TrimSpace(r.URL.Query().Get("severity")),
 		strings.TrimSpace(r.URL.Query().Get("target_type")),
 		limit,
+		strings.TrimSpace(r.URL.Query().Get("sort")),
+		strings.TrimSpace(r.URL.Query().Get("order")),
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -94,6 +106,7 @@ func (s *Server) handleHomeAuditEvents(w http.ResponseWriter, r *http.Request, h
 func auditEventSnapshots(events []store.AuditEvent) []map[string]any {
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {
+		metadata := redactAuditMetadata(event.MetadataJSON)
 		out = append(out, map[string]any{
 			"id":             event.ID,
 			"occurred_at":    event.OccurredAt,
@@ -106,10 +119,132 @@ func auditEventSnapshots(events []store.AuditEvent) []map[string]any {
 			"ip_hash":        event.IPHash,
 			"target_type":    event.TargetType,
 			"target_id":      event.TargetID,
-			"metadata":       redactAuditMetadata(event.MetadataJSON),
+			"helper_text":    auditEventHelperText(event, metadata),
+			"metadata":       metadata,
 		})
 	}
 	return out
+}
+
+func auditEventHelperText(event store.AuditEvent, metadata map[string]any) string {
+	reason := auditMetadataString(metadata, "reason")
+	operation := auditMetadataString(metadata, "operation")
+	switch event.EventType {
+	case "login.succeeded":
+		return "User signed in successfully."
+	case "login.failed":
+		switch reason {
+		case "unknown_user":
+			return "Login failed because the email does not match a Hank account."
+		case "bad_password":
+			return "Login failed because the password did not match."
+		case "login_backoff":
+			return "Login was blocked by repeated failed attempts. Wait for the retry window or reset the password."
+		case "rate_limited":
+			return "Login was rate limited from this client. Wait before retrying and check for repeated attempts."
+		default:
+			return "Login failed. Check the account, password, and rate-limit state."
+		}
+	case "session.revoked":
+		return "User session was signed out or revoked."
+	case "password.changed":
+		return "User password was changed."
+	case "invitation.signup":
+		return "A user accepted an invitation and signed in."
+	case "file_transfer.requested":
+		return "A file " + auditOperationLabel(operation) + " was requested. Use the transfer ID to follow progress."
+	case "file_transfer.setup_failed":
+		switch reason {
+		case "upload_size_limit":
+			return "File upload was larger than the configured source policy allows."
+		case "agent_offline":
+			return "File transfer could not start because the home connector was offline."
+		default:
+			return "File transfer setup failed before streaming began."
+		}
+	case "file_transfer.failed":
+		switch reason {
+		case "agent_offline":
+			return "File transfer failed because the home connector was offline."
+		case "ready_timeout", "complete_timeout":
+			return "File transfer timed out waiting for the home connector."
+		case "upload_too_large":
+			return "File upload exceeded the configured source policy size limit."
+		case "transfer_offset_mismatch":
+			return "File transfer stopped because client and connector offsets did not match."
+		default:
+			return "File transfer failed. Check connector status, source policy, and transfer metadata."
+		}
+	case "file_operation.denied":
+		return "File action was blocked by source policy. Check allowed prefixes, blocked prefixes, and permissions."
+	case "file_operation.requested":
+		return "A managed file operation was queued. Check the related file job for progress or rollback."
+	case "app_package.previewed":
+		return "App package preview completed and is ready for review before activation."
+	case "app_package.preview_failed":
+		switch reason {
+		case "admin_required":
+			return "App package preview was blocked because the user is not a home admin."
+		case "agent_offline":
+			return "App package preview could not run because the home connector was offline."
+		case "package_too_large":
+			return "App package upload exceeded the package size limit."
+		case "app_package_invalid":
+			return "App package validation failed. Check the package manifest and schema."
+		default:
+			return "App package preview failed. Check package validity and connector status."
+		}
+	case "app_package.activated":
+		return "App package was installed or activated for this home."
+	case "app_package.activate_failed":
+		switch reason {
+		case "admin_required":
+			return "App activation was blocked because the user is not a home admin."
+		case "app_staging_missing", "app_staging_expired":
+			return "App activation failed because the staged package was missing or expired."
+		case "app_package_invalid":
+			return "App activation failed because the package did not pass validation."
+		default:
+			return "App activation failed. Preview the package again and check connector status."
+		}
+	case "service_profile.changed":
+		return "Connection settings changed. Verify the home connector can still reach the service."
+	case "permission.changed":
+		return "Home permissions changed. Review member access if behavior changed."
+	case "password.reset":
+		return "An admin reset a user password."
+	default:
+		if event.Severity == auditSeverityCritical {
+			return "Critical security event. Review metadata and recent user actions."
+		}
+		if event.Severity == auditSeverityWarning {
+			return "Warning event. Review metadata and related connector or policy state."
+		}
+		return "Informational event. Review metadata for context."
+	}
+}
+
+func auditMetadataString(metadata map[string]any, key string) string {
+	value, ok := metadata[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func auditOperationLabel(operation string) string {
+	switch strings.TrimSpace(operation) {
+	case "upload":
+		return "upload"
+	case "download":
+		return "download"
+	default:
+		return "transfer"
+	}
 }
 
 func redactAuditMetadata(raw string) map[string]any {

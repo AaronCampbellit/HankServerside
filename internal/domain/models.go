@@ -403,6 +403,22 @@ type AssistantFileIndex struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
+type AssistantIndexJob struct {
+	ID          string     `json:"id"`
+	HomeID      string     `json:"home_id"`
+	UserID      string     `json:"user_id"`
+	SourceType  string     `json:"source_type"`
+	SourceID    string     `json:"source_id"`
+	Status      string     `json:"status"`
+	Attempts    int        `json:"attempts"`
+	LastError   string     `json:"last_error,omitempty"`
+	RunAfter    time.Time  `json:"run_after"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
 type AssistantRetrievedContext struct {
 	SourceType   string    `json:"source_type"`
 	SourceID     string    `json:"source_id"`
@@ -430,6 +446,9 @@ type AssistantIndexStats struct {
 	FileCount          int                         `json:"file_count"`
 	EmbeddedFileCount  int                         `json:"embedded_file_count"`
 	ConversationCount  int                         `json:"conversation_count"`
+	QueuedJobCount     int                         `json:"queued_job_count"`
+	RunningJobCount    int                         `json:"running_job_count"`
+	FailedJobCount     int                         `json:"failed_job_count"`
 }
 
 type AssistantSettings struct {

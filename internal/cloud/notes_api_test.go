@@ -112,6 +112,137 @@ func TestExternalProfileNotesAPIReadSearchTagsAndAppend(t *testing.T) {
 	response.Body.Close()
 }
 
+func TestProfileNotesNotebookLifecycleAndScopedSearch(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_profile_notebooks", Email: "profile-notebooks@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	token := "profile-notebooks-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_profile_notebooks", UserID: user.ID, TokenHash: hashToken(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var notebookSave protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":   "projects",
+		"title":     "Projects Notebook",
+		"page_type": "notebook",
+	}, &notebookSave)
+	if notebookSave.PageType != protocol.NotePageTypeNotebook {
+		t.Fatalf("notebook save page_type = %q, want %q", notebookSave.PageType, protocol.NotePageTypeNotebook)
+	}
+
+	var notebook protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/projects", nil, &notebook)
+	if notebook.PageType != protocol.NotePageTypeNotebook || notebook.Title != "Projects Notebook" {
+		t.Fatalf("notebook fetch = page_type:%q title:%q", notebook.PageType, notebook.Title)
+	}
+
+	parentID := "projects"
+	var childSave protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "milk.md",
+		"title":         "Milk Run",
+		"body_markdown": "buy milk inside notebook",
+		"page_type":     "text",
+		"parent_id":     parentID,
+	}, &childSave)
+
+	var child protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/milk.md", nil, &child)
+	if child.ParentID != "projects" {
+		t.Fatalf("child parent_id = %q, want projects", child.ParentID)
+	}
+
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "loose.md",
+		"title":         "Loose Milk",
+		"body_markdown": "buy milk outside notebook",
+		"page_type":     "text",
+	}, nil)
+
+	var allSearch protocol.NotesSearchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/search?q=projects", nil, &allSearch)
+	if len(allSearch.Results) != 1 || allSearch.Results[0].NoteID != "projects" || allSearch.Results[0].PageType != protocol.NotePageTypeNotebook {
+		t.Fatalf("all search results = %#v, want notebook title hit", allSearch.Results)
+	}
+
+	var scopedSearch protocol.NotesSearchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/search?q=milk&notebook_id=projects", nil, &scopedSearch)
+	if len(scopedSearch.Results) != 1 || scopedSearch.Results[0].NoteID != "milk.md" || scopedSearch.Results[0].ParentID != "projects" {
+		t.Fatalf("scoped search results = %#v, want only milk.md under projects", scopedSearch.Results)
+	}
+
+	noParent := ""
+	var moved protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPut, "/v1/me/notes/milk.md", map[string]any{
+		"title":             "Milk Run",
+		"body_markdown":     "buy milk inside notebook",
+		"expected_revision": childSave.Revision,
+		"page_type":         "text",
+		"parent_id":         noParent,
+	}, &moved)
+	if moved.Revision == childSave.Revision {
+		t.Fatalf("moved revision = original revision %q, want new revision", moved.Revision)
+	}
+
+	var movedChild protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/milk.md", nil, &movedChild)
+	if movedChild.ParentID != "" {
+		t.Fatalf("moved child parent_id = %q, want empty", movedChild.ParentID)
+	}
+
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/search?q=milk&notebook_id=projects", nil, &scopedSearch)
+	if len(scopedSearch.Results) != 0 {
+		t.Fatalf("scoped search after move = %#v, want no results", scopedSearch.Results)
+	}
+}
+
+func TestProfileNotesRejectTextNoteAsNotebookParent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_profile_notebook_parent", Email: "profile-notebook-parent@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	token := "profile-notebook-parent-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_profile_notebook_parent", UserID: user.ID, TokenHash: hashToken(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "plain.md",
+		"title":         "Plain note",
+		"body_markdown": "not a notebook",
+		"page_type":     "text",
+	}, nil)
+
+	response := requestJSONStatus(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "child.md",
+		"title":         "Child",
+		"body_markdown": "should not save",
+		"page_type":     "text",
+		"parent_id":     "plain.md",
+	}, http.StatusBadRequest)
+	response.Body.Close()
+}
+
 func TestExternalHomeNotesAPIUsesSharedVisibilityAndHomePermission(t *testing.T) {
 	t.Parallel()
 

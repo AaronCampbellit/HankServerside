@@ -3,6 +3,8 @@ package apps
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,16 +180,21 @@ func (m *Manager) PreviewPackage(ctx context.Context, request protocol.AppsPacka
 	if err != nil {
 		return protocol.AppsPackagePreviewResponse{}, fmt.Errorf("%w: %v", ErrPackageValidation, err)
 	}
+	packageHash, err := fileSHA256Hex(stagePath)
+	if err != nil {
+		return protocol.AppsPackagePreviewResponse{}, err
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.staged[stagingID] = preview
 	_, replacing := m.apps[preview.Manifest.ID]
 	return protocol.AppsPackagePreviewResponse{
-		StagingID: stagingID,
-		App:       summaryFromPreview(preview),
-		Warnings:  append([]string(nil), preview.Warnings...),
-		Replacing: replacing,
+		StagingID:     stagingID,
+		PackageSHA256: packageHash,
+		App:           summaryFromPreview(preview),
+		Warnings:      append([]string(nil), preview.Warnings...),
+		Replacing:     replacing,
 	}, nil
 }
 
@@ -201,9 +208,6 @@ func (m *Manager) ActivatePackage(ctx context.Context, request protocol.AppsPack
 	m.mu.RLock()
 	preview, ok := m.staged[request.StagingID]
 	m.mu.RUnlock()
-	if !ok {
-		return protocol.AppsPackageActivateResponse{}, fmt.Errorf("%w: %s", ErrMissingStagingPackage, request.StagingID)
-	}
 	if _, err := os.Stat(stagePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return protocol.AppsPackageActivateResponse{}, fmt.Errorf("%w: %s", ErrMissingStagingPackage, request.StagingID)
@@ -214,8 +218,17 @@ func (m *Manager) ActivatePackage(ctx context.Context, request protocol.AppsPack
 	if err != nil {
 		return protocol.AppsPackageActivateResponse{}, fmt.Errorf("%w: %v", ErrPackageValidation, err)
 	}
-	if currentPreview.Manifest.ID != preview.Manifest.ID {
+	if ok && currentPreview.Manifest.ID != preview.Manifest.ID {
 		return protocol.AppsPackageActivateResponse{}, fmt.Errorf("%w: staged app changed from %q to %q", ErrPackageValidation, preview.Manifest.ID, currentPreview.Manifest.ID)
+	}
+	if request.PackageSHA256 != "" {
+		currentHash, err := fileSHA256Hex(stagePath)
+		if err != nil {
+			return protocol.AppsPackageActivateResponse{}, err
+		}
+		if !strings.EqualFold(currentHash, request.PackageSHA256) {
+			return protocol.AppsPackageActivateResponse{}, fmt.Errorf("%w: package hash mismatch", ErrPackageValidation)
+		}
 	}
 	preview = currentPreview
 	if m.appsDir == "" {
@@ -584,6 +597,19 @@ func copyPackageBytes(destination io.Writer, source io.Reader) error {
 		return fmt.Errorf("app package exceeds %d bytes", maxPackageBytes)
 	}
 	return nil
+}
+
+func fileSHA256Hex(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func installArchive(appsDir string, appID string, archivePath string) (string, error) {

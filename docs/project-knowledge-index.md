@@ -48,6 +48,7 @@ app-side work.
 - [app-integration/hank-app-auth-migration.md](app-integration/hank-app-auth-migration.md)
 - [app-integration/hank-app-home-sync-checklist.md](app-integration/hank-app-home-sync-checklist.md)
 - [app-integration/hank-app-repo-separation-checklist.md](app-integration/hank-app-repo-separation-checklist.md)
+- [app-integration/hank-app-product-notes.md](app-integration/hank-app-product-notes.md): product-facing Hank app behavior extracted from historical docs and profile notes.
 
 ## Runbooks (`runbooks/`)
 
@@ -63,13 +64,19 @@ app-side work.
 
 - [PWA/current-scope.md](PWA/current-scope.md): records that Hank Remote intentionally serves no standalone PWA, and the conditions for any future mobile-web work.
 
+## Removed Historical Phase Docs
+
+The phase-era implementation plans and per-phase tasklists from the initial build
+were completed or superseded and have been removed from the active documentation
+tree. Current setup, operator, and repair guidance lives in the deployment docs,
+runbooks, and production repair plan.
+
 ## Archive (`archive/`) — historical only
 
 Everything below is retained for implementation context and traceability. It is
 **not** current setup, operator, or repair guidance — use the active docs above.
 See [archive/README.md](archive/README.md) for the full archive map.
 
-- **archive/phases**: the original phase plans and per-phase tasklists from the initial build.
 - **archive/audits**: dated point-in-time audits (backend architecture, legacy code, the 2026-06-06 cleanup snapshot).
 - **archive/designs**: implemented or superseded design specs (installable agent apps, invite/password reset, redacted settings recovery, first-party app platform readiness, HankAI local-model eval harness).
 - **archive/plans**: completed or superseded implementation plans and one-off tasklists (app platform readiness, HankAI eval harness, HankAI chat-tool/intents plans, the Codex production-readiness task pass).

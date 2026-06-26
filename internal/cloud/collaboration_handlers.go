@@ -441,6 +441,14 @@ func notesSearchQuery(r *http.Request) (string, int, error) {
 	return query, limit, nil
 }
 
+func notesSearchParentID(r *http.Request) string {
+	parentID := strings.TrimSpace(r.URL.Query().Get("notebook_id"))
+	if parentID == "" {
+		parentID = strings.TrimSpace(r.URL.Query().Get("parent_id"))
+	}
+	return parentID
+}
+
 func notesTagQuery(r *http.Request) string {
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	if tag == "" {
@@ -455,6 +463,8 @@ func writeNoteHTTPError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &conflict):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "note_conflict", "current": conflict.Current})
 	case errors.Is(err, errNoteAppendContentRequired):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, errNotebookCannotHaveParent), errors.Is(err, errInvalidNotebookParent):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errNoteAppendUnsupportedPageType):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "note_append_unsupported", "message": err.Error()})
@@ -506,7 +516,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return true
 			}
-			results, err := s.notes.SearchHome(r.Context(), home.ID, auth.User.ID, query, limit)
+			results, err := s.notes.SearchHome(r.Context(), home.ID, auth.User.ID, query, limit, notesSearchParentID(r))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return true
@@ -647,6 +657,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				return true
 			}
 			s.markHomeNotesDirty(r.Context(), home.ID, "")
+			s.enqueueAssistantNoteIndexJob(r.Context(), home.ID, auth.User.ID, response.NoteID, assistantIndexSourceSharedNote)
 			s.emitHomeNotesChanged(r.Context(), "notes.changed", map[string]any{"home_id": home.ID, "note_id": noteID})
 			writeJSON(w, http.StatusOK, response)
 			return true
@@ -684,15 +695,11 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			body.NoteID = noteID
 			response, err := s.notes.SaveHome(r.Context(), home.ID, auth.User.ID, noteID, body)
 			if err != nil {
-				conflict := &noteConflictError{}
-				if errors.As(err, &conflict) {
-					writeJSON(w, http.StatusConflict, map[string]any{"error": "note_conflict", "current": conflict.Current})
-					return true
-				}
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				writeNoteHTTPError(w, r, err)
 				return true
 			}
 			s.markHomeNotesDirty(r.Context(), home.ID, "")
+			s.enqueueAssistantNoteIndexJob(r.Context(), home.ID, auth.User.ID, response.NoteID, assistantIndexSourceSharedNote)
 			s.emitHomeNotesChanged(r.Context(), "notes.changed", map[string]any{"home_id": home.ID, "note_id": noteID})
 			writeJSON(w, http.StatusOK, response)
 			return true
@@ -710,6 +717,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 				return true
 			}
 			s.markHomeNotesDirty(r.Context(), home.ID, "")
+			s.enqueueAssistantNoteIndexJob(r.Context(), home.ID, auth.User.ID, noteID, assistantIndexSourceSharedNote)
 			s.emitHomeNotesChanged(r.Context(), "notes.deleted", map[string]any{"home_id": home.ID, "note_id": noteID})
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return true
@@ -753,15 +761,11 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			}
 			response, err := s.notes.SaveProfile(r.Context(), auth.User.ID, body.NoteID, body)
 			if err != nil {
-				conflict := &noteConflictError{}
-				if errors.As(err, &conflict) {
-					writeJSON(w, http.StatusConflict, map[string]any{"error": "note_conflict", "current": conflict.Current})
-					return
-				}
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				writeNoteHTTPError(w, r, err)
 				return
 			}
 			s.logger.Info("profile note saved via http create", "user_id", auth.User.ID, "note_id", response.NoteID, "revision", response.Revision)
+			s.enqueueAssistantNoteIndexJob(r.Context(), "", auth.User.ID, response.NoteID, assistantIndexSourceProfileNote)
 			s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 			writeJSON(w, http.StatusCreated, response)
 			return
@@ -782,7 +786,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			results, err := s.notes.SearchProfile(r.Context(), auth.User.ID, query, limit)
+			results, err := s.notes.SearchProfile(r.Context(), auth.User.ID, query, limit, notesSearchParentID(r))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -834,6 +838,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		s.logger.Info("profile note appended via http", "user_id", auth.User.ID, "note_id", response.NoteID, "revision", response.Revision)
+		s.enqueueAssistantNoteIndexJob(r.Context(), "", auth.User.ID, response.NoteID, assistantIndexSourceProfileNote)
 		s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 		writeJSON(w, http.StatusOK, response)
 		return
@@ -881,15 +886,11 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 		body.NoteID = noteID
 		response, err := s.notes.SaveProfile(r.Context(), auth.User.ID, noteID, body)
 		if err != nil {
-			conflict := &noteConflictError{}
-			if errors.As(err, &conflict) {
-				writeJSON(w, http.StatusConflict, map[string]any{"error": "note_conflict", "current": conflict.Current})
-				return
-			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeNoteHTTPError(w, r, err)
 			return
 		}
 		s.logger.Info("profile note saved via http update", "user_id", auth.User.ID, "note_id", response.NoteID, "revision", response.Revision)
+		s.enqueueAssistantNoteIndexJob(r.Context(), "", auth.User.ID, response.NoteID, assistantIndexSourceProfileNote)
 		s.emitProfileNotesChanged(r.Context(), map[string]any{"user_id": auth.User.ID, "note_id": response.NoteID})
 		writeJSON(w, http.StatusOK, response)
 	case http.MethodDelete:
@@ -905,6 +906,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		s.logger.Info("profile note deleted via http", "user_id", auth.User.ID, "note_id", noteID)
+		s.enqueueAssistantNoteIndexJob(r.Context(), "", auth.User.ID, noteID, assistantIndexSourceProfileNote)
 		s.broadcastAppEvent(r.Context(), topicNotesProfile, "notes.deleted", map[string]any{"user_id": auth.User.ID, "note_id": noteID})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:

@@ -748,7 +748,6 @@ HankServerside now exposes HankAI assistant sessions, per-user source settings, 
 - OpenAI/ChatGPT link routes:
   - `GET /v1/oauth/openai/status`
   - `GET /v1/oauth/openai/start`
-  - `GET /v1/oauth/openai/callback`
 - Link status can return `auth_mode: "authorization_url"` or `auth_mode: "device_code"`.
 - For `authorization_url`, `start` returns an `authorization_url`.
 - For `device_code`, `start` returns `auth_mode`, `verification_url`, `user_code`, `expires_at`, and `poll_after_seconds`.

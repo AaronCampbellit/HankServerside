@@ -358,6 +358,9 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, h
 		"vector_store":         status.VectorStore,
 		"index":                indexStats,
 	}
+	if !status.EmbeddingConfigured || status.EmbeddingModel == "local-hash" {
+		statusPayload["embedding_warning"] = "local_hash_fallback"
+	}
 	writeJSON(w, http.StatusOK, statusPayload)
 }
 
@@ -850,16 +853,7 @@ func (s *Server) handleAssistantCalendarIndex(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	settings, err := s.currentAssistantSettings(r.Context(), home.ID, auth.User.ID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if settings.CalendarEnabled {
-		if err := s.indexAssistantCalendarEntries(r.Context(), home.ID, auth.User.ID, entries); err != nil {
-			s.logger.Warn("assistant calendar index refresh failed", "error", err)
-		}
-	}
+	s.enqueueAssistantIndexJob(r.Context(), home.ID, auth.User.ID, assistantIndexSourceCalendar, "")
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "entry_count": len(entries)})
 }
 
@@ -1774,7 +1768,7 @@ func (s *Server) generateAssistantResponseForSession(ctx context.Context, home d
 			"intent": intent.Kind,
 		}),
 	})
-	s.refreshAssistantIndex(ctx, runtime, tool, intent)
+	s.refreshAssistantIndex(ctx, runtime)
 	s.recordAssistantTrace(ctx, assistantTraceEvent{
 		Scope:   "assistant",
 		Event:   "assistant.index.refresh_done",
@@ -2013,9 +2007,7 @@ func (s *Server) answerAppendNotePrompt(ctx context.Context, home domain.Home, a
 	if err := s.store.UpsertUserNote(ctx, target); err != nil {
 		return assistantMessageContent{}, err
 	}
-	if err := s.indexAssistantNote(ctx, home.ID, auth.User.ID, assistantNoteSourceType(target), target); err != nil {
-		s.logger.Warn("assistant note index refresh failed after append", "note_id", target.ID, "error", err)
-	}
+	s.enqueueAssistantIndexJob(ctx, home.ID, auth.User.ID, assistantNoteSourceType(target), target.NoteID)
 
 	return assistantMessageContent{
 		Text: fmt.Sprintf("Added `%s` to `%s`.", itemText, target.Title),
@@ -3016,6 +3008,7 @@ func (s *Server) executeConfirmedAssistantAction(
 		if err := s.store.UpsertUserNote(ctx, note); err != nil {
 			return assistantRunResponse{}, err
 		}
+		s.enqueueAssistantIndexJob(ctx, session.HomeID, userID, assistantNoteSourceType(note), note.NoteID)
 		content := assistantMessageContent{
 			Text: fmt.Sprintf("Added `%s` to `%s`.", pending.NoteAppend.AppendedText, note.Title),
 			Cards: []assistantResultCard{
@@ -3083,9 +3076,7 @@ func (s *Server) executeConfirmedAssistantAction(
 		if err := s.store.UpsertUserNote(ctx, note); err != nil {
 			return assistantRunResponse{}, err
 		}
-		if err := s.indexAssistantNote(ctx, session.HomeID, userID, assistantNoteSourceType(note), note); err != nil {
-			s.logger.Warn("assistant note index refresh failed after create", "note_id", note.ID, "error", err)
-		}
+		s.enqueueAssistantIndexJob(ctx, session.HomeID, userID, assistantNoteSourceType(note), note.NoteID)
 		content := assistantMessageContent{
 			Text: fmt.Sprintf("Created `%s`.", note.Title),
 			Cards: []assistantResultCard{
@@ -4895,7 +4886,7 @@ func fileMatchScore(item protocol.FileItem, query string) int {
 			score++
 		}
 	}
-	if item.IsDirectory {
+	if score > 0 && item.IsDirectory {
 		score++
 	}
 	return score

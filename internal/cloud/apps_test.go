@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,43 @@ func TestAppsImportPreviewRoutesPackageToAgent(t *testing.T) {
 	}
 }
 
+func TestAppsImportPreviewReturnsStructuredAgentError(t *testing.T) {
+	ctx := context.Background()
+	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "test done")
+
+	resultCh := make(chan testJSONResponse, 1)
+	go func() {
+		resultCh <- doRawRequest(t, testServer, sessionToken, http.MethodPost, "/v1/home/apps/import/preview", []byte("not-a-package"))
+	}()
+
+	envelope := readAgentCommandEnvelope(t, ctx, agentConn, protocol.CommandAppsPackagePreview)
+	writeAgentError(t, ctx, agentConn, envelope, agentID, homeID, "app_package_invalid", "package validation failed")
+	result := <-resultCh
+	if result.StatusCode != http.StatusBadRequest {
+		t.Fatalf("preview status = %d body=%s", result.StatusCode, result.Body)
+	}
+	var body struct {
+		Error   string         `json:"error"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal([]byte(result.Body), &body); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if body.Error != "app_package_invalid" || body.Message != "package validation failed" || body.Details["stage"] != "agent_preview" {
+		t.Fatalf("error body = %#v", body)
+	}
+	events, err := db.ListAuditEvents(ctx, homeID, "app_package.preview_failed", auditSeverityWarning, "app_package", 10, "occurred_at", "desc")
+	if err != nil {
+		t.Fatalf("ListAuditEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].TargetID == "" || !strings.Contains(events[0].MetadataJSON, "app_package_invalid") {
+		t.Fatalf("preview audit events = %#v", events)
+	}
+}
+
 func TestAppsActivatePersistsReturnedAppMetadata(t *testing.T) {
 	ctx := context.Background()
 	db, testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgentWithDB(t, ctx)
@@ -518,5 +556,13 @@ func writeAgentResponse(t *testing.T, ctx context.Context, conn *websocket.Conn,
 	}
 	if err := wsjson.Write(ctx, conn, response); err != nil {
 		t.Fatalf("agent response write: %v", err)
+	}
+}
+
+func writeAgentError(t *testing.T, ctx context.Context, conn *websocket.Conn, request protocol.Envelope, agentID string, homeID string, code string, message string) {
+	t.Helper()
+	response := protocol.NewErrorEnvelope(protocol.TypeCloudResponse, request.RequestID, agentID, homeID, code, message, nil)
+	if err := wsjson.Write(ctx, conn, response); err != nil {
+		t.Fatalf("agent error write: %v", err)
 	}
 }

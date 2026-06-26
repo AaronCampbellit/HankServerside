@@ -16,6 +16,7 @@ var slashCommandPattern = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_-]*$`)
 
 const networkPermissionConfiguredBaseURL = "configured_base_url"
 const filePermissionConfiguredSource = "configured_source"
+const maxCommandTimeoutSeconds = 300
 
 var allowedSettingsFieldTypes = map[string]struct{}{
 	"boolean":  {},
@@ -29,6 +30,10 @@ var allowedSettingsFieldTypes = map[string]struct{}{
 
 var allowedSettingsFieldSources = map[string]struct{}{
 	"file_sources": {},
+}
+
+var allowedCommandModes = map[string]struct{}{
+	"request_response": {},
 }
 
 var reservedSlashCommands = map[string]struct{}{
@@ -113,6 +118,21 @@ func ValidateManifest(manifest Manifest) error {
 	if !identifierPattern.MatchString(manifest.ID) {
 		return fmt.Errorf("app id %q must match %s", manifest.ID, identifierPattern.String())
 	}
+	if len(manifest.ID) > 64 {
+		return fmt.Errorf("app id exceeds 64 characters")
+	}
+	if err := validateTextField("name", manifest.Name, true, 80); err != nil {
+		return err
+	}
+	if err := validateTextField("version", manifest.Version, true, 64); err != nil {
+		return err
+	}
+	if err := validateTextField("publisher", manifest.Publisher, false, 80); err != nil {
+		return err
+	}
+	if err := validateTextField("description", manifest.Description, false, 500); err != nil {
+		return err
+	}
 	if manifest.Runtime.Type != protocol.AppRuntimeStdio {
 		return fmt.Errorf("runtime type %q is not supported", manifest.Runtime.Type)
 	}
@@ -132,6 +152,12 @@ func ValidateManifest(manifest Manifest) error {
 			return fmt.Errorf("duplicate command id %q", command.ID)
 		}
 		commandIDs[command.ID] = struct{}{}
+		if _, ok := allowedCommandModes[command.Mode]; !ok {
+			return fmt.Errorf("command %d mode %q is not supported", i, command.Mode)
+		}
+		if command.TimeoutSeconds < 1 || command.TimeoutSeconds > maxCommandTimeoutSeconds {
+			return fmt.Errorf("command %d timeout_seconds must be between 1 and %d", i, maxCommandTimeoutSeconds)
+		}
 		if err := validatePackagePath("schema path", command.InputSchema, false); err != nil {
 			return fmt.Errorf("command %d input %w", i, err)
 		}
@@ -144,6 +170,9 @@ func ValidateManifest(manifest Manifest) error {
 	for i, slashCommand := range manifest.Assistant.SlashCommands {
 		if !slashCommandPattern.MatchString(slashCommand.Command) {
 			return fmt.Errorf("slash command %q must match %s", slashCommand.Command, slashCommandPattern.String())
+		}
+		if err := validateTextField(fmt.Sprintf("slash command %d description", i), slashCommand.Description, false, 160); err != nil {
+			return err
 		}
 		if _, ok := reservedSlashCommands[strings.ToLower(slashCommand.Command)]; ok {
 			return fmt.Errorf("reserved slash command %q is owned by HankAI", slashCommand.Command)
@@ -160,15 +189,38 @@ func ValidateManifest(manifest Manifest) error {
 	if err := validatePackagePath("schema path", manifest.Config.Schema, false); err != nil {
 		return fmt.Errorf("config %w", err)
 	}
+	secretFields := make(map[string]struct{}, len(manifest.Config.SecretFields))
+	for i, field := range manifest.Config.SecretFields {
+		if !identifierPattern.MatchString(field) {
+			return fmt.Errorf("secret_fields[%d] %q must match %s", i, field, identifierPattern.String())
+		}
+		if _, ok := secretFields[field]; ok {
+			return fmt.Errorf("duplicate secret_fields entry %q", field)
+		}
+		secretFields[field] = struct{}{}
+	}
+	settingsFields := make(map[string]SettingsField, len(manifest.Config.Settings.Fields))
 	for i, field := range manifest.Config.Settings.Fields {
 		if !identifierPattern.MatchString(field.Key) {
 			return fmt.Errorf("settings field %d key %q must match %s", i, field.Key, identifierPattern.String())
 		}
+		if _, ok := settingsFields[field.Key]; ok {
+			return fmt.Errorf("duplicate settings field key %q", field.Key)
+		}
+		settingsFields[field.Key] = field
 		if _, ok := allowedSettingsFieldTypes[field.Type]; !ok {
 			return fmt.Errorf("settings field %d type %q is not supported", i, field.Type)
 		}
 		if field.Secret && field.SecretKey != "" && !identifierPattern.MatchString(field.SecretKey) {
 			return fmt.Errorf("settings field %d secret_key %q must match %s", i, field.SecretKey, identifierPattern.String())
+		}
+		if field.Secret {
+			if field.SecretKey == "" {
+				return fmt.Errorf("settings field %d secret_key is required for secret fields", i)
+			}
+			if _, ok := secretFields[field.SecretKey]; !ok {
+				return fmt.Errorf("settings field %d secret_key %q must be listed in config.secret_fields", i, field.SecretKey)
+			}
 		}
 		if field.Source != "" {
 			if _, ok := allowedSettingsFieldSources[field.Source]; !ok {
@@ -206,6 +258,13 @@ func ValidateManifest(manifest Manifest) error {
 		if permission.Kind != networkPermissionConfiguredBaseURL {
 			return fmt.Errorf("network permission %d kind %q is not supported", i, permission.Kind)
 		}
+		if !identifierPattern.MatchString(permission.Field) {
+			return fmt.Errorf("network permission %d field %q must match %s", i, permission.Field, identifierPattern.String())
+		}
+		field, ok := settingsFields[permission.Field]
+		if !ok || field.Type != "url" {
+			return fmt.Errorf("network permission %d field %q must reference a url settings field", i, permission.Field)
+		}
 	}
 	for i, permission := range manifest.Permissions.Files {
 		if permission.Kind != filePermissionConfiguredSource {
@@ -214,11 +273,29 @@ func ValidateManifest(manifest Manifest) error {
 		if !identifierPattern.MatchString(permission.Field) {
 			return fmt.Errorf("file permission %d field %q must match %s", i, permission.Field, identifierPattern.String())
 		}
+		field, ok := settingsFields[permission.Field]
+		if !ok || field.Type != "select" || field.Source != "file_sources" {
+			return fmt.Errorf("file permission %d field %q must reference a select settings field with source file_sources", i, permission.Field)
+		}
 	}
 	if len(manifest.Permissions.Events) > 0 {
 		return fmt.Errorf("event permission entries are not supported")
 	}
 
+	return nil
+}
+
+func validateTextField(label string, value string, required bool, maxLength int) error {
+	trimmed := strings.TrimSpace(value)
+	if required && trimmed == "" {
+		return fmt.Errorf("%s is required", label)
+	}
+	if value != "" && trimmed == "" {
+		return fmt.Errorf("%s must not be blank", label)
+	}
+	if len(value) > maxLength {
+		return fmt.Errorf("%s exceeds %d characters", label, maxLength)
+	}
 	return nil
 }
 

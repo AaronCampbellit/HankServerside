@@ -69,7 +69,7 @@ func TestActiveDocsDoNotReferenceRemovedLegacyPaths(t *testing.T) {
 	}
 }
 
-func TestPhaseDocsAreIndexedAsArchive(t *testing.T) {
+func TestPhaseDocsAreRemovedFromActiveIndex(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
@@ -79,8 +79,11 @@ func TestPhaseDocsAreIndexedAsArchive(t *testing.T) {
 		t.Fatalf("read project knowledge index: %v", err)
 	}
 	body := string(data)
-	if !strings.Contains(body, "archive/phases") {
-		t.Fatal("project knowledge index should point phase docs at archive/phases")
+	if strings.Contains(body, "archive/phases") {
+		t.Fatal("project knowledge index should not point to removed phase archives")
+	}
+	if !strings.Contains(body, "Removed Historical Phase Docs") {
+		t.Fatal("project knowledge index should explain that historical phase docs were removed")
 	}
 	for _, stale := range []string{
 		"](phase-1-",

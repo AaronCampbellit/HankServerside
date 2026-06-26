@@ -128,6 +128,10 @@ func (s *Service) Save(_ context.Context, noteID string, title string, content s
 	if resolvedPageType == protocol.NotePageTypeKanban && content == "" && resolvedBoard != nil {
 		content = kanbanMarkdown(titleFromPath(normalized), resolvedBoard)
 	}
+	if resolvedPageType == protocol.NotePageTypeNotebook {
+		content = ""
+		resolvedBoard = nil
+	}
 
 	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 		return protocol.NotesSaveResponse{}, err
@@ -219,14 +223,13 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]protoc
 	loweredNeedle := strings.ToLower(needle)
 	results := make([]protocol.NoteSearchResult, 0)
 	for _, document := range documents {
-		if document.summary.PageType != protocol.NotePageTypeText {
-			continue
-		}
-
 		title := document.summary.Title
 		content := document.fetch.Content
 		titleMatch := strings.Index(strings.ToLower(title), loweredNeedle)
-		bodyMatch := strings.Index(strings.ToLower(content), loweredNeedle)
+		bodyMatch := -1
+		if document.summary.PageType != protocol.NotePageTypeNotebook {
+			bodyMatch = strings.Index(strings.ToLower(content), loweredNeedle)
+		}
 		if titleMatch < 0 && bodyMatch < 0 {
 			continue
 		}
@@ -421,8 +424,7 @@ func (s *Service) loadDocument(noteID string, resolved string) (noteDocument, er
 	var board *protocol.KanbanBoard
 	sidecarInfo, sidecarErr := os.Stat(sidecarPath(resolved))
 	if sidecarErr == nil {
-		pageType = protocol.NotePageTypeKanban
-		board, err = readBoard(sidecarPath(resolved))
+		pageType, board, err = readSidecar(sidecarPath(resolved))
 		if err != nil {
 			return noteDocument{}, err
 		}
@@ -471,18 +473,25 @@ func (s *Service) loadDocument(noteID string, resolved string) (noteDocument, er
 
 func (s *Service) writeSidecar(resolved string, pageType string, board *protocol.KanbanBoard) error {
 	sidecar := sidecarPath(resolved)
-	if pageType != protocol.NotePageTypeKanban {
+	switch pageType {
+	case protocol.NotePageTypeKanban:
+		encoded, err := json.MarshalIndent(boardOrEmpty(board), "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(sidecar, encoded, 0o644)
+	case protocol.NotePageTypeNotebook:
+		encoded, err := json.MarshalIndent(noteSidecar{PageType: protocol.NotePageTypeNotebook}, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(sidecar, encoded, 0o644)
+	default:
 		if err := os.Remove(sidecar); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
-
-	encoded, err := json.MarshalIndent(boardOrEmpty(board), "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(sidecar, encoded, 0o644)
 }
 
 func sidecarPath(notePath string) string {
@@ -494,22 +503,37 @@ func isSidecar(path string) bool {
 	return strings.HasSuffix(path, sidecarSuffix)
 }
 
-func readBoard(path string) (*protocol.KanbanBoard, error) {
+type noteSidecar struct {
+	PageType string                `json:"page_type"`
+	Board    *protocol.KanbanBoard `json:"board,omitempty"`
+}
+
+func readSidecar(path string) (string, *protocol.KanbanBoard, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if len(data) == 0 {
 		board := boardOrEmpty(nil)
-		return &board, nil
+		return protocol.NotePageTypeKanban, &board, nil
+	}
+
+	var meta noteSidecar
+	if err := json.Unmarshal(data, &meta); err == nil && strings.TrimSpace(meta.PageType) != "" {
+		pageType := normalizePageType(meta.PageType)
+		if pageType == protocol.NotePageTypeNotebook {
+			return pageType, nil, nil
+		}
+		board := boardOrEmpty(meta.Board)
+		return protocol.NotePageTypeKanban, &board, nil
 	}
 
 	var board protocol.KanbanBoard
 	if err := json.Unmarshal(data, &board); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	normalized := boardOrEmpty(&board)
-	return &normalized, nil
+	return protocol.NotePageTypeKanban, &normalized, nil
 }
 
 func boardOrEmpty(board *protocol.KanbanBoard) protocol.KanbanBoard {
@@ -666,6 +690,8 @@ func normalizePageType(pageType string) string {
 		return protocol.NotePageTypeText
 	case protocol.NotePageTypeKanban:
 		return protocol.NotePageTypeKanban
+	case protocol.NotePageTypeNotebook:
+		return protocol.NotePageTypeNotebook
 	default:
 		return protocol.NotePageTypeText
 	}

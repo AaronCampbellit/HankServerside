@@ -1498,6 +1498,16 @@ button.button-link {
   min-height: 36px;
 }
 
+.notes-search-wrap select,
+.document-meta select {
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.notes-search-wrap select {
+  flex: 0 0 min(220px, 38vw);
+}
+
 .note-tabs {
   display: flex;
   gap: 6px;
@@ -1535,6 +1545,22 @@ button.button-link {
   background: var(--brand);
   color: #08111c;
   border-color: transparent;
+}
+
+.note-tab.notebook {
+  border-color: rgba(107, 189, 255, 0.3);
+}
+
+.note-tab-parent {
+  color: var(--muted);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-tab.active .note-tab-parent {
+  color: rgba(8, 17, 28, 0.72);
 }
 
 .note-tab-title,
@@ -1715,6 +1741,54 @@ button.button-link {
   min-height: 1.65em;
 }
 
+.note-inline-layer strong {
+  font-weight: 800;
+}
+
+.note-inline-layer em {
+  font-style: italic;
+}
+
+.note-inline-layer u {
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.12em;
+}
+
+.note-heading {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.note-heading-1 {
+  font-size: 1.22em;
+}
+
+.note-heading-2 {
+  font-size: 1.16em;
+}
+
+.note-heading-3 {
+  font-size: 1.1em;
+}
+
+.note-heading-4,
+.note-heading-5,
+.note-heading-6 {
+  font-size: 1.04em;
+}
+
+.note-list-marker {
+  display: inline-block;
+  min-width: 1.35em;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.note-list-text {
+  font-size: inherit;
+}
+
 .note-inline-link,
 .note-check-toggle.inline {
   pointer-events: auto;
@@ -1814,11 +1888,18 @@ button.button-link {
 }
 
 body.kanban-note .note-inline-layer,
-body.kanban-note .document-editor {
+body.kanban-note .document-editor,
+body.notebook-note .note-inline-layer,
+body.notebook-note .document-editor,
+body.notebook-note .formatting-toolbar {
   display: none;
 }
 
 body.kanban-note .kanban-board {
+  display: flex;
+}
+
+body.notebook-note .notebook-panel {
   display: flex;
 }
 
@@ -1832,6 +1913,25 @@ body.kanban-note .kanban-board {
   padding: 20px;
   overflow: auto;
   background: var(--surface-strong);
+}
+
+.notebook-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  background: var(--surface-strong);
+}
+
+.notebook-count {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .kanban-actions {
@@ -3668,6 +3768,11 @@ button:disabled {
   .notes-search-wrap {
     min-width: 0;
     max-width: none;
+    width: 100%;
+  }
+
+  .notes-search-wrap select,
+  .document-meta select {
     width: 100%;
   }
 

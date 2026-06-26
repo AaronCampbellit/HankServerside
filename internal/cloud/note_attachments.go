@@ -134,7 +134,7 @@ func (s *Server) handleNoteAttachmentsHTTP(w http.ResponseWriter, r *http.Reques
 		if attachmentPath, err := s.noteAttachmentPath(attachment.StorageKey); err == nil {
 			_ = os.Remove(attachmentPath)
 		}
-		s.indexNoteAfterAttachmentUpload(r.Context(), updatedNote, userID)
+		s.enqueueAssistantNoteIndexJob(r.Context(), updatedNote.HomeID, userID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
 		s.emitNoteAttachmentChanged(r.Context(), note, scope, userID)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
@@ -220,7 +220,7 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 		_ = os.Remove(targetPath)
 		return domain.NoteAttachment{}, err
 	}
-	s.indexNoteAfterAttachmentUpload(r.Context(), updatedNote, userID)
+	s.enqueueAssistantNoteIndexJob(r.Context(), updatedNote.HomeID, userID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
 	return attachment, nil
 }
 
@@ -265,20 +265,6 @@ func noteWithoutAttachmentReference(note domain.UserNote, userID string, attachm
 	note.UpdatedAt = time.Now().UTC()
 	note.UpdatedBy = userID
 	return note, nil
-}
-
-func (s *Server) indexNoteAfterAttachmentUpload(ctx context.Context, note domain.UserNote, userID string) {
-	homeID := note.HomeID
-	if homeID == "" {
-		if home, err := s.store.GetSingletonHomeForUser(ctx, userID); err == nil {
-			homeID = home.ID
-		}
-	}
-	if homeID != "" {
-		if err := s.indexAssistantNote(ctx, homeID, userID, assistantNoteSourceType(note), note); err != nil {
-			s.logger.Warn("assistant note index refresh failed after attachment upload", "note_id", note.ID, "error", err)
-		}
-	}
 }
 
 func (s *Server) serveNoteAttachment(w http.ResponseWriter, r *http.Request, attachment domain.NoteAttachment) {

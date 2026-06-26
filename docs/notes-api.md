@@ -108,7 +108,8 @@ Profile notes are private to the signed-in user unless shared into the Home.
 | --- | --- | --- |
 | `GET` | `/v1/me/notes` | List profile notes. |
 | `POST` | `/v1/me/notes` | Create a profile note. |
-| `GET` | `/v1/me/notes/search?q=<query>&limit=<n>` | Search profile text notes. |
+| `GET` | `/v1/me/notes/search?q=<query>&limit=<n>` | Search profile notes and notebooks. |
+| `GET` | `/v1/me/notes/search?q=<query>&notebook_id=<noteID>` | Search profile notes within one notebook. |
 | `GET` | `/v1/me/notes/tags` | List profile note tag counts. |
 | `GET` | `/v1/me/notes/tag-rollup?tag=<tag>` | List tagged lines across profile notes. |
 | `GET` | `/v1/me/notes/{noteID}` | Fetch one profile note. |
@@ -121,7 +122,8 @@ Profile notes are private to the signed-in user unless shared into the Home.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/home/notes` | List visible shared Home notes. |
-| `GET` | `/v1/home/notes/search?q=<query>&limit=<n>` | Search visible shared Home text notes. |
+| `GET` | `/v1/home/notes/search?q=<query>&limit=<n>` | Search visible shared Home notes and notebooks. |
+| `GET` | `/v1/home/notes/search?q=<query>&notebook_id=<noteID>` | Search visible shared Home notes within one notebook. |
 | `GET` | `/v1/home/notes/tags` | List visible shared Home note tag counts. |
 | `GET` | `/v1/home/notes/tag-rollup?tag=<tag>` | List tagged lines across visible shared Home notes. |
 | `GET` | `/v1/home/notes/{noteID}` | Fetch one visible shared Home note. |
@@ -155,9 +157,9 @@ Fields:
 - `body_markdown`: canonical note body for text notes.
 - `body_format`: defaults to `markdown`.
 - `expected_revision`: optional optimistic concurrency token.
-- `page_type`: `text` or `kanban`; append is only supported for `text`.
+- `page_type`: `text`, `kanban`, or `notebook`; append is only supported for `text`.
 - `board`: kanban board payload when `page_type` is `kanban`.
-- `parent_id` and `sort_order`: optional hierarchy and ordering metadata.
+- `parent_id` and `sort_order`: optional hierarchy and ordering metadata. To place a note in a notebook, set `parent_id` to a note whose `page_type` is `notebook`. Send an empty `parent_id` to move it back out.
 
 Successful saves return:
 
@@ -200,9 +202,13 @@ the route returns `409` with `error: note_append_unsupported`.
 Search routes accept:
 
 - `q` or `query`: search text.
+- `notebook_id` or `parent_id`: optional notebook note ID to search within.
 - `limit`: optional result limit. Invalid negative or non-numeric values return
   `400`; values above `200` are capped to `200`. The default search limit is
   `50`.
+
+Normal search includes notebook titles. Scoped notebook search returns notes
+whose `parent_id` matches the notebook ID.
 
 Search response:
 
@@ -213,6 +219,7 @@ Search response:
       "note_id": "project-plan.md",
       "title": "Project Plan",
       "page_type": "text",
+      "parent_id": "projects",
       "preview": "matching text around the search hit",
       "match_location": 12,
       "line_index": 1

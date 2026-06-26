@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Hank Remote Notes</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260606-mobile-responsive">
+    <link rel="stylesheet" href="/assets/styles.css?v=20260626-notes-renderer">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/hank-icon-192.png">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -38,6 +38,7 @@
           <div class="notes-topbar">
             <div class="notes-search-wrap">
               <input id="note-search" type="search" placeholder="Find notes">
+              <select id="notebook-filter" aria-label="Notebook filter"></select>
             </div>
             <div class="actions wrap">
               <button id="refresh-button" type="button" class="secondary icon-button" aria-label="Refresh notes" title="Refresh notes">
@@ -48,6 +49,7 @@
                   <path d="M5.5 15A7 7 0 0 0 17.8 17.8L20 16"></path>
                 </svg>
               </button>
+              <button id="new-notebook-button" type="button" class="secondary">New Notebook</button>
               <button id="new-button" type="button">New Note</button>
             </div>
           </div>
@@ -58,6 +60,7 @@
           <div class="document-head">
             <input id="note-title" class="document-title" type="text" placeholder="Untitled">
             <div class="document-meta">
+              <select id="note-notebook" aria-label="Notebook"></select>
               <span id="save-state" class="save-state">Saved</span>
               <span id="last-saved">Not saved yet</span>
               <button id="delete-button" type="button" class="ghost">Delete</button>
@@ -87,6 +90,12 @@
             <div id="note-inline-layer" class="note-inline-layer"></div>
             <textarea id="note-content" class="document-editor" rows="24" spellcheck="true" placeholder="Start writing"></textarea>
             <div id="kanban-board" class="kanban-board"></div>
+            <div id="notebook-panel" class="notebook-panel" hidden>
+              <div>
+                <p id="notebook-count" class="notebook-count">0 notes</p>
+              </div>
+              <button id="notebook-new-note-button" type="button">New Note</button>
+            </div>
           </div>
         </section>
       </main>
@@ -96,8 +105,8 @@
 
     <script src="/assets/api-client.js" defer></script>
     <script src="/assets/ui-helpers.js" defer></script>
-    <script src="/assets/profile-notes-editor.js" defer></script>
-    <script src="/assets/profile-notes.js?v=20260531-note-kanban-clipboard" defer></script>
+    <script src="/assets/profile-notes-editor.js?v=20260626-notes-renderer" defer></script>
+    <script src="/assets/profile-notes.js?v=20260626-notes-renderer" defer></script>
     <script src="/assets/admin-nav.js?v=20260606-mobile-responsive" defer></script>
   </body>
 </html>

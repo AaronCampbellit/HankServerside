@@ -23,11 +23,10 @@ type assistantToolRuntime struct {
 }
 
 type assistantTool struct {
-	Kind         assistantIntentKind
-	Description  string
-	Match        func(prompt string) (assistantIntent, bool)
-	RefreshIndex func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent)
-	Execute      func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error)
+	Kind        assistantIntentKind
+	Description string
+	Match       func(prompt string) (assistantIntent, bool)
+	Execute     func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error)
 }
 
 func assistantSlashTool(kind assistantIntentKind, command string, description string, execute func(context.Context, *Server, assistantToolRuntime, assistantIntent) (assistantMessageContent, error)) assistantTool {
@@ -197,23 +196,6 @@ var assistantToolRegistry = []assistantTool{
 			}
 			return assistantIntent{Kind: assistantIntentReadOnlySynthesis, Query: strings.TrimSpace(prompt)}, true
 		},
-		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
-			if runtime.Settings.ProjectDocsEnabled {
-				if err := server.indexAssistantProjectDocs(ctx, runtime.Home.ID, runtime.Auth.User.ID); err != nil {
-					server.logger.Warn("assistant project docs indexing failed", "error", err)
-				}
-			}
-			if runtime.Settings.HomeAssistantEnabled {
-				if err := server.indexAssistantHomeAssistantStates(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
-					server.logger.Warn("assistant Home Assistant indexing failed", "error", err)
-				}
-			}
-			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
-					server.logger.Warn("assistant file indexing failed", "error", err)
-				}
-			}
-		},
 		Execute: executeAssistantReadOnlySynthesisTool,
 	},
 	{
@@ -247,13 +229,6 @@ var assistantToolRegistry = []assistantTool{
 			}
 			return assistantIntent{Kind: assistantIntentProjectDocs, Query: strings.TrimSpace(prompt)}, true
 		},
-		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
-			if runtime.Settings.ProjectDocsEnabled {
-				if err := server.indexAssistantProjectDocs(ctx, runtime.Home.ID, runtime.Auth.User.ID); err != nil {
-					server.logger.Warn("assistant project docs indexing failed", "error", err)
-				}
-			}
-		},
 		Execute: executeAssistantProjectDocsTool,
 	},
 	{
@@ -264,13 +239,6 @@ var assistantToolRegistry = []assistantTool{
 				return assistantIntent{}, false
 			}
 			return assistantIntent{Kind: assistantIntentHomeAssistantQuery, Query: homeAssistantQueryDisplay(prompt)}, true
-		},
-		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
-			if runtime.Settings.HomeAssistantEnabled {
-				if err := server.indexAssistantHomeAssistantStates(ctx, runtime.Home, runtime.Membership, runtime.Auth); err != nil {
-					server.logger.Warn("assistant Home Assistant indexing failed", "error", err)
-				}
-			}
 		},
 		Execute: executeAssistantHomeAssistantQueryTool,
 	},
@@ -317,13 +285,6 @@ var assistantToolRegistry = []assistantTool{
 			}
 			return assistantIntent{Kind: assistantIntentFilesCreateFolder, Query: parseCreateFolderPath(prompt)}, true
 		},
-		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
-			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
-					server.logger.Warn("assistant file indexing failed", "error", err)
-				}
-			}
-		},
 		Execute: executeAssistantFilesCreateFolderTool,
 	},
 	{
@@ -335,13 +296,6 @@ var assistantToolRegistry = []assistantTool{
 			}
 			return assistantIntent{Kind: assistantIntentFilesListFolder, Query: fileFolderQuery(prompt)}, true
 		},
-		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
-			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
-					server.logger.Warn("assistant file indexing failed", "error", err)
-				}
-			}
-		},
 		Execute: executeAssistantFilesListFolderTool,
 	},
 	{
@@ -352,13 +306,6 @@ var assistantToolRegistry = []assistantTool{
 				return assistantIntent{}, false
 			}
 			return assistantIntent{Kind: assistantIntentFilesSearch, Query: fileQuery(prompt)}, true
-		},
-		RefreshIndex: func(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) {
-			if runtime.Settings.FilesEnabled {
-				if err := server.indexAssistantFiles(ctx, runtime.Home, runtime.Membership, runtime.Auth, runtime.Settings); err != nil {
-					server.logger.Warn("assistant file indexing failed", "error", err)
-				}
-			}
 		},
 		Execute: executeAssistantFilesSearchTool,
 	},

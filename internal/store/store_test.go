@@ -308,6 +308,44 @@ func TestPruneLifecycleRemovesExpiredOperationalRows(t *testing.T) {
 	assertNoRowsStore(t, db, ctx, "note attachment row", `SELECT 1 FROM note_attachments WHERE id = ?`, "natt_old")
 }
 
+func TestListAuditEventsSortsBoundedResults(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_audit_sort", Email: "audit-sort@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_audit_sort", UserID: user.ID, Name: "Audit Sort Home", CreatedAt: now, UpdatedAt: now}
+	mustStore(t, db.CreateUser(ctx, user))
+	mustStore(t, db.CreateHome(ctx, home))
+
+	for _, event := range []AuditEvent{
+		{ID: "audit_sort_b", OccurredAt: now.Add(-time.Minute), ActorUserID: &user.ID, HomeID: &home.ID, EventType: "download.failed", Severity: "warning", TargetType: "file_transfer", TargetID: "b", MetadataJSON: "{}"},
+		{ID: "audit_sort_a", OccurredAt: now, ActorUserID: &user.ID, HomeID: &home.ID, EventType: "app_package.preview_failed", Severity: "warning", TargetType: "app_package", TargetID: "a", MetadataJSON: "{}"},
+		{ID: "audit_sort_c", OccurredAt: now.Add(-2 * time.Minute), ActorUserID: &user.ID, HomeID: &home.ID, EventType: "upload.failed", Severity: "critical", TargetType: "file_transfer", TargetID: "c", MetadataJSON: "{}"},
+	} {
+		mustStore(t, db.CreateAuditEvent(ctx, event))
+	}
+
+	byType, err := db.ListAuditEvents(ctx, home.ID, "", "", "", 10, "event_type", "asc")
+	if err != nil {
+		t.Fatalf("ListAuditEvents by event_type: %v", err)
+	}
+	if got := []string{byType[0].EventType, byType[1].EventType, byType[2].EventType}; strings.Join(got, ",") != "app_package.preview_failed,download.failed,upload.failed" {
+		t.Fatalf("event_type sort = %v", got)
+	}
+
+	fallback, err := db.ListAuditEvents(ctx, home.ID, "", "", "", 10, "metadata_json", "sideways")
+	if err != nil {
+		t.Fatalf("ListAuditEvents fallback: %v", err)
+	}
+	if fallback[0].ID != "audit_sort_a" || fallback[1].ID != "audit_sort_b" || fallback[2].ID != "audit_sort_c" {
+		t.Fatalf("fallback sort IDs = %s, %s, %s; want newest first", fallback[0].ID, fallback[1].ID, fallback[2].ID)
+	}
+}
+
 func mustStore(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

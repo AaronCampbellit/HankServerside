@@ -104,6 +104,50 @@ func TestListAndFetchIncludeKanbanMetadata(t *testing.T) {
 	}
 }
 
+func TestListAndFetchIncludeNotebookMetadata(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+
+	save, err := service.Save(context.Background(), "", "Projects", "", "", protocol.NotePageTypeNotebook, nil)
+	if err != nil {
+		t.Fatalf("Save notebook: %v", err)
+	}
+	if save.PageType != protocol.NotePageTypeNotebook {
+		t.Fatalf("Save page type = %q, want %q", save.PageType, protocol.NotePageTypeNotebook)
+	}
+
+	notes, err := service.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("List len = %d, want 1", len(notes))
+	}
+	if notes[0].PageType != protocol.NotePageTypeNotebook {
+		t.Fatalf("List page type = %q, want %q", notes[0].PageType, protocol.NotePageTypeNotebook)
+	}
+
+	fetch, err := service.Fetch(context.Background(), save.NoteID)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if fetch.PageType != protocol.NotePageTypeNotebook || fetch.Title != "Projects" {
+		t.Fatalf("Fetch page type/title = %q/%q, want notebook/Projects", fetch.PageType, fetch.Title)
+	}
+	if fetch.Content != "" {
+		t.Fatalf("Fetch content = %q, want empty notebook body", fetch.Content)
+	}
+
+	results, err := service.Search(context.Background(), "projects", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].NoteID != save.NoteID || results[0].PageType != protocol.NotePageTypeNotebook {
+		t.Fatalf("Search results = %#v, want notebook title hit", results)
+	}
+}
+
 func TestSearchTagsAndRollupsUseTextNotesOnly(t *testing.T) {
 	t.Parallel()
 
