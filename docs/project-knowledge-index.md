@@ -8,9 +8,9 @@ Layout at a glance:
 - **Active reference docs** live flat in `docs/`.
 - **Operator runbooks** live in `docs/runbooks/`.
 - **Hank app (client) integration** docs live in `docs/app-integration/`.
-- **Historical material** (completed or superseded phases, dated audits,
-  implemented designs, finished plans/tasklists) lives under `docs/archive/`
-  and should not be read as current guidance.
+- Completed or superseded plans, audits, designs, and tasklists are removed from
+  the active docs tree once their durable guidance has been folded into the
+  files below.
 
 ## Root Documents
 
@@ -64,27 +64,16 @@ app-side work.
 
 - [PWA/current-scope.md](PWA/current-scope.md): records that Hank Remote intentionally serves no standalone PWA, and the conditions for any future mobile-web work.
 
-## Removed Historical Phase Docs
+## Removed Historical Docs
 
-The phase-era implementation plans and per-phase tasklists from the initial build
-were completed or superseded and have been removed from the active documentation
+Phase-era implementation plans, dated audits, completed route parity checklists,
+and superseded design/task docs have been removed from the active documentation
 tree. Current setup, operator, and repair guidance lives in the deployment docs,
-runbooks, and production repair plan.
-
-## Archive (`archive/`) — historical only
-
-Everything below is retained for implementation context and traceability. It is
-**not** current setup, operator, or repair guidance — use the active docs above.
-See [archive/README.md](archive/README.md) for the full archive map.
-
-- **archive/audits**: dated point-in-time audits (backend architecture, legacy code, the 2026-06-06 cleanup snapshot).
-- **archive/designs**: implemented or superseded design specs (installable agent apps, invite/password reset, redacted settings recovery, first-party app platform readiness, HankAI local-model eval harness).
-- **archive/plans**: completed or superseded implementation plans and one-off tasklists (app platform readiness, HankAI eval harness, HankAI chat-tool/intents plans, the Codex production-readiness task pass).
+runbooks, security hardening note, and production repair plan.
 
 ## HankAI Indexing
 
 HankAI indexes root markdown files and every markdown file under `docs/` as the
-`Project docs` source, including `docs/archive/`; archived paths are flagged as
-historical so they rank below active docs. The cloud Docker image copies these
-files into `/app`, and local development defaults to the repo root. Override with
+`Project docs` source. The cloud Docker image copies these files into `/app`,
+and local development defaults to the repo root. Override with
 `HANK_REMOTE_PROJECT_DOCS_DIR` if the markdown lives elsewhere.

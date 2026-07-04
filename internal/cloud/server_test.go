@@ -280,9 +280,7 @@ func TestLoginPageIsServed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("login body read: %v", err)
 	}
-	if !strings.Contains(string(body), "Hank Remote Login") {
-		t.Fatalf("login body missing title: %s", string(body))
-	}
+	assertReactShell(t, "/", string(body))
 }
 
 func TestRegistrationDisabledAfterFirstAdminBootstrap(t *testing.T) {
@@ -374,6 +372,7 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/settings/apps",
 		"/dashboard/settings/logs",
 		"/dashboard/settings/join-home",
+		"/dashboard/not-a-route",
 	}
 
 	for _, routePath := range paths {
@@ -516,6 +515,18 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 	}
 	settingsResponse.Body.Close()
 
+	unknownResponse := requestDashboardPage(t, testServer, "/dashboard/not-a-route", "member-token")
+	if unknownResponse.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(unknownResponse.Body)
+		unknownResponse.Body.Close()
+		t.Fatalf("member unknown dashboard route status = %d, want %d body=%s", unknownResponse.StatusCode, http.StatusOK, string(data))
+	}
+	unknownBody, _ := io.ReadAll(unknownResponse.Body)
+	unknownResponse.Body.Close()
+	if !strings.Contains(string(unknownBody), `<div id="root"></div>`) {
+		t.Fatalf("member unknown dashboard route should serve React shell: %s", string(unknownBody))
+	}
+
 	storageResponse := requestDashboardPage(t, testServer, "/dashboard/settings/backups", "member-token")
 	if storageResponse.StatusCode != http.StatusForbidden {
 		data, _ := io.ReadAll(storageResponse.Body)
@@ -568,29 +579,27 @@ func TestCanonicalSettingsRoutesAreServed(t *testing.T) {
 	testServer := httptest.NewServer(server.http.Handler)
 	defer testServer.Close()
 
-	routes := map[string]string{
-		"/dashboard/settings":             "Hank Remote Settings",
-		"/dashboard/settings/home":        "Hank Remote Home Settings",
-		"/dashboard/settings/quick-links": "Hank Remote Quick Link Settings",
-		"/dashboard/settings/people":      "Hank Remote People Settings",
-		"/dashboard/settings/connections": "Hank Remote Connection Settings",
-		"/dashboard/settings/ai":          "Hank Remote AI Settings",
-		"/dashboard/settings/apps":        "Hank Remote Apps",
-		"/dashboard/settings/backups":     "Hank Remote Storage",
-		"/dashboard/settings/recovery":    "Hank Remote Recovery",
-		"/dashboard/settings/logs":        "Hank Remote Logs",
-		"/dashboard/settings/join-home":   "Hank Remote Join Home",
+	routes := []string{
+		"/dashboard/settings",
+		"/dashboard/settings/home",
+		"/dashboard/settings/quick-links",
+		"/dashboard/settings/people",
+		"/dashboard/settings/connections",
+		"/dashboard/settings/ai",
+		"/dashboard/settings/apps",
+		"/dashboard/settings/backups",
+		"/dashboard/settings/recovery",
+		"/dashboard/settings/logs",
+		"/dashboard/settings/join-home",
 	}
-	for routePath, title := range routes {
+	for _, routePath := range routes {
 		response := requestDashboardPage(t, testServer, routePath, "settings-token")
 		data, _ := io.ReadAll(response.Body)
 		response.Body.Close()
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("%s status = %d body=%s", routePath, response.StatusCode, string(data))
 		}
-		if !strings.Contains(string(data), "<title>"+title+"</title>") {
-			t.Fatalf("%s missing title %q", routePath, title)
-		}
+		assertReactShell(t, routePath, string(data))
 	}
 }
 
@@ -629,623 +638,96 @@ func TestCanonicalSettingsRoutesAreRegistered(t *testing.T) {
 	}
 }
 
-func TestDashboardStorageLinksAreAdminOnly(t *testing.T) {
+func TestReactBuiltAssetsAreServed(t *testing.T) {
 	t.Parallel()
 
-	pages := []string{
-		"dashboard.html",
-		"hank.html",
-		"home-assistant.html",
-		"settings.html",
-		"settings-connections.html",
-		"apps.html",
-		"profile-notes.html",
-		"file-server.html",
-	}
-	for _, page := range pages {
-		data, err := fs.ReadFile(uiAssets, "ui/"+page)
-		if err != nil {
-			t.Fatalf("%s read: %v", page, err)
-		}
-		body := string(data)
-		if strings.Contains(body, `>Overview<`) || strings.Contains(body, `>Status<`) {
-			t.Fatalf("%s still exposes old overview/status navigation", page)
-		}
-		if strings.Contains(body, `class="lede"`) {
-			t.Fatalf("%s should not render a hero subtitle", page)
-		}
-		if strings.Contains(body, `href="/dashboard/settings/backups"`) && !strings.Contains(body, `href="/dashboard/settings/backups" data-admin-only="true" hidden`) {
-			t.Fatalf("%s backup settings links must be admin-only", page)
-		}
-		adminScriptStart := strings.Index(body, `src="/assets/admin-nav.js`)
-		if adminScriptStart == -1 {
-			t.Fatalf("%s missing admin nav visibility script", page)
-		}
-		adminScriptEnd := strings.Index(body[adminScriptStart:], ">")
-		if adminScriptEnd == -1 || !strings.Contains(body[adminScriptStart:adminScriptStart+adminScriptEnd], "defer") {
-			t.Fatalf("%s admin nav visibility script is not deferred", page)
-		}
-	}
-
-	if _, err := fs.ReadFile(uiAssets, "ui/admin-nav.js"); err != nil {
-		t.Fatalf("admin-nav.js read: %v", err)
-	}
-	nav, err := fs.ReadFile(uiAssets, "ui/admin-nav.js")
+	entries, err := fs.ReadDir(uiAssets, "ui/react/assets")
 	if err != nil {
-		t.Fatalf("admin-nav.js read: %v", err)
+		t.Fatalf("read react assets: %v", err)
 	}
-	navBody := string(nav)
-	if strings.Contains(navBody, `label: "Overview"`) || strings.Contains(navBody, `label: "Status"`) {
-		t.Fatal("admin nav still registers old overview/status entries")
-	}
-	if !strings.Contains(navBody, `href: "/dashboard/settings/backups"`) || !strings.Contains(navBody, `adminOnly: true`) {
-		t.Fatal("admin nav must expose backup settings as an admin-only search result")
-	}
-	if !strings.Contains(navBody, `href: "/dashboard/settings/recovery"`) || !strings.Contains(navBody, `adminOnly: true`) {
-		t.Fatal("admin nav must expose recovery settings as an admin-only search result")
-	}
-	if !strings.Contains(navBody, `href: "/dashboard/settings/apps"`) || !strings.Contains(navBody, `adminOnly: true`) {
-		t.Fatal("admin nav must expose app settings as an admin-only search result")
-	}
-	if !strings.Contains(navBody, `href: "/dashboard/settings/logs"`) || !strings.Contains(navBody, `adminOnly: true`) {
-		t.Fatal("admin nav must expose logs settings as an admin-only search result")
-	}
-	if strings.Contains(navBody, `<span>Search Settings</span>`) || strings.Contains(navBody, `placeholder="Search settings"`) || !strings.Contains(navBody, `aria-label="Search"`) {
-		t.Fatal("admin nav search should use a short placeholder and aria label without a visible title")
-	}
-	if strings.Contains(navBody, `sidebar-nav-group`) {
-		t.Fatal("admin nav should not render visible group labels")
-	}
-	request := httptest.NewRequest(http.MethodGet, "/assets/admin-nav.js", nil)
-	response := httptest.NewRecorder()
-	serveUIAsset(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("admin-nav.js asset status = %d, want %d", response.Code, http.StatusOK)
-	}
-	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
-		t.Fatalf("admin-nav.js content-type = %q", contentType)
-	}
-}
-
-func TestDashboardNavigationDoesNotUseContentIframe(t *testing.T) {
-	t.Parallel()
-
-	nav, err := fs.ReadFile(uiAssets, "ui/admin-nav.js")
-	if err != nil {
-		t.Fatalf("admin-nav.js read: %v", err)
-	}
-	navBody := string(nav)
-	for _, forbidden := range []string{
-		"function ensureDashboardFrame",
-		"dashboard-content-frame",
-		"embeddedURL(",
-		"installEmbeddedMode",
-		`url.searchParams.set("embedded", "1")`,
-		`window.history.pushState({ dashboardURL`,
-	} {
-		if strings.Contains(navBody, forbidden) {
-			t.Fatalf("admin-nav.js still uses iframe navigation marker %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		"installDashboardShell",
-		"installSettingsSearch",
-		"applyAdminVisibility",
-	} {
-		if !strings.Contains(navBody, required) {
-			t.Fatalf("admin-nav.js lost shared dashboard shell behavior %q", required)
-		}
-	}
-
-	styles, err := fs.ReadFile(uiAssets, "ui/styles.css")
-	if err != nil {
-		t.Fatalf("styles.css read: %v", err)
-	}
-	styleBody := string(styles)
-	for _, forbidden := range []string{".dashboard-content-frame", ".dashboard-frame-main"} {
-		if strings.Contains(styleBody, forbidden) {
-			t.Fatalf("styles.css still has dashboard iframe style %q", forbidden)
-		}
-	}
-}
-
-func TestSettingsNavigationIncludesAdminRecoveryAndAppsRoutes(t *testing.T) {
-	t.Parallel()
-
-	data, err := fs.ReadFile(uiAssets, "ui/settings-nav.js")
-	if err != nil {
-		t.Fatalf("settings-nav.js read: %v", err)
-	}
-	body := string(data)
-	for _, required := range []string{
-		`{ href: "/dashboard/settings/apps", label: "Apps", adminOnly: true }`,
-		`{ href: "/dashboard/settings/backups", label: "Backups", adminOnly: true }`,
-		`{ href: "/dashboard/settings/recovery", label: "Recovery", adminOnly: true }`,
-		`{ href: "/dashboard/settings/logs", label: "Logs", adminOnly: true }`,
-		`window.location.replace("/dashboard/settings/home")`,
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("settings-nav.js missing admin route marker %q", required)
-		}
-	}
-
-	for _, asset := range []string{"recovery.html", "recovery.js", "apps.html", "apps.js", "settings-logs.html", "settings-logs.js"} {
-		if _, err := fs.ReadFile(uiAssets, "ui/"+asset); err != nil {
-			t.Fatalf("%s read: %v", asset, err)
-		}
-	}
-	logs, err := fs.ReadFile(uiAssets, "ui/settings-logs.js")
-	if err != nil {
-		t.Fatalf("settings-logs.js read: %v", err)
-	}
-	if !strings.Contains(string(logs), "event.helper_text") {
-		t.Fatal("settings-logs.js should render audit helper text")
-	}
-	for _, assetPath := range []string{"/assets/recovery.js", "/assets/apps.js", "/assets/settings-logs.js"} {
-		request := httptest.NewRequest(http.MethodGet, assetPath, nil)
-		response := httptest.NewRecorder()
-		serveUIAsset(response, request)
-		if response.Code != http.StatusOK {
-			t.Fatalf("%s asset status = %d, want %d", assetPath, response.Code, http.StatusOK)
-		}
-	}
-}
-
-func TestSettingsPagesDoNotUsePaneIframes(t *testing.T) {
-	t.Parallel()
-
-	settingsPages := []string{
-		"settings.html",
-		"settings-home.html",
-		"settings-quick-links.html",
-		"home-users.html",
-		"settings-connections.html",
-		"assistant-settings.html",
-		"apps.html",
-		"storage.html",
-		"recovery.html",
-		"accept-invitation.html",
-	}
-	for _, page := range settingsPages {
-		data, err := fs.ReadFile(uiAssets, "ui/"+page)
-		if err != nil {
-			t.Fatalf("%s read: %v", page, err)
-		}
-		body := string(data)
-		for _, forbidden := range []string{
-			`class="settings-pane-frame"`,
-			`data-src="/dashboard`,
-			`?embedded=1`,
-			`data-settings-page-panel`,
-		} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s still uses Settings iframe marker %q", page, forbidden)
-			}
-		}
-		if !strings.Contains(body, `<script src="/assets/settings-nav.js" defer></script>`) {
-			t.Fatalf("%s missing shared settings-nav.js", page)
-		}
-	}
-
-	request := httptest.NewRequest(http.MethodGet, "/assets/settings-nav.js", nil)
-	response := httptest.NewRecorder()
-	serveUIAsset(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("settings-nav.js asset status = %d, want %d", response.Code, http.StatusOK)
-	}
-}
-
-func TestSettingsRouteUsesSharedDashboardShellWithoutNavigationOverride(t *testing.T) {
-	t.Parallel()
-
-	data, err := fs.ReadFile(uiAssets, "ui/admin-nav.js")
-	if err != nil {
-		t.Fatalf("admin-nav.js read: %v", err)
-	}
-	body := string(data)
-	for _, required := range []string{
-		"function installRouteStateSync",
-		"setActiveShellPage(new URL(link.href, window.location.origin))",
-		"setActiveShellPage(new URL(window.location.href))",
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("admin-nav.js missing normal dashboard navigation marker %q", required)
-		}
-	}
-	for _, forbidden := range []string{
-		"function isStandaloneDashboardRoute",
-		"window.location.assign",
-		"event.preventDefault();\n      navigateDashboardFrame",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("admin-nav.js still has dashboard navigation override marker %q", forbidden)
-		}
-	}
-}
-
-func TestSettingsLandingLinksToCanonicalRoutes(t *testing.T) {
-	t.Parallel()
-
-	data, err := fs.ReadFile(uiAssets, "ui/settings.html")
-	if err != nil {
-		t.Fatalf("settings.html read: %v", err)
-	}
-	body := string(data)
-	for _, required := range []string{
-		`<div data-settings-nav></div>`,
-		`href="/dashboard/settings/home"`,
-		`href="/dashboard/settings/connections"`,
-		`href="/dashboard/settings/apps"`,
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("settings.html missing %q", required)
-		}
-	}
-}
-
-func TestSettingsNavGatesAdminRoutes(t *testing.T) {
-	t.Parallel()
-
-	data, err := fs.ReadFile(uiAssets, "ui/settings-nav.js")
-	if err != nil {
-		t.Fatalf("settings-nav.js read: %v", err)
-	}
-	body := string(data)
-	for _, required := range []string{
-		`const adminRoutes = ["/dashboard/settings/apps", "/dashboard/settings/backups", "/dashboard/settings/recovery", "/dashboard/settings/logs"]`,
-		`.filter((page) => !page.adminOnly || canViewAdmin)`,
-		`current?.role === "admin"`,
-		`adminRoutes.includes(window.location.pathname)`,
-	} {
-		if !strings.Contains(body, required) {
-			t.Fatalf("settings-nav.js missing admin route gate marker %q", required)
-		}
-	}
-
-	nav, err := fs.ReadFile(uiAssets, "ui/admin-nav.js")
-	if err != nil {
-		t.Fatalf("admin-nav.js read: %v", err)
-	}
-	if strings.Contains(string(nav), `data-settings-page-panel`) {
-		t.Fatal("admin-nav.js should not preserve Settings pane visibility exceptions")
-	}
-}
-
-func TestSettingsConnectionsDoesNotRequireMissingHermesForm(t *testing.T) {
-	t.Parallel()
-
-	html, err := fs.ReadFile(uiAssets, "ui/settings-connections.html")
-	if err != nil {
-		t.Fatalf("settings-connections.html read: %v", err)
-	}
-	script, err := fs.ReadFile(uiAssets, "ui/settings-connections.js")
-	if err != nil {
-		t.Fatalf("settings-connections.js read: %v", err)
-	}
-	hasHermesForm := strings.Contains(string(html), `id="hermes-form"`)
-	body := string(script)
-	if !hasHermesForm && strings.Contains(body, `els.hermesForm.querySelectorAll`) {
-		t.Fatal("settings-connections.js must not require a missing Hermes form")
-	}
-	if !strings.Contains(body, `els.hermesForm?.querySelectorAll`) {
-		t.Fatal("settings-connections.js should guard optional Hermes form controls")
-	}
-}
-
-func TestSettingsHomeAndQuickLinksDoNotReuseDashboardPaneMode(t *testing.T) {
-	t.Parallel()
-
-	dashboardHTML, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
-	if err != nil {
-		t.Fatalf("dashboard.html read: %v", err)
-	}
-	dashboardJS, err := fs.ReadFile(uiAssets, "ui/dashboard.js")
-	if err != nil {
-		t.Fatalf("dashboard.js read: %v", err)
-	}
-	for _, body := range []string{string(dashboardHTML), string(dashboardJS)} {
-		for _, forbidden := range []string{"pane=1", "isSettingsHomePane", "settings-home-pane"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("dashboard still has Settings pane coupling %q", forbidden)
-			}
-		}
-	}
-
-	for _, asset := range []string{"settings-home.html", "settings-home.js", "settings-quick-links.html", "settings-quick-links.js"} {
-		if _, err := fs.ReadFile(uiAssets, "ui/"+asset); err != nil {
-			t.Fatalf("%s read: %v", asset, err)
-		}
-	}
-}
-
-func TestDashboardHasNoAppNavigationIframes(t *testing.T) {
-	t.Parallel()
-
-	entries, err := fs.ReadDir(uiAssets, "ui")
-	if err != nil {
-		t.Fatalf("read ui assets: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
-			continue
-		}
-		data, err := fs.ReadFile(uiAssets, "ui/"+entry.Name())
-		if err != nil {
-			t.Fatalf("%s read: %v", entry.Name(), err)
-		}
-		body := string(data)
-		if strings.Contains(body, "settings-pane-frame") || strings.Contains(body, "dashboard-content-frame") || strings.Contains(body, "?embedded=1") {
-			t.Fatalf("%s still has app-navigation iframe marker", entry.Name())
-		}
-	}
-
-	for _, asset := range []string{"admin-nav.js", "settings.js", "styles.css"} {
-		data, err := fs.ReadFile(uiAssets, "ui/"+asset)
-		if err != nil {
-			t.Fatalf("%s read: %v", asset, err)
-		}
-		body := string(data)
-		for _, forbidden := range []string{"settings-pane-frame", "dashboard-content-frame", "embedded-dashboard", "ResizeObserver", "frame.contentWindow"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s still has iframe navigation marker %q", asset, forbidden)
-			}
-		}
-	}
-}
-
-func TestDashboardPagesUseSharedAPIClient(t *testing.T) {
-	t.Parallel()
-
-	entries, err := fs.ReadDir(uiAssets, "ui")
-	if err != nil {
-		t.Fatalf("read ui assets: %v", err)
-	}
+	found := 0
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
-		data, err := fs.ReadFile(uiAssets, "ui/"+name)
-		if err != nil {
-			t.Fatalf("%s read: %v", name, err)
+		if !strings.HasSuffix(name, ".js") && !strings.HasSuffix(name, ".css") {
+			continue
 		}
-		body := string(data)
+		request := httptest.NewRequest(http.MethodGet, "/assets/"+name, nil)
+		response := httptest.NewRecorder()
+		serveUIAsset(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s asset status = %d, want %d", name, response.Code, http.StatusOK)
+		}
+		contentType := response.Header().Get("Content-Type")
 		switch {
-		case strings.HasSuffix(name, ".html") && strings.Contains(body, `<script src="/assets/`):
-			apiIndex := strings.Index(body, `<script src="/assets/api-client.js"`)
-			if apiIndex == -1 {
-				t.Fatalf("%s missing shared api-client.js", name)
-			}
-			if firstScript := strings.Index(body, `<script src="/assets/`); firstScript != apiIndex {
-				t.Fatalf("%s should load api-client.js before page scripts", name)
-			}
 		case strings.HasSuffix(name, ".js"):
-			for _, forbidden := range []string{`async function api(`, `function api(`, `async function apiJSON(`, `function apiJSON(`, `apiJSON(`, "\n) {\n", `const headers = new Headers(options.headers || {})`} {
-				if name == "api-client.js" && forbidden == `const headers = new Headers(options.headers || {})` {
-					continue
-				}
-				if strings.Contains(body, forbidden) {
-					t.Fatalf("%s reintroduced local dashboard API helper %q", name, forbidden)
-				}
+			if !strings.Contains(contentType, "application/javascript") {
+				t.Fatalf("%s content-type = %q", name, contentType)
+			}
+		case strings.HasSuffix(name, ".css"):
+			if !strings.Contains(contentType, "text/css") {
+				t.Fatalf("%s content-type = %q", name, contentType)
 			}
 		}
+		found++
 	}
-
-	request := httptest.NewRequest(http.MethodGet, "/assets/api-client.js", nil)
-	response := httptest.NewRecorder()
-	serveUIAsset(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("api-client.js asset status = %d, want %d", response.Code, http.StatusOK)
-	}
-	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
-		t.Fatalf("api-client.js content-type = %q", contentType)
+	if found == 0 {
+		t.Fatal("expected at least one built React JS or CSS asset")
 	}
 }
 
-func TestDashboardPagesLoadSharedUIHelpers(t *testing.T) {
+func TestLegacyDashboardPageAssetsAreNotServedAfterReactCutover(t *testing.T) {
 	t.Parallel()
-
-	entries, err := fs.ReadDir(uiAssets, "ui")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".html") {
-			continue
-		}
-		data, err := fs.ReadFile(uiAssets, "ui/"+name)
-		if err != nil {
-			t.Fatalf("%s read: %v", name, err)
-		}
-		body := string(data)
-		if !strings.Contains(body, `<script src="/assets/api-client.js"`) {
-			continue
-		}
-		apiIndex := strings.Index(body, `<script src="/assets/api-client.js"`)
-		helpersIndex := strings.Index(body, `<script src="/assets/ui-helpers.js"`)
-		if helpersIndex == -1 {
-			t.Fatalf("%s missing shared ui-helpers.js", name)
-		}
-		if helpersIndex < apiIndex {
-			t.Fatalf("%s loads ui-helpers.js before api-client.js", name)
-		}
-	}
-
-	request := httptest.NewRequest(http.MethodGet, "/assets/ui-helpers.js", nil)
-	response := httptest.NewRecorder()
-	serveUIAsset(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("ui-helpers.js asset status = %d, want %d", response.Code, http.StatusOK)
-	}
-	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
-		t.Fatalf("ui-helpers.js content-type = %q", contentType)
-	}
-}
-
-func TestLargeDashboardPagesLoadHelperModules(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string][]string{
-		"file-server.html": {
-			`<script src="/assets/file-server-utils.js" defer></script>`,
-			`<script src="/assets/file-server-preview.js" defer></script>`,
-			`<script src="/assets/file-server.js`,
-		},
-		"profile-notes.html": {
-			`<script src="/assets/profile-notes-editor.js" defer></script>`,
-			`<script src="/assets/profile-notes.js`,
-		},
-		"hank.html": {
-			`<script src="/assets/hank-renderers.js" defer></script>`,
-			`<script src="/assets/hank.js`,
-		},
-	}
-	for htmlName, requiredScripts := range cases {
-		data, err := fs.ReadFile(uiAssets, "ui/"+htmlName)
-		if err != nil {
-			t.Fatalf("%s read: %v", htmlName, err)
-		}
-		body := string(data)
-		previousIndex := strings.Index(body, `<script src="/assets/ui-helpers.js"`)
-		if previousIndex == -1 {
-			t.Fatalf("%s missing ui-helpers.js before page helper modules", htmlName)
-		}
-		for _, script := range requiredScripts {
-			index := strings.Index(body, script)
-			if index == -1 {
-				t.Fatalf("%s missing %s", htmlName, script)
-			}
-			if index < previousIndex {
-				t.Fatalf("%s loads %s before ui-helpers.js", htmlName, script)
-			}
-			previousIndex = index
-		}
-	}
 
 	for _, assetPath := range []string{
-		"/assets/file-server-utils.js",
-		"/assets/file-server-preview.js",
-		"/assets/profile-notes-editor.js",
-		"/assets/hank-renderers.js",
+		"/assets/admin-nav.js",
+		"/assets/api-client.js",
+		"/assets/apps.js",
+		"/assets/assistant-settings.js",
+		"/assets/dashboard.js",
+		"/assets/file-server.js",
+		"/assets/hank.js",
+		"/assets/home-assistant.js",
+		"/assets/login.js",
+		"/assets/profile-notes.js",
+		"/assets/settings-nav.js",
+		"/assets/settings.js",
+		"/assets/storage.js",
+		"/assets/styles.css",
+		"/assets/ui-helpers.js",
 	} {
 		request := httptest.NewRequest(http.MethodGet, assetPath, nil)
 		response := httptest.NewRecorder()
 		serveUIAsset(response, request)
-		if response.Code != http.StatusOK {
-			t.Fatalf("%s asset status = %d, want %d", assetPath, response.Code, http.StatusOK)
-		}
-		if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "application/javascript") {
-			t.Fatalf("%s content-type = %q", assetPath, contentType)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s asset status = %d, want %d", assetPath, response.Code, http.StatusNotFound)
 		}
 	}
 }
 
-func TestHomeAssistantDashboardTilesUseProfileSettings(t *testing.T) {
+func TestPublicReactAppRoutesAreServed(t *testing.T) {
 	t.Parallel()
 
-	script, err := fs.ReadFile(uiAssets, "ui/home-assistant.js")
-	if err != nil {
-		t.Fatalf("read home-assistant.js: %v", err)
-	}
-	body := string(script)
-	for _, expected := range []string{
-		`api("/v1/me/profile")`,
-		`api("/v1/me/profile", {`,
-		`dashboard_tiles`,
-		`expected_revision: state.profileRevision > 0 ? state.profileRevision : null`,
-		`is_enabled: true`,
-	} {
-		if !strings.Contains(body, expected) {
-			t.Fatalf("home-assistant.js missing profile-backed dashboard contract %q", expected)
-		}
-	}
-	for _, forbidden := range []string{
-		`hank-homeassistant-dashboard`,
-		`localStorage.getItem`,
-		`localStorage.setItem`,
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("home-assistant.js should not store dashboard tiles in browser local storage: found %q", forbidden)
-		}
-	}
-}
+	db := storeForTest(t)
+	defer db.Close()
 
-func TestInstallableAppUIIsPackageDriven(t *testing.T) {
-	t.Parallel()
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
 
-	hankScript, err := fs.ReadFile(uiAssets, "ui/hank.js")
-	if err != nil {
-		t.Fatalf("read hank.js: %v", err)
-	}
-	hank := string(hankScript)
-	for _, expected := range []string{`api("/v1/home/apps")`, `appSlashCommands`, `builtinSlashCommands`} {
-		if !strings.Contains(hank, expected) {
-			t.Fatalf("hank.js missing package-driven slash command marker %q", expected)
-		}
-	}
-	for _, forbidden := range []string{`command: "/gramaton"`, `command: "/Hermes"`} {
-		if strings.Contains(hank, forbidden) {
-			t.Fatalf("hank.js should not hardcode installable app slash command %q", forbidden)
-		}
-	}
-
-	for _, asset := range []string{"ui/settings-connections.html", "ui/settings-connections.js", "ui/assistant-settings.html", "ui/assistant-settings.js"} {
-		data, err := fs.ReadFile(uiAssets, asset)
+	for _, routePath := range []string{"/", "/join"} {
+		response, err := http.Get(testServer.URL + routePath)
 		if err != nil {
-			t.Fatalf("read %s: %v", asset, err)
+			t.Fatalf("%s request: %v", routePath, err)
 		}
-		body := string(data)
-		for _, forbidden := range []string{"Hermes Agent", "hermes-form", "Save Hermes", "Enable Gramaton source", "media-gramaton", "Media Downloads", "Agent setup needed"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s should not contain legacy installable app UI marker %q", asset, forbidden)
-			}
+		data, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", routePath, response.StatusCode, string(data))
 		}
-	}
-}
-
-func TestUIPagesDoNotRenderHeroSubtitles(t *testing.T) {
-	t.Parallel()
-
-	entries, err := fs.ReadDir(uiAssets, "ui")
-	if err != nil {
-		t.Fatalf("read ui assets: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
-			continue
-		}
-		data, err := fs.ReadFile(uiAssets, "ui/"+entry.Name())
-		if err != nil {
-			t.Fatalf("%s read: %v", entry.Name(), err)
-		}
-		if strings.Contains(string(data), `class="lede"`) {
-			t.Fatalf("%s should not render a hero subtitle", entry.Name())
-		}
-	}
-}
-
-func TestUIPagesDoNotLinkInstallManifests(t *testing.T) {
-	t.Parallel()
-
-	entries, err := fs.ReadDir(uiAssets, "ui")
-	if err != nil {
-		t.Fatalf("read ui assets: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
-			continue
-		}
-		data, err := fs.ReadFile(uiAssets, "ui/"+entry.Name())
-		if err != nil {
-			t.Fatalf("%s read: %v", entry.Name(), err)
-		}
-		body := string(data)
-		for _, forbidden := range []string{`rel="manifest"`, "serviceWorker"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("%s should not include install-app behavior %q", entry.Name(), forbidden)
-			}
-		}
+		assertReactShell(t, routePath, string(data))
 	}
 }
 
@@ -1302,238 +784,6 @@ func TestPWARemovalIsDocumented(t *testing.T) {
 			if !strings.Contains(body, expected) {
 				t.Fatalf("%s missing %q", path, expected)
 			}
-		}
-	}
-}
-
-func TestSettingsHomeAndQuickLinksRoutesExistDuringSplit(t *testing.T) {
-	t.Parallel()
-
-	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
-	if err != nil {
-		t.Fatalf("dashboard.html read: %v", err)
-	}
-	body := string(dashboard)
-	for _, forbidden := range []string{`id="setup-file-panel"`, `id="home-form"`, `id="quick-link-form"`} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("dashboard should not keep Settings edit form %q", forbidden)
-		}
-	}
-	if !strings.Contains(body, `id="quick-links-panel"`) {
-		t.Fatal("dashboard home should include quick links")
-	}
-
-	for _, page := range []string{"settings-home.html", "settings-quick-links.html"} {
-		data, err := fs.ReadFile(uiAssets, "ui/"+page)
-		if err != nil {
-			t.Fatalf("%s read: %v", page, err)
-		}
-		body := string(data)
-		if !strings.Contains(body, `<div data-settings-nav></div>`) {
-			t.Fatalf("%s missing shared Settings navigation host", page)
-		}
-	}
-}
-
-func TestDashboardHomePanelLinksToHomeSettingsForEditing(t *testing.T) {
-	t.Parallel()
-
-	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
-	if err != nil {
-		t.Fatalf("dashboard.html read: %v", err)
-	}
-	body := string(dashboard)
-	for _, expected := range []string{`id="home-panel-title">Current Home`, `id="home-count" class="pill"`} {
-		if !strings.Contains(body, expected) {
-			t.Fatalf("dashboard home panel markup missing %q", expected)
-		}
-	}
-
-	settingsHome, err := fs.ReadFile(uiAssets, "ui/settings-home.html")
-	if err != nil {
-		t.Fatalf("settings-home.html read: %v", err)
-	}
-	settingsHomeBody := string(settingsHome)
-	for _, expected := range []string{`id="home-form" class="inline-form"`, `id="setup-file-panel"`, `id="token-form"`, `Create Setup File`, `<script src="/assets/settings-home.js" defer></script>`} {
-		if !strings.Contains(settingsHomeBody, expected) {
-			t.Fatalf("settings home markup missing %q", expected)
-		}
-	}
-
-	script, err := fs.ReadFile(uiAssets, "ui/settings-home.js")
-	if err != nil {
-		t.Fatalf("settings-home.js read: %v", err)
-	}
-	scriptBody := string(script)
-	for _, expected := range []string{`agentIDFromHomeName`, `agentEnvFile`, `href="/dashboard/settings/people"`, `href="/dashboard/settings/connections"`, `data-agent-action="restart"`, `/v1/home/agent/restart`, `window.HankUI.copyText(state.lastAgentEnvFile)`} {
-		if !strings.Contains(scriptBody, expected) {
-			t.Fatalf("settings home script missing %q", expected)
-		}
-	}
-	if strings.Contains(scriptBody, `Created ${formatDate(home.created_at)}`) {
-		t.Fatal("settings home card should not show created date")
-	}
-}
-
-func TestDashboardQuickLinksPanelIsReadOnlyAndSettingsOwnsEditing(t *testing.T) {
-	t.Parallel()
-
-	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
-	if err != nil {
-		t.Fatalf("dashboard.html read: %v", err)
-	}
-	body := string(dashboard)
-	for _, expected := range []string{`id="quick-links-panel"`, `id="quick-links-count" class="pill"`, `href="/dashboard/settings/quick-links"`, `id="quick-links-list"`} {
-		if !strings.Contains(body, expected) {
-			t.Fatalf("dashboard quick links markup missing %q", expected)
-		}
-	}
-	for _, adminMarker := range []string{`id="quick-link-form"`, `id="quick-link-add"`, `id="quick-links-edit-mode"`, `data-quick-link-edit`, `data-quick-link-delete`, `data-quick-link-move`} {
-		if strings.Contains(body, adminMarker) {
-			t.Fatalf("dashboard html should not statically expose quick link admin controls: %s", adminMarker)
-		}
-	}
-
-	script, err := fs.ReadFile(uiAssets, "ui/dashboard.js")
-	if err != nil {
-		t.Fatalf("dashboard.js read: %v", err)
-	}
-	scriptBody := string(script)
-	for _, expected := range []string{"/v1/home/quick-links", "renderQuickLinks", "refreshQuickLinks"} {
-		if !strings.Contains(scriptBody, expected) {
-			t.Fatalf("dashboard quick links script missing %q", expected)
-		}
-	}
-	for _, forbidden := range []string{"quickLinksCanEdit", "quickLinksEditMode", "data-quick-link-edit", "toggleQuickLinksEditMode", "toggleQuickLinkForm", "userOwnsDeploymentHome"} {
-		if strings.Contains(scriptBody, forbidden) {
-			t.Fatalf("dashboard quick links script should not keep edit behavior %q", forbidden)
-		}
-	}
-
-	settings, err := fs.ReadFile(uiAssets, "ui/settings-quick-links.html")
-	if err != nil {
-		t.Fatalf("settings-quick-links.html read: %v", err)
-	}
-	settingsBody := string(settings)
-	for _, expected := range []string{`<title>Hank Remote Quick Link Settings</title>`, `<div data-settings-nav></div>`, `id="quick-link-form" class="quick-link-form" hidden`, `<script src="/assets/settings-quick-links.js" defer></script>`} {
-		if !strings.Contains(settingsBody, expected) {
-			t.Fatalf("settings quick links target missing %q", expected)
-		}
-	}
-
-	settingsScript, err := fs.ReadFile(uiAssets, "ui/settings-quick-links.js")
-	if err != nil {
-		t.Fatalf("settings-quick-links.js read: %v", err)
-	}
-	settingsScriptBody := string(settingsScript)
-	for _, expected := range []string{"canEditQuickLinks", "Boolean(payload.can_edit)", "data-quick-link-edit", "toggleQuickLinksEditMode", "toggleQuickLinkForm", "editQuickLink"} {
-		if !strings.Contains(settingsScriptBody, expected) {
-			t.Fatalf("settings quick links script missing %q", expected)
-		}
-	}
-}
-
-func TestFileServerUIOffersManagedJobRollback(t *testing.T) {
-	t.Parallel()
-
-	script, err := fs.ReadFile(uiAssets, "ui/file-server.js")
-	if err != nil {
-		t.Fatalf("file-server.js read: %v", err)
-	}
-	body := string(script)
-	for _, expected := range []string{`data-file-job-action="rollback"`, `Roll Back`, `rollback_required`} {
-		if !strings.Contains(body, expected) {
-			t.Fatalf("file-server rollback script missing %q", expected)
-		}
-	}
-}
-
-func TestFileServerUIOffersBrowserMediaPreviews(t *testing.T) {
-	t.Parallel()
-
-	script, err := fs.ReadFile(uiAssets, "ui/file-server.js")
-	if err != nil {
-		t.Fatalf("file-server.js read: %v", err)
-	}
-	styles, err := fs.ReadFile(uiAssets, "ui/styles.css")
-	if err != nil {
-		t.Fatalf("styles.css read: %v", err)
-	}
-	scriptBody := string(script)
-	for _, expected := range []string{
-		`const videoExtensions = new Set(["m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm"])`,
-		`const audioExtensions = new Set(["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba"])`,
-		`const htmlExtensions = new Set(["htm", "html"])`,
-		`loadInlineStreamPreview(item, "image")`,
-		`loadInlineStreamPreview(item, "video")`,
-		`loadInlineStreamPreview(item, "audio")`,
-		`loadInlineStreamPreview(item, "html")`,
-		`/v1/home/files/preview?${params.toString()}`,
-		`<video class="file-preview-media"`,
-		`<audio class="file-preview-audio"`,
-		`sandbox=""`,
-	} {
-		if !strings.Contains(scriptBody, expected) {
-			t.Fatalf("file-server media preview script missing %q", expected)
-		}
-	}
-	styleBody := string(styles)
-	for _, expected := range []string{".file-preview-media", ".file-preview-audio"} {
-		if !strings.Contains(styleBody, expected) {
-			t.Fatalf("file-server media preview styles missing %q", expected)
-		}
-	}
-}
-
-func TestDashboardHealthPanelIsOperatorFriendly(t *testing.T) {
-	t.Parallel()
-
-	dashboard, err := fs.ReadFile(uiAssets, "ui/dashboard.html")
-	if err != nil {
-		t.Fatalf("dashboard.html read: %v", err)
-	}
-	body := string(dashboard)
-	if !strings.Contains(body, `id="health" class="panel wide-panel collapsible-panel dashboard-health-panel" open`) {
-		t.Fatal("dashboard health panel should be a large open home-page panel")
-	}
-	for _, rawEndpoint := range []string{`href="/healthz"`, `href="/readyz"`, `href="/metrics"`} {
-		if strings.Contains(body, rawEndpoint) {
-			t.Fatalf("dashboard health panel should not use raw endpoint link %s as its primary UI", rawEndpoint)
-		}
-	}
-
-	script, err := fs.ReadFile(uiAssets, "ui/dashboard.js")
-	if err != nil {
-		t.Fatalf("dashboard.js read: %v", err)
-	}
-	scriptBody := string(script)
-	for _, expected := range []string{"Cloud", "Connector", "Notes", "Connections", "Backups", "Database", "health-check"} {
-		if !strings.Contains(scriptBody, expected) {
-			t.Fatalf("dashboard health renderer missing %q", expected)
-		}
-	}
-}
-
-func TestOperatorStylesStayCompactAndResponsive(t *testing.T) {
-	t.Parallel()
-
-	styles, err := fs.ReadFile(uiAssets, "ui/styles.css")
-	if err != nil {
-		t.Fatalf("styles.css read: %v", err)
-	}
-	body := string(styles)
-	if strings.Contains(body, "font-size: clamp(") {
-		t.Fatal("operator headings should not scale font size with viewport width")
-	}
-	for _, expected := range []string{
-		"[hidden] {\n  display: none !important;",
-		"border-radius: 8px;",
-		".settings-layout {\n  display: grid;\n  gap: 14px;\n  align-items: start;",
-		".quick-links-grid {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));",
-		".setup-checklist-item .manage-link {\n  min-width: 64px;",
-	} {
-		if !strings.Contains(body, expected) {
-			t.Fatalf("operator styles missing %q", expected)
 		}
 	}
 }
@@ -1906,6 +1156,44 @@ func TestLoginRateLimitIsEnforced(t *testing.T) {
 	}
 }
 
+func TestSuccessfulLoginAuditEventAppearsInHomeLogs(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_login_audit", Email: "login-audit@example.com", PasswordHash: string(mustPasswordHash(t, "correct-password")), CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_login_audit", UserID: user.ID, Name: "Login Audit Home", CreatedAt: now, UpdatedAt: now}
+	adminSession := domain.AppSession{ID: "sess_login_audit_admin", UserID: user.ID, TokenHash: hashToken("admin-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, adminSession))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	requestJSON(t, testServer, "", http.MethodPost, "/v1/auth/login", map[string]string{
+		"email":    user.Email,
+		"password": "correct-password",
+	}, nil)
+
+	var payload struct {
+		Events []struct {
+			EventType string `json:"event_type"`
+			HomeID    string `json:"home_id"`
+		} `json:"events"`
+	}
+	requestJSON(t, testServer, "admin-token", http.MethodGet, "/v1/home/audit-events?event_type=login.succeeded", nil, &payload)
+	if len(payload.Events) != 1 {
+		t.Fatalf("home login audit events = %d, want 1", len(payload.Events))
+	}
+	if payload.Events[0].HomeID != home.ID {
+		t.Fatalf("login audit home_id = %q, want %q", payload.Events[0].HomeID, home.ID)
+	}
+}
+
 func TestListAgentTokensForHome(t *testing.T) {
 	t.Parallel()
 
@@ -1946,6 +1234,90 @@ func TestListAgentTokensForHome(t *testing.T) {
 	}
 	if payload.Tokens[0].TokenHash != "" {
 		t.Fatalf("token hash should be omitted from JSON response")
+	}
+}
+
+func TestEmptyListResponsesUseJSONArray(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_empty_lists", Email: "empty-lists@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_empty_lists", UserID: user.ID, Name: "Empty Lists Home", CreatedAt: now, UpdatedAt: now}
+	sessionToken := "empty-list-session-token"
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_empty_lists", UserID: user.ID, TokenHash: hashToken(sessionToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	cases := map[string][]string{
+		"/v1/home/apps":         {`"apps":[]`},
+		"/v1/home/agent/tokens": {`"tokens":[]`},
+		"/v1/home/audit-events": {`"events":[]`},
+	}
+	for path, wants := range cases {
+		response := doJSONRequest(t, testServer, sessionToken, http.MethodGet, path, nil)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", path, response.StatusCode, response.Body)
+		}
+		for _, want := range wants {
+			if !strings.Contains(response.Body, want) {
+				t.Fatalf("%s should contain %s, got %s", path, want, response.Body)
+			}
+		}
+	}
+}
+
+func TestHomeQuickLinksListUsesEmptyArrayWhenNoLinks(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_quick_empty", Email: "quick-empty@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_quick_empty", UserID: user.ID, Name: "Quick Empty Home", CreatedAt: now, UpdatedAt: now}
+	sessionToken := "quick-empty-token"
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_quick_empty", UserID: user.ID, TokenHash: hashToken(sessionToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	response := doJSONRequest(t, testServer, sessionToken, http.MethodGet, "/v1/home/quick-links", nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("quick links status = %d body=%s", response.StatusCode, response.Body)
+	}
+	if !strings.Contains(response.Body, `"links":[]`) {
+		t.Fatalf("quick links response should encode empty links as []: %s", response.Body)
+	}
+}
+
+func TestQuickLinkListResponseNormalizesNilLinks(t *testing.T) {
+	t.Parallel()
+
+	payload := quickLinkListResponse(domain.Home{}, nil, domain.HomeMembership{})
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"links":[]`) {
+		t.Fatalf("quick links response should encode nil links as []: %s", string(data))
 	}
 }
 
@@ -2212,6 +1584,100 @@ func TestHomeSetupStatusShowsDuringInitialRuntime(t *testing.T) {
 	}
 }
 
+func TestUIBootstrapRequiresAuthentication(t *testing.T) {
+	t.Parallel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	response, err := http.Get(testServer.URL + "/v1/ui/bootstrap")
+	if err != nil {
+		t.Fatalf("bootstrap request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestUIBootstrapReturnsCurrentShellState(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_bootstrap", Email: "bootstrap@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_bootstrap", UserID: user.ID, Name: "Bootstrap Home", CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}
+	agent := domain.Agent{ID: "agent_bootstrap", HomeID: home.ID, Name: "Bootstrap Agent", Status: domain.AgentStatusOffline, CreatedAt: now, UpdatedAt: now}
+	sessionRawToken := "bootstrap-session-token"
+	session := domain.AppSession{ID: "sess_bootstrap", UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.UpsertAgent(ctx, agent))
+	must(t, db.CreateSession(ctx, session))
+	must(t, db.UpsertCloudRuntime(ctx, "runtime_bootstrap", "test-version"))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var payload map[string]any
+	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/ui/bootstrap", nil, &payload)
+
+	userPayload, ok := payload["user"].(map[string]any)
+	if !ok || userPayload["email"] != user.Email {
+		t.Fatalf("user payload = %#v", payload["user"])
+	}
+	sessionPayload, ok := payload["session"].(map[string]any)
+	if !ok || sessionPayload["id"] != session.ID {
+		t.Fatalf("session payload = %#v", payload["session"])
+	}
+	homePayload, ok := payload["home"].(map[string]any)
+	if !ok || homePayload["name"] != home.Name {
+		t.Fatalf("home payload = %#v", payload["home"])
+	}
+	membershipPayload, ok := payload["membership"].(map[string]any)
+	if !ok || membershipPayload["role"] != domain.HomeRoleAdmin {
+		t.Fatalf("membership payload = %#v", payload["membership"])
+	}
+	permissions, ok := payload["permissions"].(map[string]any)
+	if !ok || permissions["is_admin"] != true || permissions["can_manage_apps"] != true || permissions["can_use_files"] != true {
+		t.Fatalf("permissions = %#v", payload["permissions"])
+	}
+	agentPayload, ok := payload["agent"].(map[string]any)
+	if !ok || agentPayload["agent_id"] != agent.ID || agentPayload["status"] != domain.AgentStatusOffline {
+		t.Fatalf("agent payload = %#v", payload["agent"])
+	}
+	setupPayload, ok := payload["setup_status"].(map[string]any)
+	if !ok || setupPayload["first_setup_visible"] != false {
+		t.Fatalf("setup_status payload = %#v", payload["setup_status"])
+	}
+	featuresPayload, ok := payload["features"].(map[string]any)
+	if !ok {
+		t.Fatalf("features payload = %#v", payload["features"])
+	}
+	if _, ok := featuresPayload["mcp_enabled"].(bool); !ok {
+		t.Fatalf("mcp_enabled = %#v", featuresPayload["mcp_enabled"])
+	}
+	serverPayload, ok := payload["server"].(map[string]any)
+	if !ok || serverPayload["version"] == "" {
+		t.Fatalf("server payload = %#v", payload["server"])
+	}
+	navigationPayload, ok := payload["navigation"].([]any)
+	if !ok || len(navigationPayload) == 0 {
+		t.Fatalf("navigation payload = %#v", payload["navigation"])
+	}
+}
+
 func TestDeleteAgentTokenCanPurgeDisabledSetupFile(t *testing.T) {
 	t.Parallel()
 
@@ -2303,6 +1769,28 @@ func TestHomeAgentRestartEndpointRoutesSystemRestart(t *testing.T) {
 	}
 	if payload["ok"] != true || payload["message"] == "" {
 		t.Fatalf("restart payload = %#v", payload)
+	}
+
+	var auditPayload struct {
+		Events []struct {
+			EventType  string         `json:"event_type"`
+			Severity   string         `json:"severity"`
+			TargetType string         `json:"target_type"`
+			TargetID   string         `json:"target_id"`
+			HelperText string         `json:"helper_text"`
+			Metadata   map[string]any `json:"metadata"`
+		} `json:"events"`
+	}
+	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/audit-events?event_type=agent.restart_requested&severity=warning&target_type=agent", nil, &auditPayload)
+	if len(auditPayload.Events) != 1 {
+		t.Fatalf("restart audit events = %d, want 1", len(auditPayload.Events))
+	}
+	event := auditPayload.Events[0]
+	if event.EventType != "agent.restart_requested" || event.Severity != auditSeverityWarning || event.TargetType != "agent" || event.TargetID != agentID {
+		t.Fatalf("restart audit event = %#v", event)
+	}
+	if event.HelperText == "" || event.Metadata["restart_at"] == nil {
+		t.Fatalf("restart audit helper/metadata = %#v", event)
 	}
 }
 
@@ -2627,7 +2115,7 @@ func TestFilePreviewStreamsInlineRangeOverHTTP(t *testing.T) {
 			if err != nil || open.Operation != protocol.FileTransferOperationDownload {
 				return
 			}
-			if open.SourceID != "media" || open.Path != "movies/demo.mp4" || open.Offset != 6 {
+			if open.SourceID != "media" || open.Path != "movies/demo.mp4" || open.Offset != 6 || open.Length != 5 {
 				return
 			}
 
@@ -3108,6 +2596,19 @@ func requestJSON(t *testing.T, server *httptest.Server, sessionToken string, met
 	if out != nil {
 		if err := json.NewDecoder(response.Body).Decode(out); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func assertReactShell(t *testing.T, routePath string, body string) {
+	t.Helper()
+	for _, expected := range []string{
+		`<div id="root"></div>`,
+		`<title>Hank Remote</title>`,
+		`<script type="module" crossorigin src="/assets/index-`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("%s missing React shell marker %q", routePath, expected)
 		}
 	}
 }

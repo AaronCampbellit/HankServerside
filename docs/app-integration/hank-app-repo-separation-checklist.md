@@ -46,8 +46,8 @@ Moved to sibling per-app repos under `/Volumes/CampbellDrive/Projects`:
 Runtime/platform files that stay in this repo:
 
 - `internal/cloud/apps.go`
-- `internal/cloud/ui/apps.js`
-- `internal/cloud/ui/apps.html`
+- `web/dashboard/src/settings/AppsSettings.tsx`
+- `web/dashboard/src/api/apps.ts`
 - `internal/protocol/apps.go`
 - `internal/agent/apps/manifest.go`
 - `internal/agent/apps/package.go`

@@ -1,0 +1,70 @@
+import { apiClient, type ApiTransport } from "./client";
+
+export type AuthUser = {
+  email?: string;
+  password_change_required?: boolean;
+};
+
+export type AuthResponse = {
+  user?: AuthUser;
+};
+
+export type InvitationPreview = {
+  email: string;
+  role: string;
+};
+
+export type MeResponse = {
+  user?: AuthUser;
+};
+
+export class AuthClient {
+  constructor(private readonly transport: ApiTransport = apiClient) {}
+
+  login(email: string, password: string): Promise<AuthResponse> {
+    return this.transport.request<AuthResponse>("/v1/auth/login", {
+      method: "POST",
+      body: { email, password },
+    });
+  }
+
+  register(email: string, password: string): Promise<AuthResponse> {
+    return this.transport.request<AuthResponse>("/v1/auth/register", {
+      method: "POST",
+      body: { email, password },
+    });
+  }
+
+  previewInvitation(token: string): Promise<InvitationPreview> {
+    return this.transport.request<InvitationPreview>("/v1/auth/invitations/preview", {
+      method: "POST",
+      body: { token },
+    });
+  }
+
+  signupInvitation(token: string, email: string, password: string): Promise<unknown> {
+    return this.transport.request<unknown>("/v1/auth/invitations/signup", {
+      method: "POST",
+      body: { token, email, password },
+    });
+  }
+
+  changePassword(currentPassword: string, newPassword: string): Promise<unknown> {
+    return this.transport.request<unknown>("/v1/auth/change-password", {
+      method: "POST",
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+  }
+
+  logout(): Promise<unknown> {
+    return this.transport.request<unknown>("/v1/auth/logout", {
+      method: "POST",
+    });
+  }
+
+  me(): Promise<MeResponse> {
+    return this.transport.request<MeResponse>("/v1/me");
+  }
+}
+
+export const authClient = new AuthClient();

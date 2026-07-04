@@ -2,7 +2,7 @@
 
 `Hank Remote` is the server-side companion for Hank. It runs a public cloud service plus a local agent service on the same machine so the iPhone app can reach Home Assistant, files, and notes remotely over one authenticated API surface.
 
-The cloud service now also serves a management dashboard at `/` and `/dashboard` for app auth, home creation, agent visibility, token lifecycle operations, Settings, files, notes, HankAI, backup/restore, and troubleshooting. Hank Remote does not currently serve a standalone PWA; the removed `/pwa` route family is documented in `docs/PWA/current-scope.md`.
+The cloud service now also serves a React/Vite management dashboard at `/` and `/dashboard` for app auth, home creation, agent visibility, token lifecycle operations, Settings, files, notes, HankAI, backup/restore, and troubleshooting. Hank Remote does not currently serve a standalone PWA; the removed `/pwa` route family is documented in `docs/PWA/current-scope.md`.
 
 ## What Exists Now
 
@@ -140,6 +140,7 @@ The cloud service now also serves a management dashboard at `/` and `/dashboard`
   - `GET /docs/deployment`
 - current browser surface:
   - the operator dashboard is the supported browser UI
+  - React/TypeScript source lives in `web/dashboard`; Vite builds the embedded app into `internal/cloud/ui/react`
   - `/dashboard/settings/*` exposes Settings sections as direct authenticated routes. Dashboard navigation does not use iframe composition; only file preview content uses sandboxed iframes.
   - `/pwa`, `/pwa/`, `/pwa/sw.js`, `/pwa/manifest.webmanifest`, and `/assets/site.webmanifest` are intentionally not served
 - cloud operations endpoints:
@@ -312,6 +313,7 @@ Hank Remote can expose an authenticated [MCP](https://modelcontextprotocol.io) e
 ```bash
 make tidy
 make fmt
+make frontend-check
 make build
 make run-cloud
 make run-agent

@@ -7,7 +7,7 @@ This document keeps demo-server testing separate from production code. The valid
 These files are production-safe and should be committed with the backend repair work:
 
 - `tools/livevalidation/main.go`: end-to-end live app, agent, Home Assistant, and file-flow validation.
-- `tools/adminvalidation/main.go`: admin UI/API validation for current Settings > Backups audit/query telemetry, File Server file jobs, and query telemetry APIs.
+- `tools/adminvalidation/main.go`: admin UI/API validation that protected browser routes serve the React shell, protected React bootstrap returns required objects/arrays, and current Settings > Backups audit/query telemetry, Apps, File Server file jobs, and query telemetry APIs keep their dashboard contracts.
 - `tools/loadtest/loadtest_test.go`: single-home target load scenarios and JSON report output.
 - `scripts/restart-validation.sh`: restart-recovery test wrapper.
 - `scripts/file-safety-validation.sh`: file policy and managed-job safety wrapper.

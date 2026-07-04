@@ -226,6 +226,9 @@ func (s *Server) checkAndWriteHomeQuickLinks(w http.ResponseWriter, r *http.Requ
 }
 
 func quickLinkListResponse(home domain.Home, links []domain.HomeQuickLink, membership domain.HomeMembership) map[string]any {
+	if links == nil {
+		links = []domain.HomeQuickLink{}
+	}
 	return map[string]any{
 		"links":    links,
 		"can_edit": canEditHomeQuickLinks(home, membership),

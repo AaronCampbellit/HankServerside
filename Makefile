@@ -1,7 +1,7 @@
 APP_NAME := hank-remote
 COMPOSE := docker compose --env-file .env.cloud
 
-.PHONY: tidy fmt build run-cloud run-agent run-db-ops migrate-up migrate-status migrate-baseline schema-drift-check loadtest
+.PHONY: tidy fmt build frontend-install frontend-test frontend-build frontend-check build-all run-cloud run-agent run-db-ops migrate-up migrate-status migrate-baseline schema-drift-check loadtest
 
 tidy:
 	go mod tidy
@@ -9,8 +9,22 @@ tidy:
 fmt:
 	gofmt -w ./cmd ./internal
 
-build:
+build: frontend-build
 	go build ./...
+
+frontend-install:
+	npm --prefix web/dashboard install
+
+frontend-test:
+	npm --prefix web/dashboard run test:run
+
+frontend-build:
+	npm --prefix web/dashboard run build
+
+frontend-check:
+	npm --prefix web/dashboard run check
+
+build-all: build
 
 run-cloud:
 	go run ./cmd/hank-remote-cloud

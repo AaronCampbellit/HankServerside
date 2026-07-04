@@ -574,34 +574,11 @@ func TestAdminWorkflowAuditTelemetryAndFileJobUI(t *testing.T) {
 	queryResponse := requestJSONStatusAny(t, testServer, sessionToken, http.MethodGet, "/v1/home/query-telemetry?limit=20", nil, http.StatusOK, http.StatusServiceUnavailable)
 	queryResponse.Body.Close()
 
-	for _, asset := range []struct {
-		name string
-		want []string
-	}{
-		{
-			name: "ui/storage.html",
-			want: []string{"Audit Trail", "audit-event-type", "Query Telemetry", "query-refresh-button"},
-		},
-		{
-			name: "ui/storage.js",
-			want: []string{"/v1/home/audit-events", "renderAuditEvents", "/v1/home/query-telemetry", "renderQueryTelemetry"},
-		},
-		{
-			name: "ui/file-server.js",
-			want: []string{"/v1/home/file-jobs?limit=10", "data-file-job-action=\"retry\"", "data-file-job-action=\"cancel\""},
-		},
-	} {
-		data, err := fs.ReadFile(uiAssets, asset.name)
-		if err != nil {
-			t.Fatalf("read %s: %v", asset.name, err)
-		}
-		body := string(data)
-		for _, want := range asset.want {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s missing %q", asset.name, want)
-			}
-		}
+	reactShell, err := fs.ReadFile(uiAssets, "ui/react/index.html")
+	if err != nil {
+		t.Fatalf("read React shell: %v", err)
 	}
+	assertReactShell(t, "/dashboard/settings/backups", string(reactShell))
 }
 
 func TestAuthorizationMatrixDeniesMembersRevocationsFeaturesAndNoteIsolation(t *testing.T) {

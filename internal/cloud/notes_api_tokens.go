@@ -156,7 +156,7 @@ func (s *Server) handleHomeNotesAPITokens(w http.ResponseWriter, r *http.Request
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+		writeJSON(w, http.StatusOK, map[string]any{"tokens": nonNilSlice(tokens)})
 		return true
 
 	case len(parts) == 1 && r.Method == http.MethodPost:

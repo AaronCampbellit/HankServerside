@@ -45,23 +45,42 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	if err := client.expectHTMLContains(ctx, "/dashboard/settings/backups", []string{"Audit Trail", "Query Telemetry", "audit-event-type", "query-refresh-button"}); err != nil {
+	if err := client.expectHTMLContains(ctx, "/dashboard/settings/backups", []string{`<div id="root"></div>`, `<script type="module" crossorigin src="/assets/index-`}); err != nil {
 		return err
 	}
-	fmt.Println("PASS admin storage UI exposes audit and query telemetry panels")
+	fmt.Println("PASS admin storage route serves React dashboard")
 
-	if err := client.expectHTMLContains(ctx, "/dashboard/file-server", []string{"File Jobs", "file-jobs-refresh-button"}); err != nil {
+	if err := client.expectHTMLContains(ctx, "/dashboard/file-server", []string{`<div id="root"></div>`, `<script type="module" crossorigin src="/assets/index-`}); err != nil {
 		return err
 	}
-	fmt.Println("PASS file server UI exposes managed file jobs")
+	fmt.Println("PASS file server route serves React dashboard")
 
-	if err := client.expectAssetContains(ctx, "/assets/storage.js", []string{"/v1/home/audit-events", "renderAuditEvents", "/v1/home/query-telemetry", "renderQueryTelemetry"}); err != nil {
+	var bootstrap map[string]any
+	if err := client.doJSON(ctx, http.MethodGet, "/v1/ui/bootstrap", nil, http.StatusOK, &bootstrap); err != nil {
+		return fmt.Errorf("GET /v1/ui/bootstrap: %w", err)
+	}
+	if err := expectObject(bootstrap, "user"); err != nil {
 		return err
 	}
-	if err := client.expectAssetContains(ctx, "/assets/file-server.js", []string{"/v1/home/file-jobs?limit=10", "data-file-job-action=\"retry\"", "data-file-job-action=\"cancel\""}); err != nil {
+	if err := expectObject(bootstrap, "permissions"); err != nil {
 		return err
 	}
-	fmt.Println("PASS admin workflow JavaScript wires expected endpoints and actions")
+	if err := expectObject(bootstrap, "server"); err != nil {
+		return err
+	}
+	if err := expectArray(bootstrap, "navigation"); err != nil {
+		return err
+	}
+	fmt.Println("PASS React bootstrap API returned required dashboard contract")
+
+	var apps map[string]any
+	if err := client.doJSON(ctx, http.MethodGet, "/v1/home/apps", nil, http.StatusOK, &apps); err != nil {
+		return fmt.Errorf("GET /v1/home/apps: %w", err)
+	}
+	if err := expectArray(apps, "apps"); err != nil {
+		return err
+	}
+	fmt.Println("PASS apps API returned array contract")
 
 	var audit struct {
 		Events []map[string]any `json:"events"`
@@ -105,19 +124,22 @@ func run() error {
 	return nil
 }
 
-func (c validationClient) expectHTMLContains(ctx context.Context, path string, wants []string) error {
-	status, body, err := c.doRaw(ctx, http.MethodGet, path, nil, c.token)
-	if err != nil {
-		return err
+func expectObject(payload map[string]any, key string) error {
+	if value, ok := payload[key].(map[string]any); ok && value != nil {
+		return nil
 	}
-	if status != http.StatusOK {
-		return fmt.Errorf("GET %s status=%d body=%s", path, status, string(body))
-	}
-	return containsAll(path, string(body), wants)
+	return fmt.Errorf("%s should be a JSON object, got %#v", key, payload[key])
 }
 
-func (c validationClient) expectAssetContains(ctx context.Context, path string, wants []string) error {
-	status, body, err := c.doRaw(ctx, http.MethodGet, path, nil, "")
+func expectArray(payload map[string]any, key string) error {
+	if value, ok := payload[key].([]any); ok && value != nil {
+		return nil
+	}
+	return fmt.Errorf("%s should be a JSON array, got %#v", key, payload[key])
+}
+
+func (c validationClient) expectHTMLContains(ctx context.Context, path string, wants []string) error {
+	status, body, err := c.doRaw(ctx, http.MethodGet, path, nil, c.token)
 	if err != nil {
 		return err
 	}

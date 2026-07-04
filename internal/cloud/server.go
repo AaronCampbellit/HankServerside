@@ -168,6 +168,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/change-password", server.handleAuthChangePassword)
 	mux.HandleFunc("/v1/auth/invitations/preview", server.handleAuthInvitationPreview)
 	mux.HandleFunc("/v1/auth/invitations/signup", server.handleAuthInvitationSignup)
+	mux.HandleFunc("/v1/ui/bootstrap", server.handleUIBootstrap)
 	mux.HandleFunc("/v1/me", server.handleMe)
 	mux.HandleFunc("/v1/me/devices/apns", server.handleAPNSDeviceRegistration)
 	mux.HandleFunc("/v1/me/devices/", server.handleAPNSDevice)
@@ -505,7 +506,8 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, _, err := s.store.BootstrapSingletonHome(r.Context(), user, "Home"); err != nil {
+	home, _, err := s.store.BootstrapSingletonHome(r.Context(), user, "Home")
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -517,7 +519,7 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("app user registered", "request_id", requestIDFromContext(r.Context()), "user_id", user.ID, "email", user.Email, "session_id", session.ID)
-	s.audit(r.Context(), "session.created", auditSeverityInfo, user.ID, "", "", requestIDFromContext(r.Context()), "session", session.ID, map[string]any{"reason": "registration"})
+	s.audit(r.Context(), "session.created", auditSeverityInfo, user.ID, "", home.ID, requestIDFromContext(r.Context()), "session", session.ID, map[string]any{"reason": "registration"})
 	setSessionCookie(w, r, rawToken, session.ExpiresAt)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -551,7 +553,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if blocked {
 		s.metrics.IncAuthFailure("login_email_backoff")
-		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", "", requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "login_backoff"})
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", s.auditHomeIDForEmail(r.Context(), body.Email), requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "login_backoff"})
 		s.logger.Warn("login email backoff active", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email, "retry_after", retryAfter.String())
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
@@ -563,7 +565,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !allowed {
 		s.metrics.IncAuthFailure("login_rate_limited")
-		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", "", requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "rate_limited"})
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, "", "", s.auditHomeIDForEmail(r.Context(), body.Email), requestIDFromContext(r.Context()), "email", stableAuditTarget(body.Email), map[string]any{"reason": "rate_limited"})
 		s.logger.Warn("login rate limited", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "email", body.Email)
 		http.Error(w, "too many login attempts", http.StatusTooManyRequests)
 		return
@@ -583,7 +585,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
 		_ = s.store.RecordLoginFailure(r.Context(), body.Email)
 		s.loginBackoff.RecordFailure(body.Email)
-		s.audit(r.Context(), "login.failed", auditSeverityWarning, user.ID, "", "", requestIDFromContext(r.Context()), "user", user.ID, map[string]any{"reason": "bad_password"})
+		s.audit(r.Context(), "login.failed", auditSeverityWarning, user.ID, "", s.auditHomeIDForUser(r.Context(), user.ID), requestIDFromContext(r.Context()), "user", user.ID, map[string]any{"reason": "bad_password"})
 		s.metrics.IncAuthFailure("login_bad_password")
 		s.logger.Warn("login failed with bad password", "request_id", requestIDFromContext(r.Context()), "client_ip", clientIP(r), "user_id", user.ID, "email", body.Email)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
@@ -599,7 +601,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("app user logged in", "request_id", requestIDFromContext(r.Context()), "user_id", user.ID, "session_id", session.ID)
-	s.audit(r.Context(), "login.succeeded", auditSeverityInfo, user.ID, "", "", requestIDFromContext(r.Context()), "session", session.ID, nil)
+	s.audit(r.Context(), "login.succeeded", auditSeverityInfo, user.ID, "", s.auditHomeIDForUser(r.Context(), user.ID), requestIDFromContext(r.Context()), "session", session.ID, nil)
 	setSessionCookie(w, r, rawToken, session.ExpiresAt)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -649,7 +651,7 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.audit(r.Context(), "password.changed", auditSeverityInfo, auth.User.ID, "", "", requestIDFromContext(r.Context()), "user", auth.User.ID, nil)
+	s.audit(r.Context(), "password.changed", auditSeverityInfo, auth.User.ID, "", s.auditHomeIDForUser(r.Context(), auth.User.ID), requestIDFromContext(r.Context()), "user", auth.User.ID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": sanitizeUser(user)})
 }
 
@@ -760,7 +762,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	clearSessionCookie(w, r)
 	s.logger.Info("app session revoked", "request_id", requestIDFromContext(r.Context()), "user_id", auth.User.ID, "session_id", auth.Session.ID)
-	s.audit(r.Context(), "session.revoked", auditSeverityInfo, auth.User.ID, "", "", requestIDFromContext(r.Context()), "session", auth.Session.ID, nil)
+	s.audit(r.Context(), "session.revoked", auditSeverityInfo, auth.User.ID, "", s.auditHomeIDForUser(r.Context(), auth.User.ID), requestIDFromContext(r.Context()), "session", auth.Session.ID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1343,6 +1345,13 @@ type filePreviewRange struct {
 	End      int64
 }
 
+func (r filePreviewRange) Length() int64 {
+	if !r.HasRange || r.End < r.Start {
+		return 0
+	}
+	return r.End - r.Start + 1
+}
+
 func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
 	sourceID := strings.TrimSpace(r.URL.Query().Get("source_id"))
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
@@ -1384,6 +1393,7 @@ func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request,
 		SourceID:  sourceID,
 		Path:      path,
 		Offset:    byteRange.Start,
+		Length:    byteRange.Length(),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1434,6 +1444,7 @@ func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request,
 	for remaining > 0 {
 		select {
 		case <-r.Context().Done():
+			s.sendFileTransferCancel(agentConn, home.ID, attempt.ID, "http_request_cancelled")
 			return
 		case frame := <-attempt.DataCh:
 			if frame.Error != nil {
@@ -1562,6 +1573,21 @@ func previewContentType(path string) string {
 	}
 }
 
+func (s *Server) sendFileTransferCancel(agentConn *agentConnection, homeID string, transferID string, reason string) {
+	if agentConn == nil || agentConn.peer == nil || transferID == "" {
+		return
+	}
+	cancel, err := protocol.NewEnvelope(protocol.TypeFileTransferCancel, transferID, agentConn.agent.ID, homeID, protocol.FileTransferCancel{Reason: reason})
+	if err != nil {
+		return
+	}
+	ctx, done := context.WithTimeout(context.Background(), 2*time.Second)
+	defer done()
+	if err := agentConn.peer.Write(ctx, cancel); err != nil {
+		s.logger.Debug("failed to send file transfer cancel", "transfer_id", transferID, "error", err)
+	}
+}
+
 func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 	transferID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/file-transfers/"), "/")
 	statusOnly := false
@@ -1676,6 +1702,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-r.Context().Done():
+				s.sendFileTransferCancel(agentConn, transfer.HomeID, attempt.ID, "http_request_cancelled")
 				transfer.Advance(currentOffset, ready.Size)
 				return
 			case frame := <-attempt.DataCh:
@@ -2175,7 +2202,7 @@ func sanitizeUser(user domain.User) map[string]any {
 
 func passwordChangeAllowedPath(path string) bool {
 	switch path {
-	case "/v1/me", "/v1/auth/change-password", "/v1/auth/logout":
+	case "/v1/me", "/v1/ui/bootstrap", "/v1/auth/change-password", "/v1/auth/logout":
 		return true
 	default:
 		return false
@@ -2218,6 +2245,13 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func nonNilSlice[T any](items []T) []T {
+	if items == nil {
+		return []T{}
+	}
+	return items
 }
 
 func requestIDMiddleware(next http.Handler) http.Handler {

@@ -26,7 +26,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 		return
 	}
-	serveUIFile(w, r, "login.html", "text/html; charset=utf-8")
+	serveReactApp(w, r)
 }
 
 func (s *Server) handleJoinPage(w http.ResponseWriter, r *http.Request) {
@@ -34,75 +34,75 @@ func (s *Server) handleJoinPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	serveUIFile(w, r, "join.html", "text/html; charset=utf-8")
+	serveReactApp(w, r)
 }
 
 func (s *Server) handlePasswordChangePage(w http.ResponseWriter, r *http.Request) {
-	s.serveAuthenticatedUIPage(w, r, "/password-change", "password-change.html")
+	s.serveAuthenticatedUIPage(w, r, "/password-change")
 }
 
 func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard", "dashboard.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard")
 }
 
 func (s *Server) handleHankPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/hank", "hank.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/hank")
 }
 
 func (s *Server) handleHomeAssistantPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/home-assistant", "home-assistant.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/home-assistant")
 }
 
 func (s *Server) handleProfileNotesPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/profile-notes", "profile-notes.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/profile-notes")
 }
 
 func (s *Server) handleFileServerPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/file-server", "file-server.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/file-server")
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
-	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings", "settings.html")
+	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings")
 }
 
 func (s *Server) handleSettingsHomePage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/home", "settings-home.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/home")
 }
 
 func (s *Server) handleSettingsQuickLinksPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/quick-links", "settings-quick-links.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/quick-links")
 }
 
 func (s *Server) handleSettingsPeoplePage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/people", "home-users.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/people")
 }
 
 func (s *Server) handleSettingsConnectionsPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/connections", "settings-connections.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/connections")
 }
 
 func (s *Server) handleSettingsAIPage(w http.ResponseWriter, r *http.Request) {
-	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/ai", "assistant-settings.html")
+	s.serveHomeMemberUIPage(w, r, "/dashboard/settings/ai")
 }
 
 func (s *Server) handleSettingsAppsPage(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/apps", "apps.html")
+	s.serveAdminUIPage(w, r, "/dashboard/settings/apps")
 }
 
 func (s *Server) handleSettingsBackupsPage(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/backups", "storage.html")
+	s.serveAdminUIPage(w, r, "/dashboard/settings/backups")
 }
 
 func (s *Server) handleSettingsRecoveryPage(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/recovery", "recovery.html")
+	s.serveAdminUIPage(w, r, "/dashboard/settings/recovery")
 }
 
 func (s *Server) handleSettingsLogsPage(w http.ResponseWriter, r *http.Request) {
-	s.serveAdminUIPage(w, r, "/dashboard/settings/logs", "settings-logs.html")
+	s.serveAdminUIPage(w, r, "/dashboard/settings/logs")
 }
 
 func (s *Server) handleSettingsJoinHomePage(w http.ResponseWriter, r *http.Request) {
-	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings/join-home", "accept-invitation.html")
+	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings/join-home")
 }
 
 func serveDeploymentGuide(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +110,7 @@ func serveDeploymentGuide(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	serveUIFile(w, r, "deployment.html", "text/html; charset=utf-8")
+	serveReactApp(w, r)
 }
 
 func serveUIFavicon(w http.ResponseWriter, r *http.Request) {
@@ -123,11 +123,10 @@ func serveUIFavicon(w http.ResponseWriter, r *http.Request) {
 
 func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	name := path.Clean(strings.TrimPrefix(r.URL.Path, "/assets/"))
+	if serveReactAsset(w, name) {
+		return
+	}
 	switch name {
-	case "styles.css":
-		serveUIFile(w, r, name, "text/css; charset=utf-8")
-	case "api-client.js", "ui-helpers.js", "settings-nav.js", "settings-home.js", "settings-quick-links.js", "settings-logs.js", "file-server-utils.js", "file-server-preview.js", "profile-notes-editor.js", "hank-renderers.js", "login.js", "join.js", "password-change.js", "dashboard.js", "home-assistant.js", "settings.js", "settings-connections.js", "home-users.js", "service-profiles.js", "sync-status.js", "storage.js", "recovery.js", "apps.js", "hank.js", "assistant-settings.js", "profile-notes.js", "file-server.js", "accept-invitation.js", "admin-nav.js":
-		serveUIFile(w, r, name, "application/javascript; charset=utf-8")
 	case "favicon.ico", "favicon.png", "hank-icon.png", "hank-icon-192.png", "hank-icon-512.png", "apple-touch-icon.png":
 		serveUIFile(w, r, name, "image/png")
 	default:
@@ -135,7 +134,7 @@ func serveUIAsset(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) serveAuthenticatedUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, assetName string) {
+func (s *Server) serveAuthenticatedUIPage(w http.ResponseWriter, r *http.Request, expectedPath string) {
 	if r.URL.Path != expectedPath {
 		http.NotFound(w, r)
 		return
@@ -149,10 +148,10 @@ func (s *Server) serveAuthenticatedUIPage(w http.ResponseWriter, r *http.Request
 		http.Redirect(w, r, "/password-change", http.StatusSeeOther)
 		return
 	}
-	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
+	serveReactApp(w, r)
 }
 
-func (s *Server) serveHomeMemberUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, assetName string) {
+func (s *Server) serveHomeMemberUIPage(w http.ResponseWriter, r *http.Request, expectedPath string) {
 	if r.URL.Path != expectedPath {
 		http.NotFound(w, r)
 		return
@@ -170,10 +169,10 @@ func (s *Server) serveHomeMemberUIPage(w http.ResponseWriter, r *http.Request, e
 		http.Error(w, "home membership required", http.StatusForbidden)
 		return
 	}
-	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
+	serveReactApp(w, r)
 }
 
-func (s *Server) serveAdminUIPage(w http.ResponseWriter, r *http.Request, expectedPath string, assetName string) {
+func (s *Server) serveAdminUIPage(w http.ResponseWriter, r *http.Request, expectedPath string) {
 	if r.URL.Path != expectedPath {
 		http.NotFound(w, r)
 		return
@@ -192,7 +191,25 @@ func (s *Server) serveAdminUIPage(w http.ResponseWriter, r *http.Request, expect
 		http.Error(w, "admin role required", http.StatusForbidden)
 		return
 	}
-	serveUIFile(w, r, assetName, "text/html; charset=utf-8")
+	serveReactApp(w, r)
+}
+
+func serveReactApp(w http.ResponseWriter, r *http.Request) {
+	serveUIFile(w, r, "react/index.html", "text/html; charset=utf-8")
+}
+
+func serveReactAsset(w http.ResponseWriter, name string) bool {
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	switch {
+	case strings.HasSuffix(name, ".css"):
+		return serveUIFileIfExists(w, "react/assets/"+name, "text/css; charset=utf-8")
+	case strings.HasSuffix(name, ".js"):
+		return serveUIFileIfExists(w, "react/assets/"+name, "application/javascript; charset=utf-8")
+	default:
+		return false
+	}
 }
 
 func serveUIFile(w http.ResponseWriter, r *http.Request, name string, contentType string) {
@@ -201,6 +218,26 @@ func serveUIFile(w http.ResponseWriter, r *http.Request, name string, contentTyp
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", contentType)
+	if strings.HasSuffix(name, ".html") {
+		w.Header().Set("Cache-Control", "private, max-age=30")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func serveUIFileIfExists(w http.ResponseWriter, name string, contentType string) bool {
+	data, err := fs.ReadFile(uiAssets, "ui/"+name)
+	if err != nil {
+		return false
+	}
+	writeUIFile(w, name, contentType, data)
+	return true
+}
+
+func writeUIFile(w http.ResponseWriter, name string, contentType string, data []byte) {
 	w.Header().Set("Content-Type", contentType)
 	if strings.HasSuffix(name, ".html") {
 		w.Header().Set("Cache-Control", "private, max-age=30")

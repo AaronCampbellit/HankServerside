@@ -135,6 +135,11 @@ type FileTransferOpen struct {
 	SourceID  string `json:"source_id,omitempty"`
 	Path      string `json:"path"`
 	Offset    int64  `json:"offset,omitempty"`
+	Length    int64  `json:"length,omitempty"`
+}
+
+type FileTransferCancel struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 type FileTransferReady struct {

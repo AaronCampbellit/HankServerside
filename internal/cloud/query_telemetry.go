@@ -32,6 +32,6 @@ func (s *Server) handleHomeQueryTelemetry(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), status)
 		return true
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"queries": rows})
+	writeJSON(w, http.StatusOK, map[string]any{"queries": nonNilSlice(rows)})
 	return true
 }

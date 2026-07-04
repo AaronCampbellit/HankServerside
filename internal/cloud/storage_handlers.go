@@ -80,7 +80,7 @@ func (s *Server) handleHomeStorage(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"events": events})
+		writeJSON(w, http.StatusOK, map[string]any{"events": nonNilSlice(events)})
 		return true
 
 	case len(parts) == 2 && parts[1] == "events" && r.Method == http.MethodDelete:

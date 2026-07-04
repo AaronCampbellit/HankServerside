@@ -137,6 +137,7 @@ func (s *Server) handleHomeInvitationAccept(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.audit(r.Context(), "invitation.accepted", auditSeverityInfo, auth.User.ID, "", invitation.HomeID, requestIDFromContext(r.Context()), "invitation", invitation.ID, map[string]any{"email_hash": stableAuditTarget(auth.User.Email)})
 	home, err := s.store.GetHomeByID(r.Context(), invitation.HomeID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -155,7 +156,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"members": members})
+		writeJSON(w, http.StatusOK, map[string]any{"members": nonNilSlice(members)})
 		return true
 	}
 
@@ -169,7 +170,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"invitations": invitations})
+		writeJSON(w, http.StatusOK, map[string]any{"invitations": nonNilSlice(invitations)})
 		return true
 	}
 
@@ -206,6 +207,11 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.audit(r.Context(), "invitation.created", auditSeverityInfo, membership.UserID, "", home.ID, requestIDFromContext(r.Context()), "invitation", invitation.ID, map[string]any{
+			"email_hash": stableAuditTarget(invitation.Email),
+			"role":       invitation.Role,
+			"expires_at": invitation.ExpiresAt,
+		})
 		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "invitation_created"})
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"invitation_id": invitation.ID,
@@ -232,6 +238,7 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
+		s.audit(r.Context(), "invitation.cancelled", auditSeverityInfo, membership.UserID, "", home.ID, requestIDFromContext(r.Context()), "invitation", parts[2], nil)
 		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "invitation_deleted"})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return true
@@ -501,7 +508,7 @@ func (s *Server) handleHomeNotesHTTP(w http.ResponseWriter, r *http.Request, hom
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
+		writeJSON(w, http.StatusOK, map[string]any{"notes": nonNilSlice(notes)})
 		return true
 	}
 
@@ -748,7 +755,7 @@ func (s *Server) handleProfileNotesHTTP(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			s.logger.Info("profile notes list served", "user_id", auth.User.ID, "note_count", len(notes))
-			writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
+			writeJSON(w, http.StatusOK, map[string]any{"notes": nonNilSlice(notes)})
 			return
 		case http.MethodPost:
 			if !s.requireNotesScope(w, r, auth, domain.NotesAPIScopeWrite) {
@@ -1139,7 +1146,7 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
+		writeJSON(w, http.StatusOK, map[string]any{"profiles": nonNilSlice(profiles)})
 		return true
 	}
 

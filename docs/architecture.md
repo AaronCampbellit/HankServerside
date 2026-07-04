@@ -71,6 +71,7 @@ HankServerside is Hank's stable OS/runtime. It owns auth, routing, protocol, per
 ## Operator Surfaces
 
 - `/` and `/dashboard` provide first admin setup, home/agent status, token lifecycle, and operator troubleshooting.
+- Browser UI source lives in `web/dashboard` as a React/Vite/TypeScript app; the production build is embedded from `internal/cloud/ui/react`.
 - `/dashboard/settings/*` exposes Settings sections as direct authenticated routes. Dashboard navigation does not use iframe composition; only file preview content uses sandboxed iframes.
 - `/dashboard/file-server` exposes source browsing, uploads/downloads, file moves, cancellation, retry, and rollback for managed jobs.
 - `/dashboard/hank` exposes HankAI conversations, assistant model/provider settings, attachments, confirmations, media workflows, and client-tool result handling.

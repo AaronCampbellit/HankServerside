@@ -245,6 +245,20 @@ func TestOwnerCanListAndRevokePendingInvitations(t *testing.T) {
 		"role":  domain.HomeRoleMember,
 	}, &created)
 
+	var auditPayload struct {
+		Events []struct {
+			EventType string `json:"event_type"`
+			TargetID  string `json:"target_id"`
+		} `json:"events"`
+	}
+	requestJSON(t, testServer, "owner-token", http.MethodGet, "/v1/home/audit-events?event_type=invitation.created", nil, &auditPayload)
+	if len(auditPayload.Events) != 1 {
+		t.Fatalf("invitation audit events = %d, want 1", len(auditPayload.Events))
+	}
+	if auditPayload.Events[0].TargetID != created.InvitationID {
+		t.Fatalf("invitation audit target = %q, want %q", auditPayload.Events[0].TargetID, created.InvitationID)
+	}
+
 	var list struct {
 		Invitations []domain.HomeInvitation `json:"invitations"`
 	}

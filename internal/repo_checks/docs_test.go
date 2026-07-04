@@ -19,9 +19,6 @@ func TestActiveDocsDoNotReferenceRemovedLegacyPaths(t *testing.T) {
 			return err
 		}
 		if entry.IsDir() {
-			if filepath.Base(path) == "archive" {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 		if filepath.Ext(path) != ".md" || filepath.Base(path) == "legacy-code-audit.md" {
@@ -69,7 +66,7 @@ func TestActiveDocsDoNotReferenceRemovedLegacyPaths(t *testing.T) {
 	}
 }
 
-func TestPhaseDocsAreRemovedFromActiveIndex(t *testing.T) {
+func TestHistoricalDocsAreRemovedFromActiveIndex(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
@@ -79,11 +76,13 @@ func TestPhaseDocsAreRemovedFromActiveIndex(t *testing.T) {
 		t.Fatalf("read project knowledge index: %v", err)
 	}
 	body := string(data)
-	if strings.Contains(body, "archive/phases") {
-		t.Fatal("project knowledge index should not point to removed phase archives")
+	for _, stale := range []string{"docs/archive", "archive/", "frontend-react-route-parity-inventory.md"} {
+		if strings.Contains(body, stale) {
+			t.Fatalf("project knowledge index should not point to removed historical docs: %q", stale)
+		}
 	}
-	if !strings.Contains(body, "Removed Historical Phase Docs") {
-		t.Fatal("project knowledge index should explain that historical phase docs were removed")
+	if !strings.Contains(body, "Removed Historical Docs") {
+		t.Fatal("project knowledge index should explain that historical docs were removed")
 	}
 	for _, stale := range []string{
 		"](phase-1-",

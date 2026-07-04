@@ -95,6 +95,69 @@ func TestNotificationSettingsAndAPNSHandlers(t *testing.T) {
 	}
 }
 
+func TestHomeNotificationsFeedReportsOperationalIssues(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	suffix := strconv.FormatInt(now.UnixNano(), 36)
+	user := domain.User{ID: "usr_notify_feed_" + suffix, Email: "notify-feed+" + suffix + "@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_notify_feed_" + suffix, UserID: user.ID, Name: "Notify Feed", CreatedAt: now, UpdatedAt: now}
+	agent := domain.Agent{ID: "agent_notify_feed_" + suffix, HomeID: home.ID, Name: "Kitchen Mac", Status: domain.AgentStatusOffline, CreatedAt: now, UpdatedAt: now}
+	sessionRawToken := "session-notify-feed-" + suffix
+	session := domain.AppSession{ID: "sess_notify_feed_" + suffix, UserID: user.ID, TokenHash: hashToken(sessionRawToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.UpsertAgent(ctx, agent))
+	must(t, db.CreateSession(ctx, session))
+	must(t, db.CreateHomeQuickLink(ctx, domain.HomeQuickLink{
+		ID:                 "ql_notify_feed_" + suffix,
+		HomeID:             home.ID,
+		Title:              "Home Assistant",
+		URL:                "https://ha.example.test",
+		Description:        "Local HA",
+		SortOrder:          10,
+		HealthCheckEnabled: true,
+		Status:             domain.QuickLinkStatusDown,
+		StatusCode:         502,
+		LastError:          "bad gateway",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		UpdatedBy:          user.ID,
+	}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var payload struct {
+		Notifications []homeNotification `json:"notifications"`
+	}
+	requestJSON(t, testServer, sessionRawToken, http.MethodGet, "/v1/home/notifications", nil, &payload)
+
+	if len(payload.Notifications) < 2 {
+		t.Fatalf("notifications = %#v, want agent and quick link issues", payload.Notifications)
+	}
+	if !notificationTitlesContain(payload.Notifications, "Connector offline") {
+		t.Fatalf("missing connector notification: %#v", payload.Notifications)
+	}
+	if !notificationTitlesContain(payload.Notifications, "Quick link is down") {
+		t.Fatalf("missing quick link notification: %#v", payload.Notifications)
+	}
+}
+
+func notificationTitlesContain(items []homeNotification, title string) bool {
+	for _, item := range items {
+		if item.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
 func TestNotificationEventsTargetRelevantUsers(t *testing.T) {
 	t.Parallel()
 

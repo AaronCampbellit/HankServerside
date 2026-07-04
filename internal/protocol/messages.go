@@ -23,6 +23,7 @@ const (
 	TypeFileTransferReady    = "file.transfer.ready"
 	TypeFileTransferData     = "file.transfer.data"
 	TypeFileTransferComplete = "file.transfer.complete"
+	TypeFileTransferCancel   = "file.transfer.cancel"
 	TypeFileTransferError    = "file.transfer.error"
 )
 

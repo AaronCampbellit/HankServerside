@@ -151,7 +151,7 @@ func (s *Server) handleHomeApps(w http.ResponseWriter, r *http.Request, home dom
 			return true
 		}
 		summaries = filterAppSummariesForMembership(summaries, membership)
-		writeJSON(w, http.StatusOK, protocol.AppsListResponse{Apps: summaries})
+		writeJSON(w, http.StatusOK, protocol.AppsListResponse{Apps: nonNilSlice(summaries)})
 		return true
 	}
 

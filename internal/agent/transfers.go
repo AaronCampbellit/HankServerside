@@ -29,7 +29,7 @@ func (c *Client) handleTransferOpen(ctx context.Context, conn *websocket.Conn, e
 
 	switch open.Operation {
 	case protocol.FileTransferOperationDownload:
-		return c.startDownloadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.SourceID, open.Path, open.Offset)
+		return c.startDownloadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.SourceID, open.Path, open.Offset, open.Length)
 	case protocol.FileTransferOperationUpload:
 		return c.startUploadTransfer(ctx, conn, envelope.RequestID, envelope.HomeID, open.SourceID, open.Path, open.Offset)
 	default:
@@ -103,7 +103,14 @@ func (c *Client) handleTransferComplete(ctx context.Context, conn *websocket.Con
 	return c.writeJSON(ctx, conn, reply)
 }
 
-func (c *Client) startDownloadTransfer(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64) error {
+func (c *Client) handleTransferCancel(envelope protocol.Envelope) {
+	c.cancelDownload(envelope.RequestID)
+}
+
+func (c *Client) startDownloadTransfer(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64, length int64) error {
+	if existing := c.setDownloadCancel(transferID, nil); existing != nil {
+		existing()
+	}
 	file, info, err := c.dispatcher.files.OpenReaderSource(ctx, sourceID, path, offset)
 	if err != nil {
 		return c.writeTransferError(ctx, conn, transferID, homeID, "transfer_open_failed", err.Error())
@@ -125,7 +132,11 @@ func (c *Client) startDownloadTransfer(ctx context.Context, conn *websocket.Conn
 		return err
 	}
 
-	go c.streamDownload(ctx, conn, transferID, homeID, sourceID, path, offset, info.Size(), file)
+	transferCtx, cancel := context.WithCancel(ctx)
+	if existing := c.setDownloadCancel(transferID, cancel); existing != nil {
+		existing()
+	}
+	go c.streamDownload(transferCtx, conn, transferID, homeID, sourceID, path, offset, info.Size(), length, file)
 	return nil
 }
 
@@ -164,18 +175,27 @@ func (c *Client) startUploadTransfer(ctx context.Context, conn *websocket.Conn, 
 	return c.writeJSON(ctx, conn, ready)
 }
 
-func (c *Client) streamDownload(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64, totalSize int64, file agentfiles.ReadHandle) {
+func (c *Client) streamDownload(ctx context.Context, conn *websocket.Conn, transferID string, homeID string, sourceID string, path string, offset int64, totalSize int64, length int64, file agentfiles.ReadHandle) {
 	defer file.Close()
+	defer c.deleteDownload(transferID)
 
 	buffer := make([]byte, transferChunkSize)
 	currentOffset := offset
+	remaining := length
 
 	for {
-		n, err := file.Read(buffer)
+		if remaining == 0 && length > 0 {
+			break
+		}
+		readBuffer := buffer
+		if remaining > 0 && remaining < int64(len(readBuffer)) {
+			readBuffer = readBuffer[:remaining]
+		}
+		n, err := file.Read(readBuffer)
 		if n > 0 {
 			envelope, envelopeErr := protocol.NewEnvelope(protocol.TypeFileTransferData, transferID, c.agentID, homeID, protocol.FileTransferChunk{
 				Offset:        currentOffset,
-				ContentBase64: base64.StdEncoding.EncodeToString(buffer[:n]),
+				ContentBase64: base64.StdEncoding.EncodeToString(readBuffer[:n]),
 			})
 			if envelopeErr != nil {
 				_ = c.writeTransferError(context.Background(), conn, transferID, homeID, "transfer_encoding_failed", envelopeErr.Error())
@@ -185,28 +205,35 @@ func (c *Client) streamDownload(ctx context.Context, conn *websocket.Conn, trans
 				return
 			}
 			currentOffset += int64(n)
+			if remaining > 0 {
+				remaining -= int64(n)
+			}
 		}
 
 		if err == io.EOF {
-			complete, envelopeErr := protocol.NewEnvelope(protocol.TypeFileTransferComplete, transferID, c.agentID, homeID, protocol.FileTransferComplete{
-				Operation: protocol.FileTransferOperationDownload,
-				SourceID:  sourceID,
-				Path:      path,
-				Offset:    currentOffset,
-				Size:      totalSize,
-			})
-			if envelopeErr != nil {
-				_ = c.writeTransferError(context.Background(), conn, transferID, homeID, "transfer_encoding_failed", envelopeErr.Error())
-				return
-			}
-			_ = c.writeJSON(ctx, conn, complete)
-			return
+			break
 		}
 		if err != nil {
 			_ = c.writeTransferError(context.Background(), conn, transferID, homeID, "transfer_read_failed", err.Error())
 			return
 		}
 	}
+
+	if ctx.Err() != nil {
+		return
+	}
+	complete, envelopeErr := protocol.NewEnvelope(protocol.TypeFileTransferComplete, transferID, c.agentID, homeID, protocol.FileTransferComplete{
+		Operation: protocol.FileTransferOperationDownload,
+		SourceID:  sourceID,
+		Path:      path,
+		Offset:    currentOffset,
+		Size:      totalSize,
+	})
+	if envelopeErr != nil {
+		_ = c.writeTransferError(context.Background(), conn, transferID, homeID, "transfer_encoding_failed", envelopeErr.Error())
+		return
+	}
+	_ = c.writeJSON(ctx, conn, complete)
 }
 
 func (c *Client) writeTransferError(ctx context.Context, conn *websocket.Conn, requestID string, homeID string, code string, message string) error {
@@ -229,4 +256,29 @@ func (c *Client) deleteUpload(transferID string) (*uploadTransfer, bool) {
 		delete(c.uploads, transferID)
 	}
 	return upload, ok
+}
+
+func (c *Client) setDownloadCancel(transferID string, cancel context.CancelFunc) context.CancelFunc {
+	c.downloadsMu.Lock()
+	defer c.downloadsMu.Unlock()
+	existing := c.downloads[transferID]
+	if cancel == nil {
+		delete(c.downloads, transferID)
+	} else {
+		c.downloads[transferID] = cancel
+	}
+	return existing
+}
+
+func (c *Client) cancelDownload(transferID string) bool {
+	cancel := c.setDownloadCancel(transferID, nil)
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
+func (c *Client) deleteDownload(transferID string) {
+	c.setDownloadCancel(transferID, nil)
 }

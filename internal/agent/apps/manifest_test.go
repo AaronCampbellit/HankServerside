@@ -172,6 +172,7 @@ func TestValidateManifestRejectsSecretAndPermissionFieldDrift(t *testing.T) {
 			name: "file permission references missing settings field",
 			mutate: func(m *Manifest) {
 				m.Config.Settings = SettingsSchema{Fields: []SettingsField{{Key: "source_id", Type: "select", Source: "file_sources"}}}
+				m.Permissions.Network = nil
 				m.Permissions.Files = []FilePermission{{Kind: "configured_source", Field: "missing_source"}}
 			},
 			want: "file permission",
@@ -180,6 +181,7 @@ func TestValidateManifestRejectsSecretAndPermissionFieldDrift(t *testing.T) {
 			name: "file permission references non file source field",
 			mutate: func(m *Manifest) {
 				m.Config.Settings = SettingsSchema{Fields: []SettingsField{{Key: "source_id", Type: "text"}}}
+				m.Permissions.Network = nil
 				m.Permissions.Files = []FilePermission{{Kind: "configured_source", Field: "source_id"}}
 			},
 			want: "file_sources",
@@ -398,6 +400,7 @@ func TestValidateManifestAcceptsScalarSelectDefaultsAndEmptyOptions(t *testing.T
 			},
 		},
 	}
+	manifest.Permissions = Permissions{}
 
 	if err := ValidateManifest(manifest); err != nil {
 		t.Fatalf("ValidateManifest error: %v", err)
@@ -675,11 +678,11 @@ type archiveEntry struct {
 
 func samplePackageEntries(rawManifest string) map[string]string {
 	return map[string]string{
-		"app.json":                        rawManifest,
-		"bin/sample-app":                  "#!/bin/sh\n",
-		"schemas/config.schema.json":      `{"type":"object"}`,
-		"schemas/run.input.schema.json":   `{"type":"object"}`,
-		"schemas/run.output.schema.json":  `{"type":"object"}`,
+		"app.json":                       rawManifest,
+		"bin/sample-app":                 "#!/bin/sh\n",
+		"schemas/config.schema.json":     `{"type":"object"}`,
+		"schemas/run.input.schema.json":  `{"type":"object"}`,
+		"schemas/run.output.schema.json": `{"type":"object"}`,
 	}
 }
 

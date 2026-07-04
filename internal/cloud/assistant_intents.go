@@ -179,24 +179,9 @@ func executeAssistantMemorySearchTool(ctx context.Context, server *Server, runti
 }
 
 func rankProjectDocContexts(contexts []domain.AssistantRetrievedContext, prompt string) {
-	loweredPrompt := strings.ToLower(prompt)
-	wantsHistory := strings.Contains(loweredPrompt, "archive") || strings.Contains(loweredPrompt, "histor") || strings.Contains(loweredPrompt, "phase")
-	if wantsHistory {
-		return
-	}
 	sort.SliceStable(contexts, func(i, j int) bool {
-		leftArchived := isArchivedProjectDoc(contexts[i])
-		rightArchived := isArchivedProjectDoc(contexts[j])
-		if leftArchived != rightArchived {
-			return !leftArchived
-		}
 		return contexts[i].Score > contexts[j].Score
 	})
-}
-
-func isArchivedProjectDoc(item domain.AssistantRetrievedContext) bool {
-	path := strings.ToLower(strings.TrimSpace(item.Path))
-	return strings.Contains(path, "docs/archive/") || strings.Contains(path, "archive/phases/")
 }
 
 func errorsIsFeatureDenied(err error) bool {

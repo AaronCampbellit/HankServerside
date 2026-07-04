@@ -38,7 +38,7 @@ func (s *Server) handleHomeFileJobs(w http.ResponseWriter, r *http.Request, home
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"jobs": fileOperationJobSnapshots(jobs)})
+		writeJSON(w, http.StatusOK, map[string]any{"jobs": nonNilSlice(fileOperationJobSnapshots(jobs))})
 		return true
 	}
 

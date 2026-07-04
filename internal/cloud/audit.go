@@ -71,6 +71,22 @@ func auditPathMetadata(sourceID string, path string) map[string]any {
 	return metadata
 }
 
+func (s *Server) auditHomeIDForUser(ctx context.Context, userID string) string {
+	home, _, err := s.requireSingletonHomeMembership(ctx, userID)
+	if err != nil {
+		return ""
+	}
+	return home.ID
+}
+
+func (s *Server) auditHomeIDForEmail(ctx context.Context, email string) string {
+	user, err := s.store.GetUserByEmail(ctx, strings.TrimSpace(strings.ToLower(email)))
+	if err != nil {
+		return ""
+	}
+	return s.auditHomeIDForUser(ctx, user.ID)
+}
+
 func (s *Server) handleHomeAuditEvents(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {
 	if len(parts) != 1 || parts[0] != "audit-events" {
 		return false
@@ -99,7 +115,7 @@ func (s *Server) handleHomeAuditEvents(w http.ResponseWriter, r *http.Request, h
 		return true
 	}
 	_ = auth
-	writeJSON(w, http.StatusOK, map[string]any{"events": auditEventSnapshots(events)})
+	writeJSON(w, http.StatusOK, map[string]any{"events": nonNilSlice(auditEventSnapshots(events))})
 	return true
 }
 
@@ -149,6 +165,12 @@ func auditEventHelperText(event store.AuditEvent, metadata map[string]any) strin
 		return "User session was signed out or revoked."
 	case "password.changed":
 		return "User password was changed."
+	case "invitation.created":
+		return "An admin created a one-time home invitation."
+	case "invitation.cancelled":
+		return "An admin cancelled a pending home invitation."
+	case "invitation.accepted":
+		return "An existing user accepted a home invitation."
 	case "invitation.signup":
 		return "A user accepted an invitation and signed in."
 	case "file_transfer.requested":
@@ -179,6 +201,8 @@ func auditEventHelperText(event store.AuditEvent, metadata map[string]any) strin
 		return "File action was blocked by source policy. Check allowed prefixes, blocked prefixes, and permissions."
 	case "file_operation.requested":
 		return "A managed file operation was queued. Check the related file job for progress or rollback."
+	case "agent.restart_requested":
+		return "Connector restart was requested from the dashboard."
 	case "app_package.previewed":
 		return "App package preview completed and is ready for review before activation."
 	case "app_package.preview_failed":

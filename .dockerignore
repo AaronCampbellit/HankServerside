@@ -6,3 +6,5 @@ data
 *.db
 *.db-shm
 *.db-wal
+web/dashboard/node_modules
+internal/cloud/ui/react

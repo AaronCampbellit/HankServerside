@@ -105,6 +105,12 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.handleHomeNotifications(w, r, home, auth, membership, parts) {
+		return
+	}
+	if s.handleHomeSearch(w, r, home, auth, membership, parts) {
+		return
+	}
 	if s.handleHomeQuickLinks(w, r, home, auth, membership, parts) {
 		return
 	}
@@ -232,7 +238,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+		writeJSON(w, http.StatusOK, map[string]any{"tokens": nonNilSlice(tokens)})
 		return true
 	}
 

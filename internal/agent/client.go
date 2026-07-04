@@ -23,20 +23,22 @@ import (
 const maxMessageSize = 2 << 20
 
 type Client struct {
-	cloudURL   string
-	agentID    string
-	token      string
-	homeName   string
-	configPath string
-	logger     *slog.Logger
-	dispatcher commandDispatcher
-	writeMu    sync.Mutex
-	uploadsMu  sync.Mutex
-	uploads    map[string]*uploadTransfer
-	movesMu    sync.Mutex
-	moves      map[string]context.CancelFunc
-	moveSlots  chan struct{}
-	restartFn  func()
+	cloudURL    string
+	agentID     string
+	token       string
+	homeName    string
+	configPath  string
+	logger      *slog.Logger
+	dispatcher  commandDispatcher
+	writeMu     sync.Mutex
+	uploadsMu   sync.Mutex
+	uploads     map[string]*uploadTransfer
+	downloadsMu sync.Mutex
+	downloads   map[string]context.CancelFunc
+	movesMu     sync.Mutex
+	moves       map[string]context.CancelFunc
+	moveSlots   chan struct{}
+	restartFn   func()
 }
 
 func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, notes *agentnotes.Service, apps *agentapps.Manager, logger *slog.Logger) *Client {
@@ -72,6 +74,7 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 			config: newConfigManager(configPath, ha, files),
 		},
 		uploads:   make(map[string]*uploadTransfer),
+		downloads: make(map[string]context.CancelFunc),
 		moves:     make(map[string]context.CancelFunc),
 		moveSlots: make(chan struct{}, 1),
 		restartFn: defaultRestartFn,
@@ -251,6 +254,9 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) error {
 			if err := c.handleTransferComplete(ctx, conn, envelope); err != nil {
 				return err
 			}
+
+		case protocol.TypeFileTransferCancel:
+			c.handleTransferCancel(envelope)
 
 		default:
 			c.logger.Info("received unsupported cloud message", "agent_id", c.agentID, "type", envelope.Type)
