@@ -1012,6 +1012,62 @@ func TestHTTPServerTimeoutsSlowlorisAndAllowsLargeTransfer(t *testing.T) {
 	}
 }
 
+func TestRouteDeadlineMiddlewareScopesWriteDeadline(t *testing.T) {
+	t.Parallel()
+
+	const chunkCount = 5
+	mux := http.NewServeMux()
+	slowWriter := func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("response writer does not support flush")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		for i := 0; i < chunkCount; i++ {
+			if _, err := w.Write(make([]byte, 1024)); err != nil {
+				return
+			}
+			flusher.Flush()
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
+	mux.HandleFunc("/v1/file-transfers/", slowWriter)
+	mux.HandleFunc("/plain", slowWriter)
+
+	httpServer := &http.Server{
+		Handler:      routeDeadlineMiddleware(mux),
+		WriteTimeout: 300 * time.Millisecond,
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	go func() { _ = httpServer.Serve(listener) }()
+	defer httpServer.Close()
+
+	readAll := func(path string) (int, error) {
+		response, err := http.Get("http://" + listener.Addr().String() + path)
+		if err != nil {
+			return 0, err
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		return len(data), err
+	}
+
+	transferBytes, err := readAll("/v1/file-transfers/test")
+	if err != nil || transferBytes != chunkCount*1024 {
+		t.Fatalf("transfer route bytes = %d err = %v, want %d bytes without error", transferBytes, err, chunkCount*1024)
+	}
+
+	plainBytes, err := readAll("/plain")
+	if err == nil && plainBytes == chunkCount*1024 {
+		t.Fatal("plain route slow write completed fully; expected server write deadline to cut it off")
+	}
+}
+
 func TestHTTPServerAllowsLargeValidTransfer(t *testing.T) {
 	t.Parallel()
 

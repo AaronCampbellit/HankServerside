@@ -17,6 +17,7 @@ Layout at a glance:
 - [README.md](../README.md): current scope, route summary, project layout, and quick start.
 - [AGENTS.md](../AGENTS.md): Codex working rules and repo boundaries.
 - [SERVER_SYNC.md](../SERVER_SYNC.md): app/server contract ledger.
+- [RELEASE.md](../RELEASE.md): release checklist and operator upgrade notes for tagged releases.
 
 These stay in the repo root because common tooling expects them there. They are
 still part of the HankAI project-docs source.

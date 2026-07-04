@@ -23,6 +23,11 @@ import (
 	"github.com/dropfile/hankremote/internal/store"
 )
 
+// buildVersion is stamped at build time via
+// -ldflags "-X main.buildVersion=<version>"; it stays "dev" for local
+// go run/go build workflows.
+var buildVersion = "dev"
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -74,6 +79,7 @@ func main() {
 
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
 	server.ConfigureSecretStorageStatus(cfg.SecretKey != "", cfg.AllowPlaintextSecrets)
+	server.ConfigureMetricsScrapeToken(cfg.MetricsScrapeToken)
 	server.ConfigureAPNS(cloud.APNSConfig{
 		TeamID:      cfg.APNS.TeamID,
 		KeyID:       cfg.APNS.KeyID,
@@ -105,7 +111,7 @@ func main() {
 		PublicBaseURL: cfg.MCPPublicBaseURL,
 		DocsDir:       cfg.MCPDocsDir,
 	})
-	if err := server.StartRuntime(ctx, "dev"); err != nil {
+	if err := server.StartRuntime(ctx, buildVersion); err != nil {
 		logger.Error("failed to start runtime coordination", "error", err)
 		os.Exit(1)
 	}

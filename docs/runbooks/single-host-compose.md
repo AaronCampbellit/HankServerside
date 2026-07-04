@@ -89,6 +89,41 @@ scripts/doctor.sh
 
 Use the configured `HANK_REMOTE_CLOUD_HOST_PORT` if it is not `18080`.
 
+## Monitoring And Alerts
+
+The compose file ships a `monitoring` profile with Prometheus (rule evaluation
+against `ops/prometheus/alerts.yml`) and Alertmanager. Both bind to
+`127.0.0.1` only; access them over SSH port forwarding, never expose them
+publicly.
+
+1. Set a dedicated scrape token in `.env.cloud`:
+
+```bash
+echo "HANK_REMOTE_METRICS_SCRAPE_TOKEN=$(openssl rand -hex 32)" >> .env.cloud
+```
+
+2. Write the same token where Prometheus reads it (gitignored):
+
+```bash
+mkdir -p ops/prometheus/secrets
+grep '^HANK_REMOTE_METRICS_SCRAPE_TOKEN=' .env.cloud | cut -d= -f2 | tr -d '\n' > ops/prometheus/secrets/metrics-token
+chmod 600 ops/prometheus/secrets/metrics-token
+```
+
+3. Restart the cloud (to pick up the token) and start monitoring:
+
+```bash
+docker compose --env-file .env.cloud up -d cloud
+docker compose --env-file .env.cloud --profile monitoring up -d prometheus alertmanager
+```
+
+4. Verify: `http://127.0.0.1:9090/targets` shows the `hank-cloud` target up,
+   and `http://127.0.0.1:9090/rules` lists the Hank alert rules.
+
+Alertmanager starts with a no-op receiver. Configure a real receiver (email or
+webhook) in a server-local copy of `ops/alertmanager/alertmanager.yml` before
+relying on alerts in production, and test-fire one alert to confirm delivery.
+
 Dashboard checks:
 
 - Home agent shows online

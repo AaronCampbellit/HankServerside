@@ -222,7 +222,12 @@ curl http://127.0.0.1:18080/readyz
 
 Use your custom port if you changed `HANK_REMOTE_CLOUD_HOST_PORT`.
 
-`/metrics` requires a signed-in admin session. Scrape it through an authenticated internal path, or keep it behind an internal reverse proxy that injects admin credentials, for example:
+`/metrics` requires authentication: either a signed-in admin session, or the
+dedicated scrape token when `HANK_REMOTE_METRICS_SCRAPE_TOKEN` is set in
+`.env.cloud`. The scrape token exists so Prometheus can scrape without an
+expiring admin session; see the monitoring section of
+`docs/runbooks/single-host-compose.md` for the full Prometheus + Alertmanager
+setup.
 
 ```bash
 curl -H "Authorization: Bearer $HANK_REMOTE_ADMIN_SESSION_TOKEN" \

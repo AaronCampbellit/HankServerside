@@ -8,3 +8,4 @@
 /coverage.out
 /web/dashboard/node_modules/
 /internal/cloud/ui/react/
+/ops/prometheus/secrets/

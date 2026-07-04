@@ -16,6 +16,25 @@ Use this when app requests fail with `agent_offline` or the cloud shows a home w
 - cloud URL mismatch
 - local network outage
 - agent process crash
+- agent binary predates the header-auth migration (see below)
+
+## Agents Older Than The Header-Auth Migration
+
+Agent auth moved from URL query credentials to `Authorization: Bearer` plus
+`X-Hank-Agent-ID` headers, and the query fallback was removed. An agent built
+before that migration is rejected on every connect and shows as permanently
+offline after a cloud upgrade.
+
+Upgrade path:
+
+1. Create a new setup token in the dashboard (Settings > Home) or via
+   `POST /v1/home/agent/tokens`.
+2. Regenerate the agent env file with `scripts/install-agent-env.sh` (or paste
+   the new setup block into `.env.agent` and run `chmod 600 .env.agent`).
+3. Restart the agent with the current image/binary:
+   `docker compose --env-file .env.cloud --profile agent up -d agent`.
+4. Confirm the dashboard shows the agent online.
+5. Revoke the old token.
 
 ## Recovery
 

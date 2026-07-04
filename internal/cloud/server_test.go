@@ -1092,6 +1092,45 @@ func TestMetricsEndpointRendersCounters(t *testing.T) {
 	}
 }
 
+func TestMetricsScrapeTokenAccess(t *testing.T) {
+	t.Parallel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	server.ConfigureMetricsScrapeToken("scrape-secret")
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	fetch := func(token string) int {
+		request, err := http.NewRequest(http.MethodGet, testServer.URL+"/metrics", nil)
+		if err != nil {
+			t.Fatalf("metrics request: %v", err)
+		}
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("metrics request: %v", err)
+		}
+		defer response.Body.Close()
+		_, _ = io.Copy(io.Discard, response.Body)
+		return response.StatusCode
+	}
+
+	if status := fetch("scrape-secret"); status != http.StatusOK {
+		t.Fatalf("scrape token metrics status = %d, want %d", status, http.StatusOK)
+	}
+	if status := fetch("wrong-token"); status != http.StatusUnauthorized {
+		t.Fatalf("wrong token metrics status = %d, want %d", status, http.StatusUnauthorized)
+	}
+	if status := fetch(""); status != http.StatusUnauthorized {
+		t.Fatalf("missing token metrics status = %d, want %d", status, http.StatusUnauthorized)
+	}
+}
+
 func TestLoginRateLimitIsEnforced(t *testing.T) {
 	t.Parallel()
 

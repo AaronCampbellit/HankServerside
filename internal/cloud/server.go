@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,7 @@ type Server struct {
 	plaintextSecretsAllowed    bool
 	runtimeID                  string
 	runtimeVersion             string
+	metricsScrapeToken         string
 	runtimeCancel              context.CancelFunc
 	maintenanceCancel          context.CancelFunc
 	httpBaseCancel             context.CancelFunc
@@ -200,10 +202,10 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 
 	server.http = &http.Server{
 		Addr:              addr,
-		Handler:           securityHeadersMiddleware(requestIDMiddleware(server.metricsMiddleware(mux))),
+		Handler:           securityHeadersMiddleware(requestIDMiddleware(server.metricsMiddleware(routeDeadlineMiddleware(mux)))),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 		BaseContext: func(net.Listener) context.Context {
 			return httpBaseCtx
@@ -240,6 +242,24 @@ func (s *Server) ConfigureAPNS(cfg APNSConfig) {
 func (s *Server) ConfigureSecretStorageStatus(encrypted bool, plaintextAllowed bool) {
 	s.secretEncryptionConfigured = encrypted
 	s.plaintextSecretsAllowed = plaintextAllowed
+}
+
+// ConfigureMetricsScrapeToken enables a dedicated bearer token for Prometheus
+// scrapes of /metrics, so monitoring does not depend on an expiring admin
+// session. Admin-session access continues to work either way.
+func (s *Server) ConfigureMetricsScrapeToken(token string) {
+	s.metricsScrapeToken = strings.TrimSpace(token)
+}
+
+func (s *Server) metricsScrapeTokenMatches(r *http.Request) bool {
+	if s.metricsScrapeToken == "" {
+		return false
+	}
+	presented, err := bearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(s.metricsScrapeToken)) == 1
 }
 
 func (s *Server) StartRuntime(ctx context.Context, version string) error {
@@ -385,22 +405,24 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
-	if !ok {
-		return
-	}
-	_, membership, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			http.NotFound(w, r)
+	if !s.metricsScrapeTokenMatches(r) {
+		auth, ok := s.requireAuth(w, r)
+		if !ok {
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if membership.Role != domain.HomeRoleAdmin {
-		http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
-		return
+		_, membership, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if membership.Role != domain.HomeRoleAdmin {
+			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = io.WriteString(w, s.metrics.RenderPrometheus())
@@ -425,7 +447,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	} else {
 		_, _ = io.WriteString(w, "hank_remote_cloud_runtime_up 0\n")
 	}
-	if home, _, err := s.requireSingletonHomeMembership(r.Context(), auth.User.ID); err == nil {
+	if home, err := s.store.GetSingletonHome(r.Context()); err == nil {
 		if counts, err := s.store.CountFileOperationJobsByStatus(r.Context(), home.ID); err == nil {
 			for _, status := range []string{"queued", "running", "completed", "failed", "cancelled", "rollback_required", "rolled_back"} {
 				_, _ = io.WriteString(w, "hank_remote_file_operation_jobs{status="+strconv.Quote(status)+"} "+strconv.FormatInt(counts[status], 10)+"\n")

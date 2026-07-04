@@ -2,6 +2,21 @@ package store
 
 import "testing"
 
+func TestRebindPlaceholdersPassthroughWithoutPlaceholders(t *testing.T) {
+	query := `SELECT id FROM users WHERE email = $1`
+	if got := rebindPlaceholders(query); got != query {
+		t.Fatalf("rebindPlaceholders = %s, want unchanged", got)
+	}
+}
+
+func TestRebindPlaceholdersAnonymousDollarQuote(t *testing.T) {
+	query := `SELECT $$is ? kept$$, ? AS first`
+	want := `SELECT $$is ? kept$$, $1 AS first`
+	if got := rebindPlaceholders(query); got != want {
+		t.Fatalf("rebindPlaceholders = %s, want %s", got, want)
+	}
+}
+
 func TestRebindPlaceholdersSkipsSQLLiteralsAndComments(t *testing.T) {
 	query := `SELECT '?' AS literal, "col?name", $tag$??$tag$, ? AS first
 -- ? comment

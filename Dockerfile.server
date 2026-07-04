@@ -7,9 +7,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+ARG BUILD_VERSION=dev
 RUN npm --prefix web/dashboard ci \
 	&& npm --prefix web/dashboard run build \
-	&& CGO_ENABLED=0 GOOS=linux go build -o /out/hank-remote-cloud ./cmd/hank-remote-cloud \
+	&& CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildVersion=${BUILD_VERSION}" -o /out/hank-remote-cloud ./cmd/hank-remote-cloud \
 	&& CGO_ENABLED=0 GOOS=linux go build -o /out/hank-remote-agent ./cmd/hank-remote-agent
 
 FROM alpine:3.22

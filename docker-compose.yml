@@ -54,6 +54,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
+      args:
+        BUILD_VERSION: ${HANK_REMOTE_BUILD_VERSION:-dev}
+        SOURCE_COMMIT: ${HANK_REMOTE_SOURCE_COMMIT:-unknown}
     logging: *default-logging
     env_file:
       - path: ${HANK_REMOTE_CLOUD_ENV_FILE:-./.env.cloud}
@@ -151,6 +154,38 @@ services:
     networks:
       - hank_restore
 
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles:
+      - monitoring
+    logging: *default-logging
+    depends_on:
+      - cloud
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./ops/prometheus/secrets:/etc/prometheus/secrets:ro
+      - hank_prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+    networks:
+      - hank_app
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles:
+      - monitoring
+    logging: *default-logging
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - hank_alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+    networks:
+      - hank_app
+
   agent:
     image: hankserverside
     profiles:
@@ -174,6 +209,8 @@ services:
       - hank_app
 
 volumes:
+  hank_prometheus_data:
+  hank_alertmanager_data:
   hank_postgres_data:
   hank_postgres_restore_data:
   hank_pgbackrest_repo:

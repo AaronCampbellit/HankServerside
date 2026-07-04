@@ -219,6 +219,11 @@ POSTGRES_DB="$(env_value POSTGRES_DB hankremote)"
 HANK_REMOTE_CLOUD_HOST_PORT="$(env_value HANK_REMOTE_CLOUD_HOST_PORT 18080)"
 
 log "building first-boot images"
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  HANK_REMOTE_BUILD_VERSION="${HANK_REMOTE_BUILD_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+  HANK_REMOTE_SOURCE_COMMIT="${HANK_REMOTE_SOURCE_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+  export HANK_REMOTE_BUILD_VERSION HANK_REMOTE_SOURCE_COMMIT
+fi
 compose build postgres cloud db-ops
 
 log "starting postgres"

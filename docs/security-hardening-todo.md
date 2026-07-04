@@ -6,9 +6,9 @@ current-risk line for remaining work.
 
 ## 1. Lock Down Metrics
 
-Status: implemented. `/metrics` now requires an authenticated admin; `/healthz` and `/readyz` remain public for deployment checks.
+Status: implemented. `/metrics` now requires an authenticated admin session or, when `HANK_REMOTE_METRICS_SCRAPE_TOKEN` is set, a dedicated Prometheus scrape token; `/healthz` and `/readyz` remain public for deployment checks. The compose `monitoring` profile ships Prometheus + Alertmanager bound to `127.0.0.1` (see `docs/runbooks/single-host-compose.md`).
 
-Current risk: operators can still misconfigure a reverse proxy to expose an unauthenticated scrape path.
+Current risk: operators can still misconfigure a reverse proxy to expose an unauthenticated scrape path, and the scrape token must be rotated like any other server secret.
 
 Fix:
 
@@ -33,7 +33,7 @@ Fix:
 
 Status: implemented. The agent now sends `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID`; query-token support has been removed.
 
-Current risk: old deployed agents that still send URL query credentials will be rejected.
+Current risk: old deployed agents that still send URL query credentials will be rejected. The operator upgrade path (new setup token, regenerated `.env.agent`, restart, revoke old token) is documented in `docs/runbooks/agent-offline.md` and `RELEASE.md`.
 
 Fix:
 
@@ -46,7 +46,7 @@ Fix:
 
 Status: implemented for normal startup. `HANK_REMOTE_SECRET_ENCRYPTION_KEY` is required unless `HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true` is explicitly set for local development. The key enables encrypted storage for OpenAI/ChatGPT OAuth tokens, APNs device tokens, and profile secret vault JSON. Service-profile secrets are not currently persisted by the cloud; they are relayed to the agent and applied there.
 
-Current risk: old deployments that previously ran without `HANK_REMOTE_SECRET_ENCRYPTION_KEY` can still contain plaintext OAuth/APNs/profile-vault values until an admin runs the secret storage audit/remediation command.
+Current risk: old deployments that previously ran without `HANK_REMOTE_SECRET_ENCRYPTION_KEY` can still contain plaintext OAuth/APNs/profile-vault values until an admin runs the secret storage audit/remediation command. `scripts/doctor.sh` now runs `secrets status --strict` and fails until remediation is done, and the check is part of the `RELEASE.md` gate.
 
 Fix:
 

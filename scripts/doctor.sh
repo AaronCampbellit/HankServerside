@@ -131,6 +131,22 @@ if [ "$failures" -eq 0 ]; then
   fi
   rm -f /tmp/hank-remote-migration-status.$$ /tmp/hank-remote-migration-status-err.$$
 
+  if compose run --rm --entrypoint /usr/local/bin/hank-remote-cloud cloud secrets status --strict >/tmp/hank-remote-secrets-status.$$ 2>/tmp/hank-remote-secrets-status-err.$$; then
+    pass "secret storage is strict-clean (no plaintext legacy rows)"
+  else
+    fail "secret storage strict check failed; set HANK_REMOTE_SECRET_ENCRYPTION_KEY and run 'hank-remote-cloud secrets reencrypt', then re-run doctor"
+    sed -n '1,40p' /tmp/hank-remote-secrets-status-err.$$ >&2 || true
+    sed -n '1,40p' /tmp/hank-remote-secrets-status.$$ >&2 || true
+  fi
+  rm -f /tmp/hank-remote-secrets-status.$$ /tmp/hank-remote-secrets-status-err.$$
+
+  monitoring_services="$(docker compose --env-file "$env_file" --profile monitoring ps --services --status running 2>/dev/null || true)"
+  if printf '%s\n' "$monitoring_services" | grep -qx "prometheus"; then
+    pass "prometheus is running (monitoring profile)"
+  else
+    warn "monitoring profile is not running; alert rules in ops/prometheus/alerts.yml are not being evaluated"
+  fi
+
   if compose exec -T postgres sh -ceu '
     preload="$(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT current_setting('\''shared_preload_libraries'\'', true)")"
     for lib in pg_stat_statements; do

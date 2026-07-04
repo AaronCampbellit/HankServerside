@@ -189,6 +189,32 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// streamingTransferDeadline bounds file-transfer request reads and response
+// writes; it matches the previous server-wide WriteTimeout ceiling.
+const streamingTransferDeadline = 30 * time.Minute
+
+// routeDeadlineMiddleware scopes connection deadlines per route instead of
+// relying on one server-wide WriteTimeout sized for the slowest transfer.
+// File-transfer streams get a long read+write allowance, WebSocket upgrades
+// get no HTTP-level deadline (the websocket library manages per-frame
+// deadlines and both sides ping), and every other route keeps the tighter
+// server defaults.
+func routeDeadlineMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/file-transfers/"):
+			deadline := time.Now().Add(streamingTransferDeadline)
+			_ = rc.SetReadDeadline(deadline)
+			_ = rc.SetWriteDeadline(deadline)
+		case strings.HasPrefix(r.URL.Path, "/ws/"):
+			_ = rc.SetReadDeadline(time.Time{})
+			_ = rc.SetWriteDeadline(time.Time{})
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func randomHex(size int) string {
 	data := make([]byte, size)
 	if _, err := rand.Read(data); err != nil {

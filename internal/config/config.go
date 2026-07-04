@@ -22,6 +22,7 @@ type Cloud struct {
 	NoteAttachmentDir     string
 	SecretKey             string
 	AllowPlaintextSecrets bool
+	MetricsScrapeToken    string
 	AssistantAI           AssistantAI
 	APNS                  APNS
 	MCPEnabled            bool
@@ -161,6 +162,7 @@ func LoadCloud() (Cloud, error) {
 		NoteAttachmentDir:     envOrDefault("HANK_REMOTE_NOTE_ATTACHMENTS_DIR", "/var/lib/hank/note-attachments"),
 		SecretKey:             secretKey,
 		AllowPlaintextSecrets: allowPlaintextSecrets,
+		MetricsScrapeToken:    strings.TrimSpace(os.Getenv("HANK_REMOTE_METRICS_SCRAPE_TOKEN")),
 		MCPEnabled:            boolEnvOrDefault("HANK_REMOTE_MCP_ENABLED", false),
 		MCPPublicBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_PUBLIC_BASE_URL", ""), "/"),
 		MCPDocsDir:            envOrDefault("HANK_REMOTE_MCP_DOCS_DIR", envOrDefault("HANK_REMOTE_PROJECT_DOCS_DIR", ".")),
