@@ -154,7 +154,9 @@ func (w *Worker) Run(ctx context.Context) error {
 			checksumTimer.Reset(time.Duration(cfg.Schedule.ChecksumIntervalSeconds) * time.Second)
 		case now := <-ticker.C:
 			w.runDueCron(ctx, now.UTC())
-			_ = w.processIntents(ctx)
+			if err := w.processIntents(ctx); err != nil {
+				_, _ = AppendEvent(w.service.LogDir, NewEvent("intents", EventStatusFailed, EventSeverityError, err.Error()))
+			}
 		}
 	}
 }

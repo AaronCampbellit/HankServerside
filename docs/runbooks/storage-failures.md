@@ -36,6 +36,7 @@ Use this when `/readyz` reports storage failure, `/dashboard/settings/backups` r
 - `pg_amcheck could not complete.`: treat this as setup or connectivity failure until the output excerpt reports corruption. Confirm the database URL works from `db-ops`, then rerun the check.
 - `pg_amcheck reported a database integrity problem.`: treat this as a real database integrity incident. Stop writes if possible, run a restore test from the newest good backup, and preserve the output excerpt for diagnosis.
 - `PostgreSQL data checksums are not enabled for this cluster.`: this is expected for a database volume created before checksums were added to Compose. It is not repaired by restarting; schedule downtime and run `scripts/enable-pg-checksums.sh`.
+- The same manual backup repeats every minute, or an `intents` failure event repeats: the worker executed an intent but could not consume its file under `/var/lib/hank/db-ops/state`. Check that the state volume root and its `intents`/`intents-done` subdirectories are owned `postgres:hankdbops` with group write (`docker compose --env-file .env.cloud exec db-ops ls -lan /var/lib/hank/db-ops/state`), then restart `db-ops` so its entrypoint re-asserts ownership. Current builds also fall back to deleting the processed intent file, so a repeat loop indicates an old image or a fully read-only state volume.
 
 ## Log Cleanup
 

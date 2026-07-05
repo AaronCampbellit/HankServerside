@@ -107,7 +107,13 @@ echo "HANK_REMOTE_METRICS_SCRAPE_TOKEN=$(openssl rand -hex 32)" >> .env.cloud
 ```bash
 mkdir -p ops/prometheus/secrets
 grep '^HANK_REMOTE_METRICS_SCRAPE_TOKEN=' .env.cloud | cut -d= -f2 | tr -d '\n' > ops/prometheus/secrets/metrics-token
-chmod 600 ops/prometheus/secrets/metrics-token
+```
+
+The Prometheus container runs as `nobody` (uid 65534), so the token file must
+be readable by that user while staying hidden from other host users:
+
+```bash
+docker run --rm -v "$(pwd)/ops/prometheus/secrets:/s" alpine sh -c 'chown -R 65534:65534 /s && chmod 400 /s/metrics-token'
 ```
 
 3. Restart the cloud (to pick up the token) and start monitoring:

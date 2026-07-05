@@ -98,20 +98,32 @@ func ListIntents(stateDir string, secret string) ([]Intent, error) {
 	return intents, nil
 }
 
+// CompleteIntent consumes a processed intent file. Archiving into intents-done
+// is best-effort: if the archive dir cannot be created or written (for example
+// a state volume whose root ownership prevents the worker from creating
+// subdirectories), the intent file is deleted instead. A processed intent must
+// never survive completion, or the worker re-executes it on every tick.
 func CompleteIntent(stateDir string, intentID string) error {
 	intentID = strings.TrimSpace(intentID)
 	if intentID == "" {
 		return nil
 	}
 	path := filepath.Join(IntentDir(stateDir), intentID+".json")
-	doneDir := filepath.Join(dirOrDefault(stateDir, DefaultStateDir), "intents-done")
-	if err := ensurePrivateDir(doneDir); err != nil {
-		return err
-	}
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return os.Rename(path, filepath.Join(doneDir, intentID+"-"+time.Now().UTC().Format("20060102T150405Z")+".json"))
+	doneDir := filepath.Join(dirOrDefault(stateDir, DefaultStateDir), "intents-done")
+	archiveErr := ensurePrivateDir(doneDir)
+	if archiveErr == nil {
+		archiveErr = os.Rename(path, filepath.Join(doneDir, intentID+"-"+time.Now().UTC().Format("20060102T150405Z")+".json"))
+		if archiveErr == nil {
+			return nil
+		}
+	}
+	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return errors.Join(archiveErr, removeErr)
+	}
+	return nil
 }
 
 func VerifyIntent(secret string, intent Intent) bool {

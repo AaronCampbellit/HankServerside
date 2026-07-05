@@ -33,6 +33,8 @@ fi
 
 for path in \
 	/var/lib/hank/db-ops/state \
+	/var/lib/hank/db-ops/state/intents \
+	/var/lib/hank/db-ops/state/intents-done \
 	/var/log/hank/db-ops
 do
 	mkdir -p "$path"
