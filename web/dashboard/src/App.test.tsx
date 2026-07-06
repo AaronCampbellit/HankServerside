@@ -831,8 +831,10 @@ describe("App routes", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Daily" }));
-    expect(await screen.findByDisplayValue("Remember milk")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Note body"), { target: { value: "Remember eggs" } });
+    const existingBody = await screen.findByLabelText("Note body");
+    expect(existingBody).toHaveTextContent("Remember milk");
+    existingBody.innerHTML = "Remember eggs";
+    fireEvent.input(existingBody);
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     await waitFor(() => expect(calls).toContainEqual({
       path: "/v1/me/notes/daily.md",
@@ -851,7 +853,9 @@ describe("App routes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New note" }));
     fireEvent.change(screen.getByLabelText("Note title"), { target: { value: "New Note" } });
-    fireEvent.change(screen.getByLabelText("Note body"), { target: { value: "Fresh content" } });
+    const newBody = screen.getByLabelText("Note body");
+    newBody.innerHTML = "Fresh content";
+    fireEvent.input(newBody);
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     await waitFor(() => expect(calls).toContainEqual({
       path: "/v1/me/notes",
@@ -869,7 +873,7 @@ describe("App routes", () => {
     }));
 
     fireEvent.click(screen.getByRole("button", { name: "Daily" }));
-    await waitFor(() => expect(screen.getByLabelText("Note body")).toHaveValue("Remember milk"));
+    await waitFor(() => expect(screen.getByLabelText("Note body")).toHaveTextContent("Remember milk"));
     fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(calls).toContainEqual({

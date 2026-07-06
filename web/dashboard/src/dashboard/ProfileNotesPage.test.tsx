@@ -95,9 +95,11 @@ describe("ProfileNotesPage", () => {
     }
 
     const body = await screen.findByLabelText("Note body");
-    expect(body).toHaveDisplayValue(/# Taco Night/);
-    expect(body).toHaveDisplayValue(/Tortillas/);
-    expect(body).toHaveDisplayValue(/Maya is bringing dessert/);
+    expect(body).toHaveAttribute("contenteditable", "true");
+    expect(body).toHaveTextContent("Taco Night");
+    expect(body).toHaveTextContent("Tortillas");
+    expect(body).toHaveTextContent("Maya is bringing dessert");
+    expect(body).not.toHaveTextContent("# Taco Night");
     // The note is a single editable surface — no read-only rendered duplicate.
     expect(screen.queryByLabelText("Rendered note body")).not.toBeInTheDocument();
 
@@ -143,7 +145,7 @@ describe("ProfileNotesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Open Roof Warranty/i }));
 
     expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
-    expect(screen.getByLabelText("Note body")).toHaveDisplayValue(/# Roof Warranty/);
+    expect(screen.getByLabelText("Note body")).toHaveTextContent("Roof Warranty");
     expect(profileNotesClient.fetchNote).toHaveBeenCalledWith("roof");
   });
 
@@ -221,7 +223,8 @@ describe("ProfileNotesPage", () => {
     expect(body).toBeVisible();
     expect(body).not.toHaveClass("visually-hidden");
 
-    fireEvent.change(body, { target: { value: "Remember milk\nCall Sam" } });
+    body.innerHTML = "Remember milk<div>Call Sam</div>";
+    fireEvent.input(body);
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
 
     expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
@@ -262,7 +265,41 @@ describe("ProfileNotesPage", () => {
     expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: "smooth" });
   });
 
-  it("applies text tools to the selection and supports undo/redo", async () => {
+  it("renders formatting while editing and stores markdown", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text", revision: "1" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "**Remember** milk",
+      revision: "1",
+      page_type: "text",
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "daily", revision: "2", updated_at: "2026-07-03T12:00:00Z" });
+
+    renderPage();
+
+    const body = await screen.findByLabelText("Note body");
+    expect(body).toHaveAttribute("contenteditable", "true");
+    expect(within(body).getByText("Remember").tagName).toBe("STRONG");
+    expect(body).toHaveTextContent("Remember milk");
+    expect(body).not.toHaveTextContent("**Remember** milk");
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "**Remember** milk",
+      expected_revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+  });
+
+  it("applies text tools to the editor and supports undo/redo", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
         { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text", revision: "1" },
@@ -278,25 +315,24 @@ describe("ProfileNotesPage", () => {
 
     renderPage();
 
-    const body = await screen.findByLabelText("Note body") as HTMLTextAreaElement;
+    const body = await screen.findByLabelText("Note body");
     expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
 
-    body.setSelectionRange(0, 8);
     fireEvent.click(screen.getByRole("button", { name: "Bold" }));
-    expect(body).toHaveDisplayValue("**Remember** milk");
+    expect(within(body).getByText("bold text").tagName).toBe("STRONG");
 
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    expect(body).toHaveDisplayValue("Remember milk");
+    expect(body).toHaveTextContent("Remember milk");
+    expect(body).not.toHaveTextContent("bold text");
 
     fireEvent.click(screen.getByRole("button", { name: "Redo" }));
-    expect(body).toHaveDisplayValue("**Remember** milk");
+    expect(within(body).getByText("bold text").tagName).toBe("STRONG");
 
-    body.setSelectionRange(0, body.value.length);
     fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
-    expect(body).toHaveDisplayValue("- **Remember** milk");
+    expect(body.querySelector("ul")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Heading" }));
-    expect(body).toHaveDisplayValue("# **Remember** milk");
+    expect(body.querySelector("h1")).toBeInTheDocument();
   });
 
   it("moves a note from the list into a selected notebook", async () => {

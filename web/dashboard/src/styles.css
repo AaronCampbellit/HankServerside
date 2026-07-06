@@ -4401,18 +4401,61 @@ button.secondary:disabled {
   display: block;
   margin: 0 auto;
   padding: 18px;
-  resize: none;
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
   color: var(--ink);
-  font: 15px/1.55 var(--font-mono);
+  font: 15px/1.55 var(--font-sans);
   outline: none;
+  white-space: pre-wrap;
 }
 
 .notes-body-input:focus {
   border-color: var(--acc-line);
   box-shadow: 0 0 0 3px var(--acc-soft);
+}
+
+.notes-body-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--faint);
+}
+
+.notes-body-input p,
+.notes-body-input ul,
+.notes-body-input ol,
+.notes-body-input h1,
+.notes-body-input h2,
+.notes-body-input h3 {
+  margin: 0 0 10px;
+}
+
+.notes-body-input h1 {
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.notes-body-input h2 {
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.notes-body-input h3 {
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.notes-body-input ul,
+.notes-body-input ol {
+  padding-left: 24px;
+}
+
+.notes-body-input a {
+  color: var(--brand-dark);
+}
+
+.notes-body-input strong {
+  font-weight: 800;
 }
 
 .kanban-board {

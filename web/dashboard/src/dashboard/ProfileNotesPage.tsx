@@ -194,6 +194,160 @@ export function prefixLines(body: string, start: number, end: number, prefixFor:
   };
 }
 
+function escapeHTML(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderInlineMarkdown(value: string): string {
+  return escapeHTML(value)
+    .replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, "<u>$1</u>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^\w])_([^_\n]+)_/g, "$1<em>$2</em>")
+    .replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_match, text: string, href: string) => {
+      const normalizedHref = href.replace(/&amp;/g, "&").trim();
+      if (!/^(https?:|mailto:|\/|#)/i.test(normalizedHref)) return text;
+      return `<a href="${href}" rel="noreferrer">${text}</a>`;
+    });
+}
+
+function markdownToHTML(body: string): string {
+  const lines = body.split(/\r?\n/);
+  const html: string[] = [];
+  let list: "ul" | "ol" | "" = "";
+  const closeList = () => {
+    if (!list) return;
+    html.push(`</${list}>`);
+    list = "";
+  };
+
+  lines.forEach((line) => {
+    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2]) || "<br>"}</h${level}>`);
+      return;
+    }
+    const unordered = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (unordered) {
+      if (list !== "ul") {
+        closeList();
+        html.push("<ul>");
+        list = "ul";
+      }
+      html.push(`<li>${renderInlineMarkdown(unordered[1]) || "<br>"}</li>`);
+      return;
+    }
+    const ordered = /^\s*\d+\.\s+(.*)$/.exec(line);
+    if (ordered) {
+      if (list !== "ol") {
+        closeList();
+        html.push("<ol>");
+        list = "ol";
+      }
+      html.push(`<li>${renderInlineMarkdown(ordered[1]) || "<br>"}</li>`);
+      return;
+    }
+    closeList();
+    html.push(`<p>${line ? renderInlineMarkdown(line) : "<br>"}</p>`);
+  });
+  closeList();
+  return html.join("");
+}
+
+function inlineHTMLToMarkdown(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const element = node as HTMLElement;
+  const inner = Array.from(element.childNodes).map(inlineHTMLToMarkdown).join("");
+  switch (element.tagName) {
+    case "B":
+    case "STRONG":
+      return `**${inner}**`;
+    case "I":
+    case "EM":
+      return `_${inner}_`;
+    case "U":
+      return `<u>${inner}</u>`;
+    case "A":
+      return `[${inner}](${element.getAttribute("href") || ""})`;
+    case "BR":
+      return "\n";
+    default:
+      return inner;
+  }
+}
+
+const BLOCK_TAGS = new Set(["H1", "H2", "H3", "UL", "OL", "P", "DIV", "BLOCKQUOTE"]);
+
+/* Browsers nest blocks freely inside contentEditable (e.g. a <ul> inside a <p>),
+   so block conversion has to recurse instead of assuming a flat structure. */
+function walkBlockToMarkdown(node: Node, lines: string[]): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    if ((node.textContent || "").trim()) lines.push(node.textContent || "");
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const element = node as HTMLElement;
+  const inline = () => Array.from(element.childNodes).map(inlineHTMLToMarkdown).join("").trimEnd();
+  switch (element.tagName) {
+    case "H1":
+      lines.push(`# ${inline()}`.trimEnd());
+      return;
+    case "H2":
+      lines.push(`## ${inline()}`.trimEnd());
+      return;
+    case "H3":
+      lines.push(`### ${inline()}`.trimEnd());
+      return;
+    case "UL":
+    case "OL":
+      Array.from(element.children).forEach((child, index) => {
+        const item = Array.from(child.childNodes).map(inlineHTMLToMarkdown).join("").trimEnd();
+        lines.push(element.tagName === "OL" ? `${index + 1}. ${item}`.trimEnd() : `- ${item}`.trimEnd());
+      });
+      return;
+    case "P":
+    case "DIV":
+    case "BLOCKQUOTE": {
+      const hasBlockChild = Array.from(element.children).some((child) => BLOCK_TAGS.has(child.tagName));
+      if (!hasBlockChild) {
+        lines.push(inline());
+        return;
+      }
+      let run: Node[] = [];
+      const flush = () => {
+        if (!run.length) return;
+        const text = run.map(inlineHTMLToMarkdown).join("").trimEnd();
+        if (text) lines.push(text);
+        run = [];
+      };
+      Array.from(element.childNodes).forEach((child) => {
+        if (child.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has((child as HTMLElement).tagName)) {
+          flush();
+          walkBlockToMarkdown(child, lines);
+        } else {
+          run.push(child);
+        }
+      });
+      flush();
+      return;
+    }
+    default:
+      lines.push(inlineHTMLToMarkdown(element));
+  }
+}
+
+function htmlToMarkdown(root: HTMLElement): string {
+  const lines: string[] = [];
+  Array.from(root.childNodes).forEach((node) => walkBlockToMarkdown(node, lines));
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
 function Icon({ name }: { name: string }) {
   const common = {
     fill: "none",
@@ -227,7 +381,8 @@ function Icon({ name }: { name: string }) {
 export function ProfileNotesPage() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [history, setHistory] = useState<{ past: string[]; future: string[] }>({ past: [], future: [] });
-  const bodyInputRef = useRef<HTMLTextAreaElement>(null);
+  const bodyInputRef = useRef<HTMLDivElement>(null);
+  const lastRenderedBodyRef = useRef("");
   const lastTypedAtRef = useRef(0);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
 
@@ -238,8 +393,15 @@ export function ProfileNotesPage() {
     if (!pending || !node) return;
     pendingSelectionRef.current = null;
     node.focus();
-    node.setSelectionRange(pending.start, pending.end);
   });
+
+  useEffect(() => {
+    if (state.status !== "ready" || state.editor.pageType !== "text") return;
+    const node = bodyInputRef.current;
+    if (!node || lastRenderedBodyRef.current === state.editor.body) return;
+    node.innerHTML = markdownToHTML(state.editor.body);
+    lastRenderedBodyRef.current = state.editor.body;
+  }, [state]);
   const dialog = useConfirmDialog();
   const { showToast } = useToast();
 
@@ -404,8 +566,13 @@ export function ProfileNotesPage() {
     lastTypedAtRef.current = viaTyping ? now : 0;
   }
 
-  function changeBody(nextBody: string) {
-    recordBodyChange(readyState.editor.body, true);
+  function syncBodyFromEditor(viaTyping: boolean) {
+    const element = bodyInputRef.current;
+    if (!element) return;
+    const nextBody = htmlToMarkdown(element);
+    if (nextBody === readyState.editor.body) return;
+    recordBodyChange(readyState.editor.body, viaTyping);
+    lastRenderedBodyRef.current = nextBody;
     setReady({ editor: { ...readyState.editor, body: nextBody } });
   }
 
@@ -426,14 +593,53 @@ export function ProfileNotesPage() {
   }
 
   function mutateBody(mutator: (body: string, start: number, end: number) => { body: string; selectionStart: number; selectionEnd: number }) {
-    const element = bodyInputRef.current;
     const body = readyState.editor.body;
-    const start = element ? element.selectionStart : body.length;
-    const end = element ? element.selectionEnd : body.length;
+    const start = body.length;
+    const end = body.length;
     const result = mutator(body, start, end);
     recordBodyChange(body, false);
     pendingSelectionRef.current = { start: result.selectionStart, end: result.selectionEnd };
     setReady({ editor: { ...readyState.editor, body: result.body } });
+  }
+
+  function selectionInEditor(): boolean {
+    const element = bodyInputRef.current;
+    const selection = window.getSelection?.();
+    if (!element || !selection || !selection.rangeCount) return false;
+    const range = selection.getRangeAt(0);
+    return element.contains(range.commonAncestorContainer);
+  }
+
+  function runRichCommand(command: string, value?: string): boolean {
+    const element = bodyInputRef.current;
+    if (!element || typeof document.execCommand !== "function") return false;
+    element.focus();
+    // If the selection lives outside the note, park the caret at the end so the
+    // command always applies to the note instead of silently doing nothing.
+    if (!selectionInEditor()) {
+      const selection = window.getSelection?.();
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    let effectiveCommand = command;
+    let effectiveValue = value;
+    if (command === "createLink" && (window.getSelection?.()?.isCollapsed ?? true)) {
+      // createLink needs a selection; with a bare caret insert a ready-made link instead.
+      effectiveCommand = "insertHTML";
+      effectiveValue = `<a href="${value}" rel="noreferrer">Link</a>`;
+    }
+    if (command === "formatBlock" && typeof document.queryCommandValue === "function") {
+      const currentBlock = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
+      if (currentBlock === value) effectiveValue = "p";
+    }
+    document.execCommand(effectiveCommand, false, effectiveValue);
+    syncBodyFromEditor(false);
+    return true;
   }
 
   function applyEditorAction(action: string) {
@@ -451,23 +657,30 @@ export function ProfileNotesPage() {
     };
     const headingLevels: Record<string, string> = { heading: "# ", large: "## ", small: "### " };
     if (wrappers[action]) {
+      const commandForAction: Record<string, string> = { bold: "bold", italic: "italic", underline: "underline" };
+      if (commandForAction[action] && runRichCommand(commandForAction[action])) return;
       const { prefix, suffix, placeholder } = wrappers[action];
       mutateBody((body, start, end) => wrapSelection(body, start, end, prefix, suffix, placeholder));
       return;
     }
     if (headingLevels[action]) {
+      const tagForAction: Record<string, string> = { heading: "h1", large: "h2", small: "h3" };
+      if (runRichCommand("formatBlock", tagForAction[action])) return;
       mutateBody((body, start, end) => prefixLines(body, start, end, (line) => `${headingLevels[action]}${stripLinePrefix(line)}`));
       return;
     }
     if (action === "bullets") {
+      if (runRichCommand("insertUnorderedList")) return;
       mutateBody((body, start, end) => prefixLines(body, start, end, (line) => `- ${stripLinePrefix(line)}`));
       return;
     }
     if (action === "numbers") {
+      if (runRichCommand("insertOrderedList")) return;
       mutateBody((body, start, end) => prefixLines(body, start, end, (line, index) => `${index + 1}. ${stripLinePrefix(line)}`));
       return;
     }
     if (action === "link") {
+      if (runRichCommand("createLink", "https://example.com")) return;
       mutateBody((body, start, end) => {
         const selected = body.slice(start, end) || "Link";
         const url = "https://example.com";
@@ -765,13 +978,17 @@ export function ProfileNotesPage() {
             ) : (
               <>
                 <label className="visually-hidden" htmlFor="noteBody">Note body</label>
-                <textarea
+                <div
                   id="noteBody"
                   ref={bodyInputRef}
                   className="notes-body-input"
-                  placeholder="Start writing here."
-                  value={state.editor.body}
-                  onChange={(event) => changeBody(event.target.value)}
+                  contentEditable
+                  data-placeholder="Start writing here."
+                  role="textbox"
+                  aria-label="Note body"
+                  aria-multiline="true"
+                  suppressContentEditableWarning
+                  onInput={() => syncBodyFromEditor(true)}
                 />
               </>
             )}
@@ -816,7 +1033,17 @@ function ToolbarButton({
   onClick?: () => void;
 }) {
   return (
-    <button className="icon-button" type="button" aria-label={label} title={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>
+    <button
+      className="icon-button"
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={pressed}
+      disabled={disabled}
+      // Keep focus and the text selection inside the note while using the toolbar.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+    >
       {icon ? <Icon name={icon} /> : <span>{text}</span>}
     </button>
   );
