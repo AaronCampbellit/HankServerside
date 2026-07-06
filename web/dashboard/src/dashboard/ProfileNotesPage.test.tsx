@@ -32,6 +32,7 @@ describe("ProfileNotesPage", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("renders the redesigned editor chrome and kanban/notebook states", async () => {
@@ -93,12 +94,12 @@ describe("ProfileNotesPage", () => {
       expect(within(editorTools).getByRole("button", { name: label })).toBeInTheDocument();
     }
 
-    const textCanvas = await screen.findByLabelText("Rendered note body");
-    expect(within(textCanvas).getByText("# Taco Night")).toBeInTheDocument();
-    expect(within(textCanvas).getByText("Tortillas")).toBeInTheDocument();
-    expect(within(textCanvas).getByText("Ground beef")).toBeInTheDocument();
-    expect(within(textCanvas).getByText("Maya is bringing dessert. Pick up the order from")).toBeInTheDocument();
-    expect(within(textCanvas).getByText("#print-shop")).toBeInTheDocument();
+    const body = await screen.findByLabelText("Note body");
+    expect(body).toHaveDisplayValue(/# Taco Night/);
+    expect(body).toHaveDisplayValue(/Tortillas/);
+    expect(body).toHaveDisplayValue(/Maya is bringing dessert/);
+    // The note is a single editable surface — no read-only rendered duplicate.
+    expect(screen.queryByLabelText("Rendered note body")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Home Projects" }));
     expect(await screen.findByText("Re-caulk the bathroom")).toBeInTheDocument();
@@ -142,7 +143,7 @@ describe("ProfileNotesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Open Roof Warranty/i }));
 
     expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
-    expect(screen.getByText("# Roof Warranty")).toBeInTheDocument();
+    expect(screen.getByLabelText("Note body")).toHaveDisplayValue(/# Roof Warranty/);
     expect(profileNotesClient.fetchNote).toHaveBeenCalledWith("roof");
   });
 
@@ -231,6 +232,71 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
     });
+  });
+
+  it("keeps note row actions off-canvas and reveals them on hover", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text", revision: "1" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "Remember milk",
+      revision: "1",
+      page_type: "text",
+    });
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+
+    renderPage();
+
+    const row = (await screen.findByRole("button", { name: "Daily Notes" })).closest(".notes-guide-row") as HTMLDivElement;
+    const scrollTo = vi.fn();
+    row.scrollTo = scrollTo as unknown as typeof row.scrollTo;
+
+    fireEvent.mouseEnter(row);
+    expect(scrollTo).toHaveBeenCalledWith({ left: row.scrollWidth, behavior: "smooth" });
+
+    fireEvent.mouseLeave(row);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: "smooth" });
+  });
+
+  it("applies text tools to the selection and supports undo/redo", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text", revision: "1" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "Remember milk",
+      revision: "1",
+      page_type: "text",
+    });
+
+    renderPage();
+
+    const body = await screen.findByLabelText("Note body") as HTMLTextAreaElement;
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+
+    body.setSelectionRange(0, 8);
+    fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    expect(body).toHaveDisplayValue("**Remember** milk");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(body).toHaveDisplayValue("Remember milk");
+
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(body).toHaveDisplayValue("**Remember** milk");
+
+    body.setSelectionRange(0, body.value.length);
+    fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
+    expect(body).toHaveDisplayValue("- **Remember** milk");
+
+    fireEvent.click(screen.getByRole("button", { name: "Heading" }));
+    expect(body).toHaveDisplayValue("# **Remember** milk");
   });
 
   it("moves a note from the list into a selected notebook", async () => {

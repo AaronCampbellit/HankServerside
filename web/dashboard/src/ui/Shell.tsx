@@ -69,6 +69,8 @@ export function Shell({
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationsStatus, setNotificationsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const notifButtonRef = useRef<HTMLButtonElement>(null);
+  const notifPopoverRef = useRef<HTMLDivElement>(null);
 
   // --- global search state ---
   const [query, setQuery] = useState("");
@@ -107,6 +109,25 @@ export function Shell({
         setNotificationsStatus("error");
       });
     return () => controller.abort();
+  }, [notifOpen]);
+
+  // Close the notifications popover when clicking anywhere outside it.
+  useEffect(() => {
+    if (!notifOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (notifPopoverRef.current?.contains(target) || notifButtonRef.current?.contains(target)) return;
+      setNotifOpen(false);
+    }
+    function onEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setNotifOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
   }, [notifOpen]);
 
   // ⌘K / Ctrl-K focuses search
@@ -292,6 +313,7 @@ export function Shell({
               Operational
             </span>
             <button
+              ref={notifButtonRef}
               type="button"
               className={`topbar-icon-btn${notifications.length ? " has-notifications" : ""}`}
               aria-label="Notifications"
@@ -304,7 +326,7 @@ export function Shell({
               {notifications.length ? <span className="dot" aria-hidden="true" /> : null}
             </button>
             {notifOpen ? (
-              <div className="notif-popover" role="dialog" aria-label="Notifications">
+              <div className="notif-popover" role="dialog" aria-label="Notifications" ref={notifPopoverRef}>
                 <div className="notif-popover-header">
                   <strong>Notifications</strong>
                   {notifications.length ? <span>{notifications.length}</span> : null}
@@ -318,7 +340,7 @@ export function Shell({
                 ) : (
                   <div className="notif-list">
                     {notifications.map((item) => (
-                      <a className={`notif-item tone-${item.tone || "info"}`} href={item.url || "/dashboard"} key={item.id}>
+                      <a className={`notif-item tone-${item.tone || "info"}`} href={item.url || "/dashboard"} key={item.id} onClick={() => setNotifOpen(false)}>
                         <span className="notif-dot" aria-hidden="true" />
                         <span>
                           <strong>{item.title}</strong>

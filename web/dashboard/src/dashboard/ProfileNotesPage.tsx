@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   type KanbanBoard,
   noteID,
@@ -150,6 +150,50 @@ function updatedLabel(note?: ProfileNoteSummary): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/* Note rows hide their actions off-canvas; touch users swipe them in, mouse users hover. */
+function finePointer(): boolean {
+  return Boolean(window.matchMedia?.("(hover: hover) and (pointer: fine)").matches);
+}
+
+function revealRowActions(event: ReactMouseEvent<HTMLDivElement>) {
+  if (!finePointer()) return;
+  event.currentTarget.scrollTo({ left: event.currentTarget.scrollWidth, behavior: "smooth" });
+}
+
+function hideRowActions(event: ReactMouseEvent<HTMLDivElement>) {
+  if (!finePointer()) return;
+  event.currentTarget.scrollTo({ left: 0, behavior: "smooth" });
+}
+
+type BodyMutation = { body: string; selectionStart: number; selectionEnd: number };
+
+export function wrapSelection(body: string, start: number, end: number, prefix: string, suffix: string, placeholder: string): BodyMutation {
+  const selected = body.slice(start, end) || placeholder;
+  const next = `${body.slice(0, start)}${prefix}${selected}${suffix}${body.slice(end)}`;
+  return {
+    body: next,
+    selectionStart: start + prefix.length,
+    selectionEnd: start + prefix.length + selected.length,
+  };
+}
+
+export function stripLinePrefix(line: string): string {
+  return line.replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+)/, "");
+}
+
+export function prefixLines(body: string, start: number, end: number, prefixFor: (line: string, index: number) => string): BodyMutation {
+  const blockStart = body.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const newlineAfter = body.indexOf("\n", end);
+  const blockEnd = newlineAfter === -1 ? body.length : newlineAfter;
+  const block = body.slice(blockStart, blockEnd);
+  const nextBlock = block.split("\n").map((line, index) => prefixFor(line, index)).join("\n");
+  return {
+    body: `${body.slice(0, blockStart)}${nextBlock}${body.slice(blockEnd)}`,
+    selectionStart: blockStart,
+    selectionEnd: blockStart + nextBlock.length,
+  };
+}
+
 function Icon({ name }: { name: string }) {
   const common = {
     fill: "none",
@@ -182,6 +226,20 @@ function Icon({ name }: { name: string }) {
 
 export function ProfileNotesPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [history, setHistory] = useState<{ past: string[]; future: string[] }>({ past: [], future: [] });
+  const bodyInputRef = useRef<HTMLTextAreaElement>(null);
+  const lastTypedAtRef = useRef(0);
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+
+  // Restore the caret/selection after a toolbar action once React has committed the new body.
+  useEffect(() => {
+    const pending = pendingSelectionRef.current;
+    const node = bodyInputRef.current;
+    if (!pending || !node) return;
+    pendingSelectionRef.current = null;
+    node.focus();
+    node.setSelectionRange(pending.start, pending.end);
+  });
   const dialog = useConfirmDialog();
   const { showToast } = useToast();
 
@@ -260,9 +318,15 @@ export function ProfileNotesPage() {
     setState((current) => current.status === "ready" ? { ...current, ...next } : current);
   }
 
+  function resetHistory() {
+    setHistory({ past: [], future: [] });
+    lastTypedAtRef.current = 0;
+  }
+
   async function selectNote(id: string) {
     try {
       const note = await profileNotesClient.fetchNote(id);
+      resetHistory();
       setReady({ selectedID: id, editor: editorFromNote(note), message: "" });
     } catch (error) {
       setReady({ message: errorMessage(error) });
@@ -271,6 +335,7 @@ export function ProfileNotesPage() {
 
   function newNote() {
     const parentID = activeNotebookForNewNote(readyState);
+    resetHistory();
     setReady({
       selectedID: "",
       editor: { ...emptyEditor, parentID },
@@ -279,6 +344,7 @@ export function ProfileNotesPage() {
   }
 
   function newNoteInNotebook(parentID: string) {
+    resetHistory();
     setReady({
       selectedID: "",
       selectedNotebookID: parentID,
@@ -326,9 +392,48 @@ export function ProfileNotesPage() {
     }
   }
 
-  function appendBody(text: string) {
-    const prefix = readyState.editor.body.trim() ? `${readyState.editor.body}\n` : "";
-    setReady({ editor: { ...readyState.editor, body: `${prefix}${text}` } });
+  function recordBodyChange(previousBody: string, viaTyping: boolean) {
+    const now = Date.now();
+    setHistory((current) => {
+      // Group rapid keystrokes into one undo step.
+      if (viaTyping && now - lastTypedAtRef.current < 750 && current.past.length) {
+        return current.future.length ? { past: current.past, future: [] } : current;
+      }
+      return { past: [...current.past.slice(-99), previousBody], future: [] };
+    });
+    lastTypedAtRef.current = viaTyping ? now : 0;
+  }
+
+  function changeBody(nextBody: string) {
+    recordBodyChange(readyState.editor.body, true);
+    setReady({ editor: { ...readyState.editor, body: nextBody } });
+  }
+
+  function undoBody() {
+    if (!history.past.length) return;
+    const previous = history.past[history.past.length - 1];
+    setHistory({ past: history.past.slice(0, -1), future: [readyState.editor.body, ...history.future].slice(0, 100) });
+    lastTypedAtRef.current = 0;
+    setReady({ editor: { ...readyState.editor, body: previous } });
+  }
+
+  function redoBody() {
+    if (!history.future.length) return;
+    const next = history.future[0];
+    setHistory({ past: [...history.past.slice(-99), readyState.editor.body], future: history.future.slice(1) });
+    lastTypedAtRef.current = 0;
+    setReady({ editor: { ...readyState.editor, body: next } });
+  }
+
+  function mutateBody(mutator: (body: string, start: number, end: number) => { body: string; selectionStart: number; selectionEnd: number }) {
+    const element = bodyInputRef.current;
+    const body = readyState.editor.body;
+    const start = element ? element.selectionStart : body.length;
+    const end = element ? element.selectionEnd : body.length;
+    const result = mutator(body, start, end);
+    recordBodyChange(body, false);
+    pendingSelectionRef.current = { start: result.selectionStart, end: result.selectionEnd };
+    setReady({ editor: { ...readyState.editor, body: result.body } });
   }
 
   function applyEditorAction(action: string) {
@@ -336,19 +441,41 @@ export function ProfileNotesPage() {
       setReady({ editor: { ...readyState.editor, pageType: action } });
       return;
     }
-    const insertions: Record<string, string> = {
-      bold: "**bold text**",
-      italic: "_italic text_",
-      underline: "<u>underlined text</u>",
-      small: "### Smaller heading",
-      heading: "# Heading",
-      large: "## Larger heading",
-      bullets: "- List item",
-      numbers: "1. List item",
-      tag: "#tag",
-      link: "[Link](https://example.com)",
+    if (action === "undo") { undoBody(); return; }
+    if (action === "redo") { redoBody(); return; }
+    const wrappers: Record<string, { prefix: string; suffix: string; placeholder: string }> = {
+      bold: { prefix: "**", suffix: "**", placeholder: "bold text" },
+      italic: { prefix: "_", suffix: "_", placeholder: "italic text" },
+      underline: { prefix: "<u>", suffix: "</u>", placeholder: "underlined text" },
+      tag: { prefix: "#", suffix: "", placeholder: "tag" },
     };
-    appendBody(insertions[action] || "");
+    const headingLevels: Record<string, string> = { heading: "# ", large: "## ", small: "### " };
+    if (wrappers[action]) {
+      const { prefix, suffix, placeholder } = wrappers[action];
+      mutateBody((body, start, end) => wrapSelection(body, start, end, prefix, suffix, placeholder));
+      return;
+    }
+    if (headingLevels[action]) {
+      mutateBody((body, start, end) => prefixLines(body, start, end, (line) => `${headingLevels[action]}${stripLinePrefix(line)}`));
+      return;
+    }
+    if (action === "bullets") {
+      mutateBody((body, start, end) => prefixLines(body, start, end, (line) => `- ${stripLinePrefix(line)}`));
+      return;
+    }
+    if (action === "numbers") {
+      mutateBody((body, start, end) => prefixLines(body, start, end, (line, index) => `${index + 1}. ${stripLinePrefix(line)}`));
+      return;
+    }
+    if (action === "link") {
+      mutateBody((body, start, end) => {
+        const selected = body.slice(start, end) || "Link";
+        const url = "https://example.com";
+        const next = `${body.slice(0, start)}[${selected}](${url})${body.slice(end)}`;
+        const urlStart = start + selected.length + 3;
+        return { body: next, selectionStart: urlStart, selectionEnd: urlStart + url.length };
+      });
+    }
   }
 
   async function saveNote() {
@@ -536,7 +663,7 @@ export function ProfileNotesPage() {
                   const title = noteTitle(note);
                   const parentTitle = notebookTitle(state.notes, note.parent_id);
                   return (
-                    <div className="notes-guide-row" key={id}>
+                    <div className="notes-guide-row" key={id} onMouseEnter={revealRowActions} onMouseLeave={hideRowActions}>
                       <button
                         aria-label={title}
                         className={id === state.selectedID ? "notes-guide-item active" : "notes-guide-item"}
@@ -605,8 +732,8 @@ export function ProfileNotesPage() {
 
           {state.editor.pageType === "notebook" ? null : (
             <div className="notes-toolbar" aria-label="Editor tools">
-              <ToolbarButton label="Undo" icon="undo" />
-              <ToolbarButton label="Redo" icon="redo" />
+              <ToolbarButton label="Undo" icon="undo" disabled={!history.past.length} onClick={() => applyEditorAction("undo")} />
+              <ToolbarButton label="Redo" icon="redo" disabled={!history.future.length} onClick={() => applyEditorAction("redo")} />
               <span className="notes-toolbar-separator" aria-hidden="true" />
               <ToolbarButton label="Bold" text="B" onClick={() => applyEditorAction("bold")} />
               <ToolbarButton label="Italic" text="I" onClick={() => applyEditorAction("italic")} />
@@ -640,11 +767,12 @@ export function ProfileNotesPage() {
                 <label className="visually-hidden" htmlFor="noteBody">Note body</label>
                 <textarea
                   id="noteBody"
+                  ref={bodyInputRef}
                   className="notes-body-input"
+                  placeholder="Start writing here."
                   value={state.editor.body}
-                  onChange={(event) => setReady({ editor: { ...state.editor, body: event.target.value } })}
+                  onChange={(event) => changeBody(event.target.value)}
                 />
-                <RenderedNoteBody body={state.editor.body} />
               </>
             )}
           </div>
@@ -677,16 +805,18 @@ function ToolbarButton({
   icon,
   text,
   pressed,
+  disabled,
   onClick,
 }: {
   label: string;
   icon?: string;
   text?: string;
   pressed?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
 }) {
   return (
-    <button className="icon-button" type="button" aria-label={label} title={label} aria-pressed={pressed} onClick={onClick}>
+    <button className="icon-button" type="button" aria-label={label} title={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>
       {icon ? <Icon name={icon} /> : <span>{text}</span>}
     </button>
   );
@@ -694,42 +824,6 @@ function ToolbarButton({
 
 function markdownLines(body: string): string[] {
   return body.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-}
-
-function renderInlineText(text: string): ReactNode[] {
-  const pieces = text.split(/(#[a-zA-Z0-9_-]+)/g).filter(Boolean);
-  return pieces.map((piece, index) => {
-    if (piece.startsWith("#")) {
-      return <span className="note-inline-tag" key={`${piece}-${index}`}>{piece}</span>;
-    }
-    return <span key={`${piece}-${index}`}>{piece.trimEnd()}</span>;
-  });
-}
-
-function RenderedNoteBody({ body }: { body: string }) {
-  const lines = markdownLines(body);
-  return (
-    <article className="rendered-note-body" aria-label="Rendered note body">
-      {lines.length ? lines.map((line, index) => {
-        const checklist = line.match(/^[-*]\s+\[(x|X|\s)?\]\s+(.+)$/);
-        if (line.startsWith("# ")) {
-          return <h2 className="note-section-label" key={`${line}-${index}`}>{line}</h2>;
-        }
-        if (checklist) {
-          const checked = Boolean(checklist[1]?.trim());
-          return (
-            <div className={checked ? "checkline done" : "checkline"} key={`${line}-${index}`}>
-              <span className="fake-check" aria-hidden="true">{checked ? <Icon name="check" /> : null}</span>
-              <span>{checklist[2]}</span>
-            </div>
-          );
-        }
-        return <p className="note-copy" key={`${line}-${index}`}>{renderInlineText(line)}</p>;
-      }) : (
-        <p className="note-copy muted">Start writing here.</p>
-      )}
-    </article>
-  );
 }
 
 type KanbanColumnView = {

@@ -44,6 +44,33 @@ describe("Shell", () => {
     expect(screen.queryByText("No new notifications.")).not.toBeInTheDocument();
   });
 
+  it("closes the notifications popover when clicking outside it", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ notifications: [] }), { headers: { "Content-Type": "application/json" } })));
+
+    render(
+      <Shell
+        navItems={[{ href: "/dashboard", label: "Home", group: "Main" }]}
+        currentPath="/dashboard"
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+      >
+        <div>Dashboard content</div>
+      </Shell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(await screen.findByRole("dialog", { name: "Notifications" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByText("Dashboard content"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Notifications" })).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(await screen.findByRole("dialog", { name: "Notifications" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Notifications" })).not.toBeInTheDocument());
+  });
+
   it("renders the reference sidebar status and user footer", () => {
     render(
       <Shell

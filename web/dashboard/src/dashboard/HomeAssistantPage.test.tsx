@@ -121,6 +121,35 @@ describe("HomeAssistantPage", () => {
     expect(within(table).getByRole("button", { name: "Add Humidity to dashboard" })).toBeInTheDocument();
   });
 
+  it("offers open/close for covers and run for scripts on dashboard tiles", async () => {
+    homeAssistantClient.load.mockResolvedValue({
+      agent: { agent_id: "agent-1", name: "Kitchen Mac", status: "online" },
+      profile: {
+        revision: 2,
+        settings: { dashboard_tiles: [{ entity_id: "cover.garage_door", is_enabled: true }, { entity_id: "script.toggle_garage_lights", is_enabled: true }] },
+      },
+      dashboardEntityIDs: ["cover.garage_door", "script.toggle_garage_lights"],
+      states: [
+        { entity_id: "cover.garage_door", state: "closed", attributes: { friendly_name: "Garage Door" } },
+        { entity_id: "script.toggle_garage_lights", state: "off", attributes: { friendly_name: "Toggle Garage Lights" } },
+      ],
+    });
+    homeAssistantClient.onStateChanged.mockReturnValue(() => {});
+    homeAssistantClient.callService.mockResolvedValue({});
+
+    render(<HomeAssistantPage />);
+
+    const dashboard = await screen.findByRole("region", { name: "Your dashboard" });
+    const coverSwitch = within(dashboard).getByRole("switch", { name: "Toggle Garage Door" });
+    expect(coverSwitch).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(coverSwitch);
+    await waitFor(() => expect(homeAssistantClient.callService).toHaveBeenCalledWith("cover.garage_door", "cover", "open_cover"));
+
+    fireEvent.click(within(dashboard).getByRole("button", { name: "Run Toggle Garage Lights" }));
+    await waitFor(() => expect(homeAssistantClient.callService).toHaveBeenCalledWith("script.toggle_garage_lights", "script", "turn_on"));
+  });
+
   it("uses active switches for toggleable entities in the all-entities table", async () => {
     homeAssistantClient.load.mockResolvedValue({
       agent: { agent_id: "agent-1", name: "Kitchen Mac", status: "online" },

@@ -34,8 +34,66 @@ function searchableText(entity: HomeAssistantEntity): string {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
-export function canToggle(entityID: string): boolean {
-  return ["light", "switch", "fan", "input_boolean"].includes(entityDomain(entityID));
+export type EntityAction = {
+  domain: string;
+  service: string;
+  label: string;
+  kind: "toggle" | "run";
+  active: boolean;
+  nextState: string | null;
+};
+
+/* The primary click action for an entity, or null when it is read-only (sensors etc). */
+export function entityAction(entity: HomeAssistantEntity): EntityAction | null {
+  const domain = entityDomain(entity.entity_id);
+  const state = String(entity.state || "").toLowerCase();
+  const on = state === "on";
+  switch (domain) {
+    case "light":
+    case "switch":
+    case "fan":
+    case "input_boolean":
+    case "automation":
+    case "humidifier":
+      return {
+        domain,
+        service: on ? "turn_off" : "turn_on",
+        label: on ? "Turn off" : "Turn on",
+        kind: "toggle",
+        active: on,
+        nextState: on ? "off" : "on",
+      };
+    case "cover": {
+      const open = ["open", "opening"].includes(state);
+      return {
+        domain,
+        service: open ? "close_cover" : "open_cover",
+        label: open ? "Close" : "Open",
+        kind: "toggle",
+        active: open,
+        nextState: open ? "closing" : "opening",
+      };
+    }
+    case "lock": {
+      const locked = state === "locked";
+      return {
+        domain,
+        service: locked ? "unlock" : "lock",
+        label: locked ? "Unlock" : "Lock",
+        kind: "toggle",
+        active: locked,
+        nextState: locked ? "unlocked" : "locked",
+      };
+    }
+    case "script":
+    case "scene":
+      return { domain, service: "turn_on", label: "Run", kind: "run", active: on, nextState: null };
+    case "button":
+    case "input_button":
+      return { domain, service: "press", label: "Press", kind: "run", active: false, nextState: null };
+    default:
+      return null;
+  }
 }
 
 function numberAttribute(entity: HomeAssistantEntity, key: string): number | null {
@@ -135,28 +193,39 @@ export function EntityCard({
   const name = entityName(entity);
   const domain = entityDomain(entity.entity_id);
   const unit = entity.attributes?.unit_of_measurement;
-  const serviceLabel = entity.state === "on" ? "Turn off" : "Turn on";
-  const toggleable = canToggle(entity.entity_id);
-  const switchedOn = entity.state === "on";
+  const action = entityAction(entity);
   if (dashboardTile) {
     const tone = tileTone(entity);
     return (
-      <article className={`ha-dashboard-tile tone-${tone}`}>
+      <article
+        className={`ha-dashboard-tile tone-${tone}${action ? " is-actionable" : ""}`}
+        onClick={action ? () => onToggle(entity) : undefined}
+      >
         <div className="ha-dashboard-tile-top">
           <span className={`ha-entity-icon tone-${tone}`} aria-hidden="true">
             <EntityIcon entityID={entity.entity_id} />
           </span>
-          {toggleable ? (
+          {action?.kind === "toggle" ? (
             <button
               className="ha-switch"
               type="button"
               role="switch"
-              aria-checked={switchedOn}
+              aria-checked={action.active}
               aria-label={`Toggle ${name}`}
-              title={`Toggle ${name}`}
-              onClick={() => onToggle(entity)}
+              title={`${action.label} ${name}`}
+              onClick={(event) => { event.stopPropagation(); onToggle(entity); }}
             >
               <span aria-hidden="true" />
+            </button>
+          ) : action ? (
+            <button
+              className="ha-run-button"
+              type="button"
+              aria-label={`${action.label} ${name}`}
+              title={`${action.label} ${name}`}
+              onClick={(event) => { event.stopPropagation(); onToggle(entity); }}
+            >
+              {action.label}
             </button>
           ) : null}
         </div>
@@ -180,8 +249,8 @@ export function EntityCard({
         <span>{domain}{typeof unit === "string" && unit ? ` / ${unit}` : ""}</span>
       </div>
       <div className="row-actions">
-        {toggleable && !dashboardTile ? (
-          <button type="button" onClick={() => onToggle(entity)}>{serviceLabel} {name}</button>
+        {action ? (
+          <button type="button" onClick={() => onToggle(entity)}>{action.label} {name}</button>
         ) : null}
         <button className="secondary" type="button" onClick={() => onDashboard(entity)}>
           {dashboardTile ? "Remove tile" : saved ? "Saved" : "Add tile"}
@@ -218,8 +287,7 @@ function EntityTable({
             const name = entityName(entity);
             const domain = entityDomain(entity.entity_id);
             const saved = dashboardEntityIDs.includes(entity.entity_id);
-            const toggleable = canToggle(entity.entity_id);
-            const serviceLabel = entity.state === "on" ? "Turn off" : "Turn on";
+            const action = entityAction(entity);
             return (
               <tr key={entity.entity_id}>
                 <td>
@@ -228,17 +296,29 @@ function EntityTable({
                 </td>
                 <td>{domain}</td>
                 <td>
-                  {toggleable ? (
+                  {action?.kind === "toggle" ? (
                     <span className="ha-state-control">
                       <button
                         className="ha-switch ha-table-switch"
                         type="button"
                         role="switch"
-                        aria-checked={entity.state === "on"}
-                        aria-label={`${serviceLabel} ${name}`}
+                        aria-checked={action.active}
+                        aria-label={`${action.label} ${name}`}
                         onClick={() => onToggle(entity)}
                       >
                         <span aria-hidden="true" />
+                      </button>
+                      <span className="ha-state-label">{entity.state}</span>
+                    </span>
+                  ) : action ? (
+                    <span className="ha-state-control">
+                      <button
+                        className="ha-run-button"
+                        type="button"
+                        aria-label={`${action.label} ${name}`}
+                        onClick={() => onToggle(entity)}
+                      >
+                        {action.label}
                       </button>
                       <span className="ha-state-label">{entity.state}</span>
                     </span>
@@ -350,13 +430,17 @@ export function HomeAssistantPage() {
   }
 
   async function toggleEntity(entity: HomeAssistantEntity) {
-    const domain = entityDomain(entity.entity_id);
-    const service = entity.state === "on" ? "turn_off" : "turn_on";
+    const action = entityAction(entity);
+    if (!action) return;
+    const previousStates = readyState.states;
+    if (action.nextState) {
+      setReady({ states: upsertEntity(previousStates, { ...entity, state: action.nextState }) });
+    }
     try {
-      await homeAssistantClient.callService(entity.entity_id, domain, service);
-      setReady({ message: `${entityName(entity)} ${service.replace("_", " ")} sent.` });
+      await homeAssistantClient.callService(entity.entity_id, action.domain, action.service);
+      setReady({ message: `${entityName(entity)}: ${action.label.toLowerCase()} sent.` });
     } catch (error) {
-      setReady({ message: errorMessage(error) });
+      setReady({ states: action.nextState ? previousStates : readyState.states, message: errorMessage(error) });
     }
   }
 

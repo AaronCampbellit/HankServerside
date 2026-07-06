@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { appsClient, type AppsListPayload } from "../api/apps";
 import { bootstrapClient, type BootstrapState } from "../api/bootstrap";
 import { homeClient, type AgentPayload, type AgentTokensPayload, type Home } from "../api/home";
@@ -8,7 +8,7 @@ import { quickLinksClient, type QuickLinksPayload } from "../api/quickLinks";
 import { storageClient, type StorageEvent, type StorageStatus, type StorageTask } from "../api/storage";
 import { syncClient, type SyncProfileStatus, type SyncStatus } from "../api/sync";
 import { type AsyncState, ErrorState, LoadingState, useAsyncLoad, useToast } from "../ui/primitives";
-import { EntityCard } from "./HomeAssistantPage";
+import { entityAction, EntityCard } from "./HomeAssistantPage";
 
 type DashboardData = {
   bootstrap: BootstrapState;
@@ -173,10 +173,6 @@ function buildActivityItems(storage: StorageStatus | null, sync: SyncStatus | nu
   return items.slice(0, 4);
 }
 
-function nextToggledState(entity: HomeAssistantEntity): HomeAssistantEntity {
-  return { ...entity, state: entity.state === "on" ? "off" : "on" };
-}
-
 function HomeAssistantControlsPanel({ payload }: { payload: HomeAssistantLoadPayload | null }) {
   const [states, setStates] = useState(payload?.states || []);
   const [message, setMessage] = useState("");
@@ -185,16 +181,26 @@ function HomeAssistantControlsPanel({ payload }: { payload: HomeAssistantLoadPay
     .filter((entity): entity is HomeAssistantEntity => Boolean(entity))
     .slice(0, 4);
 
+  useEffect(() => {
+    return homeAssistantClient.onStateChanged((entity) => {
+      setStates((current) => current.some((candidate) => candidate.entity_id === entity.entity_id)
+        ? current.map((candidate) => candidate.entity_id === entity.entity_id ? { ...candidate, ...entity } : candidate)
+        : current);
+    });
+  }, []);
+
   async function toggleEntity(entity: HomeAssistantEntity) {
-    const domain = entity.entity_id.split(".")[0] || "entity";
-    const service = entity.state === "on" ? "turn_off" : "turn_on";
+    const action = entityAction(entity);
+    if (!action) return;
     const previous = states;
-    setStates((current) => current.map((candidate) => candidate.entity_id === entity.entity_id ? nextToggledState(candidate) : candidate));
+    if (action.nextState) {
+      setStates((current) => current.map((candidate) => candidate.entity_id === entity.entity_id ? { ...candidate, state: action.nextState as string } : candidate));
+    }
     try {
-      await homeAssistantClient.callService(entity.entity_id, domain, service);
+      await homeAssistantClient.callService(entity.entity_id, action.domain, action.service);
       setMessage("");
     } catch (error) {
-      setStates(previous);
+      if (action.nextState) setStates(previous);
       setMessage(error instanceof Error ? error.message : "Home Assistant control failed.");
     }
   }

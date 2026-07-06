@@ -2916,6 +2916,26 @@ button.secondary:disabled {
   background: var(--card2);
 }
 
+.ha-dashboard-tile.is-actionable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.ha-run-button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.07);
+  color: var(--ink);
+  font: 600 12px var(--font-mono);
+}
+
+.ha-run-button:hover {
+  border-color: var(--acc-line);
+  background: var(--acc-soft);
+}
+
 .ha-dashboard-tile-top {
   display: flex;
   align-items: center;
@@ -4169,11 +4189,17 @@ button.secondary:disabled {
 .notes-guide-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* Note fills the row; actions overflow off-canvas and are revealed by swipe/hover. */
+  grid-template-columns: 100% auto;
   gap: 8px;
   overflow-x: auto;
-  scroll-snap-type: x proximity;
-  scrollbar-width: thin;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.notes-guide-row::-webkit-scrollbar {
+  display: none;
 }
 
 .notes-guide-item {
@@ -4364,17 +4390,18 @@ button.secondary:disabled {
 
 .notes-content-scroll {
   min-height: 0;
+  display: grid;
   overflow: auto;
   padding: 24px;
 }
 
 .notes-body-input {
   width: min(100%, 760px);
-  min-height: 260px;
+  min-height: min(100%, 60vh);
   display: block;
-  margin: 0 auto 18px;
+  margin: 0 auto;
   padding: 18px;
-  resize: vertical;
+  resize: none;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
@@ -4386,73 +4413,6 @@ button.secondary:disabled {
 .notes-body-input:focus {
   border-color: var(--acc-line);
   box-shadow: 0 0 0 3px var(--acc-soft);
-}
-
-.rendered-note-body {
-  width: min(100%, 760px);
-  display: grid;
-  gap: 12px;
-  margin: 0 auto;
-  padding: 8px 0 80px;
-}
-
-.note-section-label {
-  margin: 20px 0 4px;
-  color: var(--ink);
-  font-size: 22px;
-  line-height: 1.18;
-}
-
-.checkline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 34px;
-  color: var(--ink);
-  font-size: 16px;
-}
-
-.fake-check {
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: rgba(255,255,255,.04);
-}
-
-.checkline.done .fake-check {
-  border-color: color-mix(in srgb, var(--success) 48%, transparent);
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.checkline.done > span:last-child {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-
-.note-copy {
-  margin: 0;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1.65;
-}
-
-.note-copy.muted {
-  color: var(--faint);
-}
-
-.note-inline-tag {
-  display: inline-flex;
-  margin-left: 6px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--acc-soft);
-  color: var(--brand-dark);
-  font-weight: 700;
 }
 
 .kanban-board {
