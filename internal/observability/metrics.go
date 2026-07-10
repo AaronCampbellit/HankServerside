@@ -36,8 +36,8 @@ func NewMetrics() *Metrics {
 		routeFailures:   make(map[string]int64),
 		httpCounts:      make(map[string]int64),
 		httpLatency:     make(map[string]time.Duration),
-		assistantCounts: make(map[string]int64),
-		assistantErrors: make(map[string]int64),
+		assistantCounts: map[string]int64{"unknown": 0},
+		assistantErrors: map[string]int64{"unknown": 0},
 	}
 }
 
