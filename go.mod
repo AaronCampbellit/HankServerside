@@ -7,7 +7,6 @@ require (
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/jackc/pgx/v5 v5.9.1
 	golang.org/x/crypto v0.50.0
-	golang.org/x/net v0.52.0
 )
 
 require (

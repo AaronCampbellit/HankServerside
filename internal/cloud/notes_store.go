@@ -763,10 +763,22 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 	if pageType == protocol.NotePageTypeKanban && content == "" && board != nil {
 		content = kanbanMarkdown(state.Title.Value, *board)
 	}
-	revision, checksum, err := revisionAndChecksum(content, pageType, boardJSON)
+	_, checksum, err := revisionAndChecksum(content, pageType, boardJSON)
 	if err != nil {
 		return domain.UserNote{}, "", err
 	}
+	revisionPayload, err := json.Marshal(map[string]any{
+		"content":    content,
+		"page_type":  pageType,
+		"board":      boardJSON,
+		"title":      strings.TrimSpace(state.Title.Value),
+		"parent_id":  strings.TrimSpace(state.ParentID.Value),
+		"sort_order": state.SortOrder,
+	})
+	if err != nil {
+		return domain.UserNote{}, "", err
+	}
+	revision := revisionBytes(revisionPayload)
 	base.Title = strings.TrimSpace(state.Title.Value)
 	if base.Title == "" {
 		base.Title = titleFromNoteID(base.NoteID)

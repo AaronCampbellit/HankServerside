@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -372,7 +373,6 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		"/dashboard/settings/apps",
 		"/dashboard/settings/logs",
 		"/dashboard/settings/join-home",
-		"/dashboard/not-a-route",
 	}
 
 	for _, routePath := range paths {
@@ -388,6 +388,15 @@ func TestDashboardPagesRedirectWhenUnauthenticated(t *testing.T) {
 		if location := response.Header.Get("Location"); location != "/" {
 			t.Fatalf("%s redirect location = %q, want %q", routePath, location, "/")
 		}
+	}
+
+	response, err := client.Get(testServer.URL + "/dashboard/not-a-route")
+	if err != nil {
+		t.Fatalf("unknown dashboard route request: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown dashboard route status = %d, want %d", response.StatusCode, http.StatusNotFound)
 	}
 }
 
@@ -516,16 +525,12 @@ func TestDashboardPagesRequireHomeMembership(t *testing.T) {
 	settingsResponse.Body.Close()
 
 	unknownResponse := requestDashboardPage(t, testServer, "/dashboard/not-a-route", "member-token")
-	if unknownResponse.StatusCode != http.StatusOK {
+	if unknownResponse.StatusCode != http.StatusNotFound {
 		data, _ := io.ReadAll(unknownResponse.Body)
 		unknownResponse.Body.Close()
-		t.Fatalf("member unknown dashboard route status = %d, want %d body=%s", unknownResponse.StatusCode, http.StatusOK, string(data))
+		t.Fatalf("member unknown dashboard route status = %d, want %d body=%s", unknownResponse.StatusCode, http.StatusNotFound, string(data))
 	}
-	unknownBody, _ := io.ReadAll(unknownResponse.Body)
 	unknownResponse.Body.Close()
-	if !strings.Contains(string(unknownBody), `<div id="root"></div>`) {
-		t.Fatalf("member unknown dashboard route should serve React shell: %s", string(unknownBody))
-	}
 
 	storageResponse := requestDashboardPage(t, testServer, "/dashboard/settings/backups", "member-token")
 	if storageResponse.StatusCode != http.StatusForbidden {
@@ -2205,8 +2210,12 @@ func TestFilePreviewStreamsInlineRangeOverHTTP(t *testing.T) {
 	if got := response.Header.Get("Accept-Ranges"); got != "bytes" {
 		t.Fatalf("Accept-Ranges = %q, want bytes", got)
 	}
-	if got := response.Header.Get("Content-Disposition"); got != `inline; filename="demo.mp4"` {
-		t.Fatalf("Content-Disposition = %q, want inline filename", got)
+	disposition, params, err := mime.ParseMediaType(response.Header.Get("Content-Disposition"))
+	if err != nil {
+		t.Fatalf("parse Content-Disposition: %v", err)
+	}
+	if disposition != "inline" || params["filename"] != "demo.mp4" {
+		t.Fatalf("Content-Disposition = %q params=%#v, want inline demo.mp4", disposition, params)
 	}
 	if got := response.Header.Get("Content-Type"); got != "video/mp4" {
 		t.Fatalf("Content-Type = %q, want video/mp4", got)

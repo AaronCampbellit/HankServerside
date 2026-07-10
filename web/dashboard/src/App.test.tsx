@@ -6,6 +6,7 @@ import { redirectTo } from "./browser/navigation";
 const homeAssistantClient = vi.hoisted(() => ({
   load: vi.fn(),
   callService: vi.fn(),
+  fetchState: vi.fn(),
   onStateChanged: vi.fn(),
 }));
 
@@ -30,6 +31,7 @@ describe("App routes", () => {
       states: [],
     });
     homeAssistantClient.callService.mockResolvedValue({});
+    homeAssistantClient.fetchState.mockResolvedValue(null);
     homeAssistantClient.onStateChanged.mockReturnValue(() => {});
   });
 
@@ -428,6 +430,11 @@ describe("App routes", () => {
       ],
     });
     homeAssistantClient.callService.mockResolvedValue({});
+    homeAssistantClient.fetchState.mockResolvedValue({
+      entity_id: "light.kitchen",
+      state: "off",
+      attributes: { friendly_name: "Kitchen Light", brightness: 128 },
+    });
     homeAssistantClient.onStateChanged.mockReturnValue(() => {});
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
       const path = String(input);
@@ -487,6 +494,8 @@ describe("App routes", () => {
     fireEvent.click(toggle);
 
     await waitFor(() => expect(homeAssistantClient.callService).toHaveBeenCalledWith("light.kitchen", "light", "turn_off"));
+    await waitFor(() => expect(homeAssistantClient.fetchState).toHaveBeenCalledWith("light.kitchen"));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
   });
 
   it("does not render canned quick-link cards when no quick links are configured", async () => {
@@ -1080,20 +1089,50 @@ describe("App routes", () => {
       if (path === "/v1/home/quick-links") {
         return new Response(JSON.stringify({
           can_edit: true,
-          links: [{
-            id: "ql_1",
-            home_id: "home_1",
-            title: "Home Assistant",
-            url: "https://ha.example.test",
-            description: "Local controls",
-            sort_order: 0,
-            health_check_enabled: true,
-            status: "up",
-            status_code: 200,
-            created_at: "2026-01-01T00:00:00Z",
-            updated_at: "2026-01-01T00:00:00Z",
-            updated_by: "usr_1",
-          }],
+          links: [
+            {
+              id: "ql_1",
+              home_id: "home_1",
+              title: "Home Assistant",
+              url: "https://ha.example.test",
+              description: "Local controls",
+              sort_order: 0,
+              health_check_enabled: true,
+              status: "up",
+              status_code: 200,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              updated_by: "usr_1",
+            },
+            {
+              id: "ql_2",
+              home_id: "home_1",
+              title: "File Server",
+              url: "https://files.example.test",
+              description: "Files",
+              sort_order: 1,
+              health_check_enabled: true,
+              status: "down",
+              status_code: 503,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              updated_by: "usr_1",
+            },
+            {
+              id: "ql_3",
+              home_id: "home_1",
+              title: "Notebook",
+              url: "https://notes.example.test",
+              description: "Notes",
+              sort_order: 2,
+              health_check_enabled: true,
+              status: "unchecked",
+              status_code: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              updated_by: "usr_1",
+            },
+          ],
         }), { headers: { "Content-Type": "application/json" } });
       }
       if (path === "/v1/home/storage/status") {
@@ -1119,7 +1158,9 @@ describe("App routes", () => {
       "href",
       "https://ha.example.test",
     );
-    expect(within(quickLinks).getByText("up")).toBeInTheDocument();
+    expect(within(quickLinks).getByText("up")).toHaveClass("tone-up");
+    expect(within(quickLinks).getByText("down")).toHaveClass("tone-down");
+    expect(within(quickLinks).getByText("unchecked")).toHaveClass("tone-unknown");
   });
 
   it("manages quick links from the settings route", async () => {

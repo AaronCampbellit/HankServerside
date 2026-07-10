@@ -2114,6 +2114,24 @@ button.secondary:disabled {
   font-weight: 750;
 }
 
+.quick-status.tone-up {
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.quick-status.tone-down {
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.quick-status.tone-unknown {
+  border-color: color-mix(in srgb, var(--warn) 28%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
 .person-avatar {
   border-radius: 50%;
   background: color-mix(in srgb, var(--brand) 22%, transparent);

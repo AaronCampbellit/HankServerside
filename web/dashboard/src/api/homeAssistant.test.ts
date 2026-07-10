@@ -42,6 +42,23 @@ describe("HomeAssistantClient", () => {
     expect(socket.sendCommand).toHaveBeenCalledWith("homeassistant.fetch_states");
   });
 
+  it("fetches a single canonical entity state", async () => {
+    const request = vi.fn();
+    const socket = {
+      subscribe: vi.fn(),
+      sendCommand: vi.fn(async () => ({
+        state: { entity_id: "light.kitchen", state: "off", attributes: { friendly_name: "Kitchen Light" } },
+      })),
+      onEvent: vi.fn(),
+    };
+    const client = new HomeAssistantClient({ request: request as unknown as ApiTransport["request"] }, socket as unknown as HomeAssistantSocket);
+
+    const state = await client.fetchState("light.kitchen");
+
+    expect(state).toEqual({ entity_id: "light.kitchen", state: "off", attributes: { friendly_name: "Kitchen Light" } });
+    expect(socket.sendCommand).toHaveBeenCalledWith("homeassistant.fetch_state", { entity_id: "light.kitchen" });
+  });
+
   it("saves dashboard tiles and calls Home Assistant services", async () => {
     const request = vi.fn(async <T>() => ({ revision: 5, settings: { dashboard_tiles: [] } }) as T);
     const socket = {

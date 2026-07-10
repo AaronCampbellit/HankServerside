@@ -249,7 +249,9 @@ func TestAssistantSettingsPromptAndSourceFiltersAffectLLMRequest(t *testing.T) {
 	if strings.Contains(sentMessages[1].Content, "[file]") || strings.Contains(sentMessages[1].Content, "/private/tax.pdf") {
 		t.Fatalf("file context leaked into provider prompt: %s", sentMessages[1].Content)
 	}
-	if !strings.Contains(sentMessages[1].Content, "[profile_note] Tax note") {
+	if !strings.Contains(sentMessages[1].Content, "Source: profile_note") ||
+		!strings.Contains(sentMessages[1].Content, "Title: Tax note") ||
+		!strings.Contains(sentMessages[1].Content, "tax refund household note") {
 		t.Fatalf("note context missing from provider prompt: %s", sentMessages[1].Content)
 	}
 }
@@ -307,6 +309,9 @@ func TestAssistantProjectDocsAreIndexedAsHarnessSource(t *testing.T) {
 	settings.ProjectDocsEnabled = true
 	auth := authContext{User: user}
 	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+	if err := server.indexAssistantProjectDocs(ctx, home.ID, user.ID); err != nil {
+		t.Fatalf("indexAssistantProjectDocs: %v", err)
+	}
 
 	answer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "frobnicator deployment rule")
 	if err != nil {
@@ -318,7 +323,7 @@ func TestAssistantProjectDocsAreIndexedAsHarnessSource(t *testing.T) {
 	if len(sentMessages) != 2 {
 		t.Fatalf("messages = %#v", sentMessages)
 	}
-	if !strings.Contains(sentMessages[1].Content, "[project_doc]") || !strings.Contains(sentMessages[1].Content, "frobnicator") {
+	if !strings.Contains(sentMessages[1].Content, "Source: project_doc") || !strings.Contains(sentMessages[1].Content, "frobnicator") {
 		t.Fatalf("project docs were not sent as context: %s", sentMessages[1].Content)
 	}
 }
@@ -413,6 +418,9 @@ func TestAssistantOpenAIAnswerUsesVectorRetrievedContext(t *testing.T) {
 		UpdatedBy:    user.ID,
 	}
 	must(t, db.UpsertUserNote(ctx, note))
+	if err := server.indexAssistantNote(ctx, home.ID, user.ID, assistantIndexSourceProfileNote, note, settings); err != nil {
+		t.Fatalf("indexAssistantNote: %v", err)
+	}
 
 	auth := authContext{User: user}
 	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
@@ -426,7 +434,9 @@ func TestAssistantOpenAIAnswerUsesVectorRetrievedContext(t *testing.T) {
 	if len(sentMessages) != 2 {
 		t.Fatalf("messages = %#v", sentMessages)
 	}
-	if !strings.Contains(sentMessages[1].Content, "[profile_note] Basement Closet") || !strings.Contains(sentMessages[1].Content, "breaker panel") {
+	if !strings.Contains(sentMessages[1].Content, "Source: profile_note") ||
+		!strings.Contains(sentMessages[1].Content, "Title: Basement Closet") ||
+		!strings.Contains(sentMessages[1].Content, "breaker panel") {
 		t.Fatalf("vector-retrieved context was not sent to OpenAI chat: %s", sentMessages[1].Content)
 	}
 }
@@ -503,6 +513,9 @@ func TestLocalModelPlannerRoutesGenericPromptToSpecificTool(t *testing.T) {
 	settings.ProjectDocsEnabled = true
 	auth := authContext{User: user}
 	membership := domain.HomeMembership{HomeID: home.ID, UserID: user.ID, Role: domain.HomeRoleAdmin, CreatedAt: now, UpdatedAt: now}
+	if err := server.indexAssistantProjectDocs(ctx, home.ID, user.ID); err != nil {
+		t.Fatalf("indexAssistantProjectDocs: %v", err)
+	}
 
 	answer, err := server.generateAssistantResponse(ctx, home, membership, auth, settings, "frobnicator rule please")
 	if err != nil {
@@ -548,19 +561,28 @@ func TestAssistantConversationMemoryIsIndexedAndFiltered(t *testing.T) {
 	var providerCalls int
 	var sentMessages []assistantLLMMessage
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		providerCalls++
-		var body struct {
-			Messages []assistantLLMMessage `json:"messages"`
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			providerCalls++
+			var body struct {
+				Messages []assistantLLMMessage `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			sentMessages = body.Messages
+			writeJSON(w, http.StatusOK, map[string]any{
+				"choices": []map[string]any{
+					{"message": map[string]any{"content": "Conversation memory answer."}},
+				},
+			})
+		case "/v1/embeddings":
+			embedding := make([]float64, 768)
+			embedding[11] = 1
+			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]any{{"embedding": embedding}}})
+		default:
+			http.NotFound(w, r)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		sentMessages = body.Messages
-		writeJSON(w, http.StatusOK, map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"content": "Conversation memory answer."}},
-			},
-		})
 	}))
 	defer provider.Close()
 
@@ -590,7 +612,7 @@ func TestAssistantConversationMemoryIsIndexedAndFiltered(t *testing.T) {
 	if providerCalls != 1 {
 		t.Fatalf("provider calls = %d, want 1", providerCalls)
 	}
-	if len(sentMessages) != 2 || !strings.Contains(sentMessages[1].Content, "[assistant_conversation]") || !strings.Contains(sentMessages[1].Content, "blue cabinet has spare fuses") {
+	if len(sentMessages) != 2 || !strings.Contains(sentMessages[1].Content, "Source: assistant_conversation") || !strings.Contains(sentMessages[1].Content, "blue cabinet has spare fuses") {
 		t.Fatalf("conversation memory was not sent as context: %#v", sentMessages)
 	}
 

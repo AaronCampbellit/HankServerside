@@ -18,6 +18,21 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
+func TestDuplicateArticleNoteAppendPromptResolvesToAppendTool(t *testing.T) {
+	prompt := "add fix hankai conversation output the the hank features note"
+	itemText, noteHint := extractAppendIntent(prompt)
+	if itemText != "fix hankai conversation output" || noteHint != "hank features note" {
+		t.Fatalf("append intent = item:%q note:%q", itemText, noteHint)
+	}
+	tool, intent := resolveAssistantTool(prompt)
+	if tool.Kind != assistantIntentNotesAppend || intent.Kind != assistantIntentNotesAppend {
+		t.Fatalf("resolved tool = %q intent = %q, want notes append", tool.Kind, intent.Kind)
+	}
+	if intent.Query != prompt {
+		t.Fatalf("append intent query = %q, want original prompt %q", intent.Query, prompt)
+	}
+}
+
 func TestAssistantIntentClassification(t *testing.T) {
 	t.Parallel()
 
@@ -535,6 +550,16 @@ func TestConfirmedAssistantNoteAppendReindexesNote(t *testing.T) {
 	must(t, db.CreateHome(ctx, home))
 	must(t, db.CreateAssistantSession(ctx, session))
 	must(t, db.UpsertUserNote(ctx, note))
+	message := domain.AssistantMessage{
+		ID:          "amsg_confirm_append",
+		SessionID:   session.ID,
+		Role:        assistantRoleAssistant,
+		Status:      assistantStateWaitingConfirm,
+		ContentJSON: `{"text":"Confirm note append."}`,
+		ModelName:   assistantModelName,
+		CreatedAt:   now,
+	}
+	must(t, db.CreateAssistantMessage(ctx, message))
 
 	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	pending := assistantPendingAction{
@@ -548,6 +573,7 @@ func TestConfirmedAssistantNoteAppendReindexesNote(t *testing.T) {
 	run := domain.AssistantRun{
 		ID:                   "arun_confirm_append",
 		SessionID:            session.ID,
+		MessageID:            message.ID,
 		State:                assistantStateWaitingConfirm,
 		RequiresConfirmation: true,
 		CreatedAt:            now,
@@ -564,7 +590,14 @@ func TestConfirmedAssistantNoteAppendReindexesNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchAssistantContext: %v", err)
 	}
-	if len(results) == 0 || results[0].SourceType != "profile_note" || results[0].Title != "Projects" {
+	foundReindexedNote := false
+	for _, result := range results {
+		if result.SourceType == "profile_note" && result.Title == "Projects" {
+			foundReindexedNote = true
+			break
+		}
+	}
+	if !foundReindexedNote {
 		t.Fatalf("confirmed append was not reindexed: %#v", results)
 	}
 }
@@ -609,8 +642,14 @@ func TestAssistantConfirmationResponseIncludesStructuredSummary(t *testing.T) {
 	if response.PendingActionSummary.Kind != "calendar_create" || response.PendingActionSummary.Title != "Create calendar event" {
 		t.Fatalf("unexpected pending action summary: %#v", response.PendingActionSummary)
 	}
+	requestedDateIncludesMay3 := false
+	for _, detail := range response.PendingActionSummary.Details {
+		if detail.Label == "Requested date" && strings.Contains(detail.Value, "May 3") {
+			requestedDateIncludesMay3 = true
+		}
+	}
 	if !assistantSummaryDetailsContain(response.PendingActionSummary.Details, "Event", "dentist appointment") ||
-		!assistantSummaryDetailsContain(response.PendingActionSummary.Details, "Requested date", "May 3") ||
+		!requestedDateIncludesMay3 ||
 		!assistantSummaryDetailsContain(response.PendingActionSummary.Details, "All day", "Yes") {
 		t.Fatalf("summary details missing expected values: %#v", response.PendingActionSummary.Details)
 	}

@@ -6,6 +6,7 @@ const homeAssistantClient = vi.hoisted(() => ({
   load: vi.fn(),
   saveDashboardTiles: vi.fn(),
   callService: vi.fn(),
+  fetchState: vi.fn(),
   onStateChanged: vi.fn(),
 }));
 
@@ -81,6 +82,11 @@ describe("HomeAssistantPage", () => {
     });
     homeAssistantClient.onStateChanged.mockReturnValue(() => {});
     homeAssistantClient.callService.mockResolvedValue({});
+    homeAssistantClient.fetchState.mockResolvedValue({
+      entity_id: "light.kitchen",
+      state: "off",
+      attributes: { friendly_name: "Kitchen Light" },
+    });
 
     render(<HomeAssistantPage />);
 
@@ -91,6 +97,8 @@ describe("HomeAssistantPage", () => {
     fireEvent.click(toggle);
 
     await waitFor(() => expect(homeAssistantClient.callService).toHaveBeenCalledWith("light.kitchen", "light", "turn_off"));
+    await waitFor(() => expect(homeAssistantClient.fetchState).toHaveBeenCalledWith("light.kitchen"));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
   });
 
   it("matches the guide layout for the dashboard and all-entities table", async () => {

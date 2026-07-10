@@ -425,6 +425,22 @@ func (s *Store) UpdateFileOperationJob(ctx context.Context, jobID string, status
 	return err
 }
 
+func (s *Store) UpdateFileOperationJobMonotonic(ctx context.Context, jobID string, status string, bytesDone int64, filesDone int64, errorMessage string, completedAt *time.Time) (bool, error) {
+	result, err := s.exec(ctx, `UPDATE file_operation_jobs
+		SET status = ?, bytes_done = ?, files_done = ?, error_message = ?, updated_at = ?, completed_at = ?
+		WHERE id = ?
+		  AND status NOT IN ('completed', 'failed', 'cancelled', 'rollback_required', 'rolled_back')`,
+		status, bytesDone, filesDone, errorMessage, time.Now().UTC(), completedAt, jobID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 func (s *Store) UpdateFileOperationJobTotals(ctx context.Context, jobID string, bytesTotal int64, filesTotal int64) error {
 	_, err := s.exec(ctx, `UPDATE file_operation_jobs
 		SET bytes_total = ?, files_total = ?, updated_at = ?

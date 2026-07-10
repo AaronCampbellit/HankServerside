@@ -31,6 +31,10 @@ type FetchStatesResponse = {
   states?: HomeAssistantEntity[];
 };
 
+type FetchStateResponse = {
+  state?: HomeAssistantEntity;
+};
+
 export function entityName(entity: HomeAssistantEntity): string {
   const name = entity.attributes?.friendly_name;
   return typeof name === "string" && name.trim() ? name : entity.entity_id;
@@ -79,6 +83,11 @@ export class HomeAssistantClient {
   async fetchStates(): Promise<HomeAssistantEntity[]> {
     const payload = await this.socket.sendCommand<FetchStatesResponse>("homeassistant.fetch_states");
     return arrayFrom<HomeAssistantEntity>(payload.states).sort((left, right) => entityName(left).localeCompare(entityName(right)));
+  }
+
+  async fetchState(entityID: string): Promise<HomeAssistantEntity | null> {
+    const payload = await this.socket.sendCommand<FetchStateResponse>("homeassistant.fetch_state", { entity_id: entityID });
+    return payload.state || null;
   }
 
   saveDashboardTiles(revision: number, settings: Record<string, unknown>, entityIDs: string[]): Promise<UserProfile> {

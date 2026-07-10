@@ -339,8 +339,12 @@ func (s *Server) retryFileOperationJob(ctx context.Context, home domain.Home, au
 	if payload.Status == "" {
 		payload.Status = "completed"
 	}
-	now := time.Now().UTC()
-	if err := s.store.UpdateFileOperationJob(ctx, job.ID, payload.Status, payload.BytesDone, payload.FilesDone, "", &now); err != nil {
+	var completedAt *time.Time
+	if payload.Status == "completed" || payload.Status == "failed" || payload.Status == "cancelled" || payload.Status == "rollback_required" || payload.Status == "rolled_back" {
+		now := time.Now().UTC()
+		completedAt = &now
+	}
+	if _, err := s.store.UpdateFileOperationJobMonotonic(ctx, job.ID, payload.Status, payload.BytesDone, payload.FilesDone, "", completedAt); err != nil {
 		return store.FileOperationJob{}, err
 	}
 	s.audit(ctx, "file_operation.retried", auditSeverityInfo, auth.User.ID, "", home.ID, requestIDFromContext(ctx), "file_operation_job", job.ID, map[string]any{"status": payload.Status})

@@ -45,6 +45,13 @@ function statusLabel(value: string | undefined): string {
   return value && value.trim() ? value : "unknown";
 }
 
+function quickLinkStatusTone(value: string | undefined): "up" | "down" | "unknown" {
+  const status = statusLabel(value).toLowerCase();
+  if (status === "up") return "up";
+  if (status === "down") return "down";
+  return "unknown";
+}
+
 function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "never";
   const then = new Date(iso).getTime();
@@ -198,6 +205,14 @@ function HomeAssistantControlsPanel({ payload }: { payload: HomeAssistantLoadPay
     }
     try {
       await homeAssistantClient.callService(entity.entity_id, action.domain, action.service);
+      try {
+        const current = await homeAssistantClient.fetchState(entity.entity_id);
+        if (current) {
+          setStates((latest) => latest.map((candidate) => candidate.entity_id === current.entity_id ? { ...candidate, ...current } : candidate));
+        }
+      } catch {
+        // Realtime polling will still correct the tile if the immediate read misses.
+      }
       setMessage("");
     } catch (error) {
       if (action.nextState) setStates(previous);
@@ -361,6 +376,7 @@ export function DashboardHome() {
     href: link.url,
     external: true,
     status: statusLabel(link.status),
+    statusTone: quickLinkStatusTone(link.status),
   })) : [];
 
   async function restartAgent() {
@@ -496,7 +512,7 @@ export function DashboardHome() {
                   >
                     <strong>{link.title}</strong>
                     <small>{link.detail}</small>
-                    {link.status ? <span className="quick-status">{link.status}</span> : null}
+                    {link.status ? <span className={`quick-status tone-${link.statusTone}`}>{link.status}</span> : null}
                   </a>
                 ))}
               </div>

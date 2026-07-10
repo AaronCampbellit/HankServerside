@@ -438,6 +438,14 @@ export function HomeAssistantPage() {
     }
     try {
       await homeAssistantClient.callService(entity.entity_id, action.domain, action.service);
+      try {
+        const current = await homeAssistantClient.fetchState(entity.entity_id);
+        if (current) {
+          setState((latest) => latest.status === "ready" ? { ...latest, states: upsertEntity(latest.states, current) } : latest);
+        }
+      } catch {
+        // Realtime polling will still correct the tile if the immediate read misses.
+      }
       setReady({ message: `${entityName(entity)}: ${action.label.toLowerCase()} sent.` });
     } catch (error) {
       setReady({ states: action.nextState ? previousStates : readyState.states, message: errorMessage(error) });

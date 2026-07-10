@@ -80,12 +80,12 @@ func TestExternalProfileNotesAPIReadSearchTagsAndAppend(t *testing.T) {
 
 	var tags protocol.NotesTagsResponse
 	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/tags", nil, &tags)
-	if len(tags.Tags) != 1 || tags.Tags[0].Tag != "todo" || tags.Tags[0].Count != 1 {
+	if len(tags.Tags) != 1 || tags.Tags[0].Tag != "#todo" || tags.Tags[0].Count != 1 {
 		t.Fatalf("tags = %#v, want one todo tag", tags.Tags)
 	}
 
 	var rollup protocol.NotesTagRollupResponse
-	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/tag-rollup?tag=todo", nil, &rollup)
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/tag-rollup?tag=%23todo", nil, &rollup)
 	if len(rollup.Items) != 1 || rollup.Items[0].NoteID != "external.md" || !strings.Contains(rollup.Items[0].LineText, "buy milk") {
 		t.Fatalf("tag rollup = %#v, want external.md todo line", rollup.Items)
 	}

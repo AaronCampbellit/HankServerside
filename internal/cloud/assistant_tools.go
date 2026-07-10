@@ -139,7 +139,7 @@ var assistantToolRegistry = []assistantTool{
 			if !isNoteAppendPrompt(prompt) {
 				return assistantIntent{}, false
 			}
-			return assistantIntent{Kind: assistantIntentNotesAppend, Query: noteSearchQuery(prompt)}, true
+			return assistantIntent{Kind: assistantIntentNotesAppend, Query: strings.TrimSpace(prompt)}, true
 		},
 		Execute: executeAssistantNotesAppendTool,
 	},
@@ -661,7 +661,10 @@ func executeAssistantFilesSearchTool(ctx context.Context, server *Server, runtim
 	if !runtime.Settings.FilesEnabled {
 		return assistantMessageContent{Text: "File access is turned off in HankAI settings."}, nil
 	}
-	prompt := assistantCommandPrompt(intent, runtime.Prompt)
+	prompt := runtime.Prompt
+	if intent.Kind == assistantIntentFilesCommand {
+		prompt = assistantCommandPrompt(intent, runtime.Prompt)
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return assistantMessageContent{Text: "Send `/files` followed by a file or folder name to search."}, nil
 	}

@@ -267,7 +267,9 @@ func TestAssistantIndexSearchRequiresPgvectorForEmbeddingQueries(t *testing.T) {
 		t.Fatalf("UpsertAssistantDocumentWithChunks: %v", err)
 	}
 
-	_, err := db.SearchAssistantContext(ctx, home.ID, user.ID, "absent phrase", []float64{0, 0, 1, 0}, 5)
+	queryEmbedding := make([]float64, 768)
+	queryEmbedding[2] = 1
+	_, err := db.SearchAssistantContext(ctx, home.ID, user.ID, "absent phrase", queryEmbedding, 5)
 	if err == nil || !strings.Contains(err.Error(), "required pgvector search is unavailable") {
 		t.Fatalf("SearchAssistantContext error = %v, want required pgvector unavailable", err)
 	}

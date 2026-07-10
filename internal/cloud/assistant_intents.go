@@ -487,10 +487,10 @@ func (s *Server) answerFileCreateFolderPrompt(ctx context.Context, home domain.H
 	parent := parentPath(path)
 	if parent != "" {
 		resolvedParent, resolvedSourceID, _, err := s.resolveAssistantFileDirectory(ctx, home.ID, parent, sourceID)
-		if err != nil {
+		if err != nil && !errors.Is(err, errAgentOffline) {
 			return assistantMessageContent{}, err
 		}
-		if resolvedParent != "" {
+		if err == nil && resolvedParent != "" {
 			sourceID = firstNonBlank(sourceID, resolvedSourceID)
 			path = joinFilePath(resolvedParent, filepathBase(path))
 		}

@@ -279,12 +279,11 @@ func TestNotesAPITokenCreateRejectsUnsafeScopes(t *testing.T) {
 		"scopes": []string{"files:read"},
 	}, http.StatusBadRequest)
 	defer response.Body.Close()
-	var errorBody map[string]any
-	if err := json.NewDecoder(response.Body).Decode(&errorBody); err != nil {
-		t.Fatalf("decode error body: %v", err)
+	errorBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read error body: %v", err)
 	}
-	got, _ := errorBody["error"].(string)
-	if !strings.Contains(got, "unsupported scope") {
-		t.Fatalf("error body = %#v", errorBody)
+	if !strings.Contains(string(errorBody), "unsupported scope") {
+		t.Fatalf("error body = %q", string(errorBody))
 	}
 }

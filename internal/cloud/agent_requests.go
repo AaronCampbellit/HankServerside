@@ -9,6 +9,8 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
+var errAgentOffline = errors.New("agent offline")
+
 type agentRequestRegistry struct {
 	mu      sync.Mutex
 	pending map[string]chan protocol.Envelope
@@ -62,7 +64,7 @@ func (s *Server) sendAgentCommand(ctx context.Context, homeID string, command st
 				"command": command,
 			}),
 		})
-		return protocol.Envelope{}, errors.New("agent offline")
+		return protocol.Envelope{}, errAgentOffline
 	}
 
 	requestID := newID("sync")

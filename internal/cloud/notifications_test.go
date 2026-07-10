@@ -238,6 +238,26 @@ func TestNotificationEventsTargetRelevantUsers(t *testing.T) {
 	must(t, db.SaveUserNoteWithOperations(ctx, note, nil))
 	must(t, db.AddNoteShare(ctx, domain.NoteShare{NoteID: note.ID, HomeID: home.ID, TargetUserID: admin.ID, SharedBy: owner.ID, CreatedAt: now, UpdatedAt: now}))
 	must(t, db.AddNoteShare(ctx, domain.NoteShare{NoteID: note.ID, HomeID: home.ID, TargetUserID: member.ID, SharedBy: owner.ID, CreatedAt: now, UpdatedAt: now}))
+	recipients, err := db.ListNoteNotificationUserIDs(ctx, note.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("ListNoteNotificationUserIDs: %v", err)
+	}
+	if !slices.Contains(recipients, member.ID) {
+		t.Fatalf("note notification recipients = %#v, want member %q", recipients, member.ID)
+	}
+	devices, err := db.ListActiveAPNSDevicesForUsers(ctx, recipients)
+	if err != nil {
+		t.Fatalf("ListActiveAPNSDevicesForUsers: %v", err)
+	}
+	memberDeviceFound := false
+	for _, device := range devices {
+		if device.UserID == member.ID {
+			memberDeviceFound = true
+		}
+	}
+	if !memberDeviceFound {
+		t.Fatalf("active notification devices = %#v, want member device", devices)
+	}
 
 	server.notifyNoteChanged(ctx, note.ID, note.NoteID, owner.ID)
 	noteSends := sender.drain()

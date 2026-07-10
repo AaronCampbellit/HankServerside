@@ -225,6 +225,7 @@ func TestPruneLifecycleRemovesExpiredOperationalRows(t *testing.T) {
 	user := domain.User{ID: "usr_prune", Email: "prune@example.com", PasswordHash: "hash", CreatedAt: old, UpdatedAt: old}
 	home := domain.Home{ID: "home_prune", UserID: user.ID, Name: "Prune Home", CreatedAt: old, UpdatedAt: old}
 	session := domain.AppSession{ID: "sess_prune", UserID: user.ID, TokenHash: "session-prune", ExpiresAt: now.Add(time.Hour), CreatedAt: old}
+	assistantSession := domain.AssistantSession{ID: "asess_prune", HomeID: home.ID, UserID: user.ID, Title: "Prune", LastMessageAt: old, CreatedAt: old, UpdatedAt: old}
 	note := domain.UserNote{
 		ID:            "note_prune",
 		NoteID:        "prune.md",
@@ -244,6 +245,7 @@ func TestPruneLifecycleRemovesExpiredOperationalRows(t *testing.T) {
 	mustStore(t, db.CreateUser(ctx, user))
 	mustStore(t, db.CreateHome(ctx, home))
 	mustStore(t, db.CreateSession(ctx, session))
+	mustStore(t, db.CreateAssistantSession(ctx, assistantSession))
 	mustStore(t, db.UpsertUserNote(ctx, note))
 	mustStore(t, db.CreateFileTransfer(ctx, FileTransferRecord{
 		ID:          "xfer_old_done",
@@ -284,7 +286,7 @@ func TestPruneLifecycleRemovesExpiredOperationalRows(t *testing.T) {
 	}))
 	mustStore(t, db.UpsertAssistantAttachments(ctx, []domain.AssistantAttachment{{
 		ID:                 "att_old",
-		SessionID:          session.ID,
+		SessionID:          assistantSession.ID,
 		UserID:             user.ID,
 		ClientAttachmentID: "client_old",
 		Filename:           "old.pdf",

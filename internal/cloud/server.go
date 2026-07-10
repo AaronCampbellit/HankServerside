@@ -1495,8 +1495,8 @@ func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request,
 			if result.Error != nil {
 				return
 			}
-			if remaining > 0 {
-				return
+			if remaining > 0 && result.Complete.Offset > currentOffset {
+				continue
 			}
 		}
 	}
