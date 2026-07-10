@@ -33,6 +33,8 @@ type ReadyState = {
   notebookDraft: string;
   moveDialogNoteID: string;
   moveDialogTargetID: string;
+  savedEditor: Editor;
+  saving: boolean;
 };
 
 type State =
@@ -78,6 +80,16 @@ function editorFromNote(note: ProfileNote): Editor {
     updatedAt: note.updated_at || "",
     shared: Boolean(note.shared),
   };
+}
+
+function editorChanged(left: Editor, right: Editor): boolean {
+  return left.noteID !== right.noteID
+    || left.title !== right.title
+    || left.body !== right.body
+    || left.revision !== right.revision
+    || left.pageType !== right.pageType
+    || left.parentID !== right.parentID
+    || JSON.stringify(left.board) !== JSON.stringify(right.board);
 }
 
 function sortNotes(notes: ProfileNoteSummary[]): ProfileNoteSummary[] {
@@ -385,6 +397,8 @@ export function ProfileNotesPage() {
   const lastRenderedBodyRef = useRef("");
   const lastTypedAtRef = useRef(0);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const savingRef = useRef(false);
+  const pendingSaveRef = useRef<Editor | null>(null);
 
   // Restore the caret/selection after a toolbar action once React has committed the new body.
   useEffect(() => {
@@ -427,6 +441,8 @@ export function ProfileNotesPage() {
         notebookDraft: current.status === "ready" ? current.notebookDraft : "",
         moveDialogNoteID: current.status === "ready" ? current.moveDialogNoteID : "",
         moveDialogTargetID: current.status === "ready" ? current.moveDialogTargetID : "",
+        savedEditor: editor,
+        saving: false,
       }));
     } catch (error) {
       setState({ status: "error", message: errorMessage(error) });
@@ -489,7 +505,8 @@ export function ProfileNotesPage() {
     try {
       const note = await profileNotesClient.fetchNote(id);
       resetHistory();
-      setReady({ selectedID: id, editor: editorFromNote(note), message: "" });
+      const editor = editorFromNote(note);
+      setReady({ selectedID: id, editor, savedEditor: editor, message: "" });
     } catch (error) {
       setReady({ message: errorMessage(error) });
     }
@@ -501,6 +518,7 @@ export function ProfileNotesPage() {
     setReady({
       selectedID: "",
       editor: { ...emptyEditor, parentID },
+      savedEditor: emptyEditor,
       message: "",
     });
   }
@@ -511,6 +529,7 @@ export function ProfileNotesPage() {
       selectedID: "",
       selectedNotebookID: parentID,
       editor: { ...emptyEditor, parentID },
+      savedEditor: emptyEditor,
       message: "",
     });
   }
@@ -544,6 +563,7 @@ export function ProfileNotesPage() {
         selectedID: savedID,
         selectedNotebookID: "",
         editor: { ...emptyEditor, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
+        savedEditor: { ...emptyEditor, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
         notebookDialogOpen: false,
         notebookDraft: "",
         message: "Notebook created.",
@@ -691,41 +711,70 @@ export function ProfileNotesPage() {
     }
   }
 
-  async function saveNote() {
+  async function saveNote(editor = readyState.editor) {
+    if (savingRef.current) {
+      pendingSaveRef.current = editor;
+      return;
+    }
+    savingRef.current = true;
+    setReady({ saving: true });
+    let queuedEditor: Editor | null = null;
     try {
       const response = await profileNotesClient.saveNote({
-        note_id: readyState.editor.noteID,
-        title: readyState.editor.title.trim() || "Untitled",
-        body_markdown: readyState.editor.body,
-        expected_revision: readyState.editor.revision,
-        page_type: readyState.editor.pageType,
-        parent_id: readyState.editor.parentID,
+        note_id: editor.noteID,
+        title: editor.title.trim() || "Untitled",
+        body_markdown: editor.body,
+        expected_revision: editor.revision,
+        page_type: editor.pageType,
+        parent_id: editor.parentID,
       });
-      setReady({
-        selectedID: response.note_id || readyState.editor.noteID,
-        notes: sortNotes([
-          {
-            note_id: response.note_id || readyState.editor.noteID,
-            title: readyState.editor.title.trim() || "Untitled",
-            preview: readyState.editor.pageType === "notebook" ? "Notebook" : readyState.editor.pageType === "kanban" ? "Kanban board" : readyState.editor.body.replace(/\s+/g, " ").trim().slice(0, 96),
-            revision: response.revision || readyState.editor.revision,
-            updated_at: response.updated_at,
-            page_type: readyState.editor.pageType,
-            parent_id: readyState.editor.pageType === "notebook" ? "" : readyState.editor.parentID,
-          },
-          ...readyState.notes.filter((note) => noteID(note) !== (response.note_id || readyState.editor.noteID)),
-        ]),
-        editor: {
-          ...readyState.editor,
-          noteID: response.note_id || readyState.editor.noteID,
-          revision: response.revision || readyState.editor.revision,
-          updatedAt: response.updated_at || readyState.editor.updatedAt,
-        },
-        message: "Note saved.",
+      const savedEditor = {
+        ...editor,
+        noteID: response.note_id || editor.noteID,
+        revision: response.revision || editor.revision,
+        updatedAt: response.updated_at || editor.updatedAt,
+      };
+      const savedID = savedEditor.noteID;
+      setState((current) => {
+        if (current.status !== "ready") return current;
+        const matchesCurrentEditor = current.editor.noteID === editor.noteID && current.selectedID === editor.noteID;
+        const nextEditor = matchesCurrentEditor
+          ? { ...current.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt }
+          : current.editor;
+        return {
+          ...current,
+          selectedID: matchesCurrentEditor ? savedID : current.selectedID,
+          notes: sortNotes([
+            {
+              note_id: savedID,
+              title: editor.title.trim() || "Untitled",
+              preview: editor.pageType === "notebook" ? "Notebook" : editor.pageType === "kanban" ? "Kanban board" : editor.body.replace(/\s+/g, " ").trim().slice(0, 96),
+              revision: savedEditor.revision,
+              updated_at: response.updated_at,
+              page_type: editor.pageType,
+              parent_id: editor.pageType === "notebook" ? "" : editor.parentID,
+            },
+            ...current.notes.filter((note) => noteID(note) !== savedID && noteID(note) !== editor.noteID),
+          ]),
+          editor: nextEditor,
+          savedEditor: matchesCurrentEditor ? savedEditor : current.savedEditor,
+          saving: false,
+          message: "Note saved.",
+        };
       });
+      queuedEditor = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      if (queuedEditor && queuedEditor.noteID === editor.noteID) {
+        queuedEditor = { ...queuedEditor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt };
+      }
       showToast("Note saved.");
     } catch (error) {
+      pendingSaveRef.current = null;
+      setReady({ saving: false });
       showToast(errorMessage(error), "error");
+    } finally {
+      savingRef.current = false;
+      if (queuedEditor) void saveNote(queuedEditor);
     }
   }
 
@@ -790,6 +839,7 @@ export function ProfileNotesPage() {
           ...readyState.notes.filter((summary) => noteID(summary) !== movedID),
         ]),
         editor: readyState.editor.noteID === movedID ? { ...readyState.editor, parentID: readyState.moveDialogTargetID, revision: response.revision || readyState.editor.revision } : readyState.editor,
+        savedEditor: readyState.editor.noteID === movedID ? { ...readyState.savedEditor, parentID: readyState.moveDialogTargetID, revision: response.revision || readyState.savedEditor.revision } : readyState.savedEditor,
         moveDialogNoteID: "",
         moveDialogTargetID: "",
         message: "Note moved.",
@@ -928,7 +978,11 @@ export function ProfileNotesPage() {
                 aria-label="Notebook"
                 disabled={state.editor.pageType === "notebook"}
                 value={state.editor.pageType === "notebook" ? "" : state.editor.parentID}
-                onChange={(event) => setReady({ editor: { ...state.editor, parentID: event.target.value } })}
+                onChange={(event) => {
+                  const editor = { ...state.editor, parentID: event.target.value };
+                  setReady({ editor });
+                  void saveNote(editor);
+                }}
               >
                 <option value="">No Notebook</option>
                 {notebookItems.map((note) => (
@@ -937,7 +991,7 @@ export function ProfileNotesPage() {
               </select>
             </label>
             <button className="notes-save-pill" type="button" aria-label="Save note" onClick={() => void saveNote()}>
-              <span>{state.editor.noteID ? "Saved" : "Unsaved"}</span>
+              <span>{state.saving ? "Saving…" : state.editor.noteID && !editorChanged(state.editor, state.savedEditor) ? "Saved" : "Unsaved"}</span>
               <small>{selectedSummary ? updatedLabel(selectedSummary) : "Not saved"}</small>
             </button>
             <button className="icon-button danger" disabled={!state.editor.noteID} type="button" aria-label="Delete note" title="Delete note" onClick={() => void deleteNote()}><Icon name="trash" /></button>

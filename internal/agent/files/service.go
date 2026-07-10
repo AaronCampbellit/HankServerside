@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -26,6 +27,9 @@ const (
 
 	fileSourceTypeLocal = "local"
 	fileSourceTypeSMB   = "smb"
+	fileSearchCacheTTL  = 5 * time.Minute
+	fileSearchMaxItems  = 250000
+	fileSearchMaxDirs   = 50000
 )
 
 type ReadHandle interface {
@@ -109,6 +113,14 @@ type Service struct {
 	localPolicy    AccessPolicy
 	smbShares      []SMBConfig
 	smbConnections map[string]*smbConnection
+	searchCacheMu  sync.Mutex
+	searchCache    map[string]fileSearchCacheEntry
+	searchCacheGen map[string]uint64
+}
+
+type fileSearchCacheEntry struct {
+	items     []protocol.FileItem
+	createdAt time.Time
 }
 
 type fileSourceSelection struct {
@@ -127,6 +139,8 @@ func NewWithConfig(cfg Config) *Service {
 		localPolicy:    cfg.Policy,
 		smbShares:      normalizeSMBConfigs(cfg.Shares),
 		smbConnections: make(map[string]*smbConnection),
+		searchCache:    make(map[string]fileSearchCacheEntry),
+		searchCacheGen: make(map[string]uint64),
 	}
 }
 
@@ -205,6 +219,7 @@ func (s *Service) ApplySMBConfigs(configs []SMBConfig) {
 		}
 	}
 	s.smbShares = next
+	s.invalidateAllSearchIndexes()
 }
 
 func (s *Service) SMBConfigs() []SMBConfig {
@@ -529,28 +544,18 @@ func (s *Service) SearchSource(ctx context.Context, sourceID string, query strin
 		limit = 50
 	}
 
-	type queueItem struct {
-		path  string
-		depth int
+	source, err := s.sourceForID(sourceID)
+	if err != nil {
+		return nil, err
 	}
-	queue := []queueItem{{path: "", depth: 0}}
+	items, err := s.searchIndex(ctx, source.ID)
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]protocol.FileItem, 0)
-	visited := 0
-	for len(queue) > 0 && visited < 500 {
-		current := queue[0]
-		queue = queue[1:]
-		visited++
-		items, err := s.ListSource(ctx, sourceID, current.path)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items {
-			if fileSearchScore(item, query) > 0 {
-				matches = append(matches, item)
-			}
-			if item.IsDirectory && current.depth < 5 {
-				queue = append(queue, queueItem{path: item.Path, depth: current.depth + 1})
-			}
+	for _, item := range items {
+		if fileSearchScore(item, query) > 0 {
+			matches = append(matches, item)
 		}
 	}
 
@@ -568,6 +573,86 @@ func (s *Service) SearchSource(ctx context.Context, sourceID string, query strin
 	return matches, nil
 }
 
+func (s *Service) searchIndex(ctx context.Context, sourceID string) ([]protocol.FileItem, error) {
+	now := time.Now()
+	s.searchCacheMu.Lock()
+	entry, ok := s.searchCache[sourceID]
+	generation := s.searchCacheGen[sourceID]
+	s.searchCacheMu.Unlock()
+	if ok && now.Sub(entry.createdAt) < fileSearchCacheTTL {
+		return append([]protocol.FileItem(nil), entry.items...), nil
+	}
+
+	type queueItem struct{ path string }
+	queue := []queueItem{{}}
+	items := make([]protocol.FileItem, 0)
+	visited := make(map[string]struct{})
+	for len(queue) > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		current := queue[0]
+		queue = queue[1:]
+		key := cleanPath(current.path)
+		if _, seen := visited[key]; seen {
+			continue
+		}
+		if len(visited) >= fileSearchMaxDirs {
+			return nil, fmt.Errorf("file search index exceeds %d directories", fileSearchMaxDirs)
+		}
+		visited[key] = struct{}{}
+		children, err := s.ListSource(ctx, sourceID, current.path)
+		if err != nil {
+			return nil, err
+		}
+		if len(items)+len(children) > fileSearchMaxItems {
+			return nil, fmt.Errorf("file search index exceeds %d items", fileSearchMaxItems)
+		}
+		items = append(items, children...)
+		for _, item := range children {
+			if item.IsDirectory {
+				queue = append(queue, queueItem{path: item.Path})
+			}
+		}
+	}
+
+	s.storeSearchIndexIfCurrent(sourceID, generation, items, now)
+	return items, nil
+}
+
+func (s *Service) searchIndexGeneration(sourceID string) uint64 {
+	s.searchCacheMu.Lock()
+	defer s.searchCacheMu.Unlock()
+	return s.searchCacheGen[sourceID]
+}
+
+func (s *Service) storeSearchIndexIfCurrent(sourceID string, generation uint64, items []protocol.FileItem, createdAt time.Time) {
+	s.searchCacheMu.Lock()
+	defer s.searchCacheMu.Unlock()
+	if s.searchCacheGen[sourceID] != generation {
+		return
+	}
+	s.searchCache[sourceID] = fileSearchCacheEntry{items: append([]protocol.FileItem(nil), items...), createdAt: createdAt}
+}
+
+func (s *Service) invalidateSearchIndex(sourceID string) {
+	s.searchCacheMu.Lock()
+	delete(s.searchCache, sourceID)
+	s.searchCacheGen[sourceID]++
+	s.searchCacheMu.Unlock()
+}
+
+func (s *Service) invalidateAllSearchIndexes() {
+	s.searchCacheMu.Lock()
+	clear(s.searchCache)
+	for sourceID := range s.searchCacheGen {
+		s.searchCacheGen[sourceID]++
+	}
+	s.searchCacheMu.Unlock()
+}
+
 func (s *Service) CreateDirectory(ctx context.Context, path string) error {
 	return s.CreateDirectorySource(ctx, "", path)
 }
@@ -580,10 +665,16 @@ func (s *Service) CreateDirectorySource(ctx context.Context, sourceID string, pa
 	if err := source.authorize("write", path, 0); err != nil {
 		return err
 	}
+	var createErr error
 	if source.Type == fileSourceTypeSMB {
-		return s.createDirectorySMB(ctx, source.ID, path)
+		createErr = s.createDirectorySMB(ctx, source.ID, path)
+	} else {
+		createErr = s.createDirectoryLocal(ctx, path)
 	}
-	return s.createDirectoryLocal(ctx, path)
+	if createErr == nil {
+		s.invalidateSearchIndex(source.ID)
+	}
+	return createErr
 }
 
 func (s *Service) Rename(ctx context.Context, from string, to string) error {
@@ -601,14 +692,28 @@ func (s *Service) RenameSource(ctx context.Context, sourceID string, from string
 	if err := source.authorize("write", to, 0); err != nil {
 		return err
 	}
+	var renameErr error
 	if source.Type == fileSourceTypeSMB {
-		return s.renameSMB(ctx, source.ID, from, to)
+		renameErr = s.renameSMB(ctx, source.ID, from, to)
+	} else {
+		renameErr = s.renameLocal(ctx, from, to)
 	}
-	return s.renameLocal(ctx, from, to)
+	if renameErr == nil {
+		s.invalidateSearchIndex(source.ID)
+	}
+	return renameErr
 }
 
 func (s *Service) MoveBetweenSources(ctx context.Context, sourceID string, destinationSourceID string, from string, to string, isDirectory bool) error {
 	_, err := s.MoveBetweenSourcesWithProgress(ctx, sourceID, destinationSourceID, from, to, isDirectory, nil)
+	if err == nil {
+		if source, sourceErr := s.sourceForID(sourceID); sourceErr == nil {
+			s.invalidateSearchIndex(source.ID)
+		}
+		if destination, destinationErr := s.sourceForID(destinationSourceID); destinationErr == nil {
+			s.invalidateSearchIndex(destination.ID)
+		}
+	}
 	return err
 }
 
@@ -708,10 +813,16 @@ func (s *Service) DeleteSource(ctx context.Context, sourceID string, path string
 	if err := source.authorize("delete", path, 0); err != nil {
 		return err
 	}
+	var deleteErr error
 	if source.Type == fileSourceTypeSMB {
-		return s.deleteSMB(ctx, source.ID, path, isDirectory)
+		deleteErr = s.deleteSMB(ctx, source.ID, path, isDirectory)
+	} else {
+		deleteErr = s.deleteLocal(ctx, path, isDirectory)
 	}
-	return s.deleteLocal(ctx, path, isDirectory)
+	if deleteErr == nil {
+		s.invalidateSearchIndex(source.ID)
+	}
+	return deleteErr
 }
 
 func (s *Service) RollbackMoveDestination(ctx context.Context, destinationSourceID string, to string, isDirectory bool) error {
@@ -758,10 +869,16 @@ func (s *Service) UploadSource(ctx context.Context, sourceID string, path string
 	if err := source.authorize("write", path, decodedBase64Size(contentBase64)); err != nil {
 		return err
 	}
+	var uploadErr error
 	if source.Type == fileSourceTypeSMB {
-		return s.uploadSMB(ctx, source.ID, path, contentBase64)
+		uploadErr = s.uploadSMB(ctx, source.ID, path, contentBase64)
+	} else {
+		uploadErr = s.uploadLocal(ctx, path, contentBase64)
 	}
-	return s.uploadLocal(ctx, path, contentBase64)
+	if uploadErr == nil {
+		s.invalidateSearchIndex(source.ID)
+	}
+	return uploadErr
 }
 
 func (s *Service) OpenReader(ctx context.Context, path string, offset int64) (ReadHandle, fs.FileInfo, error) {
@@ -800,13 +917,22 @@ func (s *Service) OpenWriterSource(ctx context.Context, sourceID string, path st
 		if err != nil {
 			return nil, 0, err
 		}
-		return limitWriteHandle(writer, maxBytes, offset), size, nil
+		return s.invalidateSearchOnClose(source.ID, limitWriteHandle(writer, maxBytes, offset)), size, nil
 	}
 	writer, size, err := s.openWriterLocal(ctx, path, offset)
 	if err != nil {
 		return nil, 0, err
 	}
-	return limitWriteHandle(writer, maxBytes, offset), size, nil
+	return s.invalidateSearchOnClose(source.ID, limitWriteHandle(writer, maxBytes, offset)), size, nil
+}
+
+func (s *Service) invalidateSearchOnClose(sourceID string, writer WriteHandle) WriteHandle {
+	return &searchInvalidatingWriteHandle{
+		WriteHandle: writer,
+		onClose: func() {
+			s.invalidateSearchIndex(sourceID)
+		},
+	}
 }
 
 func (s *Service) OpenRandomWriter(ctx context.Context, path string) (RandomWriteHandle, error) {
@@ -1038,6 +1164,19 @@ func (s *Service) openRandomWriterLocal(_ context.Context, path string) (RandomW
 	}
 
 	return os.OpenFile(resolved, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+}
+
+type searchInvalidatingWriteHandle struct {
+	WriteHandle
+	onClose func()
+}
+
+func (w *searchInvalidatingWriteHandle) Close() error {
+	err := w.WriteHandle.Close()
+	if err == nil && w.onClose != nil {
+		w.onClose()
+	}
+	return err
 }
 
 type maxWriteHandle struct {

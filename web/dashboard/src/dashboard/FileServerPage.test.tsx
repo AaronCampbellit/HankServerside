@@ -5,6 +5,7 @@ import { FileServerPage } from "./FileServerPage";
 
 const fileServerClient = vi.hoisted(() => ({
   list: vi.fn(),
+  search: vi.fn(),
   listJobs: vi.fn(),
   subscribeToJobs: vi.fn(),
   onJobsChanged: vi.fn(),
@@ -213,6 +214,50 @@ describe("FileServerPage", () => {
 
     expect(await screen.findByRole("button", { name: "photo.jpg" })).toBeInTheDocument();
     expect(screen.queryByText("Opening /Media")).not.toBeInTheDocument();
+  });
+
+  it("searches the selected share instead of filtering only the open folder", async () => {
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({
+      path: "/Current",
+      items: [{ path: "/Current/readme.txt", name: "readme.txt", size: 4 }],
+    });
+    fileServerClient.search.mockResolvedValue({
+      items: [{ path: "/Archive/2024/needle.pdf", name: "needle.pdf", size: 42 }],
+    });
+
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText("Search files"), { target: { value: "needle" } });
+
+    await waitFor(() => expect(fileServerClient.search).toHaveBeenCalledWith("needle", "hankdemo"));
+    expect(await screen.findByRole("button", { name: "needle.pdf" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "readme.txt" })).not.toBeInTheDocument();
+  });
+
+  it("clears search results before switching to another share", async () => {
+    mockDemoShares();
+    fileServerClient.list
+      .mockResolvedValueOnce({
+        path: "/",
+        items: [{ path: "/needle-local.txt", name: "needle-local.txt", size: 4 }],
+      })
+      .mockReturnValueOnce(new Promise(() => undefined));
+    fileServerClient.search.mockResolvedValue({
+      items: [{ path: "/Archive/needle.pdf", name: "needle.pdf", size: 42 }],
+    });
+
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText("Search files"), { target: { value: "needle" } });
+    expect(await screen.findByRole("button", { name: "needle.pdf" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Hankdemo/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "File shares" })).getByRole("menuitem", { name: /Hankdemo2/i }));
+
+    expect(screen.queryByRole("button", { name: "needle.pdf" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Select needle.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "needle-local.txt" })).not.toBeInTheDocument();
   });
 
   it("shows active and recently completed file transfer jobs", async () => {

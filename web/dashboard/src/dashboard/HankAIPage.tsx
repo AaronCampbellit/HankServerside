@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { hankAIClient, type HankAIMessage, type HankAISession } from "../api/hankAI";
+import { useConfirmDialog } from "../ui/primitives";
 
 type State =
   | { status: "loading" }
@@ -42,6 +43,7 @@ function sessionTitle(session: HankAISession): string {
 export function HankAIPage() {
   const [state, setState] = useState<State>({ status: "loading" });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dialog = useConfirmDialog();
 
   async function load() {
     try {
@@ -120,6 +122,41 @@ export function HankAIPage() {
     }
   }
 
+  async function deleteSession(session: HankAISession) {
+    const title = sessionTitle(session);
+    const confirmed = await dialog.confirm({
+      title: "Delete conversation",
+      message: "Delete " + title + "? This cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    try {
+      await hankAIClient.deleteSession(session.id);
+    } catch (error) {
+      setReady({ notice: errorMessage(error) });
+      return;
+    }
+    const sessions = readyState.sessions.filter((candidate) => candidate.id !== session.id);
+    const changedSelection = readyState.selectedSessionID === session.id;
+    const selectedSessionID = changedSelection ? sessions[0]?.id || "" : readyState.selectedSessionID;
+    setReady({
+      sessions,
+      selectedSessionID,
+      messages: changedSelection ? [] : readyState.messages,
+      notice: "Conversation deleted.",
+    });
+    if (!changedSelection || !selectedSessionID) return;
+    try {
+      const payload = await hankAIClient.listMessages(selectedSessionID);
+      setState((current) => current.status === "ready" && current.selectedSessionID === selectedSessionID
+        ? { ...current, messages: payload.messages || [] }
+        : current);
+    } catch (error) {
+      setReady({ notice: errorMessage(error) });
+    }
+  }
+
   async function sendMessage() {
     const content = readyState.draft.trim();
     if (!content) return;
@@ -185,16 +222,18 @@ export function HankAIPage() {
           {state.sessions.length ? (
             <div className="notes-list">
               {state.sessions.map((session) => (
-                <button
-                  aria-label={sessionTitle(session)}
-                  className={session.id === state.selectedSessionID ? "note-list-button active" : "note-list-button"}
-                  key={session.id}
-                  onClick={() => void selectSession(session.id)}
-                  type="button"
-                >
-                  <strong>{sessionTitle(session)}</strong>
-                  <span>{session.last_message_at || "No messages yet"}</span>
-                </button>
+                <div className="conversation-row" key={session.id}>
+                  <button
+                    aria-label={sessionTitle(session)}
+                    className={session.id === state.selectedSessionID ? "note-list-button active" : "note-list-button"}
+                    onClick={() => void selectSession(session.id)}
+                    type="button"
+                  >
+                    <strong>{sessionTitle(session)}</strong>
+                    <span>{session.last_message_at || "No messages yet"}</span>
+                  </button>
+                  <button className="icon-button danger conversation-delete" type="button" aria-label={"Delete " + sessionTitle(session)} title="Delete conversation" onClick={() => void deleteSession(session)}>×</button>
+                </div>
               ))}
             </div>
           ) : (

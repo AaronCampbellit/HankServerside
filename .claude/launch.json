@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard-demo-proxy",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "web/dashboard", "--", "--port", "5173", "--strictPort"],
+      "port": 5173,
+      "env": {
+        "HANK_DEV_API_PROXY": "https://hankdemo.campbellservers.com",
+        "HANK_DEV_SESSION_TOKEN_FILE": "/private/tmp/claude-501/-Volumes-CampbellDrive-Projects-HankServerside/653a1a73-a867-405e-9477-a09f6989423e/scratchpad/session_token"
+      }
+    }
+  ]
+}

@@ -30,6 +30,7 @@ type State =
       path: string;
       items: FileMeta[];
       query: string;
+      searchItems: FileMeta[] | null;
       message: string;
       viewMode: "list" | "grid";
       selectedPaths: string[];
@@ -329,11 +330,24 @@ export function FileServerPage() {
   const [sources, setSources] = useState<FileSource[]>([]);
   const [activeSourceID, setActiveSourceID] = useState("");
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const searchRequestRef = useRef(0);
   const { showToast } = useToast();
 
   async function load(path = state.path, message = "", sourceID = activeSourceID) {
+    const changingSource = Boolean(sourceID && sourceID !== activeSourceID);
+    if (changingSource) searchRequestRef.current++;
     setState((current) => current.status === "ready"
-      ? { ...current, refreshingPath: path, message, sharePickerOpen: false, menuPath: "" }
+      ? {
+          ...current,
+          refreshingPath: path,
+          message,
+          sharePickerOpen: false,
+          menuPath: "",
+          items: changingSource ? [] : current.items,
+          searchItems: changingSource ? null : current.searchItems,
+          selectedPaths: changingSource ? [] : current.selectedPaths,
+          previewPath: changingSource ? "" : current.previewPath,
+        }
       : { status: "loading", path });
     try {
       let nextSources = sources;
@@ -353,6 +367,7 @@ export function FileServerPage() {
         path: payload.path || path,
         items,
         query: current.status === "ready" ? current.query : "",
+        searchItems: current.status === "ready" ? current.searchItems : null,
         message,
         viewMode: current.status === "ready" ? current.viewMode : "list",
         selectedPaths: current.status === "ready" ? current.selectedPaths.filter((selectedPath) => items.some((item) => item.path === selectedPath)) : [],
@@ -388,6 +403,30 @@ export function FileServerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const searchQuery = state.status === "ready" ? state.query.trim() : "";
+  useEffect(() => {
+    const query = searchQuery;
+    const sourceID = activeSourceID;
+    const requestID = ++searchRequestRef.current;
+    if (!query) {
+      setState((current) => current.status === "ready" ? { ...current, searchItems: null } : current);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void fileServerClient.search(query, sourceID || undefined)
+        .then((payload) => {
+          if (searchRequestRef.current !== requestID) return;
+          const items = (payload.items || payload.entries || []) as FileMeta[];
+          setState((current) => current.status === "ready" ? { ...current, searchItems: items, selectedPaths: [], previewPath: items[0]?.path || "" } : current);
+        })
+        .catch((error) => {
+          if (searchRequestRef.current !== requestID) return;
+          setState((current) => current.status === "ready" ? { ...current, searchItems: [], message: errorMessage(error) } : current);
+        });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [activeSourceID, searchQuery]);
+
   useEffect(() => {
     let active = true;
     void fileServerClient.subscribeToJobs().catch(() => undefined);
@@ -405,8 +444,8 @@ export function FileServerPage() {
   const visibleItems = useMemo(() => {
     if (state.status !== "ready") return [];
     const query = state.query.trim().toLowerCase();
-    const items = [...state.items].sort((left, right) => Number(Boolean(right.is_directory)) - Number(Boolean(left.is_directory)) || fileName(left).localeCompare(fileName(right)));
-    if (!query) return items;
+    const items = [...(state.searchItems ?? state.items)].sort((left, right) => Number(Boolean(right.is_directory)) - Number(Boolean(left.is_directory)) || fileName(left).localeCompare(fileName(right)));
+    if (!query || state.searchItems !== null) return items;
     return items.filter((item) => [fileName(item), item.path, fileType(item)].join(" ").toLowerCase().includes(query));
   }, [state]);
 

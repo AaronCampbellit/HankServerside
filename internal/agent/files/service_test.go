@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/dropfile/hankremote/internal/protocol"
 )
 
 func TestUploadListDownloadAndBlockEscape(t *testing.T) {
@@ -221,6 +224,76 @@ func TestSearchFindsNestedFiles(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Search results = %#v, want docs/taxes/2025-summary.pdf", results)
+	}
+}
+
+func TestSearchFindsFilesBeyondLegacyTraversalDepth(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	content := base64.StdEncoding.EncodeToString([]byte("hello"))
+	path := "one/two/three/four/five/six/needle.txt"
+	if err := service.Upload(context.Background(), path, content); err != nil {
+		t.Fatalf("Upload nested file: %v", err)
+	}
+
+	results, err := service.Search(context.Background(), "needle", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, result := range results {
+		if result.Path == path {
+			return
+		}
+	}
+	t.Fatalf("Search results = %#v, want %q", results, path)
+}
+
+func TestStreamingWriteInvalidatesSearchCacheOnClose(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	ctx := context.Background()
+	if err := service.Upload(ctx, "existing.txt", base64.StdEncoding.EncodeToString([]byte("existing"))); err != nil {
+		t.Fatalf("Upload existing: %v", err)
+	}
+	if _, err := service.Search(ctx, "existing", 10); err != nil {
+		t.Fatalf("Search existing: %v", err)
+	}
+
+	writer, _, err := service.OpenWriter(ctx, "streamed-needle.txt", 0)
+	if err != nil {
+		t.Fatalf("OpenWriter: %v", err)
+	}
+	if _, err := io.WriteString(writer, "needle"); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	results, err := service.Search(ctx, "streamed-needle", 10)
+	if err != nil {
+		t.Fatalf("Search streamed: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != "streamed-needle.txt" {
+		t.Fatalf("Search results = %#v, want streamed-needle.txt", results)
+	}
+}
+
+func TestInvalidatedSearchBuildCannotPublishStaleIndex(t *testing.T) {
+	t.Parallel()
+
+	service := New(t.TempDir())
+	generation := service.searchIndexGeneration(LocalSourceID)
+	service.invalidateSearchIndex(LocalSourceID)
+	service.storeSearchIndexIfCurrent(LocalSourceID, generation, []protocol.FileItem{{Path: "stale.txt", Name: "stale.txt"}}, time.Now())
+
+	service.searchCacheMu.Lock()
+	_, cached := service.searchCache[LocalSourceID]
+	service.searchCacheMu.Unlock()
+	if cached {
+		t.Fatal("stale search index was published after invalidation")
 	}
 }
 

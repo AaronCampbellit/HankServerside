@@ -369,4 +369,106 @@ describe("ProfileNotesPage", () => {
       parent_id: "house",
     }));
   });
+
+  it("saves a notebook selection immediately instead of only changing the local editor state", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "family", title: "Family", preview: "Notebook", page_type: "notebook" },
+        { note_id: "passwords", title: "Passwords", preview: "secret", page_type: "text", revision: "1" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "passwords",
+      title: "Passwords",
+      body_markdown: "secret",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "passwords", revision: "2" });
+
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText("Notebook"), { target: { value: "family" } });
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
+      note_id: "passwords",
+      title: "Passwords",
+      body_markdown: "secret",
+      expected_revision: "1",
+      page_type: "text",
+      parent_id: "family",
+    }));
+  });
+
+  it("preserves edits made while an earlier save is still running", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily Notes", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    let resolveSave!: (value: { note_id: string; revision: string }) => void;
+    profileNotesClient.saveNote.mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
+
+    renderPage();
+
+    const body = await screen.findByLabelText("Note body");
+    body.innerHTML = "First edit";
+    fireEvent.input(body);
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(1));
+
+    body.innerHTML = "Second edit";
+    fireEvent.input(body);
+    resolveSave({ note_id: "daily", revision: "2" });
+
+    await waitFor(() => expect(body).toHaveTextContent("Second edit"));
+    expect(body).not.toHaveTextContent("First edit");
+    expect(screen.getByRole("button", { name: "Save note" })).toHaveTextContent("Unsaved");
+  });
+
+  it("queues the latest notebook selection while a save is running", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "family", title: "Family", preview: "Notebook", page_type: "notebook" },
+        { note_id: "work", title: "Work", preview: "Notebook", page_type: "notebook" },
+        { note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    let resolveFirst!: (value: { note_id: string; revision: string }) => void;
+    profileNotesClient.saveNote
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ note_id: "daily", revision: "3" });
+
+    renderPage();
+
+    const notebook = await screen.findByLabelText("Notebook");
+    fireEvent.change(notebook, { target: { value: "family" } });
+    fireEvent.change(notebook, { target: { value: "work" } });
+    resolveFirst({ note_id: "daily", revision: "2" });
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(2));
+    expect(profileNotesClient.saveNote).toHaveBeenLastCalledWith({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      expected_revision: "2",
+      page_type: "text",
+      parent_id: "work",
+    });
+  });
 });
