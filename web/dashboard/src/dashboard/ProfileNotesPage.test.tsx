@@ -33,6 +33,7 @@ describe("ProfileNotesPage", () => {
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("renders the redesigned editor chrome and kanban/notebook states", async () => {
@@ -470,5 +471,226 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "work",
     });
+  });
+
+  it("autosaves the latest note body after 750ms of idle typing", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "daily", revision: "2" });
+
+    renderPage();
+    const body = await screen.findByLabelText("Note body");
+    vi.useFakeTimers();
+
+    body.innerHTML = "First draft";
+    fireEvent.input(body);
+    await vi.advanceTimersByTimeAsync(400);
+    body.innerHTML = "Latest draft";
+    fireEvent.input(body);
+    await vi.advanceTimersByTimeAsync(749);
+    expect(profileNotesClient.saveNote).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Latest draft",
+      expected_revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    expect(screen.queryByText("Note saved.")).not.toBeInTheDocument();
+  });
+
+  it("flushes a pending autosave before opening another note", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "first", title: "First", preview: "Original", page_type: "text", revision: "1", updated_at: "2026-07-10T12:00:00Z" },
+        { note_id: "second", title: "Second", preview: "Second body", page_type: "text", revision: "1", updated_at: "2026-07-09T12:00:00Z" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "first" ? "First" : "Second",
+      body_markdown: id === "first" ? "Original" : "Second body",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    }));
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "first", revision: "2" });
+
+    renderPage();
+    const body = await screen.findByLabelText("Note body");
+    body.innerHTML = "Unsaved work";
+    fireEvent.input(body);
+    profileNotesClient.fetchNote.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Second" }));
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
+      note_id: "first",
+      title: "First",
+      body_markdown: "Unsaved work",
+      expected_revision: "1",
+      page_type: "text",
+      parent_id: "",
+    }));
+    expect(profileNotesClient.saveNote.mock.invocationCallOrder[0]).toBeLessThan(profileNotesClient.fetchNote.mock.invocationCallOrder[0]);
+  });
+
+  it("flushes pending edits when leaving the Notes route", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "daily", revision: "2" });
+
+    const page = renderPage();
+    const body = await screen.findByLabelText("Note body");
+    body.innerHTML = "Save before leaving";
+    fireEvent.input(body);
+
+    page.unmount();
+
+    expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Save before leaving",
+      expected_revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+  });
+
+  it("keeps queued saves for different notes while another save is running", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "first", title: "First", preview: "A", page_type: "text", revision: "1", updated_at: "2026-07-10T12:00:00Z" },
+        { note_id: "second", title: "Second", preview: "B", page_type: "text", revision: "1", updated_at: "2026-07-09T12:00:00Z" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "first" ? "First" : "Second",
+      body_markdown: id === "first" ? "A" : "B",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    }));
+    let resolveFirst!: (value: { note_id: string; revision: string }) => void;
+    let resolveSecond!: (value: { note_id: string; revision: string }) => void;
+    profileNotesClient.saveNote
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }))
+      .mockResolvedValueOnce({ note_id: "second", revision: "2" });
+
+    renderPage();
+    const firstBody = await screen.findByLabelText("Note body");
+    firstBody.innerHTML = "First save";
+    fireEvent.input(firstBody);
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    firstBody.innerHTML = "Latest first";
+    fireEvent.input(firstBody);
+    fireEvent.click(screen.getByRole("button", { name: "Second" }));
+    const secondBody = await screen.findByLabelText("Note body");
+    await waitFor(() => expect(secondBody).toHaveTextContent("B"));
+    secondBody.innerHTML = "Latest second";
+    fireEvent.input(secondBody);
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    resolveFirst({ note_id: "first", revision: "2" });
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(2));
+    expect(profileNotesClient.saveNote).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      note_id: "first",
+      body_markdown: "Latest first",
+      expected_revision: "2",
+    }));
+
+    resolveSecond({ note_id: "first", revision: "3" });
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(3));
+    expect(profileNotesClient.saveNote).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      note_id: "second",
+      body_markdown: "Latest second",
+    }));
+  });
+
+  it("flushes the current note before creating a notebook", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    profileNotesClient.saveNote
+      .mockResolvedValueOnce({ note_id: "daily", revision: "2" })
+      .mockResolvedValueOnce({ note_id: "family", revision: "1" });
+
+    renderPage();
+    const body = await screen.findByLabelText("Note body");
+    body.innerHTML = "Dirty daily note";
+    fireEvent.input(body);
+    fireEvent.click(screen.getByRole("button", { name: "New notebook" }));
+    fireEvent.change(screen.getByLabelText("Notebook name"), { target: { value: "Family" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create notebook" }));
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(2));
+    expect(profileNotesClient.saveNote).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      note_id: "daily",
+      body_markdown: "Dirty daily note",
+    }));
+    expect(profileNotesClient.saveNote).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      note_id: "",
+      title: "Family",
+      page_type: "notebook",
+    }));
+  });
+
+  it("does not queue an identical snapshot while that snapshot is saving", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+    });
+    let resolveSave!: (value: { note_id: string; revision: string }) => void;
+    profileNotesClient.saveNote.mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
+
+    renderPage();
+    const body = await screen.findByLabelText("Note body");
+    body.innerHTML = "One snapshot";
+    fireEvent.input(body);
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    fireEvent.blur(screen.getByLabelText("Note title"));
+    resolveSave({ note_id: "daily", revision: "2" });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save note" })).toHaveTextContent("Saved"));
+    expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(1);
   });
 });

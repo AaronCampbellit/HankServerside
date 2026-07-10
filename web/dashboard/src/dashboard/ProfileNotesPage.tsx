@@ -9,6 +9,7 @@ import {
 import { useConfirmDialog, useToast } from "../ui/primitives";
 
 type Editor = {
+  instanceKey: string;
   noteID: string;
   title: string;
   body: string;
@@ -43,6 +44,7 @@ type State =
   | ReadyState;
 
 const emptyEditor: Editor = {
+  instanceKey: "empty",
   noteID: "",
   title: "",
   body: "",
@@ -55,6 +57,12 @@ const emptyEditor: Editor = {
 };
 
 const ROOT_NOTEBOOK_FILTER = "__root__";
+const NOTE_AUTOSAVE_DELAY_MS = 750;
+
+type PendingSave = {
+  editor: Editor;
+  background: boolean;
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Profile notes could not be loaded.";
@@ -69,8 +77,10 @@ function isNotebook(note: ProfileNoteSummary | Editor): boolean {
 }
 
 function editorFromNote(note: ProfileNote): Editor {
+  const id = noteID(note);
   return {
-    noteID: noteID(note),
+    instanceKey: id || "empty",
+    noteID: id,
     title: note.title || "",
     body: note.body_markdown || note.content || "",
     revision: note.revision || "",
@@ -398,7 +408,12 @@ export function ProfileNotesPage() {
   const lastTypedAtRef = useRef(0);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const savingRef = useRef(false);
-  const pendingSaveRef = useRef<Editor | null>(null);
+  const activeSaveRef = useRef<PendingSave | null>(null);
+  const pendingSaveRef = useRef<PendingSave[]>([]);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const latestEditorRef = useRef<Editor>(emptyEditor);
+  const latestSavedEditorRef = useRef<Editor>(emptyEditor);
+  const draftSequenceRef = useRef(0);
 
   // Restore the caret/selection after a toolbar action once React has committed the new body.
   useEffect(() => {
@@ -410,12 +425,23 @@ export function ProfileNotesPage() {
   });
 
   useEffect(() => {
-    if (state.status !== "ready" || state.editor.pageType !== "text") return;
+    if (state.status !== "ready") return;
+    latestEditorRef.current = state.editor;
+    latestSavedEditorRef.current = state.savedEditor;
+    if (state.editor.pageType !== "text") return;
     const node = bodyInputRef.current;
     if (!node || lastRenderedBodyRef.current === state.editor.body) return;
     node.innerHTML = markdownToHTML(state.editor.body);
     lastRenderedBodyRef.current = state.editor.body;
   }, [state]);
+
+  useEffect(() => () => {
+    if (autosaveTimerRef.current !== null) window.clearTimeout(autosaveTimerRef.current);
+    const editor = latestEditorRef.current;
+    if (editorHasSavableContent(editor) && editorChanged(editor, latestSavedEditorRef.current)) {
+      void saveNote(editor, true);
+    }
+  }, []);
   const dialog = useConfirmDialog();
   const { showToast } = useToast();
 
@@ -496,16 +522,56 @@ export function ProfileNotesPage() {
     setState((current) => current.status === "ready" ? { ...current, ...next } : current);
   }
 
+  function clearAutosaveTimer() {
+    if (autosaveTimerRef.current === null) return;
+    window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = null;
+  }
+
+  function editorHasSavableContent(editor: Editor): boolean {
+    return Boolean(editor.noteID || editor.title.trim() || editor.body.trim() || editor.pageType !== "text");
+  }
+
+  function scheduleAutosave(editor: Editor) {
+    latestEditorRef.current = editor;
+    clearAutosaveTimer();
+    if (!editorHasSavableContent(editor) || !editorChanged(editor, readyState.savedEditor)) return;
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      void saveNote(latestEditorRef.current, true);
+    }, NOTE_AUTOSAVE_DELAY_MS);
+  }
+
+  function updateEditor(editor: Editor, autosave = true) {
+    latestEditorRef.current = editor;
+    setReady({ editor });
+    if (autosave) scheduleAutosave(editor);
+  }
+
+  function flushAutosave() {
+    clearAutosaveTimer();
+    const editor = latestEditorRef.current;
+    if (!editorHasSavableContent(editor) || !editorChanged(editor, readyState.savedEditor)) return;
+    void saveNote(editor, true);
+  }
+
+  function newDraftEditor(parentID = ""): Editor {
+    draftSequenceRef.current++;
+    return { ...emptyEditor, instanceKey: `draft-${draftSequenceRef.current}`, parentID };
+  }
+
   function resetHistory() {
     setHistory({ past: [], future: [] });
     lastTypedAtRef.current = 0;
   }
 
   async function selectNote(id: string) {
+    flushAutosave();
     try {
       const note = await profileNotesClient.fetchNote(id);
       resetHistory();
       const editor = editorFromNote(note);
+      latestEditorRef.current = editor;
       setReady({ selectedID: id, editor, savedEditor: editor, message: "" });
     } catch (error) {
       setReady({ message: errorMessage(error) });
@@ -513,23 +579,29 @@ export function ProfileNotesPage() {
   }
 
   function newNote() {
+    flushAutosave();
     const parentID = activeNotebookForNewNote(readyState);
     resetHistory();
+    const editor = newDraftEditor(parentID);
+    latestEditorRef.current = editor;
     setReady({
       selectedID: "",
-      editor: { ...emptyEditor, parentID },
-      savedEditor: emptyEditor,
+      editor,
+      savedEditor: { ...emptyEditor, instanceKey: editor.instanceKey },
       message: "",
     });
   }
 
   function newNoteInNotebook(parentID: string) {
+    flushAutosave();
     resetHistory();
+    const editor = newDraftEditor(parentID);
+    latestEditorRef.current = editor;
     setReady({
       selectedID: "",
       selectedNotebookID: parentID,
-      editor: { ...emptyEditor, parentID },
-      savedEditor: emptyEditor,
+      editor,
+      savedEditor: { ...emptyEditor, instanceKey: editor.instanceKey },
       message: "",
     });
   }
@@ -539,6 +611,7 @@ export function ProfileNotesPage() {
   }
 
   async function createNotebook() {
+    flushAutosave();
     const title = readyState.notebookDraft.trim() || "Untitled notebook";
     try {
       const response = await profileNotesClient.saveNote({
@@ -562,8 +635,8 @@ export function ProfileNotesPage() {
         notes: sortNotes([summary, ...readyState.notes.filter((note) => noteID(note) !== savedID)]),
         selectedID: savedID,
         selectedNotebookID: "",
-        editor: { ...emptyEditor, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
-        savedEditor: { ...emptyEditor, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
+        editor: { ...emptyEditor, instanceKey: savedID, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
+        savedEditor: { ...emptyEditor, instanceKey: savedID, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
         notebookDialogOpen: false,
         notebookDraft: "",
         message: "Notebook created.",
@@ -593,7 +666,7 @@ export function ProfileNotesPage() {
     if (nextBody === readyState.editor.body) return;
     recordBodyChange(readyState.editor.body, viaTyping);
     lastRenderedBodyRef.current = nextBody;
-    setReady({ editor: { ...readyState.editor, body: nextBody } });
+    updateEditor({ ...readyState.editor, body: nextBody });
   }
 
   function undoBody() {
@@ -601,7 +674,7 @@ export function ProfileNotesPage() {
     const previous = history.past[history.past.length - 1];
     setHistory({ past: history.past.slice(0, -1), future: [readyState.editor.body, ...history.future].slice(0, 100) });
     lastTypedAtRef.current = 0;
-    setReady({ editor: { ...readyState.editor, body: previous } });
+    updateEditor({ ...readyState.editor, body: previous });
   }
 
   function redoBody() {
@@ -609,7 +682,7 @@ export function ProfileNotesPage() {
     const next = history.future[0];
     setHistory({ past: [...history.past.slice(-99), readyState.editor.body], future: history.future.slice(1) });
     lastTypedAtRef.current = 0;
-    setReady({ editor: { ...readyState.editor, body: next } });
+    updateEditor({ ...readyState.editor, body: next });
   }
 
   function mutateBody(mutator: (body: string, start: number, end: number) => { body: string; selectionStart: number; selectionEnd: number }) {
@@ -619,7 +692,7 @@ export function ProfileNotesPage() {
     const result = mutator(body, start, end);
     recordBodyChange(body, false);
     pendingSelectionRef.current = { start: result.selectionStart, end: result.selectionEnd };
-    setReady({ editor: { ...readyState.editor, body: result.body } });
+    updateEditor({ ...readyState.editor, body: result.body });
   }
 
   function selectionInEditor(): boolean {
@@ -664,7 +737,7 @@ export function ProfileNotesPage() {
 
   function applyEditorAction(action: string) {
     if (action === "kanban" || action === "text") {
-      setReady({ editor: { ...readyState.editor, pageType: action } });
+      updateEditor({ ...readyState.editor, pageType: action });
       return;
     }
     if (action === "undo") { undoBody(); return; }
@@ -711,14 +784,25 @@ export function ProfileNotesPage() {
     }
   }
 
-  async function saveNote(editor = readyState.editor) {
+  async function saveNote(editor = readyState.editor, background = false) {
+    if (!background) clearAutosaveTimer();
     if (savingRef.current) {
-      pendingSaveRef.current = editor;
+      const active = activeSaveRef.current;
+      if (active?.editor.instanceKey === editor.instanceKey && !editorChanged(active.editor, editor)) return;
+      const pendingIndex = pendingSaveRef.current.findIndex((pending) => pending.editor.instanceKey === editor.instanceKey);
+      const pending = pendingIndex >= 0 ? pendingSaveRef.current[pendingIndex] : null;
+      const nextPending = {
+        editor,
+        background: pending?.background === false ? false : background,
+      };
+      if (pendingIndex >= 0) pendingSaveRef.current[pendingIndex] = nextPending;
+      else pendingSaveRef.current.push(nextPending);
       return;
     }
     savingRef.current = true;
+    activeSaveRef.current = { editor, background };
     setReady({ saving: true });
-    let queuedEditor: Editor | null = null;
+    let queuedSave: PendingSave | null = null;
     try {
       const response = await profileNotesClient.saveNote({
         note_id: editor.noteID,
@@ -737,7 +821,7 @@ export function ProfileNotesPage() {
       const savedID = savedEditor.noteID;
       setState((current) => {
         if (current.status !== "ready") return current;
-        const matchesCurrentEditor = current.editor.noteID === editor.noteID && current.selectedID === editor.noteID;
+        const matchesCurrentEditor = current.editor.instanceKey === editor.instanceKey;
         const nextEditor = matchesCurrentEditor
           ? { ...current.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt }
           : current.editor;
@@ -759,22 +843,26 @@ export function ProfileNotesPage() {
           editor: nextEditor,
           savedEditor: matchesCurrentEditor ? savedEditor : current.savedEditor,
           saving: false,
-          message: "Note saved.",
+          message: background ? current.message : "Note saved.",
         };
       });
-      queuedEditor = pendingSaveRef.current;
-      pendingSaveRef.current = null;
-      if (queuedEditor && queuedEditor.noteID === editor.noteID) {
-        queuedEditor = { ...queuedEditor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt };
+      pendingSaveRef.current = pendingSaveRef.current.map((pending) => pending.editor.instanceKey === editor.instanceKey
+        ? { ...pending, editor: { ...pending.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt } }
+        : pending);
+      queuedSave = pendingSaveRef.current.shift() || null;
+      if (queuedSave && queuedSave.editor.instanceKey === editor.instanceKey) {
+        queuedSave = { ...queuedSave, editor: { ...queuedSave.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt } };
       }
-      showToast("Note saved.");
+      if (!background) showToast("Note saved.");
     } catch (error) {
-      pendingSaveRef.current = null;
+      pendingSaveRef.current = pendingSaveRef.current.filter((pending) => pending.editor.instanceKey !== editor.instanceKey);
+      queuedSave = pendingSaveRef.current.shift() || null;
       setReady({ saving: false });
       showToast(errorMessage(error), "error");
     } finally {
+      activeSaveRef.current = null;
       savingRef.current = false;
-      if (queuedEditor) void saveNote(queuedEditor);
+      if (queuedSave) void saveNote(queuedSave.editor, queuedSave.background);
     }
   }
 
@@ -969,8 +1057,8 @@ export function ProfileNotesPage() {
               className="notes-title-input"
               value={state.editor.title}
               placeholder="Untitled"
-              onBlur={() => void saveNote()}
-              onChange={(event) => setReady({ editor: { ...state.editor, title: event.target.value } })}
+              onBlur={flushAutosave}
+              onChange={(event) => updateEditor({ ...state.editor, title: event.target.value })}
             />
             <label className="notes-editor-notebook">
               <span>Notebook</span>
@@ -980,8 +1068,8 @@ export function ProfileNotesPage() {
                 value={state.editor.pageType === "notebook" ? "" : state.editor.parentID}
                 onChange={(event) => {
                   const editor = { ...state.editor, parentID: event.target.value };
-                  setReady({ editor });
-                  void saveNote(editor);
+                  updateEditor(editor, false);
+                  void saveNote(editor, true);
                 }}
               >
                 <option value="">No Notebook</option>
