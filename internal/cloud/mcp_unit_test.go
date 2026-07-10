@@ -211,6 +211,42 @@ func TestMCPExecuteDocsToolsNoDB(t *testing.T) {
 	}
 }
 
+func TestMCPExcludedVisibilityHelpers(t *testing.T) {
+	notes := []domain.UserNote{
+		{NoteID: "private-notebook", Title: "Private Notebook", PageType: "notebook", MCPExcluded: true},
+		{NoteID: "child-hidden.md", Title: "Hidden Child", PageType: "text", ParentID: "private-notebook"},
+		{NoteID: "private-note.md", Title: "Private Note", PageType: "text", MCPExcluded: true},
+		{NoteID: "visible-notebook", Title: "Visible Notebook", PageType: "notebook"},
+		{NoteID: "child-visible.md", Title: "Visible Child", PageType: "text", ParentID: "visible-notebook"},
+		{NoteID: "visible-note.md", Title: "Visible Note", PageType: "text"},
+	}
+
+	visible := mcpVisibleProfileNotes(notes)
+	gotIDs := make([]string, 0, len(visible))
+	for _, note := range visible {
+		gotIDs = append(gotIDs, note.NoteID)
+	}
+	if strings.Join(gotIDs, ",") != "visible-notebook,child-visible.md,visible-note.md" {
+		t.Fatalf("mcpVisibleProfileNotes ids = %v", gotIDs)
+	}
+
+	for _, tc := range []struct {
+		noteID string
+		want   bool
+	}{
+		{noteID: "private-notebook", want: false},
+		{noteID: "child-hidden.md", want: false},
+		{noteID: "private-note.md", want: false},
+		{noteID: "child-visible.md", want: true},
+		{noteID: "visible-note.md", want: true},
+		{noteID: "missing.md", want: false},
+	} {
+		if got := mcpNoteVisible(notes, tc.noteID); got != tc.want {
+			t.Fatalf("mcpNoteVisible(%q) = %v, want %v", tc.noteID, got, tc.want)
+		}
+	}
+}
+
 func mcpFirstText(res map[string]any) string {
 	content, _ := res["content"].([]map[string]any)
 	if len(content) == 0 {

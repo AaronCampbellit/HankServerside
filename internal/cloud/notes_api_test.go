@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -304,4 +305,175 @@ func TestExternalHomeNotesAPIUsesSharedVisibilityAndHomePermission(t *testing.T)
 	}))
 	response := requestJSONStatus(t, testServer, "external-member-token", http.MethodGet, "/v1/home/notes/search?q=milk", nil, http.StatusForbidden)
 	response.Body.Close()
+}
+
+func TestProfileNotesMCPExcludedRoundTripAndMCPVisibility(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_profile_notes_mcp_excluded", Email: "profile-notes-mcp-excluded@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	token := "profile-notes-mcp-excluded-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_profile_notes_mcp_excluded", UserID: user.ID, TokenHash: hashToken(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var notebookSave protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":      "private-notebook",
+		"title":        "Private Notebook",
+		"page_type":    "notebook",
+		"mcp_excluded": true,
+	}, &notebookSave)
+
+	var notebook protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/private-notebook", nil, &notebook)
+	if !notebook.MCPExcluded {
+		t.Fatalf("notebook MCPExcluded = %v, want true", notebook.MCPExcluded)
+	}
+
+	parentID := "private-notebook"
+	var childSave protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "child-hidden.md",
+		"title":         "Child Hidden",
+		"body_markdown": "#secret hidden by parent",
+		"page_type":     "text",
+		"parent_id":     parentID,
+		"mcp_excluded":  false,
+	}, &childSave)
+
+	var child protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/child-hidden.md", nil, &child)
+	if child.ParentID != "private-notebook" || child.MCPExcluded {
+		t.Fatalf("child fetch = parent:%q excluded:%v", child.ParentID, child.MCPExcluded)
+	}
+
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "private-note.md",
+		"title":         "Private Note",
+		"body_markdown": "#secret direct exclusion",
+		"mcp_excluded":  true,
+	}, nil)
+
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "visible-note.md",
+		"title":         "Visible Note",
+		"body_markdown": "#todo visible to mcp",
+	}, nil)
+
+	var listed protocol.NotesListResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes", nil, &listed)
+	listedByID := map[string]protocol.NoteSummary{}
+	for _, note := range listed.Notes {
+		listedByID[note.ID] = note
+	}
+	if !listedByID["private-notebook"].MCPExcluded || !listedByID["private-note.md"].MCPExcluded || listedByID["child-hidden.md"].MCPExcluded {
+		t.Fatalf("list summaries = %#v", listedByID)
+	}
+
+	auth := mcpAuthContext{
+		User: user,
+		Token: domain.MCPToken{Scopes: []string{
+			domain.NotesAPIScopeRead,
+			domain.NotesAPIScopeWrite,
+			domain.NotesAPIScopeAppend,
+			domain.NotesAPIScopeDelete,
+		}},
+	}
+	mcpCall := func(name string, arguments map[string]any) map[string]any {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"name": name, "arguments": arguments})
+		if err != nil {
+			t.Fatalf("marshal mcp call: %v", err)
+		}
+		return server.mcpToolsCall(ctx, auth, raw)
+	}
+
+	mustContain := func(text string, needle string) {
+		t.Helper()
+		if !strings.Contains(text, needle) {
+			t.Fatalf("text %q missing %q", text, needle)
+		}
+	}
+
+	initialList := mcpCall("list_notes", map[string]any{})
+	if initialList["isError"] == true {
+		t.Fatalf("list_notes failed: %v", initialList)
+	}
+	initialListText := mcpFirstText(initialList)
+	mustContain(initialListText, "visible-note.md")
+	if strings.Contains(initialListText, "private-notebook") || strings.Contains(initialListText, "private-note.md") || strings.Contains(initialListText, "child-hidden.md") {
+		t.Fatalf("list_notes exposed excluded notes: %q", initialListText)
+	}
+
+	hiddenSearch := mcpCall("search_notes", map[string]any{"query": "secret", "limit": 10})
+	if hiddenSearch["isError"] == true {
+		t.Fatalf("search_notes failed: %v", hiddenSearch)
+	}
+	if strings.Contains(mcpFirstText(hiddenSearch), "child-hidden.md") || strings.Contains(mcpFirstText(hiddenSearch), "private-note.md") {
+		t.Fatalf("search_notes exposed excluded notes: %q", mcpFirstText(hiddenSearch))
+	}
+
+	tags := mcpCall("list_note_tags", map[string]any{})
+	if tags["isError"] == true {
+		t.Fatalf("list_note_tags failed: %v", tags)
+	}
+	tagText := mcpFirstText(tags)
+	mustContain(tagText, "#todo")
+	if strings.Contains(tagText, "#secret") {
+		t.Fatalf("list_note_tags exposed excluded tags: %q", tagText)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		arguments map[string]any
+	}{
+		{name: "get_note", arguments: map[string]any{"note_id": "private-note.md"}},
+		{name: "get_note", arguments: map[string]any{"note_id": "child-hidden.md"}},
+		{name: "update_note", arguments: map[string]any{"note_id": "private-note.md", "title": "Still Private", "content": "updated"}},
+		{name: "append_note", arguments: map[string]any{"note_id": "private-note.md", "content": "updated"}},
+		{name: "delete_note", arguments: map[string]any{"note_id": "private-note.md"}},
+	} {
+		res := mcpCall(tc.name, tc.arguments)
+		if res["isError"] != true || mcpFirstText(res) != "not found" {
+			t.Fatalf("%s(%v) = %v, want MCP not found", tc.name, tc.arguments, res)
+		}
+	}
+
+	noParent := ""
+	var moved protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPut, "/v1/me/notes/child-hidden.md", map[string]any{
+		"title":             "Child Hidden",
+		"body_markdown":     "#secret hidden by parent",
+		"expected_revision": childSave.Revision,
+		"page_type":         "text",
+		"parent_id":         noParent,
+		"mcp_excluded":      false,
+	}, &moved)
+
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/child-hidden.md", nil, &child)
+	if child.ParentID != "" || child.MCPExcluded {
+		t.Fatalf("moved child fetch = parent:%q excluded:%v", child.ParentID, child.MCPExcluded)
+	}
+
+	visibleGet := mcpCall("get_note", map[string]any{"note_id": "child-hidden.md"})
+	if visibleGet["isError"] == true {
+		t.Fatalf("get_note after move failed: %v", visibleGet)
+	}
+	mustContain(mcpFirstText(visibleGet), "hidden by parent")
+
+	visibleSearch := mcpCall("search_notes", map[string]any{"query": "hidden", "limit": 10})
+	if visibleSearch["isError"] == true {
+		t.Fatalf("search_notes after move failed: %v", visibleSearch)
+	}
+	mustContain(mcpFirstText(visibleSearch), "child-hidden.md")
 }

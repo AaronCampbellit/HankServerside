@@ -157,3 +157,75 @@ func TestSaveUserNoteUsesCanonicalBodyMarkdownOnly(t *testing.T) {
 		t.Fatalf("fetched note page/body/content = %q/%q/%q", fetched.PageType, fetched.BodyMarkdown, fetched.Content)
 	}
 }
+
+func TestUserNotesStoreMCPExcludedPersistence(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db, err := OpenMigrating(ctx, testutil.PostgreSQLTestURL(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	var excludedColumnCount int
+	if err := db.queryRow(ctx, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'user_notes' AND column_name = 'mcp_excluded'`).Scan(&excludedColumnCount); err != nil {
+		t.Fatalf("count mcp_excluded column: %v", err)
+	}
+	if excludedColumnCount != 1 {
+		t.Fatalf("user_notes.mcp_excluded column count = %d, want 1", excludedColumnCount)
+	}
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_notes_mcp_excluded", Email: "notes-mcp-excluded@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	note := domain.UserNote{
+		ID:           "note_mcp_excluded",
+		NoteID:       "private.md",
+		OwnerUserID:  user.ID,
+		Title:        "Private note",
+		Content:      "hidden from mcp",
+		BodyMarkdown: "hidden from mcp",
+		BodyFormat:   "markdown",
+		PageType:     "text",
+		MCPExcluded:  true,
+		Revision:     "rev-mcp-excluded",
+		Checksum:     "sum-mcp-excluded",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		UpdatedBy:    user.ID,
+	}
+	if err := db.SaveUserNoteWithOperations(ctx, note, []domain.NoteOperation{{
+		NoteID:         note.ID,
+		OpID:           "op-mcp-excluded",
+		ActorUserID:    user.ID,
+		SessionID:      "test",
+		BaseVersion:    0,
+		AppliedVersion: 1,
+		OpJSON:         `{"type":"text_replace","text":"hidden from mcp"}`,
+		CreatedAt:      now,
+	}}); err != nil {
+		t.Fatalf("SaveUserNoteWithOperations: %v", err)
+	}
+
+	fetched, err := db.GetProfileNote(ctx, user.ID, note.NoteID)
+	if err != nil {
+		t.Fatalf("GetProfileNote: %v", err)
+	}
+	if !fetched.MCPExcluded {
+		t.Fatalf("GetProfileNote MCPExcluded = %v, want true", fetched.MCPExcluded)
+	}
+
+	listed, err := db.ListProfileNotes(ctx, user.ID, false)
+	if err != nil {
+		t.Fatalf("ListProfileNotes: %v", err)
+	}
+	if len(listed) != 1 || !listed[0].MCPExcluded {
+		t.Fatalf("ListProfileNotes = %#v, want one MCP-excluded note", listed)
+	}
+}

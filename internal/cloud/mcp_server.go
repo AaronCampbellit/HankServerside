@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
@@ -204,6 +205,19 @@ func mcpFriendlyError(err error) string {
 
 func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name string, rawArgs json.RawMessage) (string, error) {
 	userID := auth.User.ID
+	profileNotes := func() ([]domain.UserNote, error) {
+		return s.store.ListProfileNotes(ctx, userID, false)
+	}
+	requireVisibleProfileNote := func(noteID string) error {
+		notes, err := profileNotes()
+		if err != nil {
+			return err
+		}
+		if !mcpNoteVisible(notes, noteID) {
+			return store.ErrNotFound
+		}
+		return nil
+	}
 	switch name {
 	case "list_docs":
 		paths := s.mcpDocs.listPaths()
@@ -225,11 +239,11 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		_ = json.Unmarshal(rawArgs, &a)
 		return s.mcpDocs.read(a.Path)
 	case "list_notes":
-		notes, err := s.notes.ListProfile(ctx, userID)
+		notes, err := profileNotes()
 		if err != nil {
 			return "", err
 		}
-		return jsonText(map[string]any{"notes": notes})
+		return jsonText(map[string]any{"notes": noteSummaries(mcpVisibleProfileNotes(notes))})
 	case "search_notes":
 		var a struct {
 			Query string `json:"query"`
@@ -239,17 +253,17 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		if a.Limit <= 0 {
 			a.Limit = 20
 		}
-		results, err := s.notes.SearchProfile(ctx, userID, a.Query, a.Limit, "")
+		notes, err := profileNotes()
 		if err != nil {
 			return "", err
 		}
-		return jsonText(map[string]any{"results": results})
+		return jsonText(map[string]any{"results": searchNotes(mcpVisibleProfileNotes(notes), a.Query, a.Limit, "")})
 	case "list_note_tags":
-		tags, err := s.notes.TagsProfile(ctx, userID)
+		notes, err := profileNotes()
 		if err != nil {
 			return "", err
 		}
-		return jsonText(map[string]any{"tags": tags})
+		return jsonText(map[string]any{"tags": noteTags(mcpVisibleProfileNotes(notes))})
 	case "get_note":
 		var a struct {
 			NoteID string `json:"note_id"`
@@ -257,6 +271,9 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		_ = json.Unmarshal(rawArgs, &a)
 		if a.NoteID == "" {
 			return "", errors.New("note_id is required")
+		}
+		if err := requireVisibleProfileNote(a.NoteID); err != nil {
+			return "", err
 		}
 		note, err := s.notes.FetchProfile(ctx, userID, a.NoteID)
 		if err != nil {
@@ -294,6 +311,9 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		if a.NoteID == "" {
 			return "", errors.New("note_id is required")
 		}
+		if err := requireVisibleProfileNote(a.NoteID); err != nil {
+			return "", err
+		}
 		resp, err := s.notes.SaveProfile(ctx, userID, a.NoteID, protocol.NotesSaveRequest{
 			NoteID:           a.NoteID,
 			Title:            a.Title,
@@ -316,6 +336,9 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		if a.NoteID == "" {
 			return "", errors.New("note_id is required")
 		}
+		if err := requireVisibleProfileNote(a.NoteID); err != nil {
+			return "", err
+		}
 		resp, err := s.notes.AppendProfile(ctx, userID, a.NoteID, protocol.NotesAppendRequest{
 			Content:          a.Content,
 			Separator:        a.Separator,
@@ -334,6 +357,9 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		if a.NoteID == "" {
 			return "", errors.New("note_id is required")
 		}
+		if err := requireVisibleProfileNote(a.NoteID); err != nil {
+			return "", err
+		}
 		if err := s.notes.DeleteProfile(ctx, userID, a.NoteID); err != nil {
 			return "", err
 		}
@@ -342,6 +368,38 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 	default:
 		return "", errors.New("unknown tool: " + name)
 	}
+}
+
+func mcpVisibleProfileNotes(notes []domain.UserNote) []domain.UserNote {
+	visible := make([]domain.UserNote, 0, len(notes))
+	for _, note := range notes {
+		if mcpNoteVisible(notes, note.NoteID) {
+			visible = append(visible, note)
+		}
+	}
+	return visible
+}
+
+func mcpNoteVisible(notes []domain.UserNote, noteID string) bool {
+	byID := make(map[string]domain.UserNote, len(notes))
+	for _, note := range notes {
+		byID[note.NoteID] = note
+	}
+	note, ok := byID[noteID]
+	if !ok || note.DeletedAt != nil || note.MCPExcluded {
+		return false
+	}
+	if note.ParentID == "" {
+		return true
+	}
+	parent, ok := byID[note.ParentID]
+	if !ok || parent.DeletedAt != nil {
+		return true
+	}
+	if normalizePageType(parent.PageType) != protocol.NotePageTypeNotebook {
+		return true
+	}
+	return !parent.MCPExcluded
 }
 
 func (s *Server) auditMCPWrite(ctx context.Context, auth mcpAuthContext, tool string, noteID string) {
