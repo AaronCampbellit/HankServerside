@@ -2062,6 +2062,11 @@ describe("App routes", () => {
               type: "full",
               stopped_at: "2026-06-27T10:00:00Z",
               size_bytes: 2048,
+            }, {
+              label: "20260627-010000F_20260628-010000D",
+              type: "diff",
+              stopped_at: "2026-06-28T10:00:00Z",
+              size_bytes: 1024,
             }],
           },
           restore: {
@@ -2167,7 +2172,7 @@ describe("App routes", () => {
     await waitFor(() => expect(calls).toContainEqual({
       path: "/v1/home/storage/restore-test",
       method: "POST",
-      body: { backup_label: "20260627-010000F" },
+      body: { backup_label: "20260627-010000F_20260628-010000D" },
     }));
 
     fireEvent.click(screen.getByRole("button", { name: "Clear storage logs" }));

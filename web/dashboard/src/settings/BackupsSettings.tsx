@@ -76,6 +76,10 @@ function configFromForm(form: FormState): StorageConfig {
   };
 }
 
+function latestBackupLabel(backups: NonNullable<StorageStatus["backup"]>["backups"]): string {
+  return (backups || []).reduce((latest, backup) => backup.label > latest ? backup.label : latest, "");
+}
+
 export function BackupsSettings() {
   const [state, setState] = useState<State>({ status: "loading" });
   const dialog = useConfirmDialog();
@@ -97,7 +101,7 @@ export function BackupsSettings() {
         status: "ready",
         storage,
         form: formFromConfig(storage.config),
-        restoreLabel: backups[0]?.label || "",
+        restoreLabel: latestBackupLabel(backups),
         auditEvents: auditPayload.events,
         auditFilters: { eventType: "", severity: "", targetType: "" },
         queryTelemetry: telemetryPayload.queries,
