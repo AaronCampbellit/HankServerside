@@ -62,6 +62,10 @@ compose exec -T \
 
 compose exec -T \
 	-e HANK_REMOTE_CLOUD_DATABASE_URL="$test_database_url" \
+	cloud /usr/local/bin/hank-remote-cloud migrate up >"$report_dir/migration-post-baseline-up-${run_id}.log"
+
+compose exec -T \
+	-e HANK_REMOTE_CLOUD_DATABASE_URL="$test_database_url" \
 	cloud /usr/local/bin/hank-remote-cloud migrate status --strict >"$status_file"
 
 finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
