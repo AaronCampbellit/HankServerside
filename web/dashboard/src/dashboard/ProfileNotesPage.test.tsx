@@ -34,6 +34,7 @@ describe("ProfileNotesPage", () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    Reflect.deleteProperty(document, "execCommand");
   });
 
   it("renders the redesigned editor chrome and kanban/notebook states", async () => {
@@ -334,6 +335,97 @@ describe("ProfileNotesPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Heading" }));
     expect(body.querySelector("h1")).toBeInTheDocument();
+  });
+
+  it("undoes and redoes typing and deletion as separate action groups", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily Notes", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+    });
+
+    renderPage();
+
+    const body = await screen.findByLabelText("Note body");
+    body.innerHTML = "Original text";
+    fireEvent.input(body, { inputType: "insertText" });
+    body.innerHTML = "Original tex";
+    fireEvent.input(body, { inputType: "deleteContentBackward" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(body).toHaveTextContent("Original text");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(body).toHaveTextContent("Original");
+
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(body).toHaveTextContent("Original text");
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(body).toHaveTextContent("Original tex");
+  });
+
+  it("records a rich editor command as one undo action when the browser also fires input", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily Notes", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => {
+        const body = document.activeElement as HTMLElement;
+        body.innerHTML += "<strong>bold text</strong>";
+        body.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "formatBold" }));
+        return true;
+      }),
+    });
+
+    renderPage();
+    const body = await screen.findByLabelText("Note body");
+
+    fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    expect(body).toHaveTextContent("bold text");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(body).toHaveTextContent("Original");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+  });
+
+  it("keeps exactly 50 undo and redo actions", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "daily", title: "Daily Notes", preview: "Original", page_type: "text", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily Notes",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+    });
+
+    renderPage();
+    await screen.findByLabelText("Note body");
+
+    for (let index = 0; index < 55; index++) {
+      fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    }
+
+    const undo = screen.getByRole("button", { name: "Undo" });
+    for (let index = 0; index < 50; index++) fireEvent.click(undo);
+    expect(undo).toBeDisabled();
+
+    const redo = screen.getByRole("button", { name: "Redo" });
+    for (let index = 0; index < 50; index++) fireEvent.click(redo);
+    expect(redo).toBeDisabled();
   });
 
   it("moves a note from the list into a selected notebook", async () => {

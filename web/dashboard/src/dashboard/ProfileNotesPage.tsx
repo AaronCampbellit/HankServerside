@@ -58,6 +58,20 @@ const emptyEditor: Editor = {
 
 const ROOT_NOTEBOOK_FILTER = "__root__";
 const NOTE_AUTOSAVE_DELAY_MS = 750;
+const NOTE_HISTORY_GROUP_DELAY_MS = 750;
+const NOTE_HISTORY_LIMIT = 50;
+
+type HistoryActionKind = "typing" | "deletion" | "paste" | "formatting";
+
+type HistoryEntry = {
+  body: string;
+  action: HistoryActionKind;
+};
+
+type HistoryState = {
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+};
 
 type PendingSave = {
   editor: Editor;
@@ -402,10 +416,11 @@ function Icon({ name }: { name: string }) {
 
 export function ProfileNotesPage() {
   const [state, setState] = useState<State>({ status: "loading" });
-  const [history, setHistory] = useState<{ past: string[]; future: string[] }>({ past: [], future: [] });
+  const [history, setHistory] = useState<HistoryState>({ past: [], future: [] });
   const bodyInputRef = useRef<HTMLDivElement>(null);
   const lastRenderedBodyRef = useRef("");
-  const lastTypedAtRef = useRef(0);
+  const lastHistoryActionRef = useRef<{ action: HistoryActionKind; at: number } | null>(null);
+  const richCommandPendingRef = useRef(false);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const savingRef = useRef(false);
   const activeSaveRef = useRef<PendingSave | null>(null);
@@ -562,7 +577,7 @@ export function ProfileNotesPage() {
 
   function resetHistory() {
     setHistory({ past: [], future: [] });
-    lastTypedAtRef.current = 0;
+    lastHistoryActionRef.current = null;
   }
 
   async function selectNote(id: string) {
@@ -647,42 +662,67 @@ export function ProfileNotesPage() {
     }
   }
 
-  function recordBodyChange(previousBody: string, viaTyping: boolean) {
+  function recordBodyChange(previousBody: string, action: HistoryActionKind) {
     const now = Date.now();
+    const lastAction = lastHistoryActionRef.current;
+    const canCoalesce = (action === "typing" || action === "deletion")
+      && lastAction?.action === action
+      && now - lastAction.at < NOTE_HISTORY_GROUP_DELAY_MS;
     setHistory((current) => {
-      // Group rapid keystrokes into one undo step.
-      if (viaTyping && now - lastTypedAtRef.current < 750 && current.past.length) {
+      if (canCoalesce && current.past.length) {
         return current.future.length ? { past: current.past, future: [] } : current;
       }
-      return { past: [...current.past.slice(-99), previousBody], future: [] };
+      return {
+        past: [...current.past, { body: previousBody, action }].slice(-NOTE_HISTORY_LIMIT),
+        future: [],
+      };
     });
-    lastTypedAtRef.current = viaTyping ? now : 0;
+    lastHistoryActionRef.current = { action, at: now };
   }
 
-  function syncBodyFromEditor(viaTyping: boolean) {
+  function syncBodyFromEditor(action: HistoryActionKind) {
     const element = bodyInputRef.current;
     if (!element) return;
     const nextBody = htmlToMarkdown(element);
     if (nextBody === readyState.editor.body) return;
-    recordBodyChange(readyState.editor.body, viaTyping);
+    recordBodyChange(readyState.editor.body, action);
     lastRenderedBodyRef.current = nextBody;
     updateEditor({ ...readyState.editor, body: nextBody });
+  }
+
+  function inputActionKind(inputType: string): HistoryActionKind {
+    if (inputType.startsWith("delete")) return "deletion";
+    if (inputType === "insertFromPaste" || inputType === "insertFromDrop") return "paste";
+    if (inputType.startsWith("format")) return "formatting";
+    return "typing";
+  }
+
+  function syncInputFromEditor(inputType: string) {
+    const action = richCommandPendingRef.current ? "formatting" : inputActionKind(inputType || "insertText");
+    richCommandPendingRef.current = false;
+    syncBodyFromEditor(action);
   }
 
   function undoBody() {
     if (!history.past.length) return;
     const previous = history.past[history.past.length - 1];
-    setHistory({ past: history.past.slice(0, -1), future: [readyState.editor.body, ...history.future].slice(0, 100) });
-    lastTypedAtRef.current = 0;
-    updateEditor({ ...readyState.editor, body: previous });
+    setHistory({
+      past: history.past.slice(0, -1),
+      future: [{ body: readyState.editor.body, action: previous.action }, ...history.future].slice(0, NOTE_HISTORY_LIMIT),
+    });
+    lastHistoryActionRef.current = null;
+    updateEditor({ ...readyState.editor, body: previous.body });
   }
 
   function redoBody() {
     if (!history.future.length) return;
     const next = history.future[0];
-    setHistory({ past: [...history.past.slice(-99), readyState.editor.body], future: history.future.slice(1) });
-    lastTypedAtRef.current = 0;
-    updateEditor({ ...readyState.editor, body: next });
+    setHistory({
+      past: [...history.past, { body: readyState.editor.body, action: next.action }].slice(-NOTE_HISTORY_LIMIT),
+      future: history.future.slice(1),
+    });
+    lastHistoryActionRef.current = null;
+    updateEditor({ ...readyState.editor, body: next.body });
   }
 
   function mutateBody(mutator: (body: string, start: number, end: number) => { body: string; selectionStart: number; selectionEnd: number }) {
@@ -690,7 +730,7 @@ export function ProfileNotesPage() {
     const start = body.length;
     const end = body.length;
     const result = mutator(body, start, end);
-    recordBodyChange(body, false);
+    recordBodyChange(body, "formatting");
     pendingSelectionRef.current = { start: result.selectionStart, end: result.selectionEnd };
     updateEditor({ ...readyState.editor, body: result.body });
   }
@@ -730,8 +770,14 @@ export function ProfileNotesPage() {
       const currentBlock = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
       if (currentBlock === value) effectiveValue = "p";
     }
+    richCommandPendingRef.current = true;
     document.execCommand(effectiveCommand, false, effectiveValue);
-    syncBodyFromEditor(false);
+    // Browsers normally emit an input event for execCommand. The fallback keeps
+    // the editor in sync in environments that do not, without recording twice.
+    if (richCommandPendingRef.current) {
+      richCommandPendingRef.current = false;
+      syncBodyFromEditor("formatting");
+    }
     return true;
   }
 
@@ -1130,7 +1176,7 @@ export function ProfileNotesPage() {
                   aria-label="Note body"
                   aria-multiline="true"
                   suppressContentEditableWarning
-                  onInput={() => syncBodyFromEditor(true)}
+                  onInput={(event) => syncInputFromEditor((event.nativeEvent as InputEvent).inputType)}
                 />
               </>
             )}
