@@ -236,6 +236,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: false,
     });
   });
 
@@ -298,6 +299,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: false,
     });
   });
 
@@ -460,6 +462,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "house",
+      mcp_excluded: false,
     }));
   });
 
@@ -491,7 +494,77 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "family",
+      mcp_excluded: false,
     }));
+  });
+
+  it("toggles MCP exclusion from the editor toolbar and sends the lock state in save payloads", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1", mcp_excluded: false },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      revision: "1",
+      page_type: "text",
+      parent_id: "",
+      mcp_excluded: false,
+    });
+    profileNotesClient.saveNote
+      .mockResolvedValueOnce({ note_id: "daily", revision: "2" })
+      .mockResolvedValueOnce({ note_id: "daily", revision: "3" });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Exclude from MCP" }));
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenNthCalledWith(1, {
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      expected_revision: "1",
+      page_type: "text",
+      parent_id: "",
+      mcp_excluded: true,
+    }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Include in MCP" }));
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenNthCalledWith(2, {
+      note_id: "daily",
+      title: "Daily",
+      body_markdown: "Original",
+      expected_revision: "2",
+      page_type: "text",
+      parent_id: "",
+      mcp_excluded: false,
+    }));
+  });
+
+  it("shows inherited MCP exclusion copy for notes inside an excluded notebook", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "roof", title: "Roof Warranty", preview: "Expires 2027", page_type: "text", parent_id: "house", mcp_excluded: false, updated_at: "2026-07-10T12:00:00Z" },
+        { note_id: "house", title: "House Notebook", preview: "Notebook", page_type: "notebook", mcp_excluded: true, updated_at: "2026-07-09T12:00:00Z" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "roof",
+      title: "Roof Warranty",
+      body_markdown: "# Roof Warranty\nExpires in 2027.",
+      revision: "1",
+      page_type: "text",
+      parent_id: "house",
+      mcp_excluded: false,
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("Excluded because its notebook is locked")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exclude from MCP" })).toBeInTheDocument();
   });
 
   it("preserves edits made while an earlier save is still running", async () => {
@@ -562,6 +635,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "2",
       page_type: "text",
       parent_id: "work",
+      mcp_excluded: false,
     });
   });
 
@@ -599,6 +673,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: false,
     });
     expect(screen.queryByText("Note saved.")).not.toBeInTheDocument();
   });
@@ -635,6 +710,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: false,
     }));
     expect(profileNotesClient.saveNote.mock.invocationCallOrder[0]).toBeLessThan(profileNotesClient.fetchNote.mock.invocationCallOrder[0]);
   });
@@ -667,6 +743,7 @@ describe("ProfileNotesPage", () => {
       expected_revision: "1",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: false,
     });
   });
 

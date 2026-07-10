@@ -16,6 +16,7 @@ describe("ProfileNotesClient", () => {
       expected_revision: "",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: false,
     });
     await client.saveNote({
       note_id: "daily.md",
@@ -24,6 +25,7 @@ describe("ProfileNotesClient", () => {
       expected_revision: "2",
       page_type: "text",
       parent_id: "",
+      mcp_excluded: true,
     });
     await client.deleteNote("daily.md");
 
@@ -40,6 +42,7 @@ describe("ProfileNotesClient", () => {
         expected_revision: "",
         page_type: "text",
         parent_id: "",
+        mcp_excluded: false,
       },
     });
     expect(request).toHaveBeenNthCalledWith(4, "/v1/me/notes/daily.md", {
@@ -53,6 +56,7 @@ describe("ProfileNotesClient", () => {
         expected_revision: "2",
         page_type: "text",
         parent_id: "",
+        mcp_excluded: true,
       },
     });
     expect(request).toHaveBeenNthCalledWith(5, "/v1/me/notes/daily.md", { method: "DELETE" });

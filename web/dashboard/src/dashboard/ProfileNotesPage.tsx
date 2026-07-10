@@ -16,6 +16,7 @@ type Editor = {
   revision: string;
   pageType: string;
   parentID: string;
+  mcpExcluded: boolean;
   board: KanbanBoard | null;
   updatedAt: string;
   shared: boolean;
@@ -51,6 +52,7 @@ const emptyEditor: Editor = {
   revision: "",
   pageType: "text",
   parentID: "",
+  mcpExcluded: false,
   board: null,
   updatedAt: "",
   shared: false,
@@ -100,6 +102,7 @@ function editorFromNote(note: ProfileNote): Editor {
     revision: note.revision || "",
     pageType: note.page_type || "text",
     parentID: note.parent_id || "",
+    mcpExcluded: Boolean(note.mcp_excluded),
     board: note.board || null,
     updatedAt: note.updated_at || "",
     shared: Boolean(note.shared),
@@ -113,6 +116,7 @@ function editorChanged(left: Editor, right: Editor): boolean {
     || left.revision !== right.revision
     || left.pageType !== right.pageType
     || left.parentID !== right.parentID
+    || left.mcpExcluded !== right.mcpExcluded
     || JSON.stringify(left.board) !== JSON.stringify(right.board);
 }
 
@@ -151,6 +155,25 @@ function notebookTitle(notes: ProfileNoteSummary[], notebookID?: string): string
 
 function notebookChildCount(notes: ProfileNoteSummary[], notebookID: string): number {
   return notes.filter((note) => note.parent_id === notebookID).length;
+}
+
+function noteOwnMcpExcluded(note: ProfileNoteSummary | Editor): boolean {
+  return "mcpExcluded" in note ? note.mcpExcluded : Boolean(note.mcp_excluded);
+}
+
+function parentNotebook(notes: ProfileNoteSummary[], notebookID?: string): ProfileNoteSummary | undefined {
+  if (!notebookID) return undefined;
+  return notes.find((note) => noteID(note) === notebookID);
+}
+
+function noteInheritedMcpExcluded(note: ProfileNoteSummary | Editor, notes: ProfileNoteSummary[]): boolean {
+  if (isNotebook(note) || noteOwnMcpExcluded(note)) return false;
+  const notebookID = "parentID" in note ? note.parentID : note.parent_id;
+  return Boolean(parentNotebook(notes, notebookID)?.mcp_excluded);
+}
+
+function noteEffectiveMcpExcluded(note: ProfileNoteSummary | Editor, notes: ProfileNoteSummary[]): boolean {
+  return noteOwnMcpExcluded(note) || noteInheritedMcpExcluded(note, notes);
 }
 
 function activeNotebookForNewNote(state: ReadyState): string {
@@ -408,6 +431,8 @@ function Icon({ name }: { name: string }) {
       {name === "ordered" ? <><path d="M10 7h10M10 12h10M10 17h10" {...common} /><path d="M4 6h1v3M4 17h3M4 14h2a1 1 0 0 1 0 2H4" {...common} /></> : null}
       {name === "tag" ? <><path d="M4 12V5h7l9 9-6 6z" {...common} /><circle cx="8" cy="8" r="1" fill="currentColor" /></> : null}
       {name === "link" ? <><path d="M10 13a4 4 0 0 0 5.5.5l2-2a4 4 0 0 0-5.5-5.5l-1 1" {...common} /><path d="M14 11a4 4 0 0 0-5.5-.5l-2 2a4 4 0 0 0 5.5 5.5l1-1" {...common} /></> : null}
+      {name === "lock" ? <><rect x="6" y="11" width="12" height="9" rx="2" {...common} /><path d="M9 11V8a3 3 0 0 1 6 0v3" {...common} /></> : null}
+      {name === "unlock" ? <><rect x="6" y="11" width="12" height="9" rx="2" {...common} /><path d="M15 11V8a3 3 0 1 0-6 0" {...common} /></> : null}
       {name === "x" ? <><path d="M7 7l10 10M17 7 7 17" {...common} /></> : null}
       {name === "check" ? <path d="m5 12 4 4L19 6" {...common} /> : null}
     </svg>
@@ -532,6 +557,8 @@ export function ProfileNotesPage() {
   const selectedSummary = readyState.notes.find((note) => noteID(note) === readyState.selectedID);
   const notebookItems = notebooksFrom(readyState.notes);
   const visibleNotebookItems = notebookItems.filter((note) => noteMatchesQuery(note, readyState.notes, readyState.query.trim().toLowerCase()));
+  const editorInheritedExclusion = noteInheritedMcpExcluded(readyState.editor, readyState.notes);
+  const editorEffectiveExclusion = noteEffectiveMcpExcluded(readyState.editor, readyState.notes);
 
   function setReady(next: Partial<ReadyState>) {
     setState((current) => current.status === "ready" ? { ...current, ...next } : current);
@@ -636,6 +663,7 @@ export function ProfileNotesPage() {
         expected_revision: "",
         page_type: "notebook",
         parent_id: "",
+        mcp_excluded: false,
       });
       const savedID = response.note_id;
       const summary: ProfileNoteSummary = {
@@ -645,6 +673,7 @@ export function ProfileNotesPage() {
         revision: response.revision,
         updated_at: response.updated_at,
         page_type: "notebook",
+        mcp_excluded: false,
       };
       setReady({
         notes: sortNotes([summary, ...readyState.notes.filter((note) => noteID(note) !== savedID)]),
@@ -857,6 +886,7 @@ export function ProfileNotesPage() {
         expected_revision: editor.revision,
         page_type: editor.pageType,
         parent_id: editor.parentID,
+        mcp_excluded: editor.mcpExcluded,
       });
       const savedEditor = {
         ...editor,
@@ -883,6 +913,7 @@ export function ProfileNotesPage() {
               updated_at: response.updated_at,
               page_type: editor.pageType,
               parent_id: editor.pageType === "notebook" ? "" : editor.parentID,
+              mcp_excluded: editor.mcpExcluded,
             },
             ...current.notes.filter((note) => noteID(note) !== savedID && noteID(note) !== editor.noteID),
           ]),
@@ -956,6 +987,7 @@ export function ProfileNotesPage() {
         expected_revision: note.revision || "",
         page_type: note.page_type || "text",
         parent_id: readyState.moveDialogTargetID,
+        mcp_excluded: Boolean(note.mcp_excluded),
       });
       const movedID = response.note_id || id;
       const movedTitle = note.title?.trim() || "Untitled";
@@ -969,6 +1001,7 @@ export function ProfileNotesPage() {
             updated_at: response.updated_at || note.updated_at,
             page_type: note.page_type || "text",
             parent_id: readyState.moveDialogTargetID,
+            mcp_excluded: Boolean(note.mcp_excluded),
           },
           ...readyState.notes.filter((summary) => noteID(summary) !== movedID),
         ]),
@@ -1032,17 +1065,18 @@ export function ProfileNotesPage() {
                     const id = noteID(note);
                     const title = noteTitle(note);
                     const childCount = notebookChildCount(state.notes, id);
+                    const excluded = noteEffectiveMcpExcluded(note, state.notes);
                     return (
                       <button
                         aria-label={`Open notebook ${title}`}
-                        className={id === state.selectedID ? "notes-notebook-item active" : "notes-notebook-item"}
+                        className={`${id === state.selectedID ? "notes-notebook-item active" : "notes-notebook-item"}${excluded ? " is-mcp-excluded" : ""}`}
                         key={id}
                         onClick={() => void selectNote(id)}
                         type="button"
                       >
                         <span className="notes-guide-icon" aria-hidden="true"><Icon name="book" /></span>
                         <span>
-                          <strong>{title}</strong>
+                          <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
                           <small>{childCount} {childCount === 1 ? "page" : "pages"}</small>
                         </span>
                       </button>
@@ -1059,17 +1093,18 @@ export function ProfileNotesPage() {
                   const id = noteID(note);
                   const title = noteTitle(note);
                   const parentTitle = notebookTitle(state.notes, note.parent_id);
+                  const excluded = noteEffectiveMcpExcluded(note, state.notes);
                   return (
                     <div className="notes-guide-row" key={id} onMouseEnter={revealRowActions} onMouseLeave={hideRowActions}>
                       <button
                         aria-label={title}
-                        className={id === state.selectedID ? "notes-guide-item active" : "notes-guide-item"}
+                        className={`${id === state.selectedID ? "notes-guide-item active" : "notes-guide-item"}${excluded ? " is-mcp-excluded" : ""}`}
                         onClick={() => void selectNote(id)}
                         type="button"
                       >
                         <span className="notes-guide-icon" aria-hidden="true"><Icon name={noteIconName(note)} /></span>
                         <span className="notes-guide-copy">
-                          <strong>{title}</strong>
+                          <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
                           <span>{note.preview || "No preview"}</span>
                           <span className="notes-tag-row"><em className="notes-tag">{parentTitle || noteTag(note)}</em><small>{updatedLabel(note)}</small></span>
                         </span>
@@ -1131,28 +1166,46 @@ export function ProfileNotesPage() {
             <button className="icon-button danger" disabled={!state.editor.noteID} type="button" aria-label="Delete note" title="Delete note" onClick={() => void deleteNote()}><Icon name="trash" /></button>
           </header>
 
-          {state.editor.pageType === "notebook" ? null : (
-            <div className="notes-toolbar" aria-label="Editor tools">
-              <ToolbarButton label="Undo" icon="undo" disabled={!history.past.length} onClick={() => applyEditorAction("undo")} />
-              <ToolbarButton label="Redo" icon="redo" disabled={!history.future.length} onClick={() => applyEditorAction("redo")} />
-              <span className="notes-toolbar-separator" aria-hidden="true" />
-              <ToolbarButton label="Bold" text="B" onClick={() => applyEditorAction("bold")} />
-              <ToolbarButton label="Italic" text="I" onClick={() => applyEditorAction("italic")} />
-              <ToolbarButton label="Underline" text="U" onClick={() => applyEditorAction("underline")} />
-              <ToolbarButton label="Smaller heading" text="A-" onClick={() => applyEditorAction("small")} />
-              <ToolbarButton label="Heading" text="H" onClick={() => applyEditorAction("heading")} />
-              <ToolbarButton label="Larger heading" text="A+" onClick={() => applyEditorAction("large")} />
-              <ToolbarButton label="Bulleted list" icon="list" onClick={() => applyEditorAction("bullets")} />
-              <ToolbarButton label="Numbered list" icon="ordered" onClick={() => applyEditorAction("numbers")} />
-              <span className="notes-toolbar-separator" aria-hidden="true" />
-              <ToolbarButton label="Text page" icon="note" pressed={state.editor.pageType === "text"} onClick={() => applyEditorAction("text")} />
-              <ToolbarButton label="Kanban page" icon="kanban" pressed={state.editor.pageType === "kanban"} onClick={() => applyEditorAction("kanban")} />
-              <ToolbarButton label="Tag" icon="tag" onClick={() => applyEditorAction("tag")} />
-              <ToolbarButton label="Link" icon="link" onClick={() => applyEditorAction("link")} />
-            </div>
-          )}
+          <div className="notes-toolbar" aria-label="Editor tools">
+            <ToolbarButton
+              label={state.editor.mcpExcluded ? "Include in MCP" : "Exclude from MCP"}
+              icon={state.editor.mcpExcluded ? "unlock" : "lock"}
+              pressed={state.editor.mcpExcluded}
+              onClick={() => {
+                const editor = { ...state.editor, mcpExcluded: !state.editor.mcpExcluded };
+                updateEditor(editor, false);
+                void saveNote(editor, true);
+              }}
+            />
+            {state.editor.pageType === "notebook" ? null : (
+              <>
+                <span className="notes-toolbar-separator" aria-hidden="true" />
+                <ToolbarButton label="Undo" icon="undo" disabled={!history.past.length} onClick={() => applyEditorAction("undo")} />
+                <ToolbarButton label="Redo" icon="redo" disabled={!history.future.length} onClick={() => applyEditorAction("redo")} />
+                <span className="notes-toolbar-separator" aria-hidden="true" />
+                <ToolbarButton label="Bold" text="B" onClick={() => applyEditorAction("bold")} />
+                <ToolbarButton label="Italic" text="I" onClick={() => applyEditorAction("italic")} />
+                <ToolbarButton label="Underline" text="U" onClick={() => applyEditorAction("underline")} />
+                <ToolbarButton label="Smaller heading" text="A-" onClick={() => applyEditorAction("small")} />
+                <ToolbarButton label="Heading" text="H" onClick={() => applyEditorAction("heading")} />
+                <ToolbarButton label="Larger heading" text="A+" onClick={() => applyEditorAction("large")} />
+                <ToolbarButton label="Bulleted list" icon="list" onClick={() => applyEditorAction("bullets")} />
+                <ToolbarButton label="Numbered list" icon="ordered" onClick={() => applyEditorAction("numbers")} />
+                <span className="notes-toolbar-separator" aria-hidden="true" />
+                <ToolbarButton label="Text page" icon="note" pressed={state.editor.pageType === "text"} onClick={() => applyEditorAction("text")} />
+                <ToolbarButton label="Kanban page" icon="kanban" pressed={state.editor.pageType === "kanban"} onClick={() => applyEditorAction("kanban")} />
+                <ToolbarButton label="Tag" icon="tag" onClick={() => applyEditorAction("tag")} />
+                <ToolbarButton label="Link" icon="link" onClick={() => applyEditorAction("link")} />
+              </>
+            )}
+          </div>
 
           <div className="notes-content-scroll">
+            {editorEffectiveExclusion ? (
+              <p className={`notes-mcp-state${editorInheritedExclusion ? " inherited" : ""}`}>
+                {editorInheritedExclusion ? "Excluded because its notebook is locked" : "Excluded from MCP"}
+              </p>
+            ) : null}
             {state.editor.pageType === "kanban" ? (
               <KanbanEditor body={state.editor.body} board={state.editor.board} />
             ) : state.editor.pageType === "notebook" ? (
@@ -1342,16 +1395,17 @@ function NotebookEditor({
           {childNotes.map((note) => {
             const id = noteID(note);
             const title = noteTitle(note);
+            const excluded = noteEffectiveMcpExcluded(note, notes);
             return (
               <button
                 aria-label={`Open ${title}`}
-                className="notebook-card"
+                className={`notebook-card${excluded ? " is-mcp-excluded" : ""}`}
                 key={id}
                 onClick={() => onOpenNote(id)}
                 type="button"
               >
                 <span className="note-kind" aria-hidden="true"><Icon name="note" /></span>
-                <strong>{title}</strong>
+                <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
                 <span>{note.preview || "No preview"}</span>
               </button>
             );

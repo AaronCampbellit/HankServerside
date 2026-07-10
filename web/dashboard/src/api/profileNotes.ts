@@ -11,6 +11,7 @@ export type ProfileNoteSummary = {
   page_type?: "text" | "kanban" | "notebook" | string;
   parent_id?: string;
   shared?: boolean;
+  mcp_excluded?: boolean;
 };
 
 export type KanbanCard = {
@@ -45,6 +46,7 @@ export type SaveProfileNoteInput = {
   expected_revision: string;
   page_type: string;
   parent_id: string;
+  mcp_excluded?: boolean;
 };
 
 export type SaveProfileNoteResponse = {
@@ -79,6 +81,7 @@ export class ProfileNotesClient {
       expected_revision: input.expected_revision,
       page_type: input.page_type,
       parent_id: input.parent_id,
+      mcp_excluded: Boolean(input.mcp_excluded),
     };
     if (input.note_id) {
       return this.api.request<SaveProfileNoteResponse>(`/v1/me/notes/${encodeURIComponent(input.note_id)}`, {
