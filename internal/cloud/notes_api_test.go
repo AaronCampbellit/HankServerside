@@ -477,3 +477,67 @@ func TestProfileNotesMCPExcludedRoundTripAndMCPVisibility(t *testing.T) {
 	}
 	mustContain(mcpFirstText(visibleSearch), "child-hidden.md")
 }
+
+func TestProfileNotesUpdateOmittedMCPExcludedPreservesExistingLock(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_profile_notes_lock_preserve", Email: "profile-notes-lock-preserve@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	token := "profile-notes-lock-preserve-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_profile_notes_lock_preserve", UserID: user.ID, TokenHash: hashToken(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var created protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id":       "legacy-lock.md",
+		"title":         "Legacy Lock",
+		"body_markdown": "#locked content",
+		"mcp_excluded":  true,
+	}, &created)
+
+	encodedUpdate, err := json.Marshal(protocol.NotesSaveRequest{
+		Title:            "Legacy Lock Updated",
+		BodyMarkdown:     "#locked content updated",
+		ExpectedRevision: created.Revision,
+	})
+	if err != nil {
+		t.Fatalf("marshal typed update request: %v", err)
+	}
+	t.Logf("encoded typed update request: %s", string(encodedUpdate))
+	if strings.Contains(string(encodedUpdate), `"mcp_excluded"`) {
+		t.Fatalf("typed update request = %s, want mcp_excluded omitted when unchanged", string(encodedUpdate))
+	}
+
+	var updated protocol.NotesSaveResponse
+	requestJSON(t, testServer, token, http.MethodPut, "/v1/me/notes/legacy-lock.md", protocol.NotesSaveRequest{
+		Title:            "Legacy Lock Updated",
+		BodyMarkdown:     "#locked content updated",
+		ExpectedRevision: created.Revision,
+	}, &updated)
+
+	var fetched protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/legacy-lock.md", nil, &fetched)
+	if fetched.Title != "Legacy Lock Updated" || fetched.BodyMarkdown != "#locked content updated" {
+		t.Fatalf("updated fetch = title:%q body:%q", fetched.Title, fetched.BodyMarkdown)
+	}
+	if !fetched.MCPExcluded {
+		t.Fatalf("MCPExcluded after omitted update = %v, want true", fetched.MCPExcluded)
+	}
+	noteRecord, err := db.GetProfileNote(ctx, user.ID, "legacy-lock.md")
+	if err != nil {
+		t.Fatalf("GetProfileNote after update: %v", err)
+	}
+	if !noteRecord.MCPExcluded {
+		t.Fatalf("stored MCPExcluded after omitted update = %v, want true", noteRecord.MCPExcluded)
+	}
+}

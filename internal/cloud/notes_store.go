@@ -486,7 +486,10 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 	if err != nil {
 		return protocol.NotesSaveResponse{}, err
 	}
-	updated.MCPExcluded = request.MCPExcluded
+	updated.MCPExcluded = existing.MCPExcluded
+	if request.MCPExcluded != nil {
+		updated.MCPExcluded = *request.MCPExcluded
+	}
 	if err := s.store.SaveUserNoteWithOperations(ctx, updated, []domain.NoteOperation{{
 		NoteID:         updated.ID,
 		OpID:           "http-save:" + updated.Revision,
@@ -675,9 +678,11 @@ func appendRequestForNote(note domain.UserNote, request protocol.NotesAppendRequ
 		BodyFormat:       noteBodyFormat(note),
 		ExpectedRevision: request.ExpectedRevision,
 		PageType:         protocol.NotePageTypeText,
-		MCPExcluded:      note.MCPExcluded,
+		MCPExcluded:      boolPointer(note.MCPExcluded),
 	}, nil
 }
+
+func boolPointer(value bool) *bool { return &value }
 
 func appendNoteContent(existing string, request protocol.NotesAppendRequest) (string, error) {
 	addition := request.BodyMarkdown

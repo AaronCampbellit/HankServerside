@@ -107,7 +107,7 @@ type NotesSaveRequest struct {
 	ExpectedRevision string       `json:"expected_revision,omitempty"`
 	PageType         string       `json:"page_type,omitempty"`
 	ParentID         *string      `json:"parent_id,omitempty"`
-	MCPExcluded      bool         `json:"mcp_excluded"`
+	MCPExcluded      *bool        `json:"mcp_excluded,omitempty"`
 	SortOrder        *int         `json:"sort_order,omitempty"`
 	Board            *KanbanBoard `json:"board,omitempty"`
 }
