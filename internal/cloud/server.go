@@ -48,6 +48,7 @@ type Server struct {
 	collaboration              *noteCollaborationHub
 	agentRequests              *agentRequestRegistry
 	syncs                      *homeSyncController
+	health                     *agentHealthMonitor
 	storage                    *storageops.Service
 	storageEvents              map[string]struct{}
 	storageEventsMu            sync.Mutex
@@ -104,6 +105,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		logger:                logger,
 		metrics:               observability.NewMetrics(),
 		limiter:               newRateLimiter(),
+		health:                newAgentHealthMonitor(),
 		transfers:             newTransferRegistry(),
 		appTickets:            newAppWebSocketTicketRegistry(),
 		appPackages:           newAppPackageStagingRegistry(),
@@ -214,6 +216,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 
 	go server.forwardStoreNotifications(realtimeCtx)
 	go server.forwardStorageEvents(realtimeCtx)
+	go server.runAgentHealthMonitor(realtimeCtx)
 
 	return server
 }
@@ -1112,6 +1115,20 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(command.Command, "hermes.") && membership.Role != domain.HomeRoleAdmin {
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "permission_denied", errAdminRoleRequired.Error(), nil)
 			continue
+		}
+		// RMM management commands (device actions, wake-on-LAN, remote shell)
+		// are admin-only. Shell execution is additionally audited on every
+		// invocation; the target agent must also have shell.exec enabled
+		// locally by the machine owner.
+		if isManagementCommand(command.Command) {
+			if membership.Role != domain.HomeRoleAdmin {
+				s.audit(ctx, "agent.command.denied", auditSeverityWarning, auth.User.ID, "", home.ID, envelope.RequestID, "agent_command", command.Command, map[string]any{"reason": "admin_required", "agent_id": strings.TrimSpace(envelope.AgentID)})
+				s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "permission_denied", errAdminRoleRequired.Error(), nil)
+				continue
+			}
+			if command.Command == "shell.exec" {
+				s.audit(ctx, "agent.shell.requested", auditSeverityWarning, auth.User.ID, "", home.ID, envelope.RequestID, "agent_shell", strings.TrimSpace(envelope.AgentID), map[string]any{"command_hash": stableAuditTarget(string(command.Body))})
+			}
 		}
 		if command.Command == protocol.CommandAppsInvoke {
 			if err := s.authorizeAppsInvokeCommand(ctx, home.ID, membership, command); err != nil {

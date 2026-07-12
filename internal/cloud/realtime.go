@@ -227,7 +227,7 @@ func (s *Server) authorizeRealtimeTopics(ctx context.Context, auth authContext, 
 				return nil, err
 			}
 			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
-		case topic == topicHomeStatus || topic == topicHomeSettings || topic == topicHomeMembers || topic == topicHomePermissions || topic == topicStorage || topic == topicMediaDownloads:
+		case topic == topicHomeStatus || topic == topicHomeSettings || topic == topicHomeMembers || topic == topicHomePermissions || topic == topicStorage || topic == topicMediaDownloads || topic == topicAgentsHealth:
 			if err := resolveHome(); err != nil {
 				return nil, err
 			}
