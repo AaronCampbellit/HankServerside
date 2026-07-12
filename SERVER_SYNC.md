@@ -172,6 +172,59 @@ Hank iOS and the browser Home Assistant dashboard should both use this
 tiles may be represented with `"is_enabled": false`; omitted or true means the
 tile is active.
 
+## [Multi-Agent Routing: Primary + Workers]
+
+- Status: in_progress
+- Date Opened: 2026-07-12
+- Owner: shared
+- Related Ticket/PR: feature/multi-agent-routing
+
+### Summary
+
+The cloud now supports multiple concurrently connected agents per Home: one
+primary (the home agent that owns Home Assistant, notes sync, SMB, media) plus
+any number of workers (desktops/laptops exposing their own capabilities, e.g.
+the HankAgent macOS app sharing local folders). Untargeted traffic still
+routes to the primary, so existing agents and clients are unaffected.
+
+### Contract Update
+
+- Agent registration (`agent.register` payload):
+  - `agent_type`: `"primary"` (default when blank) or `"worker"`.
+  - `metadata`: string map (hostname, os, os_version, app_version).
+  - Only primary registrations may rename the Home via `home_name`.
+- Agent heartbeat (`agent.heartbeat` payload):
+  - new optional `metrics` JSON object; conventional shape is
+    `{cpu_load_1m, memory_used_bytes, memory_total_bytes, disk_used_bytes, disk_total_bytes, uptime_seconds}`.
+- App WebSocket commands: the envelope `agent_id` field now targets a specific
+  connected agent; blank keeps routing to the primary.
+- File transfer setup (`POST /v1/home/files/downloads|uploads`): new optional
+  `agent_id` body field. Transfer resume always reconnects to the owning agent.
+- File preview (`GET /v1/home/files/preview`): new optional `agent_id` query param.
+- New route: `GET /v1/home/agents` → `{agents: [{agent_id, name, status,
+  agent_type, last_seen_at, capabilities?, metadata?, metrics?}]}` (member-visible).
+- `GET /v1/home/agent` is unchanged and returns the primary.
+- Schema: migration 000020 adds `agents.agent_type TEXT NOT NULL DEFAULT ''`.
+- Notes sync scheduling and sync-offline marking are gated to the primary agent.
+
+### Hank Changes
+
+- Clients may list all agents via `/v1/home/agents` and target worker agents
+  for `files.*` commands, previews, and transfers using `agent_id`.
+- No changes required for clients that ignore workers.
+
+### Rollout Order
+
+- server first, then worker agents (HankAgent macOS), then any client UI that
+  surfaces worker file sources.
+
+### Compatibility Notes
+
+- Fully backward compatible: the existing Go agent registers with a blank
+  `agent_type` and is treated as primary; untargeted commands behave as before.
+- Older servers reject nothing new — workers simply displace the primary on
+  old servers, so worker agents must not enroll until this ships.
+
 ## Status Labels
 
 - `planned`

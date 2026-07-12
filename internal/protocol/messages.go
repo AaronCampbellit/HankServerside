@@ -64,9 +64,20 @@ type AgentRegistered struct {
 }
 
 type AgentHeartbeat struct {
-	AgentID      string    `json:"agent_id"`
-	SentAt       time.Time `json:"sent_at"`
-	Capabilities []string  `json:"capabilities,omitempty"`
+	AgentID      string          `json:"agent_id"`
+	SentAt       time.Time       `json:"sent_at"`
+	Capabilities []string        `json:"capabilities,omitempty"`
+	Metrics      json.RawMessage `json:"metrics,omitempty"`
+}
+
+// HostMetrics is the conventional shape workers put in AgentHeartbeat.Metrics.
+type HostMetrics struct {
+	CPULoad1m        float64 `json:"cpu_load_1m,omitempty"`
+	MemoryUsedBytes  int64   `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes int64   `json:"memory_total_bytes,omitempty"`
+	DiskUsedBytes    int64   `json:"disk_used_bytes,omitempty"`
+	DiskTotalBytes   int64   `json:"disk_total_bytes,omitempty"`
+	UptimeSeconds    int64   `json:"uptime_seconds,omitempty"`
 }
 
 type RoutedCommand struct {

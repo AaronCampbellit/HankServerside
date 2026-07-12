@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -202,6 +203,45 @@ func (s *Server) handleHomeSetupStatus(w http.ResponseWriter, r *http.Request, h
 }
 
 func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {
+	if len(parts) == 1 && parts[0] == "agents" && r.Method == http.MethodGet {
+		stored, err := s.store.ListAgentsByHome(r.Context(), home.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		live := map[string]AgentSnapshot{}
+		for _, snapshot := range s.router.AgentsForHome(home.ID) {
+			live[snapshot.AgentID] = snapshot
+		}
+		agents := make([]map[string]any, 0, len(stored))
+		for _, agent := range stored {
+			agentType := agent.AgentType
+			if agentType == "" {
+				agentType = AgentTypePrimary
+			}
+			entry := map[string]any{
+				"agent_id":     agent.ID,
+				"name":         agent.Name,
+				"status":       agent.Status,
+				"agent_type":   agentType,
+				"last_seen_at": agent.LastSeenAt,
+			}
+			if snapshot, ok := live[agent.ID]; ok {
+				entry["status"] = domain.AgentStatusOnline
+				entry["capabilities"] = snapshot.Capabilities
+				if snapshot.Metadata != nil {
+					entry["metadata"] = snapshot.Metadata
+				}
+				if len(snapshot.Metrics) > 0 {
+					entry["metrics"] = json.RawMessage(snapshot.Metrics)
+				}
+			}
+			agents = append(agents, entry)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+		return true
+	}
+
 	if len(parts) == 1 && parts[0] == "agent" && r.Method == http.MethodGet {
 		agent, err := s.store.GetAgentByHomeID(r.Context(), home.ID)
 		if errors.Is(err, store.ErrNotFound) {

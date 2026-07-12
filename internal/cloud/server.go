@@ -878,17 +878,20 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	peer := newWSPeer(conn)
 	agentConnectionID := ""
+	registeredPrimary := false
 
 	s.logger.Info("agent websocket connected", "request_id", requestIDFromContext(r.Context()), "agent_id", record.Agent.ID, "home_id", record.Home.ID)
 	defer func() {
-		s.router.UnregisterAgent(record.Home.ID, agentConnectionID)
+		s.router.UnregisterAgent(record.Home.ID, record.Agent.ID, agentConnectionID)
 		if agentConnectionID != "" {
 			_ = s.store.MarkAgentConnection(context.Background(), agentConnectionID, s.runtimeID, record.Home.ID, record.Agent.ID, nil, false)
 		}
 		s.metrics.SetOnlineAgents(s.router.AgentCount())
 		now := time.Now().UTC()
 		_ = s.store.SetAgentStatus(context.Background(), record.Agent.ID, domain.AgentStatusOffline, &now)
-		s.markHomeSyncOffline(record.Home.ID, record.Agent.ID)
+		if registeredPrimary {
+			s.markHomeSyncOffline(record.Home.ID, record.Agent.ID)
+		}
 		s.emitHomeStatus(context.Background(), record.Home.ID, map[string]any{"home_id": record.Home.ID, "agent_id": record.Agent.ID, "status": domain.AgentStatusOffline})
 		s.logger.Info("agent websocket disconnected", "request_id", requestIDFromContext(r.Context()), "agent_id", record.Agent.ID, "home_id", record.Home.ID)
 	}()
@@ -919,14 +922,20 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			agent.Status = domain.AgentStatusOnline
 			agent.LastSeenAt = &now
 			agent.UpdatedAt = now
-			if payload.HomeName != "" {
+			agentType := strings.TrimSpace(payload.AgentType)
+			if agentType == "" {
+				agentType = AgentTypePrimary
+			}
+			agent.AgentType = agentType
+			registeredPrimary = agentType == AgentTypePrimary
+			if payload.HomeName != "" && registeredPrimary {
 				record.Home.Name = payload.HomeName
 			}
 			if err := s.store.UpsertAgent(ctx, agent); err != nil {
 				s.logger.Error("failed to mark agent online", "agent_id", agent.ID, "error", err)
 				return
 			}
-			agentConnectionID = s.router.RegisterAgent(record.Home.ID, agent, peer, nil)
+			agentConnectionID = s.router.RegisterAgent(record.Home.ID, agent, peer, nil, agentType, payload.Metadata)
 			_ = s.store.MarkAgentConnection(ctx, agentConnectionID, s.runtimeID, record.Home.ID, agent.ID, nil, true)
 			s.metrics.SetOnlineAgents(s.router.AgentCount())
 			s.emitHomeStatus(ctx, record.Home.ID, map[string]any{"home_id": record.Home.ID, "agent_id": agent.ID, "status": domain.AgentStatusOnline})
@@ -953,7 +962,8 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			now := time.Now().UTC()
 			_ = s.store.SetAgentStatus(ctx, record.Agent.ID, domain.AgentStatusOnline, &now)
-			s.router.UpdateAgentCapabilities(record.Home.ID, payload.Capabilities)
+			s.router.UpdateAgentCapabilities(record.Home.ID, record.Agent.ID, payload.Capabilities)
+			s.router.UpdateAgentMetrics(record.Home.ID, record.Agent.ID, payload.Metrics)
 			if agentConnectionID != "" {
 				_ = s.store.HeartbeatAgentConnection(ctx, agentConnectionID, payload.Capabilities)
 			}
@@ -1133,7 +1143,7 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		agentConn, ok := s.router.GetAgent(home.ID)
+		agentConn, ok := s.router.ResolveAgent(home.ID, strings.TrimSpace(envelope.AgentID))
 		if !ok {
 			s.metrics.IncRouteFailure("agent_offline")
 			s.failFileJob(context.Background(), fileJobID, "failed", "target home agent is offline")
@@ -1255,6 +1265,7 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 		SourceID string `json:"source_id"`
 		Path     string `json:"path"`
 		Size     int64  `json:"size,omitempty"`
+		AgentID  string `json:"agent_id,omitempty"`
 	}
 
 	var body request
@@ -1296,7 +1307,7 @@ func (s *Server) handleFileTransferSetup(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	agentConn, ok := s.router.GetAgent(home.ID)
+	agentConn, ok := s.router.ResolveAgent(home.ID, strings.TrimSpace(body.AgentID))
 	if !ok {
 		metadata := auditPathMetadata(body.SourceID, body.Path)
 		metadata["operation"] = operation
@@ -1380,6 +1391,7 @@ func (r filePreviewRange) Length() int64 {
 func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
 	sourceID := strings.TrimSpace(r.URL.Query().Get("source_id"))
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	targetAgentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
 	if path == "" {
 		http.Error(w, "path is required", http.StatusBadRequest)
 		return
@@ -1399,7 +1411,7 @@ func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	agentConn, ok := s.router.GetAgent(home.ID)
+	agentConn, ok := s.router.ResolveAgent(home.ID, targetAgentID)
 	if !ok {
 		http.Error(w, "target home agent is offline", http.StatusBadGateway)
 		return
@@ -1677,7 +1689,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		s.persistTransferStatus(r.Context(), transfer, "active")
 		defer s.transfers.EndAttempt(attempt.ID)
 
-		agentConn, ok := s.router.GetAgent(transfer.HomeID)
+		agentConn, ok := s.router.ResolveAgent(transfer.HomeID, transfer.AgentID)
 		if !ok {
 			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_offline", auditSeverityWarning)
 			http.Error(w, "target home agent is offline", http.StatusBadGateway)
@@ -1809,7 +1821,7 @@ func (s *Server) handleFileTransfer(w http.ResponseWriter, r *http.Request) {
 		s.persistTransferStatus(r.Context(), transfer, "active")
 		defer s.transfers.EndAttempt(attempt.ID)
 
-		agentConn, ok := s.router.GetAgent(transfer.HomeID)
+		agentConn, ok := s.router.ResolveAgent(transfer.HomeID, transfer.AgentID)
 		if !ok {
 			s.auditFileTransfer(r.Context(), "file_transfer.failed", transfer, "agent_offline", auditSeverityWarning)
 			http.Error(w, "target home agent is offline", http.StatusBadGateway)

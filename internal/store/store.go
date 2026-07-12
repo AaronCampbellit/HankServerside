@@ -450,18 +450,20 @@ func (s *Store) RenameSingletonHome(ctx context.Context, homeID string, name str
 func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 	_, err := s.exec(
 		ctx,
-		`INSERT INTO agents (id, home_id, name, status, last_seen_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO agents (id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		 home_id = excluded.home_id,
 		 name = excluded.name,
 		 status = excluded.status,
+		 agent_type = excluded.agent_type,
 		 last_seen_at = excluded.last_seen_at,
 		 updated_at = excluded.updated_at`,
 		agent.ID,
 		agent.HomeID,
 		agent.Name,
 		agent.Status,
+		agent.AgentType,
 		agent.LastSeenAt,
 		agent.CreatedAt,
 		agent.UpdatedAt,
@@ -470,13 +472,32 @@ func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 }
 
 func (s *Store) GetAgentByID(ctx context.Context, agentID string) (domain.Agent, error) {
-	row := s.queryRow(ctx, `SELECT id, home_id, name, status, last_seen_at, created_at, updated_at FROM agents WHERE id = ?`, agentID)
+	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at FROM agents WHERE id = ?`, agentID)
 	return scanAgent(row)
 }
 
 func (s *Store) GetAgentByHomeID(ctx context.Context, homeID string) (domain.Agent, error) {
-	row := s.queryRow(ctx, `SELECT id, home_id, name, status, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ? ORDER BY created_at ASC LIMIT 1`, homeID)
+	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ?
+		 ORDER BY CASE WHEN agent_type = '' OR agent_type = 'primary' THEN 0 ELSE 1 END, created_at ASC LIMIT 1`, homeID)
 	return scanAgent(row)
+}
+
+func (s *Store) ListAgentsByHome(ctx context.Context, homeID string) ([]domain.Agent, error) {
+	rows, err := s.query(ctx, `SELECT id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ?
+		 ORDER BY CASE WHEN agent_type = '' OR agent_type = 'primary' THEN 0 ELSE 1 END, created_at ASC`, homeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	agents := make([]domain.Agent, 0)
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, agent)
+	}
+	return agents, rows.Err()
 }
 
 func (s *Store) SetAgentStatus(ctx context.Context, agentID string, status string, lastSeenAt *time.Time) error {
@@ -687,7 +708,7 @@ func scanHome(scanner interface{ Scan(dest ...any) error }) (domain.Home, error)
 func scanAgent(scanner interface{ Scan(dest ...any) error }) (domain.Agent, error) {
 	var agent domain.Agent
 	var lastSeen sql.NullTime
-	err := scanner.Scan(&agent.ID, &agent.HomeID, &agent.Name, &agent.Status, &lastSeen, &agent.CreatedAt, &agent.UpdatedAt)
+	err := scanner.Scan(&agent.ID, &agent.HomeID, &agent.Name, &agent.Status, &agent.AgentType, &lastSeen, &agent.CreatedAt, &agent.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Agent{}, ErrNotFound
 	}

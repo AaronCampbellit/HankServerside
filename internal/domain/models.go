@@ -87,6 +87,7 @@ type Agent struct {
 	HomeID     string     `json:"home_id"`
 	Name       string     `json:"name"`
 	Status     string     `json:"status"`
+	AgentType  string     `json:"agent_type,omitempty"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
