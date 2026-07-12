@@ -7,9 +7,10 @@ signed-in user's Hank notes over an authenticated remote connection.
 It is **off by default** and gated by `HANK_REMOTE_MCP_ENABLED`. When disabled, all of the routes
 below return 404 and nothing else changes.
 
-Scope is deliberately narrow: **project docs + a read-only source snapshot (read)** and
-**profile notes (read/write/delete)**. Home Assistant, SMB/files, calendars, the secret vault,
-and shared/home notes are **not** exposed.
+Scope is deliberately narrow: **project docs + a read-only source snapshot**, optional
+**live read-only project context sources**, and **profile notes (read/write/delete)**. Home
+Assistant, general SMB/file operations, calendars, the secret vault, and shared/home notes are
+**not** exposed.
 
 The `code-reference/` source snapshot is a build-time copy of the Go source (`cmd/`, `internal/`,
 `go.mod`) shipped in the image by `Dockerfile.server` — it is **not** the running process's source,
@@ -60,10 +61,31 @@ docs tools.
 | `create_note`, `update_note` | `notes:write` |
 | `append_note` | `notes:append` or `notes:write` |
 | `delete_note` | `notes:delete` |
+| `list_context_sources`, `list_context_files`, `search_context`, `read_context_file` | `docs:read` |
 
 The user picks which scopes to grant on the consent screen; `notes:delete` is unchecked by
 default. Note access is always scoped to the **authenticated user's own profile notes** and is
 audited (`mcp.tool_called`, `mcp_oauth.*`).
+
+### Note and notebook exclusions
+
+The lock icon in Hank Notes marks a note or notebook as excluded from MCP. This is an AI privacy
+marker, not encryption or a user-facing security lock. An excluded notebook also excludes every
+note currently inside it. Moving an otherwise unlocked note out makes it visible to MCP again.
+MCP list, search, tag, fetch, append, update, and delete operations treat excluded records as
+nonexistent; normal Hank Notes and HankAI continue to see them.
+
+### Live project context sources
+
+Settings > AI & MCP > MCP Context Sources grants MCP read-only access to a project folder on an
+existing File Server share. Choose a display name, share, and share-relative folder, then use
+**Test** to verify live access. The source is temporarily unavailable while the agent or share is
+offline.
+
+The home agent rejects traversal, hidden and dependency/build trees, `.env*`, binaries,
+oversized files, and symlink escapes. MCP receives source-relative paths and has no context write,
+rename, upload, or delete tool. Search returns at most 50 matches and is bounded to 10,000 files
+and 20 MB of inspected text; individual reads are limited to 400 KB.
 
 ## Connecting a client
 

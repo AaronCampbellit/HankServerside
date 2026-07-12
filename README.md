@@ -308,6 +308,11 @@ Hank Remote can expose an authenticated [MCP](https://modelcontextprotocol.io) e
 `POST /v1/mcp`; only docs (read) and profile notes (read/write/delete) are exposed. See
 [docs/mcp.md](docs/mcp.md) for routes, scopes, and connecting a client.
 
+The dashboard can also configure live, read-only MCP Context Sources from existing File Server
+shares. The home agent performs bounded project file listing, text search, and reads without
+giving MCP general file-management access. Notes and notebooks can be marked with a lock icon to
+exclude them and their notebook children from MCP.
+
 ## Development Commands
 
 ```bash

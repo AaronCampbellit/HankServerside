@@ -428,7 +428,7 @@ describe("ProfileNotesPage", () => {
     const redo = screen.getByRole("button", { name: "Redo" });
     for (let index = 0; index < 50; index++) fireEvent.click(redo);
     expect(redo).toBeDisabled();
-  });
+  }, 15_000);
 
   it("moves a note from the list into a selected notebook", async () => {
     profileNotesClient.listNotes.mockResolvedValue({

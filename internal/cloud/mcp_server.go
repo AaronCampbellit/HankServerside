@@ -219,6 +219,70 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		return nil
 	}
 	switch name {
+	case "list_context_sources":
+		sources, err := s.store.ListMCPContextSourcesByUser(ctx, userID, true)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(map[string]any{"sources": sources})
+	case "list_context_files":
+		var a struct {
+			SourceID string `json:"source_id"`
+			Path     string `json:"path"`
+		}
+		_ = json.Unmarshal(rawArgs, &a)
+		source, err := s.mcpContextSourceForTool(ctx, userID, a.SourceID)
+		if err != nil {
+			return "", err
+		}
+		response, err := s.callMCPContextAgent(ctx, source, protocol.CommandMCPContextList, protocol.MCPContextListRequest{SourceID: source.FileSourceID, RootPath: source.RootPath, Path: a.Path})
+		if err != nil {
+			return "", err
+		}
+		payload, err := protocol.DecodePayload[protocol.MCPContextListResponse](response)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(payload)
+	case "search_context":
+		var a struct {
+			SourceID string `json:"source_id"`
+			Query    string `json:"query"`
+			Limit    int    `json:"limit"`
+		}
+		_ = json.Unmarshal(rawArgs, &a)
+		source, err := s.mcpContextSourceForTool(ctx, userID, a.SourceID)
+		if err != nil {
+			return "", err
+		}
+		response, err := s.callMCPContextAgent(ctx, source, protocol.CommandMCPContextSearch, protocol.MCPContextSearchRequest{SourceID: source.FileSourceID, RootPath: source.RootPath, Query: a.Query, Limit: a.Limit})
+		if err != nil {
+			return "", err
+		}
+		payload, err := protocol.DecodePayload[protocol.MCPContextSearchResponse](response)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(payload)
+	case "read_context_file":
+		var a struct {
+			SourceID string `json:"source_id"`
+			Path     string `json:"path"`
+		}
+		_ = json.Unmarshal(rawArgs, &a)
+		source, err := s.mcpContextSourceForTool(ctx, userID, a.SourceID)
+		if err != nil {
+			return "", err
+		}
+		response, err := s.callMCPContextAgent(ctx, source, protocol.CommandMCPContextRead, protocol.MCPContextReadRequest{SourceID: source.FileSourceID, RootPath: source.RootPath, Path: a.Path})
+		if err != nil {
+			return "", err
+		}
+		payload, err := protocol.DecodePayload[protocol.MCPContextReadResponse](response)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(payload)
 	case "list_docs":
 		paths := s.mcpDocs.listPaths()
 		if len(paths) == 0 {

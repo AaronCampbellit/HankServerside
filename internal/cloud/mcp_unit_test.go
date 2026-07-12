@@ -125,10 +125,10 @@ func TestMCPDocsIndex(t *testing.T) {
 
 func TestMCPToolListAndLookup(t *testing.T) {
 	defs := mcpToolDefs()
-	if len(defs) != 11 {
-		t.Fatalf("expected 11 tools, got %d", len(defs))
+	if len(defs) != 15 {
+		t.Fatalf("expected 15 tools, got %d", len(defs))
 	}
-	for _, name := range []string{"list_docs", "search_docs", "read_doc", "create_note", "delete_note", "append_note"} {
+	for _, name := range []string{"list_docs", "search_docs", "read_doc", "create_note", "delete_note", "append_note", "list_context_sources", "list_context_files", "search_context", "read_context_file"} {
 		if _, ok := mcpToolByName(name); !ok {
 			t.Fatalf("tool %q not found", name)
 		}

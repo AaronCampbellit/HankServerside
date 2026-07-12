@@ -160,6 +160,7 @@ Fields:
 - `page_type`: `text`, `kanban`, or `notebook`; append is only supported for `text`.
 - `board`: kanban board payload when `page_type` is `kanban`.
 - `parent_id` and `sort_order`: optional hierarchy and ordering metadata. To place a note in a notebook, set `parent_id` to a note whose `page_type` is `notebook`. Send an empty `parent_id` to move it back out.
+- `mcp_excluded`: optional MCP privacy marker. Omission on update preserves the existing value for older clients. MCP excludes marked notes and every child of a marked notebook; normal Notes APIs are unchanged.
 
 Successful saves return:
 

@@ -16,6 +16,7 @@ import (
 	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
+	agentmcpcontext "github.com/dropfile/hankremote/internal/agent/mcpcontext"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -69,6 +70,7 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 		dispatcher: commandDispatcher{
 			ha:     ha,
 			files:  files,
+			mcpctx: agentmcpcontext.New(files),
 			notes:  notes,
 			apps:   apps,
 			config: newConfigManager(configPath, ha, files),
@@ -354,6 +356,10 @@ func (c *Client) capabilities() []string {
 	}
 	if c.dispatcher.files.Enabled() {
 		capabilities = append(capabilities,
+			protocol.CommandMCPContextList,
+			protocol.CommandMCPContextSearch,
+			protocol.CommandMCPContextRead,
+			protocol.CommandMCPContextTest,
 			"files.list",
 			"files.stat",
 			"files.search",

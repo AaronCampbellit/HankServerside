@@ -101,7 +101,11 @@ export type MCPStatus = {
     created_at?: string;
     last_used_at?: string;
   }>;
+  context_sources?: MCPContextSource[];
 };
+
+export type MCPContextSource = { id: string; home_id?: string; name: string; file_source_id: string; root_path: string; enabled: boolean; last_tested_at?: string; last_test_error?: string; created_at?: string; updated_at?: string };
+export type MCPContextSourceInput = Pick<MCPContextSource, "name" | "file_source_id" | "root_path" | "enabled">;
 
 export type AssistantSettingsView = {
   openAI: OpenAIStatus;
@@ -151,6 +155,7 @@ export class AssistantClient {
         ...mcp,
         scopes_supported: arrayFrom<string>(mcp.scopes_supported),
         connections: arrayFrom(mcp.connections),
+        context_sources: arrayFrom(mcp.context_sources),
       },
     };
   }
@@ -171,6 +176,11 @@ export class AssistantClient {
       method: "DELETE",
     });
   }
+
+  createMCPContextSource(input: MCPContextSourceInput) { return this.api.request<MCPContextSource>("/v1/me/mcp/context-sources", { method: "POST", body: input }); }
+  updateMCPContextSource(id: string, input: MCPContextSourceInput) { return this.api.request<MCPContextSource>(`/v1/me/mcp/context-sources/${encodeURIComponent(id)}`, { method: "PUT", body: input }); }
+  testMCPContextSource(id: string) { return this.api.request<{ ok: boolean; source?: MCPContextSource }>(`/v1/me/mcp/context-sources/${encodeURIComponent(id)}/test`, { method: "POST", body: {} }); }
+  deleteMCPContextSource(id: string) { return this.api.request<{ ok: boolean }>(`/v1/me/mcp/context-sources/${encodeURIComponent(id)}`, { method: "DELETE" }); }
 }
 
 export const assistantClient = new AssistantClient();

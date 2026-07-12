@@ -1189,6 +1189,9 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) timeoutForCommand(command string) time.Duration {
+	if strings.HasPrefix(command, "mcp.context.") {
+		return 20 * time.Second
+	}
 	if command == "files.move" {
 		timeout := s.requestTimeout * 15
 		if timeout < 30*time.Minute {

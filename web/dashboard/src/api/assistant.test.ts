@@ -61,4 +61,18 @@ describe("AssistantClient", () => {
     expect(request).toHaveBeenCalledWith("/v1/oauth/openai/start", { method: "POST", body: {} });
     expect(request).toHaveBeenCalledWith("/v1/me/mcp/connections/conn_1", { method: "DELETE" });
   });
+
+  it("manages MCP context sources", async () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const client = new AssistantClient(testTransport(request));
+    const input = { name: "MiniHank", file_source_id: "projects", root_path: "Projects/MiniHank", enabled: true };
+    await client.createMCPContextSource(input);
+    await client.updateMCPContextSource("ctx_1", { ...input, enabled: false });
+    await client.testMCPContextSource("ctx_1");
+    await client.deleteMCPContextSource("ctx_1");
+    expect(request).toHaveBeenNthCalledWith(1, "/v1/me/mcp/context-sources", { method: "POST", body: input });
+    expect(request).toHaveBeenNthCalledWith(2, "/v1/me/mcp/context-sources/ctx_1", { method: "PUT", body: { ...input, enabled: false } });
+    expect(request).toHaveBeenNthCalledWith(3, "/v1/me/mcp/context-sources/ctx_1/test", { method: "POST", body: {} });
+    expect(request).toHaveBeenNthCalledWith(4, "/v1/me/mcp/context-sources/ctx_1", { method: "DELETE" });
+  });
 });

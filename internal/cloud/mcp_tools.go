@@ -30,6 +30,10 @@ func mcpInt(desc string) map[string]any {
 
 func mcpToolDefs() []mcpToolDef {
 	return []mcpToolDef{
+		{Name: "list_context_sources", Description: "List live read-only project context sources enabled for this Hank account.", InputSchema: mcpObjectSchema(map[string]any{}), Scopes: []string{domain.MCPScopeDocsRead}},
+		{Name: "list_context_files", Description: "List files and folders inside an approved live project context source.", InputSchema: mcpObjectSchema(map[string]any{"source_id": mcpStr("Context source id."), "path": mcpStr("Optional source-relative directory path.")}, "source_id"), Scopes: []string{domain.MCPScopeDocsRead}},
+		{Name: "search_context", Description: "Search filenames and approved text content in one live project context source.", InputSchema: mcpObjectSchema(map[string]any{"source_id": mcpStr("Context source id."), "query": mcpStr("Search text."), "limit": mcpInt("Maximum results, up to 50.")}, "source_id", "query"), Scopes: []string{domain.MCPScopeDocsRead}},
+		{Name: "read_context_file", Description: "Read one approved text file from a live project context source.", InputSchema: mcpObjectSchema(map[string]any{"source_id": mcpStr("Context source id."), "path": mcpStr("Source-relative file path.")}, "source_id", "path"), Scopes: []string{domain.MCPScopeDocsRead}},
 		{
 			Name:        "list_docs",
 			Description: "List the HankServerside project documents exposed to this server (README, AGENTS.md, SERVER_SYNC.md, docs/, schemas/, and a code-reference/ source snapshot). Returns relative paths to use with read_doc.",

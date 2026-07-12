@@ -4,10 +4,12 @@ import {
   type AssistantSettings as AssistantSettingsForm,
   type AssistantSettingsPayload,
   type AssistantSettingsView,
+  type MCPContextSourceInput,
   type PromptProfile,
   type ProviderOption,
 } from "../api/assistant";
 import { bootstrapClient, type BootstrapState } from "../api/bootstrap";
+import { connectionsClient } from "../api/connections";
 
 type State =
   | { status: "loading" }
@@ -85,12 +87,33 @@ function promptForProfile(profiles: PromptProfile[] | undefined, key: string): s
   return profiles?.find((profile) => profile.key === key)?.prompt || "";
 }
 
+type FileSourceOption = { id: string; label: string };
+function mcpFileSources(publicConfigJSON?: string): FileSourceOption[] {
+  try {
+    const config = JSON.parse(publicConfigJSON || "{}") as Record<string, unknown>;
+    const rows = [config.shares, config.sources, config.file_sources].flatMap((value) => Array.isArray(value) ? value : []);
+    return rows.flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const row = value as Record<string, unknown>;
+      const id = firstString(row.id, row.source_id, row.key, row.share, row.name);
+      return id ? [{ id, label: firstString(row.label, row.name, row.share, id) }] : [];
+    });
+  } catch { return []; }
+}
+
+const emptyContextSource: MCPContextSourceInput = { name: "", file_source_id: "", root_path: "", enabled: true };
+
 export function AssistantSettings() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [contextDraft, setContextDraft] = useState<MCPContextSourceInput>(emptyContextSource);
+  const [editingContextID, setEditingContextID] = useState("");
+  const [fileSources, setFileSources] = useState<FileSourceOption[]>([]);
 
   async function load(message = "") {
     try {
-      const [bootstrap, view] = await Promise.all([bootstrapClient.load(), assistantClient.loadSettings()]);
+      const [bootstrap, view, profiles] = await Promise.all([bootstrapClient.load(), assistantClient.loadSettings(), connectionsClient.listProfiles().catch(() => ({ profiles: [] }))]);
+      const smb = profiles.profiles.find((profile) => profile.service_type === "smb");
+      setFileSources(mcpFileSources(smb?.public_config_json));
       setState({ status: "ready", bootstrap, view, form: normalizeForm(view.settings), message });
     } catch (error) {
       setState({ status: "error", message: errorMessage(error) });
@@ -149,6 +172,7 @@ export function AssistantSettings() {
   const label = accountLabel(openAI);
   const enabledSources = readyState.view.settings.sources?.filter((source) => source.enabled) || [];
   const mcpConnections = readyState.view.mcp.connections || [];
+  const mcpContextSources = readyState.view.mcp.context_sources || [];
 
   function setForm(next: Partial<AssistantSettingsForm>) {
     setState((current) => current.status === "ready" ? { ...current, form: { ...current.form, ...next } } : current);
@@ -184,6 +208,19 @@ export function AssistantSettings() {
       setState((current) => current.status === "ready" ? { ...current, message: errorMessage(error) } : current);
     }
   }
+
+  async function saveContextSource(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      if (editingContextID) await assistantClient.updateMCPContextSource(editingContextID, contextDraft);
+      else await assistantClient.createMCPContextSource(contextDraft);
+      setContextDraft(emptyContextSource); setEditingContextID(""); await load("MCP context source saved.");
+    } catch (error) { setState((current) => current.status === "ready" ? { ...current, message: errorMessage(error) } : current); }
+  }
+
+  async function testContextSource(id: string) { try { await assistantClient.testMCPContextSource(id); await load("Live context source test passed."); } catch (error) { await load(errorMessage(error)); } }
+  async function toggleContextSource(id: string) { const source = mcpContextSources.find((item) => item.id === id); if (!source) return; await assistantClient.updateMCPContextSource(id, { name: source.name, file_source_id: source.file_source_id, root_path: source.root_path, enabled: !source.enabled }); await load(source.enabled ? "MCP context source disabled." : "MCP context source enabled."); }
+  async function removeContextSource(id: string) { await assistantClient.deleteMCPContextSource(id); await load("MCP context source removed."); }
 
   function resetPrompt() {
     const profile = readyState.form.prompt_profile === "local" ? "local" : "chatgpt";
@@ -373,6 +410,20 @@ export function AssistantSettings() {
               </button>
             </article>
           )) : <p className="empty-state">No AI apps are connected yet.</p>}
+        </div>
+        <div className="panel-heading mcp-context-heading"><h3>MCP Context Sources</h3><span className="status-pill">Live agent reads</span></div>
+        <p className="meta-line">Choose read-only project folders from an existing File Server share. Sources are available only while the home agent and share are online.</p>
+        <form className="settings-form mcp-context-form" onSubmit={saveContextSource}>
+          <label><span>Project name</span><input aria-label="Project name" disabled={!canManage} value={contextDraft.name} onChange={(event) => setContextDraft({ ...contextDraft, name: event.target.value })} /></label>
+          <label><span>File Server share</span><select aria-label="File Server share" disabled={!canManage || !fileSources.length} value={contextDraft.file_source_id} onChange={(event) => setContextDraft({ ...contextDraft, file_source_id: event.target.value })}><option value="">Select a share</option>{fileSources.map((source) => <option key={source.id} value={source.id}>{source.label}</option>)}</select></label>
+          <label><span>Project folder path</span><input aria-label="Project folder path" disabled={!canManage} placeholder="Projects/MiniHank" value={contextDraft.root_path} onChange={(event) => setContextDraft({ ...contextDraft, root_path: event.target.value })} /></label>
+          <label className="checkbox-field"><input checked={contextDraft.enabled} disabled={!canManage} type="checkbox" onChange={(event) => setContextDraft({ ...contextDraft, enabled: event.target.checked })} /><span>Enabled for MCP</span></label>
+          <div className="button-row"><button disabled={!canManage || !contextDraft.name || !contextDraft.file_source_id || !contextDraft.root_path} type="submit">{editingContextID ? "Save source" : "Add source"}</button>{editingContextID ? <button className="secondary" type="button" onClick={() => { setEditingContextID(""); setContextDraft(emptyContextSource); }}>Cancel</button> : null}</div>
+        </form>
+        {!fileSources.length ? <p className="empty-state">Configure a File Server share before adding MCP context.</p> : null}
+        <div className="card-list mcp-context-list">
+          {mcpContextSources.map((source) => <article className="dashboard-tile" key={source.id}><span>{source.enabled ? "Enabled" : "Disabled"}</span><strong>{source.name}</strong><small>{source.file_source_id}:/{source.root_path}</small><small>{source.last_test_error ? source.last_test_error : source.last_tested_at ? `Tested ${formatDate(source.last_tested_at)}` : "Not tested yet"}</small><div className="button-row"><button className="secondary" disabled={!canManage} type="button" onClick={() => { setEditingContextID(source.id); setContextDraft({ name: source.name, file_source_id: source.file_source_id, root_path: source.root_path, enabled: source.enabled }); }}>Edit</button><button className="secondary" disabled={!canManage} type="button" onClick={() => void testContextSource(source.id)}>Test</button><button className="secondary" disabled={!canManage} type="button" onClick={() => void toggleContextSource(source.id)}>{source.enabled ? "Disable" : "Enable"}</button><button className="danger-link" disabled={!canManage} type="button" onClick={() => void removeContextSource(source.id)}>Remove</button></div></article>)}
+          {!mcpContextSources.length ? <p className="empty-state">No MCP context sources configured.</p> : null}
         </div>
       </section>
     </section>

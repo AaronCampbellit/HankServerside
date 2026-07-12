@@ -11,6 +11,7 @@ import (
 	agentapps "github.com/dropfile/hankremote/internal/agent/apps"
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
 	agentha "github.com/dropfile/hankremote/internal/agent/homeassistant"
+	agentmcpcontext "github.com/dropfile/hankremote/internal/agent/mcpcontext"
 	agentnotes "github.com/dropfile/hankremote/internal/agent/notes"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
@@ -18,6 +19,7 @@ import (
 type commandDispatcher struct {
 	ha     *agentha.Client
 	files  *agentfiles.Service
+	mcpctx *agentmcpcontext.Service
 	notes  *agentnotes.Service
 	apps   *agentapps.Manager
 	config *configManager
@@ -84,6 +86,47 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 			return nil, mapError(err)
 		}
 		return protocol.FilesListResponse{Items: items}, nil
+
+	case protocol.CommandMCPContextList:
+		request, err := decodeBody[protocol.MCPContextListRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_mcp_context_request", err)
+		}
+		response, err := d.mcpctx.List(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+	case protocol.CommandMCPContextSearch:
+		request, err := decodeBody[protocol.MCPContextSearchRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_mcp_context_request", err)
+		}
+		response, err := d.mcpctx.Search(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+	case protocol.CommandMCPContextRead:
+		request, err := decodeBody[protocol.MCPContextReadRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_mcp_context_request", err)
+		}
+		response, err := d.mcpctx.Read(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+	case protocol.CommandMCPContextTest:
+		request, err := decodeBody[protocol.MCPContextTestRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_mcp_context_request", err)
+		}
+		response, err := d.mcpctx.Test(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
 
 	case "files.stat":
 		request, err := decodeBody[protocol.FilesStatRequest](command.Body)

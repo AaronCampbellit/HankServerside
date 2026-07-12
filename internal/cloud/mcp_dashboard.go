@@ -25,6 +25,10 @@ func (s *Server) handleProfileMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/me/mcp"), "/")
+	if rest == "context-sources" || strings.HasPrefix(rest, "context-sources/") {
+		s.handleMCPContextSources(w, r, auth, rest)
+		return
+	}
 
 	if strings.HasPrefix(rest, "connections/") && r.Method == http.MethodDelete {
 		tokenID := strings.TrimSpace(strings.TrimPrefix(rest, "connections/"))
@@ -51,6 +55,11 @@ func (s *Server) handleProfileMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tokens, err := s.store.ListMCPTokensByUser(r.Context(), auth.User.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	contextSources, err := s.store.ListMCPContextSourcesByUser(r.Context(), auth.User.ID, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -86,5 +95,6 @@ func (s *Server) handleProfileMCP(w http.ResponseWriter, r *http.Request) {
 		"resource_url":     s.mcpResourceURL(r),
 		"scopes_supported": mcpSupportedScopes,
 		"connections":      connections,
+		"context_sources":  contextSources,
 	})
 }
