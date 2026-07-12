@@ -225,6 +225,55 @@ routes to the primary, so existing agents and clients are unaffected.
 - Older servers reject nothing new — workers simply displace the primary on
   old servers, so worker agents must not enroll until this ships.
 
+## [Agent RMM Commands, Health Alerts, Device Status]
+
+- Status: in_progress
+- Date Opened: 2026-07-12
+- Owner: shared
+- Related Ticket/PR: feature/multi-agent-routing
+
+### Summary
+
+Worker agents expose RMM-style management tools (device actions, wake-on-LAN,
+opt-in remote shell). The cloud admin-gates and audits these, monitors agent
+health, and the assistant reports all devices.
+
+### Contract Update
+
+- App relay gating (in addition to existing files./hermes. checks):
+  - `host.*`, `shell.*`, `wol.*` commands are admin-only; non-admins get
+    `permission_denied` and an `agent.command.denied` audit event.
+  - `shell.exec` writes an `agent.shell.requested` audit event on every call
+    with a hashed command body. The target agent must also have shell enabled
+    locally (owner opt-in) or it returns `shell_disabled`.
+- Agent commands (relayed to a worker via envelope `agent_id`):
+  - `host.status` → `{hostname, platform, os_version, metrics}`
+  - `host.lock` → `{ok}`
+  - `wol.send` `{mac, broadcast?}` → `{ok, mac}`
+  - `shell.exec` `{command, timeout_seconds?}` → `{exit_code, stdout, stderr, truncated}`
+  - Heartbeat `metrics` may include `battery_percent` and `battery_charging`.
+- New realtime topic `agents.health` (member-visible, home-scoped). Events:
+  - `agent.offline` — a previously-online agent disconnected.
+  - `agent.disk_low` — a worker reported <10% free disk.
+  - Payload: `{home_id, agent_id, kind, severity, summary, time, details?}`.
+  - Emitted by a 30s server monitor, edge-triggered per agent.
+- Assistant `agent.status` intent now lists every registered agent (primary +
+  workers) with online state, capability count, and last-seen for offline ones.
+
+### Hank Changes
+
+- Clients may surface `agents.health` alerts and invoke RMM commands against a
+  worker's `agent_id` (admin sessions only).
+
+### Rollout Order
+
+- server first, then worker agents advertise host.lock/wol.send/shell.exec.
+
+### Compatibility Notes
+
+- Additive. Commands are relayed opaquely; only the new gating/audit and the
+  health monitor are new server behavior. Non-admin clients are unaffected.
+
 ## Status Labels
 
 - `planned`

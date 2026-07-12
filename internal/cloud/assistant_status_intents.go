@@ -49,30 +49,49 @@ func executeAssistantAssistantStatusTool(ctx context.Context, server *Server, ru
 }
 
 func executeAssistantAgentStatusTool(ctx context.Context, server *Server, runtime assistantToolRuntime, intent assistantIntent) (assistantMessageContent, error) {
-	agent, err := server.store.GetAgentByHomeID(ctx, runtime.Home.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		return assistantMessageContent{Text: "No home agent is registered for this Home."}, nil
-	}
+	stored, err := server.store.ListAgentsByHome(ctx, runtime.Home.ID)
 	if err != nil {
 		return assistantMessageContent{}, err
 	}
+	if len(stored) == 0 {
+		return assistantMessageContent{Text: "No agents are registered for this Home."}, nil
+	}
 
-	status := agent.Status
-	capabilities := []string(nil)
+	// Overlay live connection state (status + capabilities) onto the stored
+	// roster so offline devices still appear with their last-seen time.
+	live := map[string]AgentSnapshot{}
 	if server.router != nil {
-		if online, ok := server.router.GetAgent(runtime.Home.ID); ok {
-			status = online.agent.Status
-			capabilities = append(capabilities, online.capabilities...)
+		for _, snapshot := range server.router.AgentsForHome(runtime.Home.ID) {
+			live[snapshot.AgentID] = snapshot
 		}
 	}
-	rows := []string{
-		"Home agent status:",
-		fmt.Sprintf("- Agent: %s", assistantStatusValue(agent.Name)),
-		fmt.Sprintf("- Status: %s", assistantStatusValue(status)),
-		fmt.Sprintf("- Last seen: %s", assistantStatusTime(agent.LastSeenAt)),
-	}
-	if len(capabilities) > 0 {
-		rows = append(rows, fmt.Sprintf("- Capabilities: %d advertised", len(capabilities)))
+
+	rows := []string{"Devices:"}
+	for _, agent := range stored {
+		kind := "worker"
+		if agent.AgentType == "" || agent.AgentType == AgentTypePrimary {
+			kind = "home agent"
+		}
+		status := agent.Status
+		capCount := 0
+		lastSeen := agent.LastSeenAt
+		if snapshot, ok := live[agent.ID]; ok {
+			status = domain.AgentStatusOnline
+			capCount = len(snapshot.Capabilities)
+			if snapshot.LastSeenAt != nil {
+				lastSeen = snapshot.LastSeenAt
+			}
+		}
+		name := assistantStatusValue(agent.Name)
+		if status == domain.AgentStatusOnline {
+			extra := ""
+			if capCount > 0 {
+				extra = fmt.Sprintf(", %d capabilities", capCount)
+			}
+			rows = append(rows, fmt.Sprintf("- %s (%s): online%s", name, kind, extra))
+		} else {
+			rows = append(rows, fmt.Sprintf("- %s (%s): offline, last seen %s", name, kind, assistantStatusTime(lastSeen)))
+		}
 	}
 	return assistantMessageContent{Text: strings.Join(rows, "\n")}, nil
 }
