@@ -22,6 +22,10 @@ const connectionsClient = vi.hoisted(() => ({
   listProfiles: vi.fn(),
 }));
 
+const agentsClient = vi.hoisted(() => ({
+  listAgents: vi.fn(),
+}));
+
 vi.mock("../api/fileServer", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/fileServer")>();
   return {
@@ -35,6 +39,14 @@ vi.mock("../api/connections", async (importOriginal) => {
   return {
     ...actual,
     connectionsClient,
+  };
+});
+
+vi.mock("../api/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/agents")>();
+  return {
+    ...actual,
+    agentsClient,
   };
 });
 
@@ -73,6 +85,7 @@ function renderPage() {
 
 describe("FileServerPage", () => {
   beforeEach(() => {
+    agentsClient.listAgents.mockResolvedValue([]);
     fileServerClient.listJobs.mockResolvedValue([]);
     fileServerClient.subscribeToJobs.mockResolvedValue({});
     fileServerClient.onJobsChanged.mockReturnValue(() => undefined);
@@ -130,7 +143,7 @@ describe("FileServerPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "File Server" })).toBeInTheDocument();
-    await waitFor(() => expect(fileServerClient.list).toHaveBeenCalledWith("/", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenCalledWith("/", "hankdemo", undefined));
     expect(screen.getByRole("button", { name: /Hankdemo/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled();
     expect(screen.queryByText("nas-attic")).not.toBeInTheDocument();
@@ -149,7 +162,7 @@ describe("FileServerPage", () => {
     expect(within(shareMenu).getAllByText("//192.168.86.137/Hankdemo2")).toHaveLength(1);
 
     fireEvent.click(within(shareMenu).getByRole("menuitem", { name: /Hankdemo2/i }));
-    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/", "hankdemo2"));
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/", "hankdemo2", undefined));
 
     const preview = screen.getByLabelText("File preview");
     expect(within(preview).getByText("sunset-beach.jpg")).toBeInTheDocument();
@@ -179,6 +192,76 @@ describe("FileServerPage", () => {
     expect(within(menu).getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
   });
 
+  it("shows primary host folders and routes worker shared folders to their owning agent", async () => {
+    connectionsClient.listProfiles.mockResolvedValue({
+      profiles: [{
+        home_id: "home-demo",
+        service_type: "smb",
+        public_config_json: JSON.stringify({
+          sources: [
+            { id: "host-media", name: "Host Media", type: "local", root: "/srv/media", local_root_enabled: true },
+            { id: "hankdemo", name: "Hankdemo", type: "smb", smb_host: "nas.local", smb_share: "Hankdemo", smb_enabled: true },
+          ],
+        }),
+        secret_version: 1,
+        applied_version: 1,
+        status: "healthy",
+        updated_at: "2026-07-13T12:00:00Z",
+        updated_by: "admin",
+      }],
+    });
+    agentsClient.listAgents.mockResolvedValue([
+      { agent_id: "primary-1", name: "Home", status: "online", agent_type: "primary", capabilities: ["files.list"] },
+      { agent_id: "worker-1", name: "Studio Mac", status: "online", agent_type: "worker", capabilities: ["files.read", "files.write"] },
+    ]);
+    fileServerClient.list.mockImplementation(async (_path: string, sourceID?: string, agentID?: string) => agentID === "worker-1"
+      ? { path: "/", items: [{ path: "/shared-photo.jpg", name: "shared-photo.jpg", size: 42 }] }
+      : { path: "/", items: [{ path: `/${sourceID || "default"}.txt`, name: `${sourceID || "default"}.txt`, size: 4 }] });
+    fileServerClient.setupDownload.mockResolvedValue({ url: "/v1/file-transfers/download-worker" });
+    fileServerClient.uploadFile.mockResolvedValue({ ok: true });
+
+    renderPage();
+
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenCalledWith("/", "host-media", undefined));
+    expect(screen.getByRole("button", { name: /Host Media/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Host Media/i }));
+    const targets = screen.getByRole("menu", { name: "File shares" });
+    expect(within(targets).getByRole("menuitem", { name: /Studio Mac/i })).toBeInTheDocument();
+    expect(within(targets).getByText("/srv/media")).toBeInTheDocument();
+
+    fireEvent.click(within(targets).getByRole("menuitem", { name: /Studio Mac/i }));
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/", undefined, "worker-1"));
+
+    const preview = await screen.findByLabelText("File preview");
+    expect(within(preview).getByRole("img", { name: "Preview shared-photo.jpg" })).toHaveAttribute(
+      "src",
+      "/v1/home/files/preview?agent_id=worker-1&path=%2Fshared-photo.jpg",
+    );
+    fireEvent.click(within(preview).getByRole("button", { name: "Download preview" }));
+    await waitFor(() => expect(fileServerClient.setupDownload).toHaveBeenCalledWith("/shared-photo.jpg", undefined, "worker-1"));
+
+    const file = new File(["worker upload"], "worker.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Choose files to upload"), { target: { files: [file] } });
+    await waitFor(() => expect(fileServerClient.uploadFile).toHaveBeenCalledWith(file, "/", undefined, "worker-1"));
+
+    fireEvent.click(within(preview).getByRole("button", { name: "Move preview" }));
+    expect(screen.queryByLabelText("Destination share")).not.toBeInTheDocument();
+  });
+
+  it("opens worker deep links on the targeted device", async () => {
+    window.history.pushState({}, "", "/dashboard/file-server?agent_id=worker-1&path=/Photos");
+    connectionsClient.listProfiles.mockResolvedValue({ profiles: [] });
+    agentsClient.listAgents.mockResolvedValue([
+      { agent_id: "worker-1", name: "Studio Mac", status: "online", agent_type: "worker", capabilities: ["files.read"] },
+    ]);
+    fileServerClient.list.mockResolvedValue({ path: "/Photos", items: [] });
+
+    renderPage();
+
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenCalledWith("/Photos", undefined, "worker-1"));
+    expect(screen.getByRole("button", { name: /Studio Mac/i })).toBeInTheDocument();
+  });
+
   it("keeps the file pane mounted while opening folders and hides the root sidebar row", async () => {
     mockDemoShares();
     let resolveFolder!: (value: { path: string; items: Array<{ path: string; name: string; is_directory?: boolean; size?: number }> }) => void;
@@ -205,7 +288,7 @@ describe("FileServerPage", () => {
     expect(screen.queryByRole("heading", { name: "Loading files" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "readme.txt" })).toBeInTheDocument();
     expect(screen.getByText("Opening /Media")).toBeInTheDocument();
-    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/Media", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/Media", "hankdemo", undefined));
 
     resolveFolder({
       path: "/Media",
@@ -230,7 +313,7 @@ describe("FileServerPage", () => {
 
     fireEvent.change(await screen.findByLabelText("Search files"), { target: { value: "needle" } });
 
-    await waitFor(() => expect(fileServerClient.search).toHaveBeenCalledWith("needle", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.search).toHaveBeenCalledWith("needle", "hankdemo", undefined));
     expect(await screen.findByRole("button", { name: "needle.pdf" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "readme.txt" })).not.toBeInTheDocument();
   });
@@ -327,8 +410,8 @@ describe("FileServerPage", () => {
     expect(await screen.findByRole("button", { name: "sunset-beach.jpg" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Choose files to upload"), { target: { files: [file] } });
 
-    await waitFor(() => expect(fileServerClient.uploadFile).toHaveBeenCalledWith(file, "/Media/Photos", "hankdemo"));
-    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/Media/Photos", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.uploadFile).toHaveBeenCalledWith(file, "/Media/Photos", "hankdemo", undefined));
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenLastCalledWith("/Media/Photos", "hankdemo", undefined));
     expect(await screen.findByText("Uploaded new-photo.jpg.")).toBeInTheDocument();
   });
 
@@ -349,16 +432,16 @@ describe("FileServerPage", () => {
 
     const preview = await screen.findByLabelText("File preview");
     fireEvent.click(within(preview).getByRole("button", { name: "Download preview" }));
-    await waitFor(() => expect(fileServerClient.setupDownload).toHaveBeenCalledWith("/Media/Photos/sunset-beach.jpg", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.setupDownload).toHaveBeenCalledWith("/Media/Photos/sunset-beach.jpg", "hankdemo", undefined));
 
     fireEvent.click(within(preview).getByRole("button", { name: "Rename preview" }));
     fireEvent.change(await screen.findByLabelText("File name"), { target: { value: "sunrise.jpg" } });
     fireEvent.click(screen.getByRole("button", { name: "Rename" }));
-    await waitFor(() => expect(fileServerClient.rename).toHaveBeenCalledWith("/Media/Photos/sunset-beach.jpg", "/Media/Photos/sunrise.jpg", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.rename).toHaveBeenCalledWith("/Media/Photos/sunset-beach.jpg", "/Media/Photos/sunrise.jpg", "hankdemo", undefined));
 
     fireEvent.click(within(preview).getByRole("button", { name: "Move preview" }));
     fireEvent.change(await screen.findByLabelText("Destination path"), { target: { value: "/Media/Archive" } });
     fireEvent.click(screen.getByRole("button", { name: "Move here" }));
-    await waitFor(() => expect(fileServerClient.move).toHaveBeenCalledWith("/Media/Photos/sunset-beach.jpg", "/Media/Archive/sunset-beach.jpg", false, "hankdemo", "hankdemo"));
+    await waitFor(() => expect(fileServerClient.move).toHaveBeenCalledWith("/Media/Photos/sunset-beach.jpg", "/Media/Archive/sunset-beach.jpg", false, "hankdemo", "hankdemo", undefined));
   });
 });

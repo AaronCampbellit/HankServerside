@@ -28,6 +28,28 @@ describe("FileServerClient", () => {
     expect(socket.sendCommand).toHaveBeenNthCalledWith(7, "files.delete", { path: "/old.txt", is_directory: false, source_id: "hankdemo" });
   });
 
+  it("targets worker agents for every file command", async () => {
+    const sendCommand = vi.fn(async (_command: string, _body?: unknown, _options?: { agentID?: string }) => ({ items: [] }));
+    const socket = {
+      sendCommand,
+      subscribe: vi.fn(),
+      onEvent: vi.fn(),
+    };
+    const client = new FileServerClient(socket as unknown as FileServerSocket);
+
+    await client.list("/", undefined, "worker-1");
+    await client.search("invoice", undefined, "worker-1");
+    await client.stat("/old.txt", undefined, "worker-1");
+    await client.createDirectory("/Photos", undefined, "worker-1");
+    await client.rename("/old.txt", "/archive/old.txt", undefined, "worker-1");
+    await client.move("/old.txt", "/archive/old.txt", false, undefined, undefined, "worker-1");
+    await client.deleteItem("/old.txt", false, undefined, "worker-1");
+
+    for (const call of sendCommand.mock.calls) {
+      expect(call[2]).toEqual({ agentID: "worker-1" });
+    }
+  });
+
   it("sets up browser downloads and binary uploads through the transfer routes", async () => {
     const socket = { sendCommand: vi.fn() };
     const requestCalls: Array<{ path: string; options?: Parameters<ApiTransport["request"]>[1] }> = [];
@@ -49,14 +71,14 @@ describe("FileServerClient", () => {
     const client = new FileServerClient(socket as unknown as FileServerSocket, transport);
     const file = new File(["hello"], "hello.txt", { type: "text/plain" });
 
-    const download = await client.setupDownload("/Media/hello.txt", "hankdemo");
-    await client.uploadFile(file, "/Media", "hankdemo");
+    const download = await client.setupDownload("/Media/hello.txt", "hankdemo", "worker-1");
+    await client.uploadFile(file, "/Media", "hankdemo", "worker-1");
 
     expect(requestCalls[0]).toEqual({
       path: "/v1/home/files/downloads",
       options: {
         method: "POST",
-        body: { path: "/Media/hello.txt", source_id: "hankdemo" },
+        body: { path: "/Media/hello.txt", source_id: "hankdemo", agent_id: "worker-1" },
       },
     });
     expect(download.url).toBe("/v1/file-transfers/download-1");
@@ -64,7 +86,7 @@ describe("FileServerClient", () => {
       path: "/v1/home/files/uploads",
       options: {
         method: "POST",
-        body: { path: "/Media/hello.txt", source_id: "hankdemo", size: 5 },
+        body: { path: "/Media/hello.txt", source_id: "hankdemo", agent_id: "worker-1", size: 5 },
       },
     });
     expect(fetchMock).toHaveBeenCalledWith("/v1/file-transfers/upload-1", expect.objectContaining({

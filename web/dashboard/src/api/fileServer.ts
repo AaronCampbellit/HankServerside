@@ -29,7 +29,7 @@ export type FileTransferSetup = {
 };
 
 export type FileServerSocket = {
-  sendCommand<T>(command: string, body?: unknown): Promise<T>;
+  sendCommand<T>(command: string, body?: unknown, options?: { agentID?: string }): Promise<T>;
   subscribe(topics: string[]): Promise<unknown>;
   onEvent(listener: (event: HankSocketEvent) => void): () => void;
 };
@@ -76,34 +76,34 @@ export class FileServerClient {
     private readonly transport: ApiTransport = apiClient,
   ) {}
 
-  async list(path: string, sourceID?: string): Promise<FileListResponse> {
-    return normalizeFileList(await this.socket.sendCommand<FileListResponse>("files.list", withSourceID({ path: normalizePath(path) }, sourceID)));
+  async list(path: string, sourceID?: string, agentID?: string): Promise<FileListResponse> {
+    return normalizeFileList(await this.sendFileCommand<FileListResponse>("files.list", withSourceID({ path: normalizePath(path) }, sourceID), agentID));
   }
 
-  async search(query: string, sourceID?: string): Promise<FileListResponse> {
-    return normalizeFileList(await this.socket.sendCommand<FileListResponse>("files.search", withSourceID({ query, limit: 100 }, sourceID)));
+  async search(query: string, sourceID?: string, agentID?: string): Promise<FileListResponse> {
+    return normalizeFileList(await this.sendFileCommand<FileListResponse>("files.search", withSourceID({ query, limit: 100 }, sourceID), agentID));
   }
 
-  async createDirectory(path: string, sourceID?: string): Promise<unknown> {
-    return this.socket.sendCommand("files.create_directory", withSourceID({ path: normalizePath(path) }, sourceID));
+  async createDirectory(path: string, sourceID?: string, agentID?: string): Promise<unknown> {
+    return this.sendFileCommand("files.create_directory", withSourceID({ path: normalizePath(path) }, sourceID), agentID);
   }
 
-  async stat(path: string, sourceID?: string): Promise<FileStatResponse> {
-    return this.socket.sendCommand<FileStatResponse>("files.stat", withSourceID({ path: normalizePath(path) }, sourceID));
+  async stat(path: string, sourceID?: string, agentID?: string): Promise<FileStatResponse> {
+    return this.sendFileCommand<FileStatResponse>("files.stat", withSourceID({ path: normalizePath(path) }, sourceID), agentID);
   }
 
-  async rename(from: string, to: string, sourceID?: string): Promise<unknown> {
-    return this.socket.sendCommand("files.rename", withSourceID({ from: normalizePath(from), to: normalizePath(to) }, sourceID));
+  async rename(from: string, to: string, sourceID?: string, agentID?: string): Promise<unknown> {
+    return this.sendFileCommand("files.rename", withSourceID({ from: normalizePath(from), to: normalizePath(to) }, sourceID), agentID);
   }
 
-  async move(from: string, to: string, isDirectory: boolean, sourceID?: string, destinationSourceID?: string): Promise<unknown> {
+  async move(from: string, to: string, isDirectory: boolean, sourceID?: string, destinationSourceID?: string, agentID?: string): Promise<unknown> {
     const body = withSourceID({ from: normalizePath(from), to: normalizePath(to), is_directory: isDirectory }, sourceID);
     const cleanDestinationSourceID = String(destinationSourceID || "").trim();
-    return this.socket.sendCommand("files.move", cleanDestinationSourceID ? { ...body, destination_source_id: cleanDestinationSourceID } : body);
+    return this.sendFileCommand("files.move", cleanDestinationSourceID ? { ...body, destination_source_id: cleanDestinationSourceID } : body, agentID);
   }
 
-  async deleteItem(path: string, isDirectory: boolean, sourceID?: string): Promise<unknown> {
-    return this.socket.sendCommand("files.delete", withSourceID({ path: normalizePath(path), is_directory: isDirectory }, sourceID));
+  async deleteItem(path: string, isDirectory: boolean, sourceID?: string, agentID?: string): Promise<unknown> {
+    return this.sendFileCommand("files.delete", withSourceID({ path: normalizePath(path), is_directory: isDirectory }, sourceID), agentID);
   }
 
   async listJobs(limit = 20): Promise<FileOperationJob[]> {
@@ -121,23 +121,23 @@ export class FileServerClient {
     });
   }
 
-  async setupDownload(path: string, sourceID?: string): Promise<FileTransferSetup> {
+  async setupDownload(path: string, sourceID?: string, agentID?: string): Promise<FileTransferSetup> {
     return this.transport.request<FileTransferSetup>("/v1/home/files/downloads", {
       method: "POST",
-      body: withSourceID({ path: normalizePath(path) }, sourceID),
+      body: withAgentID(withSourceID({ path: normalizePath(path) }, sourceID), agentID),
     });
   }
 
-  async setupUpload(path: string, size: number, sourceID?: string): Promise<FileTransferSetup> {
+  async setupUpload(path: string, size: number, sourceID?: string, agentID?: string): Promise<FileTransferSetup> {
     return this.transport.request<FileTransferSetup>("/v1/home/files/uploads", {
       method: "POST",
-      body: withSourceID({ path: normalizePath(path), size }, sourceID),
+      body: withAgentID(withSourceID({ path: normalizePath(path), size }, sourceID), agentID),
     });
   }
 
-  async uploadFile(file: File, targetFolder: string, sourceID?: string): Promise<unknown> {
+  async uploadFile(file: File, targetFolder: string, sourceID?: string, agentID?: string): Promise<unknown> {
     const path = childPath(targetFolder, file.name);
-    const setup = await this.setupUpload(path, file.size || 0, sourceID);
+    const setup = await this.setupUpload(path, file.size || 0, sourceID, agentID);
     const headers: Record<string, string> = { "Content-Type": "application/octet-stream" };
     if (setup.transfer_token) headers.Authorization = `Bearer ${setup.transfer_token}`;
     const response = await fetch(setup.url, {
@@ -154,11 +154,23 @@ export class FileServerClient {
     }
     return payload;
   }
+
+  private sendFileCommand<T>(command: string, body: unknown, agentID?: string): Promise<T> {
+    const cleanAgentID = String(agentID || "").trim();
+    return cleanAgentID
+      ? this.socket.sendCommand<T>(command, body, { agentID: cleanAgentID })
+      : this.socket.sendCommand<T>(command, body);
+  }
 }
 
 function withSourceID<T extends Record<string, unknown>>(body: T, sourceID?: string): T & { source_id?: string } {
   const cleanSourceID = String(sourceID || "").trim();
   return cleanSourceID ? { ...body, source_id: cleanSourceID } : body;
+}
+
+function withAgentID<T extends Record<string, unknown>>(body: T, agentID?: string): T & { agent_id?: string } {
+  const cleanAgentID = String(agentID || "").trim();
+  return cleanAgentID ? { ...body, agent_id: cleanAgentID } : body;
 }
 
 function normalizeFileList(payload: FileListResponse): FileListResponse {

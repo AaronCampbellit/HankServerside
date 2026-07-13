@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { connectionsClient, type ServiceProfile } from "../api/connections";
 import { childPath, fileServerClient, type FileEntry, type FileOperationJob } from "../api/fileServer";
 import { useToast } from "../ui/primitives";
+import { loadFileTargets, type FileTarget } from "./fileServerTargets";
 
 type FileMeta = FileEntry & {
   dimensions?: string;
   dims?: string;
   owner?: string;
   type?: string;
-};
-
-type FileSource = {
-  id: string;
-  name: string;
-  detail: string;
 };
 
 type FileDialog =
@@ -190,9 +184,10 @@ function parentPath(path: string): string {
   return parts.length ? `/${parts.join("/")}` : "/";
 }
 
-function previewURL(item: FileMeta, sourceID: string): string {
+function previewURL(item: FileMeta, sourceID: string, agentID: string): string {
   const params = new URLSearchParams();
   if (sourceID) params.set("source_id", sourceID);
+  if (agentID) params.set("agent_id", agentID);
   params.set("path", item.path);
   return `/v1/home/files/preview?${params.toString()}`;
 }
@@ -228,67 +223,21 @@ function initialPathFromLocation(): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
-function firstString(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
+function initialTargetKey(targets: FileTarget[]): string {
+  const params = new URLSearchParams(window.location.search);
+  const sourceID = (params.get("source_id") || "").trim();
+  const agentID = (params.get("agent_id") || "").trim();
+  return targets.find((target) => target.sourceID === sourceID && target.agentID === agentID)?.key || targets[0]?.key || "primary:default";
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function recordArray(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value) ? value.map(asRecord).filter((record) => Object.keys(record).length > 0) : [];
-}
-
-function parsePublicConfig(profile: ServiceProfile): Record<string, unknown> {
-  const profileWithConfig = profile as ServiceProfile & { public_config?: unknown };
-  if (profileWithConfig.public_config && typeof profileWithConfig.public_config === "object") return asRecord(profileWithConfig.public_config);
-  if (!profile.public_config_json) return {};
-  try {
-    return asRecord(JSON.parse(profile.public_config_json));
-  } catch {
-    return {};
-  }
-}
-
-function fileSourceFromRecord(record: Record<string, unknown>): FileSource | null {
-  const host = firstString(record.host, record.smb_host);
-  const share = firstString(record.share, record.smb_share);
-  const type = firstString(record.type, record.kind, record.service_type);
-  if (type === "local" || (!host && !share)) return null;
-  const id = firstString(record.id, record.source_id, record.key, share, record.name);
-  if (!id) return null;
-  return {
-    id,
-    name: firstString(record.label, record.name, share, id),
-    detail: host && share ? `//${host}/${share}` : firstString(record.path, record.root, "SMB source"),
-  };
-}
-
-async function loadFileSources(): Promise<{ sources: FileSource[]; activeSourceID: string }> {
-  try {
-    const payload = await connectionsClient.listProfiles();
-    const profile = payload.profiles.find((candidate) => candidate.service_type === "smb");
-    if (!profile) return { sources: [], activeSourceID: "" };
-    const config = parsePublicConfig(profile);
-    const sources = new Map<string, FileSource>();
-    for (const record of [...recordArray(config.shares), ...recordArray(config.sources), ...recordArray(config.file_sources)]) {
-      const source = fileSourceFromRecord(record);
-      if (source && !sources.has(source.id)) sources.set(source.id, source);
-    }
-    const sourceList = Array.from(sources.values());
-    const activeSourceID = firstString(config.active_source_id, config.source_id);
-    return {
-      sources: sourceList,
-      activeSourceID: sourceList.some((source) => source.id === activeSourceID) ? activeSourceID : sourceList[0]?.id || "",
-    };
-  } catch {
-    return { sources: [], activeSourceID: "" };
-  }
-}
+const defaultFileTarget: FileTarget = {
+  key: "primary:default",
+  sourceID: "",
+  agentID: "",
+  name: "Home files",
+  detail: "Home connector files",
+  kind: "host",
+};
 
 function Icon({ name }: { name: string }) {
   const common = {
@@ -327,15 +276,17 @@ function Icon({ name }: { name: string }) {
 export function FileServerPage() {
   const [state, setState] = useState<State>({ status: "loading", path: initialPathFromLocation() });
   const [transferJobs, setTransferJobs] = useState<TransferJobsState>({ status: "loading", jobs: [] });
-  const [sources, setSources] = useState<FileSource[]>([]);
-  const [activeSourceID, setActiveSourceID] = useState("");
+  const [targets, setTargets] = useState<FileTarget[]>([]);
+  const [activeTargetKey, setActiveTargetKey] = useState("");
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const searchRequestRef = useRef(0);
   const { showToast } = useToast();
+  const targetOptions = targets.length ? targets : [defaultFileTarget];
+  const activeTarget = targetOptions.find((target) => target.key === activeTargetKey) || targetOptions[0];
 
-  async function load(path = state.path, message = "", sourceID = activeSourceID) {
-    const changingSource = Boolean(sourceID && sourceID !== activeSourceID);
-    if (changingSource) searchRequestRef.current++;
+  async function load(path = state.path, message = "", targetKey = activeTargetKey) {
+    const changingTarget = Boolean(targetKey && targetKey !== activeTargetKey);
+    if (changingTarget) searchRequestRef.current++;
     setState((current) => current.status === "ready"
       ? {
           ...current,
@@ -343,23 +294,24 @@ export function FileServerPage() {
           message,
           sharePickerOpen: false,
           menuPath: "",
-          items: changingSource ? [] : current.items,
-          searchItems: changingSource ? null : current.searchItems,
-          selectedPaths: changingSource ? [] : current.selectedPaths,
-          previewPath: changingSource ? "" : current.previewPath,
+          items: changingTarget ? [] : current.items,
+          query: changingTarget ? "" : current.query,
+          searchItems: changingTarget ? null : current.searchItems,
+          selectedPaths: changingTarget ? [] : current.selectedPaths,
+          previewPath: changingTarget ? "" : current.previewPath,
+          dialog: changingTarget ? null : current.dialog,
         }
       : { status: "loading", path });
     try {
-      let nextSources = sources;
-      let nextSourceID = sourceID;
-      if (!nextSources.length) {
-        const loadedSources = await loadFileSources();
-        nextSources = loadedSources.sources;
-        nextSourceID = nextSourceID || loadedSources.activeSourceID;
-        setSources(nextSources);
+      let nextTargets = targets;
+      if (!nextTargets.length) {
+        nextTargets = await loadFileTargets();
+        setTargets(nextTargets);
       }
-      setActiveSourceID(nextSourceID);
-      const payload = await fileServerClient.list(path, nextSourceID || undefined);
+      const nextTargetKey = targetKey || initialTargetKey(nextTargets);
+      const nextTarget = nextTargets.find((target) => target.key === nextTargetKey) || nextTargets[0] || defaultFileTarget;
+      setActiveTargetKey(nextTarget.key);
+      const payload = await fileServerClient.list(path, nextTarget.sourceID || undefined, nextTarget.agentID || undefined);
       const items = (payload.items || payload.entries || []) as FileMeta[];
       const defaultPreview = items.find((item) => !item.is_directory)?.path || items[0]?.path || "";
       setState((current) => ({
@@ -406,14 +358,15 @@ export function FileServerPage() {
   const searchQuery = state.status === "ready" ? state.query.trim() : "";
   useEffect(() => {
     const query = searchQuery;
-    const sourceID = activeSourceID;
+    const sourceID = activeTarget.sourceID;
+    const agentID = activeTarget.agentID;
     const requestID = ++searchRequestRef.current;
     if (!query) {
       setState((current) => current.status === "ready" ? { ...current, searchItems: null } : current);
       return;
     }
     const timer = window.setTimeout(() => {
-      void fileServerClient.search(query, sourceID || undefined)
+      void fileServerClient.search(query, sourceID || undefined, agentID || undefined)
         .then((payload) => {
           if (searchRequestRef.current !== requestID) return;
           const items = (payload.items || payload.entries || []) as FileMeta[];
@@ -425,7 +378,7 @@ export function FileServerPage() {
         });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [activeSourceID, searchQuery]);
+  }, [activeTarget.agentID, activeTarget.sourceID, searchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -469,9 +422,9 @@ export function FileServerPage() {
 
   const readyState = state;
   const isRefreshing = Boolean(readyState.refreshingPath);
-  const sourceOptions = sources.length ? sources : [{ id: "", name: "Home files", detail: "Home connector files" }];
-  const activeSource = sourceOptions.find((source) => source.id === activeSourceID) || sourceOptions[0];
-  const commandSourceID = activeSource?.id || "";
+  const commandSourceID = activeTarget.sourceID;
+  const commandAgentID = activeTarget.agentID;
+  const moveTargets = targetOptions.filter((target) => target.agentID === commandAgentID);
 
   function setReady(next: Partial<Extract<State, { status: "ready" }>>) {
     setState((current) => current.status === "ready" ? { ...current, ...next } : current);
@@ -481,8 +434,8 @@ export function FileServerPage() {
     const name = readyState.dialogDraft.trim();
     if (!name) return;
     try {
-      await fileServerClient.createDirectory(childPath(readyState.path, name), commandSourceID || undefined);
-      await load(readyState.path, "", commandSourceID);
+      await fileServerClient.createDirectory(childPath(readyState.path, name), commandSourceID || undefined, commandAgentID || undefined);
+      await load(readyState.path, "", activeTarget.key);
       showToast("Folder created.");
     } catch (error) {
       showToast(errorMessage(error), "error");
@@ -493,9 +446,9 @@ export function FileServerPage() {
     if (!items.length) return;
     try {
       for (const item of items) {
-        await fileServerClient.deleteItem(item.path, Boolean(item.is_directory), commandSourceID || undefined);
+        await fileServerClient.deleteItem(item.path, Boolean(item.is_directory), commandSourceID || undefined, commandAgentID || undefined);
       }
-      await load(readyState.path, "", commandSourceID);
+      await load(readyState.path, "", activeTarget.key);
       showToast(items.length === 1 ? "Moved to trash." : `${items.length} items moved to trash.`);
     } catch (error) {
       showToast(errorMessage(error), "error");
@@ -507,10 +460,10 @@ export function FileServerPage() {
     if (!selectedFiles.length) return;
     try {
       for (const file of selectedFiles) {
-        await fileServerClient.uploadFile(file, readyState.path, commandSourceID || undefined);
+        await fileServerClient.uploadFile(file, readyState.path, commandSourceID || undefined, commandAgentID || undefined);
       }
       if (uploadInputRef.current) uploadInputRef.current.value = "";
-      await load(readyState.path, "", commandSourceID);
+      await load(readyState.path, "", activeTarget.key);
       showToast(selectedFiles.length === 1 ? `Uploaded ${selectedFiles[0].name}.` : `Uploaded ${selectedFiles.length} files.`);
     } catch (error) {
       showToast(errorMessage(error), "error");
@@ -525,7 +478,7 @@ export function FileServerPage() {
     }
     try {
       for (const item of files) {
-        const setup = await fileServerClient.setupDownload(item.path, commandSourceID || undefined);
+        const setup = await fileServerClient.setupDownload(item.path, commandSourceID || undefined, commandAgentID || undefined);
         if (setup.url) startBrowserDownload(setup.url, fileName(item));
       }
       showToast(files.length === 1 ? `Started download for ${fileName(files[0])}.` : `Started ${files.length} downloads.`);
@@ -542,8 +495,8 @@ export function FileServerPage() {
     }
     const targetPath = childPath(parentPath(item.path), cleanName);
     try {
-      await fileServerClient.rename(item.path, targetPath, commandSourceID || undefined);
-      await load(readyState.path, "", commandSourceID);
+      await fileServerClient.rename(item.path, targetPath, commandSourceID || undefined, commandAgentID || undefined);
+      await load(readyState.path, "", activeTarget.key);
       showToast("Item renamed.");
     } catch (error) {
       showToast(errorMessage(error), "error");
@@ -561,9 +514,10 @@ export function FileServerPage() {
           Boolean(item.is_directory),
           commandSourceID || undefined,
           destinationSourceID || commandSourceID || undefined,
+          commandAgentID || undefined,
         );
       }
-      await load(readyState.path, "", commandSourceID);
+      await load(readyState.path, "", activeTarget.key);
       showToast(items.length === 1 ? "Move queued." : `${items.length} moves queued.`);
     } catch (error) {
       showToast(errorMessage(error), "error");
@@ -592,7 +546,7 @@ export function FileServerPage() {
 
   function openItem(item: FileMeta) {
     if (item.is_directory) {
-      void load(item.path, "", commandSourceID);
+      void load(item.path, "", activeTarget.key);
       return;
     }
     setReady({ previewPath: item.path, previewOpen: true });
@@ -664,24 +618,24 @@ export function FileServerPage() {
           <button className="file-share-button" type="button" aria-expanded={readyState.sharePickerOpen} onClick={() => setReady({ sharePickerOpen: !readyState.sharePickerOpen })}>
             <Icon name="hard-drive" />
             <span className="visually-hidden">Active share</span>
-            <span>{activeSource.name}</span>
+            <span>{activeTarget.name}</span>
             <span className="file-caret" aria-hidden="true">⌄</span>
           </button>
           {readyState.sharePickerOpen ? (
             <div className="file-share-menu" role="menu" aria-label="File shares">
-              {sourceOptions.map((source) => (
+              {targetOptions.map((target) => (
                 <button
-                  key={source.id || "default"}
+                  key={target.key}
                   role="menuitem"
                   type="button"
                   onClick={() => {
                     setReady({ sharePickerOpen: false });
-                    void load("/", "", source.id);
+                    void load("/", "", target.key);
                   }}
                 >
                   <Icon name="hard-drive" />
-                  <span><strong>{source.name}</strong><small>{source.detail}</small></span>
-                  {source.id === commandSourceID ? <Icon name="check" /> : null}
+                  <span><strong>{target.name}</strong><small>{target.detail}</small></span>
+                  {target.key === activeTarget.key ? <Icon name="check" /> : null}
                 </button>
               ))}
             </div>
@@ -704,7 +658,7 @@ export function FileServerPage() {
               {index === pathCrumbs.length - 1 ? (
                 <span className="file-crumb-current">{crumb.label}</span>
               ) : (
-                <button type="button" className="file-crumb-link" onClick={() => void load(crumb.path, "", commandSourceID)}>{crumb.label}</button>
+                <button type="button" className="file-crumb-link" onClick={() => void load(crumb.path, "", activeTarget.key)}>{crumb.label}</button>
               )}
             </span>
           ))}
@@ -724,13 +678,13 @@ export function FileServerPage() {
         <aside className="file-tree-pane" aria-labelledby="file-folders-heading">
           <h2 id="file-folders-heading" className="file-pane-label">Folders</h2>
           {readyState.path !== "/" ? (
-            <button className="file-tree-item" type="button" onClick={() => void load(parentPath(readyState.path), "", commandSourceID)}><Icon name="folder" />Parent folder</button>
+            <button className="file-tree-item" type="button" onClick={() => void load(parentPath(readyState.path), "", activeTarget.key)}><Icon name="folder" />Parent folder</button>
           ) : null}
           {folderItems.length ? (
             <div className="file-tree-dynamic" aria-label="Current folder children">
               {folderItems.map((item) => {
                 const name = fileName(item);
-                return <button aria-label={`Open ${name}`} className="file-tree-item" key={item.path} type="button" onClick={() => void load(item.path, "", commandSourceID)}><Icon name="folder" />{name}</button>;
+                return <button aria-label={`Open ${name}`} className="file-tree-item" key={item.path} type="button" onClick={() => void load(item.path, "", activeTarget.key)}><Icon name="folder" />{name}</button>;
               })}
             </div>
           ) : null}
@@ -810,13 +764,13 @@ export function FileServerPage() {
             <h2 className="visually-hidden">Preview</h2>
             <div className="file-preview-media">
               {isImageFile(previewItem) ? (
-                <img src={previewURL(previewItem, commandSourceID)} alt={`Preview ${fileName(previewItem)}`} />
+                <img src={previewURL(previewItem, commandSourceID, commandAgentID)} alt={`Preview ${fileName(previewItem)}`} />
               ) : isVideoFile(previewItem) ? (
-                <video src={previewURL(previewItem, commandSourceID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
+                <video src={previewURL(previewItem, commandSourceID, commandAgentID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
               ) : isAudioFile(previewItem) ? (
-                <audio src={previewURL(previewItem, commandSourceID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
+                <audio src={previewURL(previewItem, commandSourceID, commandAgentID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
               ) : isPDFFile(previewItem) ? (
-                <iframe src={previewURL(previewItem, commandSourceID)} title={`Preview ${fileName(previewItem)}`} />
+                <iframe src={previewURL(previewItem, commandSourceID, commandAgentID)} title={`Preview ${fileName(previewItem)}`} />
               ) : (
                 <span style={{ color: fileIconTone(previewItem) }}><Icon name={fileIcon(previewItem)} /></span>
               )}
@@ -874,7 +828,7 @@ export function FileServerPage() {
             dialog: readyState.dialog?.kind === "move" ? { ...readyState.dialog, destinationSourceID } : readyState.dialog,
           })}
           onRename={(item, name) => void renameItem(item, name)}
-          sources={sourceOptions}
+          sources={moveTargets}
         />
       ) : null}
     </section>
@@ -985,7 +939,7 @@ function FileDialogCard({
   onMove: (items: FileMeta[], destinationPath: string, destinationSourceID: string) => void;
   onMoveSource: (destinationSourceID: string) => void;
   onRename: (item: FileMeta, name: string) => void;
-  sources: FileSource[];
+  sources: FileTarget[];
 }) {
   const title = dialog.kind === "folder"
     ? "New folder"
@@ -1021,7 +975,7 @@ function FileDialogCard({
               <label className="guide-dialog-field">
                 <span>Destination share</span>
                 <select value={dialog.destinationSourceID} onChange={(event) => onMoveSource(event.target.value)}>
-                  {sources.map((source) => <option key={source.id || "default"} value={source.id}>{source.name}</option>)}
+                  {sources.map((source) => <option key={source.key} value={source.sourceID}>{source.name}</option>)}
                 </select>
               </label>
             ) : null}
