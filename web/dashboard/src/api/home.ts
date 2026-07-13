@@ -40,6 +40,7 @@ export type AgentTokensPayload = {
 export type CreateAgentTokenInput = {
   agent_id: string;
   name: string;
+  agent_type: "primary" | "worker";
   expires_in_seconds: number;
 };
 
@@ -48,6 +49,7 @@ export type CreatedAgentToken = {
   home_id: string;
   agent_id: string;
   agent_name: string;
+  agent_type: "primary" | "worker";
   token: string;
   expires_at?: string | null;
   created_at: string;

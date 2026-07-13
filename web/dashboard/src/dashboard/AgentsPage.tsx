@@ -498,7 +498,7 @@ export function AgentsPage() {
 
   async function createToken(agentID: string, name: string): Promise<CreatedAgentToken | null> {
     try {
-      const token = await homeClient.createAgentToken({ agent_id: agentID, name, expires_in_seconds: 0 });
+      const token = await homeClient.createAgentToken({ agent_id: agentID, name, agent_type: "worker", expires_in_seconds: 0 });
       const tokens = await homeClient.listAgentTokens().then((payload) => payload.tokens).catch(() => []);
       setState((current) => (current.status === "ready" ? { ...current, tokens } : current));
       showToast(`Token created for ${agentID}`);

@@ -3,6 +3,7 @@ package cloud
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,43 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
+
+func resolveAgentEnrollmentType(requested string, existing *domain.Agent, agents []domain.Agent) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested != "" && requested != AgentTypePrimary && requested != AgentTypeWorker {
+		return "", fmt.Errorf("agent_type must be %q or %q", AgentTypePrimary, AgentTypeWorker)
+	}
+
+	if existing != nil {
+		existingType, ok := normalizeAgentType(existing.AgentType)
+		if !ok {
+			return "", fmt.Errorf("existing agent type %q is invalid", existing.AgentType)
+		}
+		if requested != "" && requested != existingType {
+			return "", fmt.Errorf("agent_type cannot be changed when issuing a new token")
+		}
+		return existingType, nil
+	}
+
+	hasPrimary := false
+	for _, agent := range agents {
+		agentType, ok := normalizeAgentType(agent.AgentType)
+		if ok && agentType == AgentTypePrimary {
+			hasPrimary = true
+			break
+		}
+	}
+	if requested == "" {
+		if hasPrimary {
+			return AgentTypeWorker, nil
+		}
+		return AgentTypePrimary, nil
+	}
+	if requested == AgentTypePrimary && hasPrimary {
+		return "", fmt.Errorf("home already has a primary agent")
+	}
+	return requested, nil
+}
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireAuth(w, r)
@@ -222,7 +260,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			entry := map[string]any{
 				"agent_id":     agent.ID,
 				"name":         agent.Name,
-				"status":       agent.Status,
+				"status":       agentConnectionStatus(false),
 				"agent_type":   agentType,
 				"last_seen_at": agent.LastSeenAt,
 			}
@@ -255,7 +293,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 		snapshot := map[string]any{
 			"agent_id":     agent.ID,
 			"name":         agent.Name,
-			"status":       agent.Status,
+			"status":       agentConnectionStatus(false),
 			"last_seen_at": agent.LastSeenAt,
 			"home_id":      home.ID,
 			"home_name":    home.Name,
@@ -290,6 +328,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 		type request struct {
 			AgentID          string `json:"agent_id"`
 			Name             string `json:"name"`
+			AgentType        string `json:"agent_type"`
 			ExpiresInSeconds int    `json:"expires_in_seconds"`
 		}
 		var body request
@@ -307,23 +346,47 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 		if agentName == "" {
 			agentName = body.AgentID
 		}
+		body.AgentType = strings.TrimSpace(body.AgentType)
+		if body.AgentType != "" && body.AgentType != AgentTypePrimary && body.AgentType != AgentTypeWorker {
+			http.Error(w, "agent_type must be primary or worker", http.StatusBadRequest)
+			return true
+		}
 
 		now := time.Now().UTC()
-		agent := domain.Agent{
-			ID:        body.AgentID,
-			HomeID:    home.ID,
-			Name:      agentName,
-			Status:    domain.AgentStatusOffline,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
+		var existingAgent *domain.Agent
 		if existing, err := s.store.GetAgentByID(r.Context(), body.AgentID); err == nil {
 			if existing.HomeID != home.ID {
 				http.Error(w, "agent_id already belongs to a different home", http.StatusConflict)
 				return true
 			}
-			agent.CreatedAt = existing.CreatedAt
-			agent.LastSeenAt = existing.LastSeenAt
+			existingAgent = &existing
+		} else if !errors.Is(err, store.ErrNotFound) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		agents, err := s.store.ListAgentsByHome(r.Context(), home.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		agentType, err := resolveAgentEnrollmentType(body.AgentType, existingAgent, agents)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return true
+		}
+		agent := domain.Agent{
+			ID:        body.AgentID,
+			HomeID:    home.ID,
+			Name:      agentName,
+			Status:    domain.AgentStatusOffline,
+			AgentType: agentType,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if existingAgent != nil {
+			agent.CreatedAt = existingAgent.CreatedAt
+			agent.LastSeenAt = existingAgent.LastSeenAt
+			agent.Status = existingAgent.Status
 		}
 		if err := s.store.UpsertAgent(r.Context(), agent); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -353,6 +416,7 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 			"home_id":      home.ID,
 			"agent_id":     agent.ID,
 			"agent_name":   agent.Name,
+			"agent_type":   agent.AgentType,
 			"token":        rawToken,
 			"expires_at":   token.ExpiresAt,
 			"created_at":   token.CreatedAt,

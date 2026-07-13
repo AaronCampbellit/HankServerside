@@ -19,17 +19,18 @@ const topicAgentsHealth = "agents.health"
 func isManagementCommand(command string) bool {
 	return strings.HasPrefix(command, "host.") ||
 		strings.HasPrefix(command, "shell.") ||
-		strings.HasPrefix(command, "wol.")
+		strings.HasPrefix(command, "wol.") ||
+		command == protocol.CommandSystemRestart
 }
 
 // agentHealthMonitor watches connected agents and emits alerts on the
 // agents.health realtime topic: an agent going offline, or a worker reporting
 // low free disk. State is per-agent so each condition fires once per edge.
 type agentHealthMonitor struct {
-	mu           sync.Mutex
-	wasOnline    map[string]bool
-	diskAlerted  map[string]bool
-	diskFreePct  float64
+	mu          sync.Mutex
+	wasOnline   map[string]bool
+	diskAlerted map[string]bool
+	diskFreePct float64
 }
 
 func newAgentHealthMonitor() *agentHealthMonitor {

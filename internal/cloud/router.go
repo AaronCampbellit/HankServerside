@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +31,44 @@ type agentConnection struct {
 }
 
 func (c *agentConnection) isPrimary() bool {
-	return c.agentType == "" || c.agentType == AgentTypePrimary
+	agentType, ok := normalizeAgentType(c.agentType)
+	return ok && agentType == AgentTypePrimary
+}
+
+func normalizeAgentType(value string) (string, bool) {
+	switch strings.TrimSpace(value) {
+	case "", "home-agent", AgentTypePrimary:
+		return AgentTypePrimary, true
+	case AgentTypeWorker:
+		return AgentTypeWorker, true
+	default:
+		return "", false
+	}
+}
+
+func registeredAgentType(stored string, claimed string) (string, error) {
+	storedType, ok := normalizeAgentType(stored)
+	if !ok {
+		return "", fmt.Errorf("stored agent type %q is invalid", stored)
+	}
+	if strings.TrimSpace(claimed) == "" {
+		return storedType, nil
+	}
+	claimedType, ok := normalizeAgentType(claimed)
+	if !ok {
+		return "", fmt.Errorf("claimed agent type %q is invalid", claimed)
+	}
+	if claimedType != storedType {
+		return "", fmt.Errorf("claimed agent type %q does not match enrolled type %q", claimedType, storedType)
+	}
+	return storedType, nil
+}
+
+func agentConnectionStatus(live bool) string {
+	if live {
+		return domain.AgentStatusOnline
+	}
+	return domain.AgentStatusOffline
 }
 
 type appConnection struct {
@@ -53,15 +92,15 @@ type pendingRequest struct {
 }
 
 type AgentSnapshot struct {
-	AgentID      string          `json:"agent_id"`
-	HomeID       string          `json:"home_id"`
-	HomeName     string          `json:"home_name,omitempty"`
-	AgentType    string          `json:"agent_type,omitempty"`
-	Status       string          `json:"status"`
-	Capabilities []string        `json:"capabilities,omitempty"`
-	LastSeenAt   *time.Time      `json:"last_seen_at,omitempty"`
+	AgentID      string            `json:"agent_id"`
+	HomeID       string            `json:"home_id"`
+	HomeName     string            `json:"home_name,omitempty"`
+	AgentType    string            `json:"agent_type,omitempty"`
+	Status       string            `json:"status"`
+	Capabilities []string          `json:"capabilities,omitempty"`
+	LastSeenAt   *time.Time        `json:"last_seen_at,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
-	Metrics      json.RawMessage `json:"metrics,omitempty"`
+	Metrics      json.RawMessage   `json:"metrics,omitempty"`
 }
 
 type Router struct {
@@ -88,6 +127,9 @@ func (r *Router) RegisterAgent(homeID string, agent domain.Agent, peer *wsPeer, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	connectionID := newID("agentconn")
+	if normalized, ok := normalizeAgentType(agentType); ok {
+		agentType = normalized
+	}
 	connection := &agentConnection{
 		connectionID: connectionID,
 		agent:        agent,
@@ -178,10 +220,7 @@ func (r *Router) AgentsForHome(homeID string) []AgentSnapshot {
 	agents := r.agentsByHomeID[homeID]
 	snapshots := make([]AgentSnapshot, 0, len(agents))
 	for _, connection := range agents {
-		agentType := connection.agentType
-		if agentType == "" {
-			agentType = AgentTypePrimary
-		}
+		agentType, _ := normalizeAgentType(connection.agentType)
 		snapshots = append(snapshots, AgentSnapshot{
 			AgentID:      connection.agent.ID,
 			HomeID:       homeID,

@@ -190,7 +190,7 @@ routes to the primary, so existing agents and clients are unaffected.
 ### Contract Update
 
 - Agent registration (`agent.register` payload):
-  - `agent_type`: `"primary"` (default when blank) or `"worker"`.
+  - `agent_type`: `"primary"` or `"worker"`; the server validates the claim against the role assigned during admin enrollment.
   - `metadata`: string map (hostname, os, os_version, app_version).
   - Only primary registrations may rename the Home via `home_name`.
 - Agent heartbeat (`agent.heartbeat` payload):
@@ -204,7 +204,7 @@ routes to the primary, so existing agents and clients are unaffected.
 - New route: `GET /v1/home/agents` → `{agents: [{agent_id, name, status,
   agent_type, last_seen_at, capabilities?, metadata?, metrics?}]}` (member-visible).
 - `GET /v1/home/agent` is unchanged and returns the primary.
-- Schema: migration 000020 adds `agents.agent_type TEXT NOT NULL DEFAULT ''`.
+- Schema: migration 000020 adds `agents.agent_type`, deterministically keeps one existing agent per home as `primary`, marks any others `worker`, restricts values, and enforces one primary per home.
 - Notes sync scheduling and sync-offline marking are gated to the primary agent.
 
 ### Hank Changes
@@ -220,8 +220,11 @@ routes to the primary, so existing agents and clients are unaffected.
 
 ### Compatibility Notes
 
-- Fully backward compatible: the existing Go agent registers with a blank
-  `agent_type` and is treated as primary; untargeted commands behave as before.
+- Fully backward compatible: the existing Go agent now registers as `primary`,
+  and the server also normalizes its legacy `home-agent` value to `primary`;
+  untargeted commands behave as before.
+- Agent roles come from the admin-created enrollment record. A connecting agent
+  cannot promote itself by changing the registration payload.
 - Older servers reject nothing new — workers simply displace the primary on
   old servers, so worker agents must not enroll until this ships.
 

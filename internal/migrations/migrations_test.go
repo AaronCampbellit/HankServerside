@@ -86,3 +86,33 @@ func TestRequiredPostgresExtensionsAreCreatedByMigrations(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentTypeMigrationEnforcesOnePrimaryPerHome(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	var body strings.Builder
+	for _, migration := range migrations {
+		if migration.Version != 20 {
+			continue
+		}
+		for _, statement := range migration.Statements {
+			body.WriteString(statement)
+			body.WriteByte('\n')
+		}
+	}
+	text := body.String()
+	for _, required := range []string{
+		"ROW_NUMBER() OVER (PARTITION BY home_id",
+		"CHECK (agent_type IN ('primary', 'worker'))",
+		"CREATE UNIQUE INDEX IF NOT EXISTS agents_one_primary_per_home_idx",
+		"WHERE agent_type = 'primary'",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("agent type migration missing %q in:\n%s", required, text)
+		}
+	}
+}

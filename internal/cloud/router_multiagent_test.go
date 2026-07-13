@@ -48,12 +48,95 @@ func TestRouterWorkerDoesNotDisplacePrimary(t *testing.T) {
 	}
 }
 
-func TestRouterEmptyAgentTypeIsPrimary(t *testing.T) {
-	router := NewRouter()
-	agent := domain.Agent{ID: "agent_legacy", HomeID: "home_1"}
-	router.RegisterAgent("home_1", agent, nil, nil, "", nil)
-	if got, ok := router.GetAgent("home_1"); !ok || got.agent.ID != "agent_legacy" {
-		t.Fatalf("legacy empty agent_type must register as primary, got %+v ok=%v", got, ok)
+func TestRouterLegacyAgentTypesArePrimary(t *testing.T) {
+	for _, agentType := range []string{"", "home-agent"} {
+		router := NewRouter()
+		agent := domain.Agent{ID: "agent_legacy", HomeID: "home_1"}
+		router.RegisterAgent("home_1", agent, nil, nil, agentType, nil)
+		if got, ok := router.GetAgent("home_1"); !ok || got.agent.ID != "agent_legacy" {
+			t.Fatalf("legacy agent_type %q must register as primary, got %+v ok=%v", agentType, got, ok)
+		}
+	}
+}
+
+func TestRegisteredAgentTypeUsesEnrollmentRole(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		stored  string
+		claimed string
+		want    string
+		wantErr bool
+	}{
+		{name: "legacy primary claim", stored: AgentTypePrimary, claimed: "home-agent", want: AgentTypePrimary},
+		{name: "blank worker claim", stored: AgentTypeWorker, claimed: "", want: AgentTypeWorker},
+		{name: "matching worker claim", stored: AgentTypeWorker, claimed: AgentTypeWorker, want: AgentTypeWorker},
+		{name: "worker self promotion", stored: AgentTypeWorker, claimed: AgentTypePrimary, wantErr: true},
+		{name: "invalid claim", stored: AgentTypePrimary, claimed: "controller", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := registeredAgentType(tt.stored, tt.claimed)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("registeredAgentType(%q, %q) = %q, want error", tt.stored, tt.claimed, got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("registeredAgentType(%q, %q) = %q, %v; want %q", tt.stored, tt.claimed, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveAgentEnrollmentType(t *testing.T) {
+	t.Parallel()
+
+	primary := domain.Agent{ID: "primary", AgentType: AgentTypePrimary}
+	worker := domain.Agent{ID: "worker", AgentType: AgentTypeWorker}
+	tests := []struct {
+		name      string
+		requested string
+		existing  *domain.Agent
+		agents    []domain.Agent
+		want      string
+		wantErr   bool
+	}{
+		{name: "first legacy enrollment is primary", want: AgentTypePrimary},
+		{name: "later legacy enrollment is worker", agents: []domain.Agent{primary}, want: AgentTypeWorker},
+		{name: "explicit worker", requested: AgentTypeWorker, agents: []domain.Agent{primary}, want: AgentTypeWorker},
+		{name: "explicit first primary", requested: AgentTypePrimary, want: AgentTypePrimary},
+		{name: "duplicate primary", requested: AgentTypePrimary, agents: []domain.Agent{primary}, wantErr: true},
+		{name: "reissue preserves worker", existing: &worker, agents: []domain.Agent{primary, worker}, want: AgentTypeWorker},
+		{name: "reissue cannot promote worker", requested: AgentTypePrimary, existing: &worker, agents: []domain.Agent{primary, worker}, wantErr: true},
+		{name: "invalid requested type", requested: "controller", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveAgentEnrollmentType(tt.requested, tt.existing, tt.agents)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveAgentEnrollmentType() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("resolveAgentEnrollmentType() = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentConnectionStatusUsesLiveRouterState(t *testing.T) {
+	t.Parallel()
+
+	if got := agentConnectionStatus(false); got != domain.AgentStatusOffline {
+		t.Fatalf("agentConnectionStatus(false) = %q, want offline", got)
+	}
+	if got := agentConnectionStatus(true); got != domain.AgentStatusOnline {
+		t.Fatalf("agentConnectionStatus(true) = %q, want online", got)
 	}
 }
 

@@ -1381,7 +1381,7 @@ describe("App routes", () => {
     await waitFor(() => expect(calls).toContainEqual({
       path: "/v1/home/agent/tokens",
       method: "POST",
-      body: { agent_id: "lake-agent", name: "Lake Agent", expires_in_seconds: 3600 },
+      body: { agent_id: "lake-agent", name: "Lake Agent", agent_type: "primary", expires_in_seconds: 3600 },
     }));
     expect(await screen.findByText(/HANK_REMOTE_AGENT_TOKEN="raw-agent-token"/)).toBeInTheDocument();
 
@@ -1617,7 +1617,10 @@ describe("App routes", () => {
             home_id: "home_1",
             service_type: "smb",
             public_config_json: JSON.stringify({
-              shares: [{ id: "media", name: "Media", host: "nas.local", share: "media", username: "aaron" }],
+              shares: [
+                { id: "media", name: "Media", host: "nas.local", share: "media", username: "aaron", policy: { read: true, write: false } },
+                { id: "archive", name: "Archive", host: "nas.local", share: "archive", policy: { read: true } },
+              ],
               folders: [{ id: "media-folder", name: "Media Folder", root: "/srv/media", enabled: true }],
             }),
             secret_version: 1,
@@ -1675,20 +1678,24 @@ describe("App routes", () => {
           share: "backups",
           domain: "",
           username: "backup-user",
-          shares: [{
-            id: "media",
-            name: "Backups",
-            host: "backup.local",
-            share: "backups",
-            domain: "",
-            username: "backup-user",
-          }],
-          folders: [{
-            id: "media-folder",
-            name: "Media Folder",
-            root: "/srv/media",
-            create: false,
-          }],
+          shares: [
+            {
+              id: "media",
+              name: "Backups",
+              host: "backup.local",
+              share: "backups",
+              domain: "",
+              username: "backup-user",
+              policy: { read: true, write: false },
+            },
+            {
+              id: "archive",
+              name: "Archive",
+              host: "nas.local",
+              share: "archive",
+              policy: { read: true },
+            },
+          ],
         },
         secrets: { shares: [{ id: "media", password: "secret" }] },
         persist: true,
@@ -1704,19 +1711,6 @@ describe("App routes", () => {
       method: "PUT",
       body: {
         public_config: {
-          active_source_id: "media",
-          host: "nas.local",
-          share: "media",
-          domain: "",
-          username: "aaron",
-          shares: [{
-            id: "media",
-            name: "Media",
-            host: "nas.local",
-            share: "media",
-            domain: "",
-            username: "aaron",
-          }],
           folders: [{
             id: "media-folder",
             name: "Documents",

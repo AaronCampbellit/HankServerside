@@ -15,7 +15,7 @@ describe("HomeClient", () => {
     await client.getAgent();
     await client.restartAgent();
     await client.listAgentTokens();
-    await client.createAgentToken({ agent_id: "campbell-home", name: "Campbell Home Agent", expires_in_seconds: 3600 });
+    await client.createAgentToken({ agent_id: "campbell-home", name: "Campbell Home Agent", agent_type: "primary", expires_in_seconds: 3600 });
     await client.revokeAgentToken("agtok_1");
     await client.removeAgentToken("agtok_1");
 
@@ -28,7 +28,7 @@ describe("HomeClient", () => {
       {
         path: "/v1/home/agent/tokens",
         method: "POST",
-        body: { agent_id: "campbell-home", name: "Campbell Home Agent", expires_in_seconds: 3600 },
+        body: { agent_id: "campbell-home", name: "Campbell Home Agent", agent_type: "primary", expires_in_seconds: 3600 },
       },
       { path: "/v1/home/agent/tokens/agtok_1", method: "DELETE", body: undefined },
       { path: "/v1/home/agent/tokens/agtok_1?purge=1", method: "DELETE", body: undefined },

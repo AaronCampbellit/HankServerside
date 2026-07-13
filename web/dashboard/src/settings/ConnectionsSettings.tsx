@@ -28,6 +28,7 @@ type State =
       profiles: ServiceProfile[];
       ha: { baseURL: string; timeoutSeconds: string; token: string; persist: boolean };
       smb: SMBShare & { password: string; persist: boolean };
+      smbSources: Array<Record<string, unknown>>;
       folders: HostFolder[];
       message: string;
     };
@@ -65,10 +66,24 @@ function normalizeHost(value: string): string {
   return (host.split(/[/?#]/)[0] || host).trim();
 }
 
+function smbSourceRecords(profile: ServiceProfile | undefined): Array<Record<string, unknown>> {
+  const config = parseConfig(profile);
+  for (const candidate of [config.shares, config.file_sources, config.sources]) {
+    if (!Array.isArray(candidate)) continue;
+    const sources = candidate.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const record = entry as Record<string, unknown>;
+      if (record.type && record.type !== "smb") return [];
+      return [{ ...record }];
+    });
+    if (sources.length > 0) return sources;
+  }
+  return firstString(config.host, config.smb_host, config.share, config.smb_share) ? [{ ...config }] : [];
+}
+
 function firstSMBShare(profile: ServiceProfile | undefined): SMBShare {
   const config = parseConfig(profile);
-  const shares = Array.isArray(config.shares) ? config.shares : [];
-  const first = shares.find((entry) => entry && typeof entry === "object") as Record<string, unknown> | undefined;
+  const first = smbSourceRecords(profile)[0];
   const fallback = first || config;
   const share = firstString(fallback.share, fallback.smb_share);
   const id = cleanID(firstString(fallback.id, fallback.source_id, fallback.name, share, "smb")) || "smb";
@@ -105,8 +120,9 @@ function hostFolders(profile: ServiceProfile | undefined): HostFolder[] {
   return legacyRoot ? [{ id: "local", name: "Home connector files", root: legacyRoot, create: false }] : [];
 }
 
-function publicConfigForFileServer(share: SMBShare, folders: HostFolder[]): Record<string, unknown> {
+function publicConfigForSMB(share: SMBShare, existingSources: Array<Record<string, unknown>>): Record<string, unknown> {
   const publicShare = {
+    ...(existingSources[0] || {}),
     id: share.id,
     name: share.name,
     host: share.host,
@@ -115,6 +131,17 @@ function publicConfigForFileServer(share: SMBShare, folders: HostFolder[]): Reco
     username: share.username,
   };
   const hasShare = Boolean(share.host && share.share);
+  return {
+    active_source_id: hasShare ? share.id : "",
+    host: share.host,
+    share: share.share,
+    domain: share.domain,
+    username: share.username,
+    shares: hasShare ? [publicShare, ...existingSources.slice(1)] : [],
+  };
+}
+
+function publicConfigForFolders(folders: HostFolder[]): Record<string, unknown> {
   const publicFolders = folders.flatMap((folder, index) => {
     const root = folder.root.trim();
     if (!root) return [];
@@ -126,15 +153,7 @@ function publicConfigForFileServer(share: SMBShare, folders: HostFolder[]): Reco
       create: folder.create,
     }];
   });
-  return {
-    active_source_id: hasShare ? share.id : publicFolders[0]?.id || "",
-    host: share.host,
-    share: share.share,
-    domain: share.domain,
-    username: share.username,
-    shares: hasShare ? [publicShare] : [],
-    folders: publicFolders,
-  };
+  return { folders: publicFolders };
 }
 
 function errorMessage(error: unknown): string {
@@ -162,6 +181,7 @@ export function ConnectionsSettings() {
           persist: true,
         },
         smb: { ...smbShare, password: "", persist: true },
+        smbSources: smbSourceRecords(smbProfile),
         folders: hostFolders(smbProfile),
         message,
       });
@@ -233,7 +253,7 @@ export function ConnectionsSettings() {
         username: readyState.smb.username.trim(),
       };
       const input = {
-        public_config: publicConfigForFileServer(share, readyState.folders),
+        public_config: publicConfigForSMB(share, readyState.smbSources),
         persist: readyState.smb.persist,
         ...(readyState.smb.password ? { secrets: { shares: [{ id: share.id, password: readyState.smb.password }] } } : {}),
       };
@@ -260,18 +280,8 @@ export function ConnectionsSettings() {
   async function saveFolders(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      const host = normalizeHost(readyState.smb.host);
-      const shareID = cleanID(readyState.smb.id || readyState.smb.name || readyState.smb.share || host || "smb") || "smb";
-      const share: SMBShare = {
-        id: shareID,
-        name: readyState.smb.name.trim() || readyState.smb.share.trim() || shareID,
-        host,
-        share: readyState.smb.share.trim(),
-        domain: readyState.smb.domain.trim(),
-        username: readyState.smb.username.trim(),
-      };
       await connectionsClient.saveProfile("smb", {
-        public_config: publicConfigForFileServer(share, readyState.folders),
+        public_config: publicConfigForFolders(readyState.folders),
         persist: readyState.smb.persist,
       });
       await load("Host folders saved.");

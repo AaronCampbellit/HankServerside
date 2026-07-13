@@ -69,10 +69,10 @@ func executeAssistantAgentStatusTool(ctx context.Context, server *Server, runtim
 	rows := []string{"Devices:"}
 	for _, agent := range stored {
 		kind := "worker"
-		if agent.AgentType == "" || agent.AgentType == AgentTypePrimary {
+		if agentType, ok := normalizeAgentType(agent.AgentType); ok && agentType == AgentTypePrimary {
 			kind = "home agent"
 		}
-		status := agent.Status
+		status := agentConnectionStatus(false)
 		capCount := 0
 		lastSeen := agent.LastSeenAt
 		if snapshot, ok := live[agent.ID]; ok {

@@ -451,12 +451,12 @@ func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 	_, err := s.exec(
 		ctx,
 		`INSERT INTO agents (id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, COALESCE(NULLIF(?, ''), 'primary'), ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		 home_id = excluded.home_id,
 		 name = excluded.name,
 		 status = excluded.status,
-		 agent_type = excluded.agent_type,
+		 agent_type = CASE WHEN ? = '' THEN agents.agent_type ELSE excluded.agent_type END,
 		 last_seen_at = excluded.last_seen_at,
 		 updated_at = excluded.updated_at`,
 		agent.ID,
@@ -467,6 +467,7 @@ func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 		agent.LastSeenAt,
 		agent.CreatedAt,
 		agent.UpdatedAt,
+		agent.AgentType,
 	)
 	return err
 }
@@ -593,7 +594,7 @@ func (s *Store) ValidateAgentToken(ctx context.Context, tokenHash string) (Agent
 		ctx,
 		`SELECT
 			at.id, at.home_id, at.agent_id, at.token_hash, at.revoked_at, at.expires_at, at.created_at,
-			a.id, a.home_id, a.name, a.status, a.last_seen_at, a.created_at, a.updated_at,
+			a.id, a.home_id, a.name, a.status, a.agent_type, a.last_seen_at, a.created_at, a.updated_at,
 			h.id, h.user_id, h.name, h.created_at, h.updated_at
 		FROM agent_tokens at
 		JOIN agents a ON a.id = at.agent_id
@@ -755,6 +756,7 @@ func scanAgentTokenRecord(scanner interface{ Scan(dest ...any) error }) (AgentTo
 		&record.Agent.HomeID,
 		&record.Agent.Name,
 		&record.Agent.Status,
+		&record.Agent.AgentType,
 		&agentLastSeenAt,
 		&record.Agent.CreatedAt,
 		&record.Agent.UpdatedAt,

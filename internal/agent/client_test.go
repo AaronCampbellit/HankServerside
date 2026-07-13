@@ -25,6 +25,46 @@ func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
 func (discardHandler) WithAttrs([]slog.Attr) slog.Handler        { return discardHandler{} }
 func (discardHandler) WithGroup(string) slog.Handler             { return discardHandler{} }
 
+func TestClientRegistersAsPrimaryAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client := NewClient("ws://example.invalid", "agent_1", "token", "Home", "", nil, nil, nil, nil, slog.New(discardHandler{}))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "done")
+		var envelope protocol.Envelope
+		if err := wsjson.Read(ctx, conn, &envelope); err != nil {
+			t.Errorf("read registration: %v", err)
+			return
+		}
+		payload, err := protocol.DecodePayload[protocol.AgentRegister](envelope)
+		if err != nil {
+			t.Errorf("decode registration: %v", err)
+			return
+		}
+		if payload.AgentType != "primary" {
+			t.Errorf("agent_type = %q, want primary", payload.AgentType)
+		}
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):], nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "done")
+	if err := client.sendRegister(ctx, conn); err != nil {
+		t.Fatalf("sendRegister: %v", err)
+	}
+}
+
 func TestClientSystemRestartAcknowledgesBeforeRestartHook(t *testing.T) {
 	t.Parallel()
 

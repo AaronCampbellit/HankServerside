@@ -136,6 +136,42 @@ func TestConfigManagerApplyLeavesHostFoldersWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestConfigManagerFolderOnlyApplyPreservesSMBShares(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	folderRoot := t.TempDir()
+	readOnly := true
+	files := agentfiles.NewWithConfig(agentfiles.Config{
+		Shares: []agentfiles.SMBConfig{
+			{ID: "media", Host: "nas.local", Share: "media", Policy: agentfiles.AccessPolicy{Read: &readOnly}},
+			{ID: "archive", Host: "nas.local", Share: "archive"},
+		},
+	})
+	manager := newConfigManager(filepath.Join(dir, ".env.agent"), agentha.New("", "", 0), files)
+	public, err := json.Marshal(map[string]any{
+		"folders": []map[string]any{{"id": "documents", "root": folderRoot}},
+	})
+	if err != nil {
+		t.Fatalf("marshal public config: %v", err)
+	}
+
+	if _, err := manager.Apply(context.Background(), protocol.ConfigApplyRequest{
+		ServiceType:  domain.ServiceTypeSMB,
+		PublicConfig: public,
+	}); err != nil {
+		t.Fatalf("Apply folder-only config: %v", err)
+	}
+
+	shares := files.SMBConfigs()
+	if len(shares) != 2 || shares[0].ID != "media" || shares[1].ID != "archive" {
+		t.Fatalf("SMBConfigs after folder-only apply = %#v, want both existing shares", shares)
+	}
+	if shares[0].Policy.Read == nil || !*shares[0].Policy.Read {
+		t.Fatalf("media policy after folder-only apply = %#v, want preserved read policy", shares[0].Policy)
+	}
+}
+
 func TestConfigManagerApplyFailsForMissingHostFolder(t *testing.T) {
 	t.Parallel()
 
@@ -168,5 +204,71 @@ func TestConfigManagerApplyFailsForMissingHostFolder(t *testing.T) {
 	configs := files.SMBConfigs()
 	if len(configs) != 1 || configs[0].ID != "existing" {
 		t.Fatalf("SMBConfigs after rejected apply = %#v, want existing config unchanged", configs)
+	}
+}
+
+func TestConfigManagerPersistenceFailureLeavesLiveFileConfigUnchanged(t *testing.T) {
+	t.Parallel()
+
+	existingRoot := t.TempDir()
+	replacementRoot := t.TempDir()
+	files := agentfiles.NewWithConfig(agentfiles.Config{
+		Shares:       []agentfiles.SMBConfig{{ID: "existing-share", Host: "nas.local", Share: "media"}},
+		LocalSources: []agentfiles.LocalConfig{{ID: "existing-folder", Root: existingRoot}},
+	})
+	manager := newConfigManager(t.TempDir(), agentha.New("", "", 0), files)
+	public, err := json.Marshal(map[string]any{
+		"shares": []map[string]any{
+			{"id": "replacement-share", "host": "backup.local", "share": "backups"},
+		},
+		"folders": []map[string]any{
+			{"id": "replacement-folder", "root": replacementRoot},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal public config: %v", err)
+	}
+
+	if _, err := manager.Apply(context.Background(), protocol.ConfigApplyRequest{
+		ServiceType:  domain.ServiceTypeSMB,
+		PublicConfig: public,
+		Persist:      true,
+	}); err == nil {
+		t.Fatal("Apply succeeded with a directory as the env file path, want persistence error")
+	}
+
+	shares := files.SMBConfigs()
+	if len(shares) != 1 || shares[0].ID != "existing-share" {
+		t.Fatalf("SMBConfigs after persistence failure = %#v, want existing share", shares)
+	}
+	folders := files.LocalConfigs()
+	if len(folders) != 1 || folders[0].ID != "existing-folder" {
+		t.Fatalf("LocalConfigs after persistence failure = %#v, want existing folder", folders)
+	}
+}
+
+func TestWriteEnvFileReplacesContentWithPrivateMode(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), ".env.agent")
+	if err := os.WriteFile(path, []byte("OLD=value\n"), 0o644); err != nil {
+		t.Fatalf("write original env: %v", err)
+	}
+	if err := writeEnvFile(path, map[string]string{"B": "two", "A": "one"}); err != nil {
+		t.Fatalf("writeEnvFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read replaced env: %v", err)
+	}
+	if string(data) != "A=one\nB=two\n" {
+		t.Fatalf("env content = %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat env: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("env mode = %o, want 600", info.Mode().Perm())
 	}
 }

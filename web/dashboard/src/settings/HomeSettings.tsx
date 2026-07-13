@@ -150,6 +150,7 @@ export function HomeSettings() {
       const token = await homeClient.createAgentToken({
         agent_id: readyState.tokenForm.agentID.trim() || agentIDFromHomeName(readyState.home.name),
         name: readyState.tokenForm.name.trim() || agentNameFromHomeName(readyState.home.name),
+        agent_type: "primary",
         expires_in_seconds: Number.parseInt(readyState.tokenForm.expiresInSeconds || "0", 10) || 0,
       });
       const tokenPayload: AgentTokensPayload = await homeClient.listAgentTokens();

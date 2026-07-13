@@ -684,6 +684,7 @@ func TestAuthorizationMatrixDeniesMembersRevocationsFeaturesAndNoteIsolation(t *
 	sendAppCommandExpectError(t, ctx, memberConn, "req_ha_feature_disabled", "homeassistant.fetch_states", nil, "permission_denied")
 	sendAppCommandExpectError(t, ctx, memberConn, "req_files_feature_disabled", "files.list", protocol.FilesListRequest{SourceID: "primary", Path: "/"}, "permission_denied")
 	sendAppCommandExpectError(t, ctx, memberConn, "req_notes_feature_disabled", "notes.list", nil, "permission_denied")
+	sendAppCommandExpectError(t, ctx, memberConn, "req_restart_admin_only", protocol.CommandSystemRestart, protocol.SystemRestartRequest{Reason: "member attempt"}, "permission_denied")
 
 	var ownerHomeNotes struct {
 		Notes []protocol.NoteSummary `json:"notes"`

@@ -128,6 +128,16 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 			}
 		}
 
+		if request.Persist {
+			if err := m.persistFileConfigs(configs, locals, applyLocal); err != nil {
+				profile := m.smbProfile(request.SecretVersion, request.SecretVersion, err.Error())
+				profile.Status = domain.SyncStatusDegraded
+				profile.LastError = err.Error()
+				m.profiles[request.ServiceType] = profile
+				return profile, err
+			}
+		}
+
 		m.files.ApplySMBConfigs(configs)
 		if applyLocal {
 			m.files.ApplyLocalConfigs(locals)
@@ -135,22 +145,6 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 
 		profile := m.smbProfile(request.SecretVersion, request.SecretVersion, "")
 		m.profiles[request.ServiceType] = profile
-		if request.Persist {
-			if err := m.persistSMBConfigs(m.files.SMBConfigs()); err != nil {
-				profile.Status = domain.SyncStatusDegraded
-				profile.LastError = err.Error()
-				m.profiles[request.ServiceType] = profile
-				return profile, err
-			}
-			if applyLocal {
-				if err := m.persistLocalConfigs(m.files.LocalConfigs()); err != nil {
-					profile.Status = domain.SyncStatusDegraded
-					profile.LastError = err.Error()
-					m.profiles[request.ServiceType] = profile
-					return profile, err
-				}
-			}
-		}
 		return profile, nil
 
 	default:
@@ -248,6 +242,12 @@ type smbShareSecret struct {
 }
 
 func smbConfigsFromApply(public smbPublicConfig, secrets smbSecretConfig, existing []agentfiles.SMBConfig) []agentfiles.SMBConfig {
+	managesSMB := public.Shares != nil || public.FileSources != nil || public.Sources != nil ||
+		strings.TrimSpace(public.Host) != "" || strings.TrimSpace(public.Share) != ""
+	if !managesSMB {
+		return append([]agentfiles.SMBConfig(nil), existing...)
+	}
+
 	publicShares := public.Shares
 	if len(publicShares) == 0 {
 		publicShares = filterSMBSourcePayloads(public.FileSources)
@@ -410,6 +410,13 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 	if err != nil {
 		return err
 	}
+	if err := applySMBConfigsToEnv(env, configs); err != nil {
+		return err
+	}
+	return writeEnvFile(m.envPath, env)
+}
+
+func applySMBConfigsToEnv(env map[string]string, configs []agentfiles.SMBConfig) error {
 	delete(env, "HANK_REMOTE_SMB_HOST")
 	delete(env, "HANK_REMOTE_SMB_SHARE")
 	delete(env, "HANK_REMOTE_SMB_USERNAME")
@@ -450,7 +457,7 @@ func (m *configManager) persistSMBConfigs(configs []agentfiles.SMBConfig) error 
 	} else {
 		delete(env, "HANK_REMOTE_SMB_SHARES_JSON")
 	}
-	return writeEnvFile(m.envPath, env)
+	return nil
 }
 
 func (m *configManager) persistLocalConfigs(configs []agentfiles.LocalConfig) error {
@@ -461,6 +468,13 @@ func (m *configManager) persistLocalConfigs(configs []agentfiles.LocalConfig) er
 	if err != nil {
 		return err
 	}
+	if err := applyLocalConfigsToEnv(env, configs); err != nil {
+		return err
+	}
+	return writeEnvFile(m.envPath, env)
+}
+
+func applyLocalConfigsToEnv(env map[string]string, configs []agentfiles.LocalConfig) error {
 	// The single-root legacy key is consolidated into the JSON list.
 	delete(env, "HANK_REMOTE_AGENT_FILES_ROOT")
 	type envFolder struct {
@@ -489,6 +503,25 @@ func (m *configManager) persistLocalConfigs(configs []agentfiles.LocalConfig) er
 		env["HANK_REMOTE_AGENT_FILES_ROOTS_JSON"] = string(encoded)
 	} else {
 		delete(env, "HANK_REMOTE_AGENT_FILES_ROOTS_JSON")
+	}
+	return nil
+}
+
+func (m *configManager) persistFileConfigs(smbConfigs []agentfiles.SMBConfig, localConfigs []agentfiles.LocalConfig, applyLocal bool) error {
+	if m.envPath == "" {
+		return nil
+	}
+	env, err := m.readEnvFile()
+	if err != nil {
+		return err
+	}
+	if err := applySMBConfigsToEnv(env, smbConfigs); err != nil {
+		return err
+	}
+	if applyLocal {
+		if err := applyLocalConfigsToEnv(env, localConfigs); err != nil {
+			return err
+		}
 	}
 	return writeEnvFile(m.envPath, env)
 }
@@ -530,5 +563,35 @@ func writeEnvFile(path string, env map[string]string) error {
 		lines = append(lines, key+"="+env[key])
 	}
 	lines = append(lines, "")
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600)
+
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	cleanup := func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}
+	if err := temp.Chmod(0o600); err != nil {
+		cleanup()
+		return err
+	}
+	if _, err := temp.WriteString(strings.Join(lines, "\n")); err != nil {
+		cleanup()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	return nil
 }

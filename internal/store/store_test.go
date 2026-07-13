@@ -35,7 +35,7 @@ func TestValidateAgentTokenAndRevokeForHome(t *testing.T) {
 		t.Fatalf("CreateHome: %v", err)
 	}
 
-	agent := domain.Agent{ID: "agent_1", HomeID: home.ID, Name: "Agent", Status: domain.AgentStatusOffline, CreatedAt: now, UpdatedAt: now}
+	agent := domain.Agent{ID: "agent_1", HomeID: home.ID, Name: "Agent", Status: domain.AgentStatusOffline, AgentType: "worker", CreatedAt: now, UpdatedAt: now}
 	if err := db.UpsertAgent(ctx, agent); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
@@ -52,6 +52,9 @@ func TestValidateAgentTokenAndRevokeForHome(t *testing.T) {
 	if record.Agent.ID != agent.ID || record.Home.ID != home.ID {
 		t.Fatalf("unexpected token record: %#v", record)
 	}
+	if record.Agent.AgentType != "worker" {
+		t.Fatalf("validated agent type = %q, want worker", record.Agent.AgentType)
+	}
 
 	if err := db.RevokeAgentTokenForHome(ctx, home.ID, token.ID); err != nil {
 		t.Fatalf("RevokeAgentTokenForHome: %v", err)
@@ -59,6 +62,43 @@ func TestValidateAgentTokenAndRevokeForHome(t *testing.T) {
 
 	if _, err := db.ValidateAgentToken(ctx, token.TokenHash); err != ErrNotFound {
 		t.Fatalf("ValidateAgentToken after revoke = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpsertAgentPreservesAssignedTypeWhenOmitted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_agent_type", Email: "agent-type@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_agent_type", UserID: user.ID, Name: "Agent Type Home", CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := db.CreateHome(ctx, home); err != nil {
+		t.Fatalf("CreateHome: %v", err)
+	}
+
+	agent := domain.Agent{ID: "agent_worker", HomeID: home.ID, Name: "Worker", Status: domain.AgentStatusOffline, AgentType: "worker", CreatedAt: now, UpdatedAt: now}
+	if err := db.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent worker: %v", err)
+	}
+	agent.AgentType = ""
+	agent.Name = "Worker Renamed"
+	agent.UpdatedAt = now.Add(time.Minute)
+	if err := db.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent without type: %v", err)
+	}
+
+	stored, err := db.GetAgentByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentByID: %v", err)
+	}
+	if stored.AgentType != "worker" {
+		t.Fatalf("agent type after omitted reissue = %q, want worker", stored.AgentType)
 	}
 }
 

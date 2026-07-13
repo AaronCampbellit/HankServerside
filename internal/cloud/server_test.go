@@ -66,7 +66,7 @@ func TestAppCommandRoutesToAgentAndBack(t *testing.T) {
 	}
 	defer agentConn.Close(websocket.StatusNormalClosure, "done")
 
-	register, err := protocol.NewEnvelope(protocol.TypeAgentRegister, "", agent.ID, "", protocol.AgentRegister{AgentID: agent.ID, HomeName: home.Name})
+	register, err := protocol.NewEnvelope(protocol.TypeAgentRegister, "", agent.ID, "", protocol.AgentRegister{AgentID: agent.ID, HomeName: home.Name, AgentType: "home-agent"})
 	if err != nil {
 		t.Fatalf("NewEnvelope register: %v", err)
 	}
@@ -1278,6 +1278,63 @@ func TestListAgentTokensForHome(t *testing.T) {
 	}
 	if payload.Tokens[0].TokenHash != "" {
 		t.Fatalf("token hash should be omitted from JSON response")
+	}
+}
+
+func TestAgentTokenEnrollmentAssignsRolesAndPreventsPromotion(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_enrollment", Email: "enrollment@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_enrollment", UserID: user.ID, Name: "Enrollment Home", CreatedAt: now, UpdatedAt: now}
+	sessionToken := "enrollment-session"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_enrollment", UserID: user.ID, TokenHash: hashToken(sessionToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var primaryPayload struct {
+		AgentID   string `json:"agent_id"`
+		AgentType string `json:"agent_type"`
+	}
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/agent/tokens", map[string]any{
+		"agent_id": "primary-agent", "name": "Primary", "agent_type": AgentTypePrimary,
+	}, &primaryPayload)
+	if primaryPayload.AgentID != "primary-agent" || primaryPayload.AgentType != AgentTypePrimary {
+		t.Fatalf("primary enrollment payload = %#v", primaryPayload)
+	}
+
+	var workerPayload struct {
+		AgentID   string `json:"agent_id"`
+		AgentType string `json:"agent_type"`
+	}
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/agent/tokens", map[string]any{
+		"agent_id": "worker-agent", "name": "Worker", "agent_type": AgentTypeWorker,
+	}, &workerPayload)
+	if workerPayload.AgentID != "worker-agent" || workerPayload.AgentType != AgentTypeWorker {
+		t.Fatalf("worker enrollment payload = %#v", workerPayload)
+	}
+
+	response := doJSONRequest(t, testServer, sessionToken, http.MethodPost, "/v1/home/agent/tokens", map[string]any{
+		"agent_id": "worker-agent", "name": "Worker", "agent_type": AgentTypePrimary,
+	})
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("worker promotion status = %d, want %d; body=%s", response.StatusCode, http.StatusConflict, response.Body)
+	}
+	storedWorker, err := db.GetAgentByID(ctx, "worker-agent")
+	if err != nil {
+		t.Fatalf("GetAgentByID worker: %v", err)
+	}
+	if storedWorker.AgentType != AgentTypeWorker {
+		t.Fatalf("worker type after rejected promotion = %q, want worker", storedWorker.AgentType)
 	}
 }
 

@@ -180,7 +180,7 @@ func (c *Client) sendRegister(ctx context.Context, conn *websocket.Conn) error {
 	envelope, err := protocol.NewEnvelope(protocol.TypeAgentRegister, "", c.agentID, "", protocol.AgentRegister{
 		AgentID:   c.agentID,
 		HomeName:  c.homeName,
-		AgentType: "home-agent",
+		AgentType: "primary",
 		Metadata: map[string]string{
 			"build": "dev",
 		},

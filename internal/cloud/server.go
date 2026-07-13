@@ -926,9 +926,10 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			agent.Status = domain.AgentStatusOnline
 			agent.LastSeenAt = &now
 			agent.UpdatedAt = now
-			agentType := strings.TrimSpace(payload.AgentType)
-			if agentType == "" {
-				agentType = AgentTypePrimary
+			agentType, err := registeredAgentType(record.Agent.AgentType, payload.AgentType)
+			if err != nil {
+				s.writePeerError(ctx, peer, protocol.TypeAgentError, "", record.Agent.ID, record.Home.ID, "agent_type_mismatch", err.Error(), nil)
+				continue
 			}
 			agent.AgentType = agentType
 			registeredPrimary = agentType == AgentTypePrimary
