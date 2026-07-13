@@ -98,6 +98,17 @@ function publicConfigForFolders(folders: HostFolder[]): Record<string, unknown> 
   return { folders: publicFolders };
 }
 
+function publicConfigForShares(config: Record<string, unknown>): Record<string, unknown> {
+  return {
+    active_source_id: config.active_source_id,
+    host: config.host,
+    share: config.share,
+    domain: config.domain,
+    username: config.username,
+    shares: config.shares,
+  };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Connections could not be loaded.";
 }
@@ -210,7 +221,7 @@ export function ConnectionsSettings() {
       };
       const publicConfig = upsertSMBShare(readyState.smbConfig, share, readyState.originalSMBID);
       const input = {
-        public_config: publicConfig,
+        public_config: publicConfigForShares(publicConfig),
         persist: readyState.smbDraft.persist,
         ...(readyState.smbDraft.password ? { secrets: { shares: [{ id: share.id, password: readyState.smbDraft.password }] } } : {}),
       };
@@ -267,7 +278,7 @@ export function ConnectionsSettings() {
       setReady({ smbBusy: "remove", message: "" });
       const publicConfig = removeSMBShare(readyState.smbConfig, readyState.originalSMBID);
       const remaining = smbSourceRecords(publicConfig);
-      await connectionsClient.saveProfile("smb", { public_config: publicConfig, persist: readyState.smbDraft.persist });
+      await connectionsClient.saveProfile("smb", { public_config: publicConfigForShares(publicConfig), persist: readyState.smbDraft.persist });
       await load(`${label} removed.`, remaining[0]?.id || "");
     } catch (error) {
       setReady({ smbBusy: "", message: errorMessage(error) });
@@ -414,7 +425,6 @@ export function ConnectionsSettings() {
           <label>
             <span>Share label</span>
             <input
-              aria-label="SMB share label"
               disabled={!canManage || Boolean(readyState.smbBusy)}
               onChange={(event) => setReady({ smbDraft: { ...readyState.smbDraft, name: event.target.value } })}
               type="text"
@@ -424,7 +434,6 @@ export function ConnectionsSettings() {
           <label>
             <span>Server address</span>
             <input
-              aria-label="SMB server address"
               disabled={!canManage || Boolean(readyState.smbBusy)}
               onChange={(event) => setReady({ smbDraft: { ...readyState.smbDraft, host: event.target.value } })}
               type="text"
@@ -434,7 +443,6 @@ export function ConnectionsSettings() {
           <label>
             <span>Share name</span>
             <input
-              aria-label="SMB share name"
               disabled={!canManage || Boolean(readyState.smbBusy)}
               onChange={(event) => setReady({ smbDraft: { ...readyState.smbDraft, share: event.target.value } })}
               type="text"
@@ -444,7 +452,6 @@ export function ConnectionsSettings() {
           <label>
             <span>Domain</span>
             <input
-              aria-label="SMB domain"
               disabled={!canManage || Boolean(readyState.smbBusy)}
               onChange={(event) => setReady({ smbDraft: { ...readyState.smbDraft, domain: event.target.value } })}
               type="text"
@@ -454,7 +461,6 @@ export function ConnectionsSettings() {
           <label>
             <span>Username</span>
             <input
-              aria-label="SMB username"
               disabled={!canManage || Boolean(readyState.smbBusy)}
               onChange={(event) => setReady({ smbDraft: { ...readyState.smbDraft, username: event.target.value } })}
               type="text"
@@ -482,7 +488,7 @@ export function ConnectionsSettings() {
             <span>Save on home connector</span>
           </label>
           <div className="button-row">
-            <button disabled={!canManage || Boolean(readyState.smbBusy)} type="submit">{readyState.smbBusy === "save" ? "Saving..." : "Save SMB Share"}</button>
+            <button disabled={!canManage || Boolean(readyState.smbBusy)} type="submit">{readyState.smbBusy === "save" ? "Saving..." : "Save File Server"}</button>
             <button className="secondary" disabled={!canManage || Boolean(readyState.smbBusy)} onClick={() => void testSMB()} type="button">{readyState.smbBusy === "test" ? "Testing..." : "Test Connection"}</button>
             <button className="danger-link" disabled={!canManage || !readyState.originalSMBID || Boolean(readyState.smbBusy)} onClick={() => void removeSelectedSMB()} type="button">{readyState.smbBusy === "remove" ? "Removing..." : "Remove SMB Share"}</button>
           </div>

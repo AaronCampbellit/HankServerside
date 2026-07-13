@@ -51,15 +51,15 @@ describe("ConnectionsSettings SMB management", () => {
     renderSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit Archive" }));
-    expect(screen.getByLabelText("SMB share name")).toHaveValue("archive");
-    expect(screen.getByLabelText("SMB server address")).toHaveValue("backup.local");
-    fireEvent.change(screen.getByLabelText("SMB share label"), { target: { value: "Cold Archive" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save SMB Share" }));
+    expect(screen.getByLabelText("Share name")).toHaveValue("archive");
+    expect(screen.getByLabelText("Server address")).toHaveValue("backup.local");
+    fireEvent.change(screen.getByLabelText("Share label"), { target: { value: "Cold Archive" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save File Server" }));
 
     await waitFor(() => expect(connectionsClient.saveProfile).toHaveBeenCalledTimes(1));
     const input = connectionsClient.saveProfile.mock.calls[0][1];
     expect(input.secrets).toBeUndefined();
-    expect(input.public_config.folders).toEqual(smbConfig.folders);
+    expect(input.public_config.folders).toBeUndefined();
     expect(input.public_config.shares).toEqual([
       smbConfig.shares[0],
       { ...smbConfig.shares[1], name: "Cold Archive", domain: "" },
@@ -70,10 +70,10 @@ describe("ConnectionsSettings SMB management", () => {
     renderSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "Add SMB share" }));
-    expect(screen.getByLabelText("SMB share label")).toHaveValue("");
-    fireEvent.change(screen.getByLabelText("SMB share label"), { target: { value: "Projects" } });
-    fireEvent.change(screen.getByLabelText("SMB server address"), { target: { value: "smb://projects.local/projects" } });
-    fireEvent.change(screen.getByLabelText("SMB share name"), { target: { value: "projects" } });
+    expect(screen.getByLabelText("Share label")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Share label"), { target: { value: "Projects" } });
+    fireEvent.change(screen.getByLabelText("Server address"), { target: { value: "smb://projects.local/projects" } });
+    fireEvent.change(screen.getByLabelText("Share name"), { target: { value: "projects" } });
     fireEvent.change(screen.getByLabelText("SMB password"), { target: { value: "draft-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Test Connection" }));
 
@@ -103,6 +103,6 @@ describe("ConnectionsSettings SMB management", () => {
     const input = connectionsClient.saveProfile.mock.calls[0][1];
     expect(input.public_config.shares).toEqual([smbConfig.shares[1]]);
     expect(input.public_config.active_source_id).toBe("archive");
-    expect(input.public_config.folders).toEqual(smbConfig.folders);
+    expect(input.public_config.folders).toBeUndefined();
   });
 });
