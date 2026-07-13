@@ -58,6 +58,14 @@ func (m *configManager) TestSMB(ctx context.Context, request protocol.ConfigSMBT
 		Password: request.Password,
 		Domain:   strings.TrimSpace(request.Domain),
 	}
+	if cfg.Password == "" {
+		for _, existing := range m.files.SMBConfigs() {
+			if existing.ID == cfg.ID {
+				cfg.Password = existing.Password
+				break
+			}
+		}
+	}
 	if cfg.ID == "" {
 		return protocol.ConfigSMBTestResponse{}, errors.New("SMB share ID is required")
 	}

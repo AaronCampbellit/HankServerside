@@ -60,6 +60,22 @@ func TestConfigManagerSMBTestValidatesDraft(t *testing.T) {
 	}
 }
 
+func TestConfigManagerSMBTestReusesSavedPasswordWhenDraftIsBlank(t *testing.T) {
+	t.Parallel()
+
+	files := agentfiles.NewWithConfig(agentfiles.Config{Shares: []agentfiles.SMBConfig{{ID: "media", Host: "nas.local", Share: "media", Password: "saved-secret"}}})
+	manager := newConfigManager("", agentha.New("", "", 0), files)
+	manager.testSMB = func(_ context.Context, cfg agentfiles.SMBConfig) error {
+		if cfg.Password != "saved-secret" {
+			t.Fatalf("probe password = %q, want saved credential", cfg.Password)
+		}
+		return nil
+	}
+	if _, err := manager.TestSMB(context.Background(), protocol.ConfigSMBTestRequest{ID: "media", Host: "nas.local", Share: "media"}); err != nil {
+		t.Fatalf("TestSMB: %v", err)
+	}
+}
+
 func TestPrepareLocalConfigsCreatesAndValidates(t *testing.T) {
 	t.Parallel()
 
