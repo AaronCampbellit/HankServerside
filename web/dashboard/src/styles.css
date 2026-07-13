@@ -522,6 +522,42 @@ button.secondary:hover {
   color: var(--muted);
 }
 
+.smb-share-list {
+  margin-bottom: 14px;
+}
+
+.smb-share-row {
+  width: 100%;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  text-align: left;
+}
+
+.smb-share-row:hover,
+.smb-share-row.selected {
+  border-color: color-mix(in srgb, var(--brand) 68%, var(--line));
+  background: color-mix(in srgb, var(--brand) 8%, var(--card));
+}
+
+.smb-share-row .quick-link-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.smb-share-row .quick-link-copy span,
+.smb-share-row .quick-link-copy small {
+  color: var(--muted);
+}
+
 .notes-layout {
   display: grid;
   grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
