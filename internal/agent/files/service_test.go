@@ -451,9 +451,10 @@ func TestSnapshotIncludesHostFolders(t *testing.T) {
 	t.Parallel()
 
 	defaultRoot := t.TempDir()
+	denyWrite := false
 	service := NewWithConfig(Config{
 		Root:         defaultRoot,
-		LocalSources: []LocalConfig{{ID: "media", Name: "Media", Root: t.TempDir()}},
+		LocalSources: []LocalConfig{{ID: "media", Name: "Media", Root: t.TempDir(), Policy: AccessPolicy{Write: &denyWrite}}},
 	})
 
 	snapshot := service.Snapshot()
@@ -472,6 +473,9 @@ func TestSnapshotIncludesHostFolders(t *testing.T) {
 	}
 	if folders[1].ID != "media" {
 		t.Fatalf("second folder = %#v, want media", folders[1])
+	}
+	if folders[1].Policy.Write == nil || *folders[1].Policy.Write {
+		t.Fatalf("second folder policy = %#v, want write=false", folders[1].Policy)
 	}
 }
 
@@ -535,10 +539,11 @@ func TestSMBConfigEnablesService(t *testing.T) {
 func TestMultipleSMBSharesSnapshotAndDefaultSource(t *testing.T) {
 	t.Parallel()
 
+	denyDelete := false
 	service := NewWithConfig(Config{
 		Root: t.TempDir(),
 		Shares: []SMBConfig{
-			{ID: "media", Name: "Media", Host: "nas.local", Share: "media", Username: "aaron", Password: "secret"},
+			{ID: "media", Name: "Media", Host: "nas.local", Share: "media", Username: "aaron", Password: "secret", Policy: AccessPolicy{Delete: &denyDelete}},
 			{ID: "archive", Name: "Archive", Host: "nas.local", Share: "archive", Username: "aaron"},
 		},
 	})
@@ -556,6 +561,9 @@ func TestMultipleSMBSharesSnapshotAndDefaultSource(t *testing.T) {
 	}
 	if sources[0].ID != "media" || !sources[0].SMBPasswordSet {
 		t.Fatalf("first source = %#v, want media with saved password", sources[0])
+	}
+	if sources[0].Policy.Delete == nil || *sources[0].Policy.Delete {
+		t.Fatalf("first source policy = %#v, want delete=false", sources[0].Policy)
 	}
 	if sources[2].ID != LocalSourceID || !sources[2].LocalRootEnabled {
 		t.Fatalf("last source = %#v, want local source", sources[2])

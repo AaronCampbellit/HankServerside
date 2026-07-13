@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,37 @@ import (
 
 var errAdminRoleRequired = errors.New("admin role required")
 var errFeaturePermissionDenied = errors.New("feature permission denied")
+
+func mergeServicePublicConfig(serviceType string, existingJSON string, patch json.RawMessage) (json.RawMessage, error) {
+	if len(patch) == 0 {
+		return nil, nil
+	}
+	if serviceType != domain.ServiceTypeSMB {
+		return append(json.RawMessage(nil), patch...), nil
+	}
+
+	existing := map[string]any{}
+	if strings.TrimSpace(existingJSON) != "" {
+		if err := json.Unmarshal([]byte(existingJSON), &existing); err != nil {
+			return nil, fmt.Errorf("decode existing SMB public config: %w", err)
+		}
+	}
+	var updates map[string]any
+	if err := json.Unmarshal(patch, &updates); err != nil {
+		return nil, fmt.Errorf("decode SMB public config update: %w", err)
+	}
+	if updates == nil {
+		return nil, errors.New("SMB public_config must be an object")
+	}
+	for key, value := range updates {
+		existing[key] = value
+	}
+	merged, err := json.Marshal(existing)
+	if err != nil {
+		return nil, fmt.Errorf("encode merged SMB public config: %w", err)
+	}
+	return merged, nil
+}
 
 func (s *Server) requireSingletonHomeMembership(ctx context.Context, userID string) (domain.Home, domain.HomeMembership, error) {
 	return NewDeploymentHomeResolver(s.store).ResolveForUser(ctx, userID)
@@ -1185,8 +1217,14 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 		profile := existing
 		profile.UpdatedAt = now
 		profile.UpdatedBy = auth.User.ID
+		publicConfig := body.PublicConfig
 		if len(body.PublicConfig) > 0 {
-			profile.PublicConfigJSON = strings.TrimSpace(string(body.PublicConfig))
+			publicConfig, err = mergeServicePublicConfig(serviceType, existing.PublicConfigJSON, body.PublicConfig)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return true
+			}
+			profile.PublicConfigJSON = strings.TrimSpace(string(publicConfig))
 		}
 
 		secretVersion := existing.SecretVersion
@@ -1213,7 +1251,7 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 			if ok {
 				response, err := s.sendAgentCommand(r.Context(), home.ID, "config.apply", protocol.ConfigApplyRequest{
 					ServiceType:   serviceType,
-					PublicConfig:  body.PublicConfig,
+					PublicConfig:  publicConfig,
 					Secrets:       body.Secrets,
 					SecretVersion: secretVersion,
 					Persist:       body.Persist,

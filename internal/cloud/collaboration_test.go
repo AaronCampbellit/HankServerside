@@ -20,6 +20,50 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 )
 
+func TestMergeSMBPublicConfigPreservesUnpatchedSourcesAndPolicies(t *testing.T) {
+	t.Parallel()
+
+	existing := `{
+		"shares":[{"id":"media","host":"nas.local","share":"media","policy":{"read":true,"write":false}}],
+		"folders":[{"id":"docs","root":"/srv/docs","policy":{"read":true,"write":false}}]
+	}`
+	folderPatch := json.RawMessage(`{"folders":[{"id":"archive","root":"/srv/archive","policy":{"read":true,"write":false}}]}`)
+	merged, err := mergeServicePublicConfig(domain.ServiceTypeSMB, existing, folderPatch)
+	if err != nil {
+		t.Fatalf("merge folder patch: %v", err)
+	}
+	var folderResult map[string]any
+	if err := json.Unmarshal(merged, &folderResult); err != nil {
+		t.Fatalf("decode folder result: %v", err)
+	}
+	shares, _ := folderResult["shares"].([]any)
+	if len(shares) != 1 {
+		t.Fatalf("shares after folder patch = %#v, want preserved share", folderResult["shares"])
+	}
+	share := shares[0].(map[string]any)
+	if policy, _ := share["policy"].(map[string]any); policy["write"] != false {
+		t.Fatalf("share policy after folder patch = %#v, want write=false", share["policy"])
+	}
+
+	sharePatch := json.RawMessage(`{"shares":[{"id":"backup","host":"backup.local","share":"backup","policy":{"read":true}}]}`)
+	merged, err = mergeServicePublicConfig(domain.ServiceTypeSMB, string(merged), sharePatch)
+	if err != nil {
+		t.Fatalf("merge share patch: %v", err)
+	}
+	var shareResult map[string]any
+	if err := json.Unmarshal(merged, &shareResult); err != nil {
+		t.Fatalf("decode share result: %v", err)
+	}
+	folders, _ := shareResult["folders"].([]any)
+	if len(folders) != 1 {
+		t.Fatalf("folders after share patch = %#v, want preserved folder", shareResult["folders"])
+	}
+	folder := folders[0].(map[string]any)
+	if policy, _ := folder["policy"].(map[string]any); policy["write"] != false {
+		t.Fatalf("folder policy after share patch = %#v, want write=false", folder["policy"])
+	}
+}
+
 func TestNoteSummariesSortByMostRecentFirst(t *testing.T) {
 	t.Parallel()
 

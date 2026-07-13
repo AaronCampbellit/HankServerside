@@ -101,35 +101,38 @@ func (p AccessPolicy) HasRules() bool {
 }
 
 type SourceSnapshot struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Type             string `json:"type"`
-	Root             string `json:"root,omitempty"`
-	SMBHost          string `json:"smb_host,omitempty"`
-	SMBShare         string `json:"smb_share,omitempty"`
-	SMBUsername      string `json:"smb_username,omitempty"`
-	SMBDomain        string `json:"smb_domain,omitempty"`
-	SMBEnabled       bool   `json:"smb_enabled,omitempty"`
-	SMBPasswordSet   bool   `json:"smb_password_set,omitempty"`
-	LocalRootEnabled bool   `json:"local_root_enabled,omitempty"`
+	ID               string       `json:"id"`
+	Name             string       `json:"name"`
+	Type             string       `json:"type"`
+	Root             string       `json:"root,omitempty"`
+	SMBHost          string       `json:"smb_host,omitempty"`
+	SMBShare         string       `json:"smb_share,omitempty"`
+	SMBUsername      string       `json:"smb_username,omitempty"`
+	SMBDomain        string       `json:"smb_domain,omitempty"`
+	SMBEnabled       bool         `json:"smb_enabled,omitempty"`
+	SMBPasswordSet   bool         `json:"smb_password_set,omitempty"`
+	LocalRootEnabled bool         `json:"local_root_enabled,omitempty"`
+	Policy           AccessPolicy `json:"policy,omitempty"`
 }
 
 type smbShareSnapshot struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Host        string `json:"host"`
-	Share       string `json:"share"`
-	Username    string `json:"username,omitempty"`
-	Domain      string `json:"domain,omitempty"`
-	Enabled     bool   `json:"enabled"`
-	PasswordSet bool   `json:"password_set"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Host        string       `json:"host"`
+	Share       string       `json:"share"`
+	Username    string       `json:"username,omitempty"`
+	Domain      string       `json:"domain,omitempty"`
+	Enabled     bool         `json:"enabled"`
+	PasswordSet bool         `json:"password_set"`
+	Policy      AccessPolicy `json:"policy,omitempty"`
 }
 
 type localSourceSnapshot struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Root    string `json:"root"`
-	Enabled bool   `json:"enabled"`
+	ID      string       `json:"id"`
+	Name    string       `json:"name"`
+	Root    string       `json:"root"`
+	Enabled bool         `json:"enabled"`
+	Policy  AccessPolicy `json:"policy,omitempty"`
 }
 
 type Service struct {
@@ -483,6 +486,7 @@ func (s *Service) sourceSnapshotsLocked() []SourceSnapshot {
 			SMBDomain:      cfg.Domain,
 			SMBEnabled:     cfg.Enabled(),
 			SMBPasswordSet: cfg.Password != "",
+			Policy:         cfg.Policy,
 		})
 	}
 	for _, cfg := range s.localSources {
@@ -492,6 +496,7 @@ func (s *Service) sourceSnapshotsLocked() []SourceSnapshot {
 			Type:             fileSourceTypeLocal,
 			Root:             cfg.Root,
 			LocalRootEnabled: cfg.Enabled(),
+			Policy:           cfg.Policy,
 		})
 	}
 	return sources
@@ -505,6 +510,7 @@ func (s *Service) localSourceSnapshotsLocked() []localSourceSnapshot {
 			Name:    firstNonBlank(cfg.Name, cfg.ID),
 			Root:    cfg.Root,
 			Enabled: cfg.Enabled(),
+			Policy:  cfg.Policy,
 		})
 	}
 	return folders
@@ -522,6 +528,7 @@ func (s *Service) smbShareSnapshotsLocked() []smbShareSnapshot {
 			Domain:      cfg.Domain,
 			Enabled:     cfg.Enabled(),
 			PasswordSet: cfg.Password != "",
+			Policy:      cfg.Policy,
 		})
 	}
 	return shares

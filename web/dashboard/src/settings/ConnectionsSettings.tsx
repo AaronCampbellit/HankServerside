@@ -17,6 +17,7 @@ type HostFolder = {
   name: string;
   root: string;
   create: boolean;
+  policy?: Record<string, unknown>;
 };
 
 type State =
@@ -112,6 +113,7 @@ function hostFolders(profile: ServiceProfile | undefined): HostFolder[] {
       name: firstString(record.name, id),
       root,
       create: false,
+      ...(record.policy && typeof record.policy === "object" ? { policy: { ...(record.policy as Record<string, unknown>) } } : {}),
     }];
   });
   if (parsed.length > 0) return parsed;
@@ -151,6 +153,7 @@ function publicConfigForFolders(folders: HostFolder[]): Record<string, unknown> 
       name: folder.name.trim() || id,
       root,
       create: folder.create,
+      ...(folder.policy ? { policy: folder.policy } : {}),
     }];
   });
   return { folders: publicFolders };

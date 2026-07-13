@@ -972,7 +972,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			if agentConnectionID != "" {
 				_ = s.store.HeartbeatAgentConnection(ctx, agentConnectionID, payload.Capabilities)
 			}
-			if slices.Contains(payload.Capabilities, "notes.sync") {
+			if shouldScheduleNoteSync(registeredPrimary, payload.Capabilities) {
 				if state, err := s.store.GetHomeNoteSyncState(ctx, record.Home.ID); err == nil {
 					if state.LastManifestAt == nil || now.Sub(*state.LastManifestAt) > time.Minute {
 						s.scheduleHomeSync(record.Home, record.Agent.ID)
@@ -1004,6 +1004,10 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writePeerError(ctx, peer, protocol.TypeAgentError, envelope.RequestID, record.Agent.ID, record.Home.ID, "unsupported_message", "unsupported envelope type", nil)
 		}
 	}
+}
+
+func shouldScheduleNoteSync(registeredPrimary bool, capabilities []string) bool {
+	return registeredPrimary && slices.Contains(capabilities, "notes.sync")
 }
 
 func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {

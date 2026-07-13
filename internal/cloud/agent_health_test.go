@@ -22,3 +22,18 @@ func TestManagementCommandsRequireAdmin(t *testing.T) {
 		}
 	}
 }
+
+func TestNoteSyncSchedulingRequiresRegisteredPrimary(t *testing.T) {
+	t.Parallel()
+
+	capabilities := []string{"notes.sync"}
+	if shouldScheduleNoteSync(false, capabilities) {
+		t.Fatal("pre-registration or worker heartbeat scheduled note sync")
+	}
+	if !shouldScheduleNoteSync(true, capabilities) {
+		t.Fatal("registered primary with notes.sync did not schedule note sync")
+	}
+	if shouldScheduleNoteSync(true, []string{"files.list"}) {
+		t.Fatal("primary without notes.sync scheduled note sync")
+	}
+}
