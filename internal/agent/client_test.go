@@ -68,6 +68,9 @@ func TestClientRegistersAsPrimaryAgent(t *testing.T) {
 
 func TestPrimaryAgentShellCapabilitiesFollowExistingEnableSwitch(t *testing.T) {
 	client := NewClient("ws://example.invalid", "agent_1", "token", "Home", "", nil, nil, nil, nil, slog.New(discardHandler{}))
+	if !slices.Contains(client.capabilities(), "config.smb_test") {
+		t.Fatalf("primary capabilities missing config.smb_test: %v", client.capabilities())
+	}
 	if slices.Contains(client.capabilities(), protocol.CommandShellSessionOpen) || slices.Contains(client.capabilities(), "shell.exec") {
 		t.Fatal("shell capabilities advertised while disabled")
 	}

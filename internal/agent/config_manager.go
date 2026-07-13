@@ -27,6 +27,7 @@ type configManager struct {
 	ha       *agentha.Client
 	files    *agentfiles.Service
 	profiles map[string]protocol.ServiceProfileSnapshot
+	testSMB  func(context.Context, agentfiles.SMBConfig) error
 }
 
 func newConfigManager(envPath string, ha *agentha.Client, files *agentfiles.Service) *configManager {
@@ -35,10 +36,38 @@ func newConfigManager(envPath string, ha *agentha.Client, files *agentfiles.Serv
 		ha:       ha,
 		files:    files,
 		profiles: make(map[string]protocol.ServiceProfileSnapshot, 3),
+		testSMB: func(ctx context.Context, cfg agentfiles.SMBConfig) error {
+			probe := agentfiles.NewWithConfig(agentfiles.Config{Shares: []agentfiles.SMBConfig{cfg}})
+			defer probe.ApplySMBConfigs(nil)
+			_, err := probe.ListSource(ctx, cfg.ID, "")
+			return err
+		},
 	}
 	m.profiles[domain.ServiceTypeHomeAssistant] = m.homeAssistantProfile(0, 0, "")
 	m.profiles[domain.ServiceTypeSMB] = m.smbProfile(0, 0, "")
 	return m
+}
+
+func (m *configManager) TestSMB(ctx context.Context, request protocol.ConfigSMBTestRequest) (protocol.ConfigSMBTestResponse, error) {
+	cfg := agentfiles.SMBConfig{
+		ID:       strings.TrimSpace(request.ID),
+		Name:     strings.TrimSpace(request.Name),
+		Host:     strings.TrimSpace(request.Host),
+		Share:    strings.TrimSpace(request.Share),
+		Username: strings.TrimSpace(request.Username),
+		Password: request.Password,
+		Domain:   strings.TrimSpace(request.Domain),
+	}
+	if cfg.ID == "" {
+		return protocol.ConfigSMBTestResponse{}, errors.New("SMB share ID is required")
+	}
+	if !cfg.Enabled() {
+		return protocol.ConfigSMBTestResponse{}, errors.New("SMB host and share are required")
+	}
+	if err := m.testSMB(ctx, cfg); err != nil {
+		return protocol.ConfigSMBTestResponse{}, fmt.Errorf("SMB connection failed: %w", err)
+	}
+	return protocol.ConfigSMBTestResponse{OK: true}, nil
 }
 
 func (m *configManager) Status(_ context.Context, serviceType string) ([]protocol.ServiceProfileSnapshot, error) {

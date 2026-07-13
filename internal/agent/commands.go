@@ -472,6 +472,17 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 		}
 		return protocol.ConfigApplyResponse{Profile: profile}, nil
 
+	case "config.smb_test":
+		request, err := decodeBody[protocol.ConfigSMBTestRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_config_request", err)
+		}
+		response, err := d.config.TestSMB(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return response, nil
+
 	default:
 		return nil, &protocol.ErrorPayload{
 			Code:    "unsupported_command",

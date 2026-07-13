@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -14,6 +15,50 @@ import (
 	"github.com/dropfile/hankremote/internal/domain"
 	"github.com/dropfile/hankremote/internal/protocol"
 )
+
+func TestConfigManagerSMBTestDoesNotMutateOrPersist(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env.agent")
+	files := agentfiles.NewWithConfig(agentfiles.Config{Shares: []agentfiles.SMBConfig{{ID: "media", Host: "nas.local", Share: "media", Password: "saved-secret"}}})
+	manager := newConfigManager(envPath, agentha.New("", "", 0), files)
+	manager.testSMB = func(_ context.Context, cfg agentfiles.SMBConfig) error {
+		if cfg.ID != "archive" || cfg.Host != "backup.local" || cfg.Share != "archive" || cfg.Password != "draft-secret" {
+			t.Fatalf("test config = %#v", cfg)
+		}
+		return nil
+	}
+	before := files.SMBConfigs()
+	response, err := manager.TestSMB(context.Background(), protocol.ConfigSMBTestRequest{
+		ID: "archive", Name: "Archive", Host: "backup.local", Share: "archive", Username: "backup", Password: "draft-secret",
+	})
+	if err != nil {
+		t.Fatalf("TestSMB: %v", err)
+	}
+	if !response.OK {
+		t.Fatalf("response = %#v, want ok", response)
+	}
+	if after := files.SMBConfigs(); !reflect.DeepEqual(before, after) {
+		t.Fatalf("live SMB config changed: before=%#v after=%#v", before, after)
+	}
+	if _, err := os.Stat(envPath); !os.IsNotExist(err) {
+		t.Fatalf("test wrote env file: err=%v", err)
+	}
+}
+
+func TestConfigManagerSMBTestValidatesDraft(t *testing.T) {
+	t.Parallel()
+
+	manager := newConfigManager("", agentha.New("", "", 0), agentfiles.New(""))
+	manager.testSMB = func(context.Context, agentfiles.SMBConfig) error {
+		t.Fatal("probe called for invalid draft")
+		return nil
+	}
+	if _, err := manager.TestSMB(context.Background(), protocol.ConfigSMBTestRequest{ID: "broken", Host: "nas.local"}); err == nil || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("TestSMB error = %v, want sanitized validation error", err)
+	}
+}
 
 func TestPrepareLocalConfigsCreatesAndValidates(t *testing.T) {
 	t.Parallel()

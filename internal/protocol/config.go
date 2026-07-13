@@ -34,3 +34,17 @@ type ConfigApplyRequest struct {
 type ConfigApplyResponse struct {
 	Profile ServiceProfileSnapshot `json:"profile"`
 }
+
+type ConfigSMBTestRequest struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Share    string `json:"share"`
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	Domain   string `json:"domain"`
+}
+
+type ConfigSMBTestResponse struct {
+	OK bool `json:"ok"`
+}

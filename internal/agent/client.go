@@ -418,7 +418,7 @@ func (c *Client) capabilities() []string {
 		)
 		capabilities = append(capabilities, c.dispatcher.apps.Capabilities()...)
 	}
-	capabilities = append(capabilities, "config.status", "config.apply")
+	capabilities = append(capabilities, "config.status", "config.apply", "config.smb_test")
 	return capabilities
 }
 
