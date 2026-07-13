@@ -116,16 +116,20 @@ func (m *configManager) Apply(_ context.Context, request protocol.ConfigApplyReq
 			}
 		}
 		configs := smbConfigsFromApply(public, secrets, m.files.SMBConfigs())
-		m.files.ApplySMBConfigs(configs)
-
 		applyLocal := public.Folders != nil
+		var locals []agentfiles.LocalConfig
 		if applyLocal {
-			locals, err := prepareLocalConfigs(public.Folders)
+			var err error
+			locals, err = prepareLocalConfigs(public.Folders)
 			if err != nil {
 				profile := m.smbProfile(request.SecretVersion, request.SecretVersion, err.Error())
 				m.profiles[request.ServiceType] = profile
 				return profile, err
 			}
+		}
+
+		m.files.ApplySMBConfigs(configs)
+		if applyLocal {
 			m.files.ApplyLocalConfigs(locals)
 		}
 

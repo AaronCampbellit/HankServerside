@@ -491,6 +491,33 @@ func TestApplyLocalConfigsReplacesHostFolders(t *testing.T) {
 	}
 }
 
+func TestApplyLocalConfigsInvalidatesSearchCache(t *testing.T) {
+	t.Parallel()
+
+	oldRoot := t.TempDir()
+	newRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(oldRoot, "old.txt"), []byte("old"), 0o600); err != nil {
+		t.Fatalf("write old file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newRoot, "new.txt"), []byte("new"), 0o600); err != nil {
+		t.Fatalf("write new file: %v", err)
+	}
+
+	service := NewWithConfig(Config{LocalSources: []LocalConfig{{ID: "shared", Root: oldRoot}}})
+	if results, err := service.SearchSource(context.Background(), "shared", "old", 10); err != nil || len(results) != 1 {
+		t.Fatalf("initial search results = %#v, err = %v", results, err)
+	}
+
+	service.ApplyLocalConfigs([]LocalConfig{{ID: "shared", Root: newRoot}})
+	results, err := service.SearchSource(context.Background(), "shared", "new", 10)
+	if err != nil {
+		t.Fatalf("SearchSource after apply: %v", err)
+	}
+	if len(results) != 1 || results[0].Name != "new.txt" {
+		t.Fatalf("search results after apply = %#v, want new.txt from replacement root", results)
+	}
+}
+
 func TestSMBConfigEnablesService(t *testing.T) {
 	t.Parallel()
 

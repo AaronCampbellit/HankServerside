@@ -274,8 +274,9 @@ func (s *Service) SMBConfigs() []SMBConfig {
 func (s *Service) ApplyLocalConfigs(configs []LocalConfig) {
 	next := normalizeLocalConfigs(configs)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.localSources = next
+	s.mu.Unlock()
+	s.invalidateAllSearchIndexes()
 }
 
 func (s *Service) LocalConfigs() []LocalConfig {

@@ -12,6 +12,13 @@ type SMBShare = {
   password_set?: boolean;
 };
 
+type HostFolder = {
+  id: string;
+  name: string;
+  root: string;
+  create: boolean;
+};
+
 type State =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -21,6 +28,7 @@ type State =
       profiles: ServiceProfile[];
       ha: { baseURL: string; timeoutSeconds: string; token: string; persist: boolean };
       smb: SMBShare & { password: string; persist: boolean };
+      folders: HostFolder[];
       message: string;
     };
 
@@ -75,7 +83,29 @@ function firstSMBShare(profile: ServiceProfile | undefined): SMBShare {
   };
 }
 
-function publicConfigForShare(share: SMBShare): Record<string, unknown> {
+function hostFolders(profile: ServiceProfile | undefined): HostFolder[] {
+  const config = parseConfig(profile);
+  const folders = Array.isArray(config.folders) ? config.folders : [];
+  const parsed = folders.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    const root = firstString(record.root, record.path);
+    if (!root) return [];
+    const id = cleanID(firstString(record.id, record.source_id, record.name, `local-${index + 1}`)) || `local-${index + 1}`;
+    return [{
+      id,
+      name: firstString(record.name, id),
+      root,
+      create: false,
+    }];
+  });
+  if (parsed.length > 0) return parsed;
+
+  const legacyRoot = firstString(config.root);
+  return legacyRoot ? [{ id: "local", name: "Home connector files", root: legacyRoot, create: false }] : [];
+}
+
+function publicConfigForFileServer(share: SMBShare, folders: HostFolder[]): Record<string, unknown> {
   const publicShare = {
     id: share.id,
     name: share.name,
@@ -84,13 +114,26 @@ function publicConfigForShare(share: SMBShare): Record<string, unknown> {
     domain: share.domain,
     username: share.username,
   };
+  const hasShare = Boolean(share.host && share.share);
+  const publicFolders = folders.flatMap((folder, index) => {
+    const root = folder.root.trim();
+    if (!root) return [];
+    const id = cleanID(folder.id || folder.name || `local-${index + 1}`) || `local-${index + 1}`;
+    return [{
+      id,
+      name: folder.name.trim() || id,
+      root,
+      create: folder.create,
+    }];
+  });
   return {
-    active_source_id: share.id,
+    active_source_id: hasShare ? share.id : publicFolders[0]?.id || "",
     host: share.host,
     share: share.share,
     domain: share.domain,
     username: share.username,
-    shares: [publicShare],
+    shares: hasShare ? [publicShare] : [],
+    folders: publicFolders,
   };
 }
 
@@ -106,7 +149,8 @@ export function ConnectionsSettings() {
       const [bootstrap, payload] = await Promise.all([bootstrapClient.load(), connectionsClient.listProfiles()]);
       const profiles = payload.profiles || [];
       const haConfig = parseConfig(profileByType(profiles, "homeassistant"));
-      const smbShare = firstSMBShare(profileByType(profiles, "smb"));
+      const smbProfile = profileByType(profiles, "smb");
+      const smbShare = firstSMBShare(smbProfile);
       setState({
         status: "ready",
         bootstrap,
@@ -118,6 +162,7 @@ export function ConnectionsSettings() {
           persist: true,
         },
         smb: { ...smbShare, password: "", persist: true },
+        folders: hostFolders(smbProfile),
         message,
       });
     } catch (error) {
@@ -188,12 +233,48 @@ export function ConnectionsSettings() {
         username: readyState.smb.username.trim(),
       };
       const input = {
-        public_config: publicConfigForShare(share),
+        public_config: publicConfigForFileServer(share, readyState.folders),
         persist: readyState.smb.persist,
         ...(readyState.smb.password ? { secrets: { shares: [{ id: share.id, password: readyState.smb.password }] } } : {}),
       };
       await connectionsClient.saveProfile("smb", input);
       await load("File server share saved.");
+    } catch (error) {
+      setReady({ message: errorMessage(error) });
+    }
+  }
+
+  function updateFolder(index: number, next: Partial<HostFolder>) {
+    setReady({ folders: readyState.folders.map((folder, folderIndex) => folderIndex === index ? { ...folder, ...next } : folder) });
+  }
+
+  function addFolder() {
+    const index = readyState.folders.length + 1;
+    setReady({ folders: [...readyState.folders, { id: `local-${index}`, name: "", root: "", create: false }] });
+  }
+
+  function removeFolder(index: number) {
+    setReady({ folders: readyState.folders.filter((_, folderIndex) => folderIndex !== index) });
+  }
+
+  async function saveFolders(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const host = normalizeHost(readyState.smb.host);
+      const shareID = cleanID(readyState.smb.id || readyState.smb.name || readyState.smb.share || host || "smb") || "smb";
+      const share: SMBShare = {
+        id: shareID,
+        name: readyState.smb.name.trim() || readyState.smb.share.trim() || shareID,
+        host,
+        share: readyState.smb.share.trim(),
+        domain: readyState.smb.domain.trim(),
+        username: readyState.smb.username.trim(),
+      };
+      await connectionsClient.saveProfile("smb", {
+        public_config: publicConfigForFileServer(share, readyState.folders),
+        persist: readyState.smb.persist,
+      });
+      await load("Host folders saved.");
     } catch (error) {
       setReady({ message: errorMessage(error) });
     }
@@ -350,6 +431,60 @@ export function ConnectionsSettings() {
             <span>Save on home connector</span>
           </label>
           <button disabled={!canManage} type="submit">Save File Server</button>
+        </form>
+      </section>
+
+      <section className="settings-panel" aria-label="Host Folders">
+        <div className="panel-heading">
+          <div>
+            <h2>Host Folders</h2>
+            <p className="meta-line">Expose selected directories from the home connector as File Server sources.</p>
+          </div>
+          <button className="secondary" disabled={!canManage} onClick={addFolder} type="button">Add folder</button>
+        </div>
+        <form className="quick-link-form" onSubmit={saveFolders}>
+          {readyState.folders.length ? readyState.folders.map((folder, index) => (
+            <fieldset className="quick-link-form" key={`${folder.id}-${index}`}>
+              <label>
+                <span>Folder label</span>
+                <input
+                  aria-label="Host folder label"
+                  disabled={!canManage}
+                  onChange={(event) => updateFolder(index, { name: event.target.value })}
+                  type="text"
+                  value={folder.name}
+                />
+              </label>
+              <label>
+                <span>Absolute path</span>
+                <input
+                  aria-label="Host folder path"
+                  disabled={!canManage}
+                  onChange={(event) => updateFolder(index, { root: event.target.value })}
+                  placeholder="/srv/media"
+                  type="text"
+                  value={folder.root}
+                />
+              </label>
+              <label className="checkbox-field">
+                <input
+                  aria-label="Create folder if it does not exist"
+                  checked={folder.create}
+                  disabled={!canManage}
+                  onChange={(event) => updateFolder(index, { create: event.target.checked })}
+                  type="checkbox"
+                />
+                <span>Create folder if it does not exist</span>
+              </label>
+              <button
+                className="secondary"
+                disabled={!canManage}
+                onClick={() => removeFolder(index)}
+                type="button"
+              >Remove {folder.name || `folder ${index + 1}`}</button>
+            </fieldset>
+          )) : <p className="empty-state">No host folders configured.</p>}
+          <button disabled={!canManage} type="submit">Save Host Folders</button>
         </form>
       </section>
     </section>

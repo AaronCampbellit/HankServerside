@@ -1618,6 +1618,7 @@ describe("App routes", () => {
             service_type: "smb",
             public_config_json: JSON.stringify({
               shares: [{ id: "media", name: "Media", host: "nas.local", share: "media", username: "aaron" }],
+              folders: [{ id: "media-folder", name: "Media Folder", root: "/srv/media", enabled: true }],
             }),
             secret_version: 1,
             applied_version: 1,
@@ -1638,6 +1639,8 @@ describe("App routes", () => {
     expect(await screen.findByDisplayValue("http://ha.local:8123")).toBeInTheDocument();
     expect(screen.getByText("homeassistant")).toBeInTheDocument();
     expect(screen.getByText("Media")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Media Folder")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("/srv/media")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Home Assistant address" }), {
       target: { value: "http://homeassistant.local:8123" },
@@ -1680,8 +1683,47 @@ describe("App routes", () => {
             domain: "",
             username: "backup-user",
           }],
+          folders: [{
+            id: "media-folder",
+            name: "Media Folder",
+            root: "/srv/media",
+            create: false,
+          }],
         },
         secrets: { shares: [{ id: "media", password: "secret" }] },
+        persist: true,
+      },
+    }));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Host folder label" }), { target: { value: "Documents" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Host folder path" }), { target: { value: "/srv/documents" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Create folder if it does not exist" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Host Folders" }));
+    await waitFor(() => expect(calls).toContainEqual({
+      path: "/v1/home/service-profiles/smb",
+      method: "PUT",
+      body: {
+        public_config: {
+          active_source_id: "media",
+          host: "nas.local",
+          share: "media",
+          domain: "",
+          username: "aaron",
+          shares: [{
+            id: "media",
+            name: "Media",
+            host: "nas.local",
+            share: "media",
+            domain: "",
+            username: "aaron",
+          }],
+          folders: [{
+            id: "media-folder",
+            name: "Documents",
+            root: "/srv/documents",
+            create: true,
+          }],
+        },
         persist: true,
       },
     }));

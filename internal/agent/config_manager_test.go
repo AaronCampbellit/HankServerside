@@ -140,10 +140,15 @@ func TestConfigManagerApplyFailsForMissingHostFolder(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	files := agentfiles.New("")
+	files := agentfiles.NewWithConfig(agentfiles.Config{
+		Shares: []agentfiles.SMBConfig{{ID: "existing", Host: "nas.local", Share: "media"}},
+	})
 	manager := newConfigManager(filepath.Join(dir, ".env.agent"), agentha.New("", "", 0), files)
 
 	public, err := json.Marshal(map[string]any{
+		"shares": []map[string]any{
+			{"id": "replacement", "host": "backup.local", "share": "backups"},
+		},
 		"folders": []map[string]any{
 			{"id": "media", "root": filepath.Join(dir, "missing")},
 		},
@@ -158,5 +163,10 @@ func TestConfigManagerApplyFailsForMissingHostFolder(t *testing.T) {
 		Persist:      true,
 	}); err == nil {
 		t.Fatal("Apply accepted a missing host folder without create, want error")
+	}
+
+	configs := files.SMBConfigs()
+	if len(configs) != 1 || configs[0].ID != "existing" {
+		t.Fatalf("SMBConfigs after rejected apply = %#v, want existing config unchanged", configs)
 	}
 }
