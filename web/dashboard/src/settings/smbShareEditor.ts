@@ -37,7 +37,7 @@ function sourceRecords(config: Record<string, unknown>): Array<Record<string, un
       if (record.type && record.type !== "smb") return [];
       return [{ ...record }];
     });
-    if (records.length > 0 || candidate === config.shares) return records;
+    if (records.length > 0) return records;
   }
   return firstString(config.host, config.smb_host, config.share, config.smb_share) ? [{ ...config }] : [];
 }

@@ -317,7 +317,7 @@ export function ConnectionsSettings() {
         <div>
           <p className="eyebrow">Hank Remote</p>
           <h1 id="route-title">Connections</h1>
-          <p className="meta-line">Credentials stay on the home agent - the cloud never sees them.</p>
+          <p className="meta-line">Credentials are stored only on the home agent.</p>
         </div>
         <span className="status-pill">{canManage ? "Admin" : "View Only"}</span>
       </header>

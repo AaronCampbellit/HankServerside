@@ -24,6 +24,13 @@ describe("SMB share editor", () => {
     expect(smbSourceRecords(config).map((share) => share.id)).toEqual(["media", "archive"]);
   });
 
+  it("falls back to legacy share lists when canonical shares are empty", () => {
+    expect(smbSourceRecords({
+      shares: [],
+      file_sources: [{ id: "legacy", name: "Legacy", host: "legacy.local", share: "files" }],
+    }).map((share) => share.id)).toEqual(["legacy"]);
+  });
+
   it("updates a selected share without changing other shares or unrelated config", () => {
     const updated = upsertSMBShare(config, {
       id: "archive",

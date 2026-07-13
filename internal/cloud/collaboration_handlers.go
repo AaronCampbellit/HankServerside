@@ -1202,7 +1202,7 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 			return true
 		}
 		if response.Error != nil {
-			http.Error(w, response.Error.Message, http.StatusBadGateway)
+			http.Error(w, "SMB connection test failed", http.StatusBadGateway)
 			return true
 		}
 		result, err := protocol.DecodePayload[protocol.ConfigSMBTestResponse](response)
