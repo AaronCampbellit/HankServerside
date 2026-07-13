@@ -364,6 +364,47 @@ func TestServiceProfileApplySetsBackupTimestamp(t *testing.T) {
 	}
 }
 
+func TestSMBServiceProfileTestRoutesWithoutPersisting(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	testServer, homeID, agentID, sessionToken, agentConn := setupServerAndAgent(t, ctx)
+	defer testServer.Close()
+	defer agentConn.Close(websocket.StatusNormalClosure, "done")
+
+	go func() {
+		var envelope protocol.Envelope
+		if err := wsjson.Read(ctx, agentConn, &envelope); err != nil {
+			return
+		}
+		command, err := protocol.DecodePayload[protocol.RoutedCommand](envelope)
+		if err != nil || command.Command != "config.smb_test" {
+			t.Errorf("command = %#v, err = %v", command, err)
+			return
+		}
+		var request protocol.ConfigSMBTestRequest
+		if err := json.Unmarshal(command.Body, &request); err != nil {
+			t.Errorf("decode SMB test: %v", err)
+			return
+		}
+		if request.ID != "archive" || request.Password != "draft-secret" {
+			t.Errorf("SMB test request = %#v", request)
+			return
+		}
+		reply, _ := protocol.NewEnvelope(protocol.TypeCloudResponse, envelope.RequestID, agentID, homeID, protocol.ConfigSMBTestResponse{OK: true})
+		_ = wsjson.Write(ctx, agentConn, reply)
+	}()
+
+	var response protocol.ConfigSMBTestResponse
+	requestJSON(t, testServer, sessionToken, http.MethodPost, "/v1/home/service-profiles/smb/test", map[string]any{
+		"id": "archive", "name": "Archive", "host": "backup.local", "share": "archive", "username": "backup", "password": "draft-secret",
+	}, &response)
+	if !response.OK {
+		t.Fatalf("response = %#v, want ok", response)
+	}
+}
+
 func TestHermesServiceProfileApplyRoutesToAgent(t *testing.T) {
 	t.Parallel()
 

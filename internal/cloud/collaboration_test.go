@@ -478,6 +478,42 @@ func TestMemberCannotUpdateServiceProfile(t *testing.T) {
 	defer response.Body.Close()
 }
 
+func TestSMBServiceProfileTestRejectsMemberAndOfflineAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	owner := domain.User{ID: "usr_owner", Email: "owner@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	member := domain.User{ID: "usr_member", Email: "member@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_1", UserID: owner.ID, Name: "Family Home", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, owner))
+	must(t, db.CreateUser(ctx, member))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.AddHomeMembership(ctx, domain.HomeMembership{HomeID: home.ID, UserID: member.ID, Role: domain.HomeRoleMember, CreatedAt: now, UpdatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_owner", UserID: owner.ID, TokenHash: hashToken("owner-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_member", UserID: member.ID, TokenHash: hashToken("member-token"), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+	body := map[string]any{"id": "archive", "host": "nas.local", "share": "archive", "password": "secret"}
+
+	memberResponse := requestJSONStatus(t, testServer, "member-token", http.MethodPost, "/v1/home/service-profiles/smb/test", body, http.StatusForbidden)
+	memberResponse.Body.Close()
+	offlineResponse := requestJSONStatus(t, testServer, "owner-token", http.MethodPost, "/v1/home/service-profiles/smb/test", body, http.StatusConflict)
+	defer offlineResponse.Body.Close()
+	data, err := io.ReadAll(offlineResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret") {
+		t.Fatalf("offline response exposed password: %s", data)
+	}
+}
+
 func TestHomePermissionsDenyMemberNotesAccessWithoutOverride(t *testing.T) {
 	t.Parallel()
 

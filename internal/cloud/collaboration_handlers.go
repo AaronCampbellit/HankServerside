@@ -1182,6 +1182,38 @@ func (s *Server) handleHomeServiceProfiles(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 
+	if len(parts) == 3 && parts[0] == "service-profiles" && parts[1] == domain.ServiceTypeSMB && parts[2] == "test" && r.Method == http.MethodPost {
+		if membership.Role != domain.HomeRoleAdmin {
+			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+			return true
+		}
+		var request protocol.ConfigSMBTestRequest
+		if err := parseJSON(w, r, &request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		if _, ok := s.router.GetAgent(home.ID); !ok {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline"})
+			return true
+		}
+		response, err := s.sendAgentCommand(r.Context(), home.ID, "config.smb_test", request)
+		if err != nil {
+			http.Error(w, "SMB connection test failed", http.StatusBadGateway)
+			return true
+		}
+		if response.Error != nil {
+			http.Error(w, response.Error.Message, http.StatusBadGateway)
+			return true
+		}
+		result, err := protocol.DecodePayload[protocol.ConfigSMBTestResponse](response)
+		if err != nil {
+			http.Error(w, "invalid SMB connection test response", http.StatusBadGateway)
+			return true
+		}
+		writeJSON(w, http.StatusOK, result)
+		return true
+	}
+
 	if len(parts) == 2 && parts[0] == "service-profiles" && r.Method == http.MethodPut {
 		if membership.Role != domain.HomeRoleAdmin {
 			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)

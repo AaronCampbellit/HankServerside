@@ -26,6 +26,18 @@ export type SaveServiceProfileInput = {
   persist: boolean;
 };
 
+export type SMBTestInput = {
+  id: string;
+  name: string;
+  host: string;
+  share: string;
+  username: string;
+  password?: string;
+  domain: string;
+};
+
+export type SMBTestResult = { ok: boolean };
+
 export class ConnectionsClient {
   constructor(private readonly api: ApiTransport = apiClient) {}
 
@@ -37,6 +49,13 @@ export class ConnectionsClient {
   saveProfile(serviceType: ServiceType, input: SaveServiceProfileInput) {
     return this.api.request<ServiceProfile>(`/v1/home/service-profiles/${encodeURIComponent(serviceType)}`, {
       method: "PUT",
+      body: input,
+    });
+  }
+
+  testSMB(input: SMBTestInput) {
+    return this.api.request<SMBTestResult>("/v1/home/service-profiles/smb/test", {
+      method: "POST",
       body: input,
     });
   }
