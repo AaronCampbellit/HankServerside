@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
@@ -553,6 +554,10 @@ func (m *configManager) readEnvFile() (map[string]string, error) {
 }
 
 func writeEnvFile(path string, env map[string]string) error {
+	return writeEnvFileWithRename(path, env, os.Rename)
+}
+
+func writeEnvFileWithRename(path string, env map[string]string, rename func(string, string) error) error {
 	keys := make([]string, 0, len(env))
 	for key := range env {
 		keys = append(keys, key)
@@ -589,7 +594,31 @@ func writeEnvFile(path string, env map[string]string) error {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := rename(tempPath, path); err != nil {
+		if errors.Is(err, syscall.EBUSY) {
+			data, readErr := os.ReadFile(tempPath)
+			_ = os.Remove(tempPath)
+			if readErr != nil {
+				return readErr
+			}
+			file, openErr := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
+			if openErr != nil {
+				return openErr
+			}
+			if chmodErr := file.Chmod(0o600); chmodErr != nil {
+				_ = file.Close()
+				return chmodErr
+			}
+			if _, writeErr := file.Write(data); writeErr != nil {
+				_ = file.Close()
+				return writeErr
+			}
+			if syncErr := file.Sync(); syncErr != nil {
+				_ = file.Close()
+				return syncErr
+			}
+			return file.Close()
+		}
 		_ = os.Remove(tempPath)
 		return err
 	}

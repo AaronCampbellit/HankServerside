@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	agentfiles "github.com/dropfile/hankremote/internal/agent/files"
@@ -267,6 +268,40 @@ func TestWriteEnvFileReplacesContentWithPrivateMode(t *testing.T) {
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat env: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("env mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestWriteEnvFileFallsBackToInPlaceWriteForBindMount(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), ".env.agent")
+	if err := os.WriteFile(path, []byte("OLD=value\n"), 0o644); err != nil {
+		t.Fatalf("write original env: %v", err)
+	}
+	renameCalls := 0
+	err := writeEnvFileWithRename(path, map[string]string{"B": "two", "A": "one"}, func(_, _ string) error {
+		renameCalls++
+		return syscall.EBUSY
+	})
+	if err != nil {
+		t.Fatalf("writeEnvFileWithRename: %v", err)
+	}
+	if renameCalls != 1 {
+		t.Fatalf("rename calls = %d, want 1", renameCalls)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read env after bind-mount fallback: %v", err)
+	}
+	if string(data) != "A=one\nB=two\n" {
+		t.Fatalf("env content = %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat env after bind-mount fallback: %v", err)
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("env mode = %o, want 600", info.Mode().Perm())
