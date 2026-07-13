@@ -45,6 +45,17 @@ export type ShellResult = {
   truncated: boolean;
 };
 
+export type TerminalOpen = { session_id: string; cursor: number; shell?: string };
+export type TerminalAttach = { session_id: string; cursor: number; output?: string; exited?: boolean; exit_code?: number };
+export type TerminalEvent = {
+  session_id: string;
+  cursor: number;
+  data?: string;
+  exit_code?: number;
+  reason?: string;
+  exited: boolean;
+};
+
 export type AgentsSocket = {
   subscribe(topics: string[]): Promise<unknown>;
   sendCommand<T>(command: string, body?: unknown, options?: { timeoutMs?: number; agentID?: string }): Promise<T>;
@@ -120,6 +131,47 @@ export class AgentsClient {
       { command, timeout_seconds: timeoutSeconds },
       { agentID, timeoutMs: (timeoutSeconds + 15) * 1000 },
     );
+  }
+
+  openTerminal(agentID: string, sessionID: string, columns: number, rows: number): Promise<TerminalOpen> {
+    return this.socket.sendCommand("shell.session.open", { session_id: sessionID, columns, rows }, { agentID });
+  }
+
+  subscribeTerminal(sessionID: string): Promise<unknown> {
+    return this.socket.subscribe([`shell.session:${sessionID}`]);
+  }
+
+  attachTerminal(agentID: string, sessionID: string, afterCursor: number): Promise<TerminalAttach> {
+    return this.socket.sendCommand("shell.session.attach", { session_id: sessionID, after_cursor: afterCursor }, { agentID });
+  }
+
+  writeTerminal(agentID: string, sessionID: string, data: string): Promise<unknown> {
+    return this.socket.sendCommand("shell.session.input", { session_id: sessionID, data }, { agentID });
+  }
+
+  resizeTerminal(agentID: string, sessionID: string, columns: number, rows: number): Promise<unknown> {
+    return this.socket.sendCommand("shell.session.resize", { session_id: sessionID, columns, rows }, { agentID });
+  }
+
+  closeTerminal(agentID: string, sessionID: string): Promise<unknown> {
+    return this.socket.sendCommand("shell.session.close", { session_id: sessionID }, { agentID });
+  }
+
+  onTerminalEvent(sessionID: string, listener: (event: TerminalEvent) => void): () => void {
+    const topic = `shell.session:${sessionID}`;
+    return this.socket.onEvent((event) => {
+      if (event.topic !== topic || (event.event !== "shell.session.output" && event.event !== "shell.session.exited")) return;
+      const body = decodeEventBody(event.body);
+      if (!body || body.session_id !== sessionID || typeof body.cursor !== "number") return;
+      listener({
+        session_id: sessionID,
+        cursor: body.cursor,
+        data: typeof body.data === "string" ? body.data : undefined,
+        exit_code: typeof body.exit_code === "number" ? body.exit_code : undefined,
+        reason: typeof body.reason === "string" ? body.reason : undefined,
+        exited: event.event === "shell.session.exited",
+      });
+    });
   }
 }
 

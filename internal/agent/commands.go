@@ -17,12 +17,14 @@ import (
 )
 
 type commandDispatcher struct {
-	ha     *agentha.Client
-	files  *agentfiles.Service
-	mcpctx *agentmcpcontext.Service
-	notes  *agentnotes.Service
-	apps   *agentapps.Manager
-	config *configManager
+	ha        *agentha.Client
+	files     *agentfiles.Service
+	mcpctx    *agentmcpcontext.Service
+	notes     *agentnotes.Service
+	apps      *agentapps.Manager
+	config    *configManager
+	host      *hostService
+	terminals *terminalManager
 }
 
 func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.RoutedCommand) (any, *protocol.ErrorPayload) {
@@ -40,6 +42,86 @@ func (d *commandDispatcher) dispatch(ctx context.Context, command protocol.Route
 			Message: message,
 			Time:    time.Now().UTC(),
 		}, nil
+
+	case "host.status":
+		return d.host.status(), nil
+	case "host.lock":
+		if err := d.host.lock(ctx); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.EmptyResponse{OK: true}, nil
+	case "wol.send":
+		request, err := decodeBody[struct {
+			MAC       string `json:"mac"`
+			Broadcast string `json:"broadcast,omitempty"`
+		}](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_wol_request", err)
+		}
+		if err := d.host.wake(request.MAC, request.Broadcast); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.EmptyResponse{OK: true}, nil
+	case "shell.exec":
+		request, err := decodeBody[struct {
+			Command        string  `json:"command"`
+			TimeoutSeconds float64 `json:"timeout_seconds,omitempty"`
+		}](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_shell_request", err)
+		}
+		result, err := d.host.exec(ctx, request.Command, time.Duration(request.TimeoutSeconds*float64(time.Second)))
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return result, nil
+	case protocol.CommandShellSessionOpen:
+		request, err := decodeBody[protocol.ShellSessionOpenRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_shell_request", err)
+		}
+		result, err := d.terminals.open(ctx, request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return result, nil
+	case protocol.CommandShellSessionInput:
+		request, err := decodeBody[protocol.ShellSessionInputRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_shell_request", err)
+		}
+		if err := d.terminals.input(request); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.EmptyResponse{OK: true}, nil
+	case protocol.CommandShellSessionResize:
+		request, err := decodeBody[protocol.ShellSessionResizeRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_shell_request", err)
+		}
+		if err := d.terminals.resize(request); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.EmptyResponse{OK: true}, nil
+	case protocol.CommandShellSessionAttach:
+		request, err := decodeBody[protocol.ShellSessionAttachRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_shell_request", err)
+		}
+		result, err := d.terminals.attach(request)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return result, nil
+	case protocol.CommandShellSessionClose:
+		request, err := decodeBody[protocol.ShellSessionCloseRequest](command.Body)
+		if err != nil {
+			return nil, badRequest("invalid_shell_request", err)
+		}
+		if err := d.terminals.close(request); err != nil {
+			return nil, mapError(err)
+		}
+		return protocol.EmptyResponse{OK: true}, nil
 
 	case "homeassistant.health":
 		if err := d.ha.Health(ctx); err != nil {

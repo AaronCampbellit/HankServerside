@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -62,6 +63,23 @@ func TestClientRegistersAsPrimaryAgent(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "done")
 	if err := client.sendRegister(ctx, conn); err != nil {
 		t.Fatalf("sendRegister: %v", err)
+	}
+}
+
+func TestPrimaryAgentShellCapabilitiesFollowExistingEnableSwitch(t *testing.T) {
+	client := NewClient("ws://example.invalid", "agent_1", "token", "Home", "", nil, nil, nil, nil, slog.New(discardHandler{}))
+	if slices.Contains(client.capabilities(), protocol.CommandShellSessionOpen) || slices.Contains(client.capabilities(), "shell.exec") {
+		t.Fatal("shell capabilities advertised while disabled")
+	}
+	client.SetShellEnabled(true)
+	for _, capability := range []string{"host.read", "host.lock", "wol.send", "shell.exec", protocol.CommandShellSessionOpen} {
+		if !slices.Contains(client.capabilities(), capability) {
+			t.Fatalf("enabled capabilities missing %q: %v", capability, client.capabilities())
+		}
+	}
+	client.SetShellEnabled(false)
+	if slices.Contains(client.capabilities(), protocol.CommandShellSessionOpen) {
+		t.Fatal("live shell remained advertised after disable")
 	}
 }
 

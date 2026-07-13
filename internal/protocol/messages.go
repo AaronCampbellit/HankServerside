@@ -2,6 +2,9 @@ package protocol
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -28,9 +31,118 @@ const (
 )
 
 const (
-	CommandSystemPing    = "system.ping"
-	CommandSystemRestart = "system.restart"
+	CommandSystemPing         = "system.ping"
+	CommandSystemRestart      = "system.restart"
+	CommandShellSessionOpen   = "shell.session.open"
+	CommandShellSessionInput  = "shell.session.input"
+	CommandShellSessionResize = "shell.session.resize"
+	CommandShellSessionAttach = "shell.session.attach"
+	CommandShellSessionClose  = "shell.session.close"
 )
+
+const MaxShellInputBytes = 64 * 1024
+
+var shellSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
+
+func ShellSessionTopic(sessionID string) string { return "shell.session:" + sessionID }
+
+type ShellSessionOpenRequest struct {
+	SessionID string `json:"session_id"`
+	Columns   uint16 `json:"columns"`
+	Rows      uint16 `json:"rows"`
+}
+
+func (r ShellSessionOpenRequest) Validate() error {
+	if !shellSessionIDPattern.MatchString(r.SessionID) {
+		return errors.New("invalid shell session id")
+	}
+	return validateTerminalSize(r.Columns, r.Rows)
+}
+
+type ShellSessionOpenResponse struct {
+	SessionID string `json:"session_id"`
+	Cursor    uint64 `json:"cursor"`
+	Shell     string `json:"shell,omitempty"`
+}
+
+type ShellSessionInputRequest struct {
+	SessionID string `json:"session_id"`
+	Data      string `json:"data"`
+}
+
+func (r ShellSessionInputRequest) Validate() error {
+	if !shellSessionIDPattern.MatchString(r.SessionID) {
+		return errors.New("invalid shell session id")
+	}
+	if len(r.Data) == 0 || len(r.Data) > MaxShellInputBytes {
+		return fmt.Errorf("shell input must be between 1 and %d bytes", MaxShellInputBytes)
+	}
+	return nil
+}
+
+type ShellSessionResizeRequest struct {
+	SessionID string `json:"session_id"`
+	Columns   uint16 `json:"columns"`
+	Rows      uint16 `json:"rows"`
+}
+
+func (r ShellSessionResizeRequest) Validate() error {
+	if !shellSessionIDPattern.MatchString(r.SessionID) {
+		return errors.New("invalid shell session id")
+	}
+	return validateTerminalSize(r.Columns, r.Rows)
+}
+
+type ShellSessionAttachRequest struct {
+	SessionID   string `json:"session_id"`
+	AfterCursor uint64 `json:"after_cursor,omitempty"`
+}
+
+type ShellSessionAttachResponse struct {
+	SessionID string `json:"session_id"`
+	Cursor    uint64 `json:"cursor"`
+	Output    string `json:"output,omitempty"`
+	Exited    bool   `json:"exited,omitempty"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
+}
+
+func (r ShellSessionAttachRequest) Validate() error {
+	if !shellSessionIDPattern.MatchString(r.SessionID) {
+		return errors.New("invalid shell session id")
+	}
+	return nil
+}
+
+type ShellSessionCloseRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (r ShellSessionCloseRequest) Validate() error {
+	if !shellSessionIDPattern.MatchString(r.SessionID) {
+		return errors.New("invalid shell session id")
+	}
+	return nil
+}
+
+type ShellSessionOutput struct {
+	SessionID string `json:"session_id"`
+	Cursor    uint64 `json:"cursor"`
+	Data      string `json:"data"`
+}
+
+type ShellSessionExited struct {
+	SessionID string `json:"session_id"`
+	Cursor    uint64 `json:"cursor"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+func validateTerminalSize(columns, rows uint16) error {
+	if columns < 20 || columns > 500 || rows < 5 || rows > 500 {
+		return errors.New("terminal size is outside supported range")
+	}
+	return nil
+}
 
 type Envelope struct {
 	Version   string          `json:"version"`

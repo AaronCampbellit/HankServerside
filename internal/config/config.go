@@ -84,6 +84,7 @@ type Agent struct {
 	FilesRoot     string
 	LocalFolders  []LocalFolder
 	NotesRoot     string
+	ShellEnabled  bool
 }
 
 type LocalFolder struct {
@@ -253,6 +254,7 @@ func LoadAgent() (Agent, error) {
 		FilesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_FILES_ROOT")),
 		LocalFolders:  localFolders,
 		NotesRoot:     strings.TrimSpace(os.Getenv("HANK_REMOTE_AGENT_NOTES_ROOT")),
+		ShellEnabled:  boolEnvOrDefault("HANK_REMOTE_AGENT_SHELL_ENABLED", false),
 		HA: HomeAssistant{
 			BaseURL: strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_BASE_URL")),
 			Token:   strings.TrimSpace(os.Getenv("HANK_REMOTE_HA_TOKEN")),
