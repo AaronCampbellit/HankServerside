@@ -179,6 +179,14 @@ func (s *Server) authorizeRealtimeTopics(ctx context.Context, auth authContext, 
 	}
 	for _, topic := range topics {
 		switch {
+		case strings.HasPrefix(topic, shellSessionTopicPrefix):
+			if err := resolveHome(); err != nil {
+				return nil, err
+			}
+			if membership.Role != domain.HomeRoleAdmin || !s.shellSessions.ownsTopic(topic, home.ID, auth.User.ID) {
+				return nil, errors.New("shell session topic is not owned by this user")
+			}
+			authorized = append(authorized, scopedHomeTopic(home.ID, topic))
 		case topic == "profile.settings" || topic == "profile.secret_vault" || topic == topicNotesProfile:
 			authorized = append(authorized, scopedUserTopic(auth.User.ID, topic))
 		case topic == topicHomeAssistantStates:
@@ -393,6 +401,17 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 	}
 
 	switch event.Event {
+	case "shell.session.output", "shell.session.exited":
+		topic := event.Topic
+		if !strings.HasPrefix(topic, shellSessionTopicPrefix) {
+			s.logger.Warn("bad shell session event topic", "home_id", homeID, "topic", topic)
+			return
+		}
+		if !s.shellSessions.allowsAgentEvent(topic, homeID, envelope.AgentID) {
+			s.logger.Warn("shell session event rejected for wrong agent", "home_id", homeID, "agent_id", envelope.AgentID, "topic", topic)
+			return
+		}
+		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topic), topic, event.Event, event.Body)
 	case "homeassistant.state_changed":
 		s.broadcastRawAppEventOnKey(ctx, scopedHomeTopic(homeID, topicHomeAssistantStates), topicHomeAssistantStates, event.Event, event.Body)
 		s.notifyDashboardEntityChanged(ctx, homeID, event.Body)

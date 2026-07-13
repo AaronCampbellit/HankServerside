@@ -49,6 +49,7 @@ function agentEnvFile(token: CreatedAgentToken, home: Home): string {
     "HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent",
     "",
     "HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files",
+    "HANK_REMOTE_AGENT_SHELL_ENABLED=false",
     "HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes",
   ].join("\n");
 }

@@ -49,6 +49,7 @@ type Server struct {
 	agentRequests              *agentRequestRegistry
 	syncs                      *homeSyncController
 	health                     *agentHealthMonitor
+	shellSessions              *shellSessionRegistry
 	storage                    *storageops.Service
 	storageEvents              map[string]struct{}
 	storageEventsMu            sync.Mutex
@@ -106,6 +107,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		metrics:               observability.NewMetrics(),
 		limiter:               newRateLimiter(),
 		health:                newAgentHealthMonitor(),
+		shellSessions:         newShellSessionRegistry(4, 8, 5*time.Minute),
 		transfers:             newTransferRegistry(),
 		appTickets:            newAppWebSocketTicketRegistry(),
 		appPackages:           newAppPackageStagingRegistry(),
@@ -1173,9 +1175,21 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "agent_offline", "target home agent is offline", nil)
 			continue
 		}
+		if strings.HasPrefix(command.Command, "shell.session.") {
+			if err := s.authorizeShellSessionCommand(command, home.ID, auth.User.ID, agentConn.agent.ID); err != nil {
+				s.audit(ctx, "agent.shell.denied", auditSeverityWarning, auth.User.ID, "", home.ID, envelope.RequestID, "agent_shell", agentConn.agent.ID, map[string]any{"reason": err.Error(), "operation": command.Command})
+				s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "shell_session_denied", err.Error(), nil)
+				continue
+			}
+			s.audit(ctx, "agent.shell.session", auditSeverityWarning, auth.User.ID, "", home.ID, envelope.RequestID, "agent_shell", agentConn.agent.ID, map[string]any{"operation": command.Command})
+		}
 
 		timeout := s.timeoutForCommand(command.Command)
-		if err := s.store.CreateRelayRequest(ctx, envelope.RequestID, envelope.HomeID, appConn.connectionID, command.Command, command.Body, timeout); err != nil {
+		persistedBody := command.Body
+		if command.Command == protocol.CommandShellSessionInput {
+			persistedBody = nil
+		}
+		if err := s.store.CreateRelayRequest(ctx, envelope.RequestID, envelope.HomeID, appConn.connectionID, command.Command, persistedBody, timeout); err != nil {
 			s.metrics.IncRouteFailure("relay_persist_failed")
 			s.failFileJob(context.Background(), fileJobID, "failed", "request could not be persisted")
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "request_rejected", "request could not be persisted", nil)

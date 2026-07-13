@@ -306,8 +306,11 @@ HANK_REMOTE_AGENT_HOME_NAME=Home
 HANK_REMOTE_AGENT_CONFIG_PATH=/app/.env.agent
 
 HANK_REMOTE_AGENT_FILES_ROOT=/srv/hank/files
+HANK_REMOTE_AGENT_SHELL_ENABLED=false
 HANK_REMOTE_AGENT_NOTES_ROOT=/srv/hank/notes
 ```
+
+`HANK_REMOTE_AGENT_SHELL_ENABLED` is the single shell permission switch for the primary home agent. Setting it to `true` enables both compatibility shell commands and resumable live terminal sessions; changing it back to `false` prevents new sessions. Leave it disabled unless remote administration is intentionally required.
 
 Keep this value unchanged for the single-server Compose deployment:
 

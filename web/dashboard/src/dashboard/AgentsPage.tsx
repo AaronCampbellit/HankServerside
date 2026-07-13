@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import {
   agentDisplayName,
   agentHasCapability,
@@ -8,8 +11,8 @@ import {
   type AgentAlert,
   type AgentMetrics,
   type HomeAgentEntry,
-  type ShellResult,
 } from "../api/agents";
+import { terminalStore } from "../api/terminalStore";
 import { bootstrapClient } from "../api/bootstrap";
 import { homeClient, type AgentToken, type CreatedAgentToken } from "../api/home";
 import { useConfirmDialog, useToast } from "../ui/primitives";
@@ -25,15 +28,6 @@ type PageState =
       tokens: AgentToken[];
       alerts: AgentAlert[];
     };
-
-type ShellLine = {
-  id: string;
-  command: string;
-  output: string;
-  exitCode: number | null;
-  failed: boolean;
-  running: boolean;
-};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Agents could not be loaded.";
@@ -133,82 +127,77 @@ function AgentCard({ agent, onOpen }: { agent: HomeAgentEntry; onOpen: () => voi
 }
 
 function ShellConsole({ agent }: { agent: HomeAgentEntry }) {
-  const [input, setInput] = useState("");
-  const [lines, setLines] = useState<ShellLine[]>([]);
-  const [busy, setBusy] = useState(false);
-  const logRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const writtenRef = useRef(0);
+  const snapshot = useSyncExternalStore(
+    (listener) => terminalStore.subscribe(agent.agent_id, listener),
+    () => terminalStore.snapshot(agent.agent_id),
+  );
 
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
-  }, [lines]);
+    const host = hostRef.current;
+    if (!host || navigator.userAgent.toLowerCase().includes("jsdom")) return;
+    const terminal = new Terminal({
+      cursorBlink: true,
+      convertEol: false,
+      fontFamily: "var(--font-mono)",
+      fontSize: 12,
+      scrollback: 5000,
+      theme: { background: "#0b1118", foreground: "#d7e0ea", cursor: "#57a6ff", selectionBackground: "#2c5c88" },
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(host);
+    fit.fit();
+    terminalRef.current = terminal;
+    fitRef.current = fit;
+    const input = terminal.onData((data) => { void terminalStore.write(agent.agent_id, data); });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+      fit.fit();
+      void terminalStore.resize(agent.agent_id, terminal.cols, terminal.rows);
+    });
+    observer?.observe(host);
+    return () => { observer?.disconnect(); input.dispose(); terminal.dispose(); terminalRef.current = null; fitRef.current = null; writtenRef.current = 0; };
+  }, [agent.agent_id]);
 
-  async function run() {
-    const command = input.trim();
-    if (!command || busy) return;
-    setInput("");
-    setBusy(true);
-    const id = `${Date.now()}`;
-    setLines((current) => [...current, { id, command, output: "", exitCode: null, failed: false, running: true }]);
-    try {
-      const result: ShellResult = await agentsClient.runShell(agent.agent_id, command);
-      let output = result.stdout || "";
-      if (result.stderr) output += (output ? "\n" : "") + result.stderr;
-      if (result.truncated) output += "\n… (output truncated)";
-      setLines((current) =>
-        current.map((line) =>
-          line.id === id
-            ? { ...line, output: output || "(no output)", exitCode: result.exit_code, failed: result.exit_code !== 0, running: false }
-            : line,
-        ),
-      );
-    } catch (error) {
-      setLines((current) =>
-        current.map((line) =>
-          line.id === id ? { ...line, output: errorMessage(error), failed: true, running: false } : line,
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    if (snapshot.output.length < writtenRef.current) { terminal.clear(); writtenRef.current = 0; }
+    const next = snapshot.output.slice(writtenRef.current);
+    if (next) terminal.write(next);
+    writtenRef.current = snapshot.output.length;
+  }, [snapshot.output]);
+
+  useEffect(() => {
+    if (!snapshot.sessionID || snapshot.status === "closed" || snapshot.status === "exited") return;
+    void terminalStore.attach(agent.agent_id);
+    const timer = window.setInterval(() => { void terminalStore.attach(agent.agent_id); }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [agent.agent_id, snapshot.sessionID]);
+
+  async function start() {
+    const terminal = terminalRef.current;
+    await terminalStore.open(agent.agent_id, terminal?.cols || 100, terminal?.rows || 30);
+    terminal?.focus();
   }
 
   return (
     <div className="agent-shell">
       <div className="agent-shell-head">
-        <h3>Shell</h3>
-        <span className="agent-shell-badge">audited · admin only</span>
-      </div>
-      {lines.length ? (
-        <div className="agent-shell-log" ref={logRef}>
-          {lines.map((line) => (
-            <div className="agent-shell-entry" key={line.id}>
-              <div className="agent-shell-command">$ {line.command}</div>
-              <pre className={line.failed ? "agent-shell-output is-error" : "agent-shell-output"}>
-                {line.running ? "running…" : line.output}
-              </pre>
-            </div>
-          ))}
+        <div><h3>Live shell</h3><span className="agent-shell-badge">{snapshot.status} · audited · admin only</span></div>
+        <div className="agent-shell-actions">
+          {snapshot.status === "closed" || snapshot.status === "exited" || snapshot.status === "error" ? (
+            <button type="button" className="secondary" onClick={() => void start()}>New terminal</button>
+          ) : (
+            <button type="button" className="danger" onClick={() => void terminalStore.close(agent.agent_id)}>Close</button>
+          )}
         </div>
-      ) : null}
-      <form
-        className="agent-shell-input"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void run();
-        }}
-      >
-        <span aria-hidden="true">$</span>
-        <input
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="Run a command on this device"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-        />
-        <button type="submit" className="secondary" disabled={busy || !input.trim()}>
-          {busy ? "Running…" : "Run"}
-        </button>
-      </form>
+      </div>
+      <div className="agent-shell-terminal" ref={hostRef} aria-label={`Live terminal on ${agentDisplayName(agent)}`} />
+      {snapshot.error ? <p className="agent-shell-error">{snapshot.error}</p> : null}
     </div>
   );
 }
@@ -305,13 +294,13 @@ function AgentDetail({
           ) : (
             <p className="empty-state">Device actions require an admin account.</p>
           )}
-          {!agentHasCapability(agent, "shell.exec") && !agentIsPrimary(agent) ? (
-            <p className="agent-hint">Remote shell is disabled on this device. The owner can enable it in that Mac's Hank settings.</p>
+          {!agentHasCapability(agent, "shell.session.open") ? (
+            <p className="agent-hint">Remote shell is disabled on this device. Enable shell commands in that agent's settings to allow live terminals.</p>
           ) : null}
         </div>
       </div>
 
-      {isAdmin && agentHasCapability(agent, "shell.exec") ? <ShellConsole agent={agent} /> : null}
+      {isAdmin && agentHasCapability(agent, "shell.session.open") ? <ShellConsole agent={agent} /> : null}
     </section>
   );
 }

@@ -47,6 +47,7 @@ func main() {
 	}
 
 	client := agent.NewClient(cfg.CloudURL, cfg.AgentID, cfg.Token, cfg.HomeName, cfg.ConfigPath, ha, files, notes, appManager, logger)
+	client.SetShellEnabled(cfg.ShellEnabled)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

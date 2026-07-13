@@ -66,6 +66,25 @@ describe("AgentsClient", () => {
     expect(commands[3].body).toEqual({ command: "uptime", timeout_seconds: 60 });
   });
 
+  it("opens, attaches, writes, resizes, and closes an interactive terminal", async () => {
+    const request = async <T,>() => ({}) as T;
+    const { socket, commands, subscriptions } = fakeSocket();
+    const client = new AgentsClient({ request }, socket);
+
+    await client.openTerminal("mac-1", "term_test_0001", 100, 30);
+    await client.subscribeTerminal("term_test_0001");
+    await client.attachTerminal("mac-1", "term_test_0001", 12);
+    await client.writeTerminal("mac-1", "term_test_0001", "pwd\n");
+    await client.resizeTerminal("mac-1", "term_test_0001", 120, 40);
+    await client.closeTerminal("mac-1", "term_test_0001");
+
+    expect(subscriptions).toContainEqual(["shell.session:term_test_0001"]);
+    expect(commands.slice(-5).map((value) => value.command)).toEqual([
+      "shell.session.open", "shell.session.attach", "shell.session.input", "shell.session.resize", "shell.session.close",
+    ]);
+    expect(commands.at(-3)?.body).toEqual({ session_id: "term_test_0001", data: "pwd\n" });
+  });
+
   it("decodes agents.health alerts", async () => {
     const request = async <T,>() => ({}) as T;
     const { socket, emit } = fakeSocket();

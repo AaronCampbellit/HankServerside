@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -24,22 +25,23 @@ import (
 const maxMessageSize = 2 << 20
 
 type Client struct {
-	cloudURL    string
-	agentID     string
-	token       string
-	homeName    string
-	configPath  string
-	logger      *slog.Logger
-	dispatcher  commandDispatcher
-	writeMu     sync.Mutex
-	uploadsMu   sync.Mutex
-	uploads     map[string]*uploadTransfer
-	downloadsMu sync.Mutex
-	downloads   map[string]context.CancelFunc
-	movesMu     sync.Mutex
-	moves       map[string]context.CancelFunc
-	moveSlots   chan struct{}
-	restartFn   func()
+	cloudURL     string
+	agentID      string
+	token        string
+	homeName     string
+	configPath   string
+	logger       *slog.Logger
+	dispatcher   commandDispatcher
+	writeMu      sync.Mutex
+	uploadsMu    sync.Mutex
+	uploads      map[string]*uploadTransfer
+	downloadsMu  sync.Mutex
+	downloads    map[string]context.CancelFunc
+	movesMu      sync.Mutex
+	moves        map[string]context.CancelFunc
+	moveSlots    chan struct{}
+	restartFn    func()
+	shellEnabled atomic.Bool
 }
 
 func NewClient(cloudURL string, agentID string, token string, homeName string, configPath string, ha *agentha.Client, files *agentfiles.Service, notes *agentnotes.Service, apps *agentapps.Manager, logger *slog.Logger) *Client {
@@ -60,7 +62,8 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 	}
 	apps.SetPackageDownloadAuth(agentID, token)
 
-	return &Client{
+	terminals := newTerminalManager(false, nil)
+	client := &Client{
 		cloudURL:   cloudURL,
 		agentID:    agentID,
 		token:      token,
@@ -68,12 +71,13 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 		configPath: configPath,
 		logger:     logger,
 		dispatcher: commandDispatcher{
-			ha:     ha,
-			files:  files,
-			mcpctx: agentmcpcontext.New(files),
-			notes:  notes,
-			apps:   apps,
-			config: newConfigManager(configPath, ha, files),
+			ha:        ha,
+			files:     files,
+			mcpctx:    agentmcpcontext.New(files),
+			notes:     notes,
+			apps:      apps,
+			config:    newConfigManager(configPath, ha, files),
+			terminals: terminals,
 		},
 		uploads:   make(map[string]*uploadTransfer),
 		downloads: make(map[string]context.CancelFunc),
@@ -81,6 +85,13 @@ func NewClient(cloudURL string, agentID string, token string, homeName string, c
 		moveSlots: make(chan struct{}, 1),
 		restartFn: defaultRestartFn,
 	}
+	client.dispatcher.host = &hostService{shellEnabled: func() bool { return client.shellEnabled.Load() }}
+	return client
+}
+
+func (c *Client) SetShellEnabled(enabled bool) {
+	c.shellEnabled.Store(enabled)
+	c.dispatcher.terminals.setEnabled(enabled)
 }
 
 func defaultRestartFn() {
@@ -153,6 +164,10 @@ func (c *Client) runOnce(ctx context.Context) error {
 		})
 		defer c.dispatcher.apps.SetEventSink(nil)
 	}
+	c.dispatcher.terminals.setEventSink(func(ctx context.Context, event string, topic string, payload any) error {
+		return c.sendAgentEvent(ctx, conn, event, topic, payload)
+	})
+	defer c.dispatcher.terminals.setEventSink(nil)
 
 	for {
 		select {
@@ -198,10 +213,12 @@ func (c *Client) sendRegister(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func (c *Client) sendHeartbeat(ctx context.Context, conn *websocket.Conn) error {
+	metrics, _ := json.Marshal(collectHostMetrics())
 	envelope, err := protocol.NewEnvelope(protocol.TypeAgentHeartbeat, "", c.agentID, "", protocol.AgentHeartbeat{
 		AgentID:      c.agentID,
 		SentAt:       time.Now().UTC(),
 		Capabilities: c.capabilities(),
+		Metrics:      metrics,
 	})
 	if err != nil {
 		return err
@@ -346,6 +363,10 @@ func (c *Client) writeError(ctx context.Context, conn *websocket.Conn, requestID
 
 func (c *Client) capabilities() []string {
 	capabilities := []string{protocol.CommandSystemPing, protocol.CommandSystemRestart}
+	capabilities = append(capabilities, "host.read", "host.lock", "wol.send")
+	if c.shellEnabled.Load() {
+		capabilities = append(capabilities, "shell.exec", protocol.CommandShellSessionOpen, protocol.CommandShellSessionInput, protocol.CommandShellSessionResize, protocol.CommandShellSessionAttach, protocol.CommandShellSessionClose)
+	}
 	if c.dispatcher.ha.Enabled() {
 		capabilities = append(capabilities,
 			"homeassistant.health",
