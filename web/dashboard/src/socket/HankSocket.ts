@@ -11,6 +11,7 @@ type RoutedCommandEnvelope = {
   type: "app.command";
   request_id: string;
   timestamp: string;
+  agent_id?: string;
   payload: {
     command: string;
     body: unknown;
@@ -83,7 +84,7 @@ export class HankSocket {
     this.rejectAll(new HankSocketError("socket_closed", "Hank socket closed."));
   }
 
-  async sendCommand<T>(command: string, body: unknown = {}, options: { timeoutMs?: number } = {}): Promise<T> {
+  async sendCommand<T>(command: string, body: unknown = {}, options: { timeoutMs?: number; agentID?: string } = {}): Promise<T> {
     await this.connect();
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -97,6 +98,10 @@ export class HankSocket {
       timestamp: new Date().toISOString(),
       payload: { command, body },
     };
+    if (options.agentID) {
+      // Target a specific agent (blank routes to the home's primary agent).
+      envelope.agent_id = options.agentID;
+    }
     const timeoutMs = options.timeoutMs ?? 30000;
     return new Promise<T>((resolve, reject) => {
       const timeoutID = window.setTimeout(() => {

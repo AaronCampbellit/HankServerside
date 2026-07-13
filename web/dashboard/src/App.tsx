@@ -10,6 +10,7 @@ import { JoinPage } from "./auth/JoinPage";
 import { LoginPage } from "./auth/LoginPage";
 import { PasswordChangePage } from "./auth/PasswordChangePage";
 import { redirectTo } from "./browser/navigation";
+import { AgentsPage } from "./dashboard/AgentsPage";
 import { DashboardHome } from "./dashboard/DashboardHome";
 import { DeploymentGuide } from "./dashboard/DeploymentGuide";
 import { FileServerPage } from "./dashboard/FileServerPage";
@@ -67,6 +68,7 @@ function pageForRoute(route: RouteDefinition): ReactNode {
     case "/docs/deployment": return <DeploymentGuide />;
     case "/dashboard/home-assistant": return <HomeAssistantPage />;
     case "/dashboard/file-server": return <FileServerPage />;
+    case "/dashboard/agents": return <AgentsPage />;
     case "/dashboard/profile-notes": return <ProfileNotesPage />;
     case "/dashboard/settings": return <HomeSettings />;
     case "/dashboard/settings/home": return <HomeSettings />;

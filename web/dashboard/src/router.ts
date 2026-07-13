@@ -21,6 +21,7 @@ export const appRoutes: RouteDefinition[] = [
   { path: "/dashboard/home-assistant", heading: "Home Assistant", nav: true },
   { path: "/dashboard/profile-notes", heading: "Profile Notes", nav: true },
   { path: "/dashboard/file-server", heading: "File Server", nav: true },
+  { path: "/dashboard/agents", heading: "Agents", nav: true },
   { path: "/dashboard/settings", heading: "Settings", nav: true },
   { path: "/dashboard/settings/home", heading: "Home & Connector", nav: true },
   { path: "/dashboard/settings/quick-links", heading: "Quick Links", nav: true },

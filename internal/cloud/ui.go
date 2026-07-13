@@ -61,6 +61,10 @@ func (s *Server) handleFileServerPage(w http.ResponseWriter, r *http.Request) {
 	s.serveHomeMemberUIPage(w, r, "/dashboard/file-server")
 }
 
+func (s *Server) handleAgentsPage(w http.ResponseWriter, r *http.Request) {
+	s.serveHomeMemberUIPage(w, r, "/dashboard/agents")
+}
+
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	s.serveAuthenticatedUIPage(w, r, "/dashboard/settings")
 }

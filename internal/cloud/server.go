@@ -141,6 +141,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/dashboard/home-assistant", server.handleHomeAssistantPage)
 	mux.HandleFunc("/dashboard/profile-notes", server.handleProfileNotesPage)
 	mux.HandleFunc("/dashboard/file-server", server.handleFileServerPage)
+	mux.HandleFunc("/dashboard/agents", server.handleAgentsPage)
 	mux.HandleFunc("/dashboard/settings", server.handleSettingsPage)
 	mux.HandleFunc("/dashboard/settings/home", server.handleSettingsHomePage)
 	mux.HandleFunc("/dashboard/settings/quick-links", server.handleSettingsQuickLinksPage)

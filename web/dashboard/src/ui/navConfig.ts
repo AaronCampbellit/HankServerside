@@ -12,6 +12,7 @@ export const primaryNav: GroupedNavItem[] = [
   { href: "/dashboard/profile-notes", label: "Notes", group: "Tools" },
   { href: "/dashboard/home-assistant", label: "Home Assistant", group: "Tools" },
   { href: "/dashboard/file-server", label: "File Server", group: "Tools" },
+  { href: "/dashboard/agents", label: "Agents", group: "Tools" },
   { href: "/dashboard/settings", label: "Settings", group: "Settings" },
   { href: "/docs/deployment", label: "Setup Guide", group: "Support" },
 ];
