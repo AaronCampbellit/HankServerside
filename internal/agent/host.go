@@ -25,14 +25,21 @@ func (h *hostService) status() map[string]any {
 }
 
 func collectHostMetrics() protocol.HostMetrics {
-	var memory runtime.MemStats
-	runtime.ReadMemStats(&memory)
-	metrics := protocol.HostMetrics{MemoryUsedBytes: int64(memory.Sys)}
+	metrics := protocol.HostMetrics{}
 	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
 		fields := strings.Fields(string(raw))
 		if len(fields) > 0 {
 			metrics.CPULoad1m, _ = strconv.ParseFloat(fields[0], 64)
 		}
+	}
+	if raw, err := os.ReadFile("/proc/meminfo"); err == nil {
+		if used, total, ok := parseProcMemory(string(raw)); ok {
+			metrics.MemoryUsedBytes = used
+			metrics.MemoryTotalBytes = total
+		}
+	}
+	if raw, err := os.ReadFile("/proc/uptime"); err == nil {
+		metrics.UptimeSeconds = parseProcUptime(string(raw))
 	}
 	var stat syscall.Statfs_t
 	if syscall.Statfs("/", &stat) == nil {
@@ -40,6 +47,35 @@ func collectHostMetrics() protocol.HostMetrics {
 		metrics.DiskUsedBytes = int64(stat.Blocks-stat.Bavail) * int64(stat.Bsize)
 	}
 	return metrics
+}
+
+func parseProcMemory(raw string) (used, total int64, ok bool) {
+	values := make(map[string]int64)
+	for _, line := range strings.Split(raw, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		value, err := strconv.ParseInt(fields[1], 10, 64)
+		if err == nil {
+			values[strings.TrimSuffix(fields[0], ":")] = value * 1024
+		}
+	}
+	total = values["MemTotal"]
+	available, hasAvailable := values["MemAvailable"]
+	if total <= 0 || !hasAvailable || available < 0 || available > total {
+		return 0, 0, false
+	}
+	return total - available, total, true
+}
+
+func parseProcUptime(raw string) int64 {
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return 0
+	}
+	seconds, _ := strconv.ParseFloat(fields[0], 64)
+	return int64(seconds)
 }
 
 func (h *hostService) lock(ctx context.Context) error {

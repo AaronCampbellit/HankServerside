@@ -1175,8 +1175,10 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "agent_offline", "target home agent is offline", nil)
 			continue
 		}
+		var shellSessionID string
 		if strings.HasPrefix(command.Command, "shell.session.") {
-			if err := s.authorizeShellSessionCommand(command, home.ID, auth.User.ID, agentConn.agent.ID); err != nil {
+			shellSessionID, err = s.authorizeShellSessionCommand(command, home.ID, auth.User.ID, agentConn.agent.ID)
+			if err != nil {
 				s.audit(ctx, "agent.shell.denied", auditSeverityWarning, auth.User.ID, "", home.ID, envelope.RequestID, "agent_shell", agentConn.agent.ID, map[string]any{"reason": err.Error(), "operation": command.Command})
 				s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "shell_session_denied", err.Error(), nil)
 				continue
@@ -1190,12 +1192,15 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			persistedBody = nil
 		}
 		if err := s.store.CreateRelayRequest(ctx, envelope.RequestID, envelope.HomeID, appConn.connectionID, command.Command, persistedBody, timeout); err != nil {
+			s.shellSessions.complete(command.Command, shellSessionID, false)
 			s.metrics.IncRouteFailure("relay_persist_failed")
 			s.failFileJob(context.Background(), fileJobID, "failed", "request could not be persisted")
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, "request_rejected", "request could not be persisted", nil)
 			continue
 		}
-		if _, err := s.router.AddPending(context.Background(), envelope.RequestID, envelope.HomeID, command.Command, fileJobID, appConn, timeout, s.handlePendingTimeout); err != nil {
+		_, err = s.router.AddPending(context.Background(), envelope.RequestID, envelope.HomeID, command.Command, shellSessionID, fileJobID, appConn, timeout, s.handlePendingTimeout)
+		if err != nil {
+			s.shellSessions.complete(command.Command, shellSessionID, false)
 			_ = s.store.FailRelayRequest(context.Background(), envelope.RequestID, "failed", "request_rejected", err.Error())
 			s.failFileJob(context.Background(), fileJobID, "failed", err.Error())
 			code := "request_rejected"
@@ -1207,11 +1212,11 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writePeerError(ctx, appPeer, protocol.TypeAppError, envelope.RequestID, "", envelope.HomeID, code, statusMessage, nil)
 			continue
 		}
-
 		s.logger.Info("routing app command", "request_id", envelope.RequestID, "session_id", auth.Session.ID, "user_id", auth.User.ID, "home_id", envelope.HomeID, "agent_id", agentConn.agent.ID, "command", command.Command)
 
 		relay, err := protocol.NewEnvelope(protocol.TypeCloudCommand, envelope.RequestID, agentConn.agent.ID, envelope.HomeID, command)
 		if err != nil {
+			s.shellSessions.complete(command.Command, shellSessionID, false)
 			if _, ok := s.router.ResolvePending(envelope.RequestID); ok {
 				s.metrics.IncRouteFailure("encoding_failed")
 			}
@@ -1222,6 +1227,7 @@ func (s *Server) handleAppWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := agentConn.peer.Write(ctx, relay); err != nil {
+			s.shellSessions.complete(command.Command, shellSessionID, false)
 			if _, ok := s.router.ResolvePending(envelope.RequestID); ok {
 				s.metrics.IncRouteFailure("route_write_failed")
 			}
@@ -1261,6 +1267,7 @@ func (s *Server) handleAgentResponse(ctx context.Context, envelope protocol.Enve
 
 	duration := time.Since(pending.startedAt)
 	failed := envelope.Error != nil
+	s.shellSessions.complete(pending.command, pending.shellSessionID, !failed)
 	s.metrics.RecordCommand(pending.command, duration, failed)
 	s.metrics.RecordRelay(duration, failed)
 	s.logger.Info("agent response relayed", "request_id", envelope.RequestID, "home_id", envelope.HomeID, "agent_id", envelope.AgentID, "command", pending.command, "duration", duration.String(), "failed", failed)
@@ -1287,6 +1294,7 @@ func (s *Server) handleAgentResponse(ctx context.Context, envelope protocol.Enve
 }
 
 func (s *Server) handlePendingTimeout(ctx context.Context, pending *pendingRequest) {
+	s.shellSessions.complete(pending.command, pending.shellSessionID, false)
 	duration := time.Since(pending.startedAt)
 	s.metrics.IncRouteFailure("request_timeout")
 	s.metrics.RecordCommand(pending.command, duration, true)

@@ -52,3 +52,18 @@ func TestShellSessionRegistryAuthorizesOwnedTopic(t *testing.T) {
 		t.Fatal("terminal output agent ownership was not enforced")
 	}
 }
+
+func TestShellSessionRegistryReleasesFailedOpenAndSuccessfulClose(t *testing.T) {
+	registry := newShellSessionRegistry(1, 1, 5*time.Minute)
+	if err := registry.open("term_failed", "home", "user", "agent-a"); err != nil {
+		t.Fatal(err)
+	}
+	registry.complete("shell.session.open", "term_failed", false)
+	if err := registry.open("term_live", "home", "user", "agent-a"); err != nil {
+		t.Fatalf("failed open kept a slot: %v", err)
+	}
+	registry.complete("shell.session.close", "term_live", true)
+	if err := registry.open("term_next", "home", "user", "agent-a"); err != nil {
+		t.Fatalf("successful close kept a slot: %v", err)
+	}
+}

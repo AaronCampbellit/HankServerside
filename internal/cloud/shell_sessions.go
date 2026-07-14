@@ -17,7 +17,7 @@ type cloudShellSession struct {
 	touchedAt               time.Time
 }
 
-func (s *Server) authorizeShellSessionCommand(command protocol.RoutedCommand, homeID, userID, agentID string) error {
+func (s *Server) authorizeShellSessionCommand(command protocol.RoutedCommand, homeID, userID, agentID string) (string, error) {
 	decode := func(target interface{ Validate() error }) error {
 		if err := json.Unmarshal(command.Body, target); err != nil {
 			return err
@@ -28,35 +28,35 @@ func (s *Server) authorizeShellSessionCommand(command protocol.RoutedCommand, ho
 	case protocol.CommandShellSessionOpen:
 		request := &protocol.ShellSessionOpenRequest{}
 		if err := decode(request); err != nil {
-			return err
+			return "", err
 		}
-		return s.shellSessions.open(request.SessionID, homeID, userID, agentID)
+		return request.SessionID, s.shellSessions.open(request.SessionID, homeID, userID, agentID)
 	case protocol.CommandShellSessionInput:
 		request := &protocol.ShellSessionInputRequest{}
 		if err := decode(request); err != nil {
-			return err
+			return "", err
 		}
-		return s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
+		return request.SessionID, s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
 	case protocol.CommandShellSessionResize:
 		request := &protocol.ShellSessionResizeRequest{}
 		if err := decode(request); err != nil {
-			return err
+			return "", err
 		}
-		return s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
+		return request.SessionID, s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
 	case protocol.CommandShellSessionAttach:
 		request := &protocol.ShellSessionAttachRequest{}
 		if err := decode(request); err != nil {
-			return err
+			return "", err
 		}
-		return s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
+		return request.SessionID, s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
 	case protocol.CommandShellSessionClose:
 		request := &protocol.ShellSessionCloseRequest{}
 		if err := decode(request); err != nil {
-			return err
+			return "", err
 		}
-		return s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
+		return request.SessionID, s.shellSessions.authorize(request.SessionID, homeID, userID, agentID)
 	default:
-		return errors.New("unsupported shell session operation")
+		return "", errors.New("unsupported shell session operation")
 	}
 }
 
@@ -118,6 +118,16 @@ func (r *shellSessionRegistry) close(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.sessions, id)
+}
+
+func (r *shellSessionRegistry) complete(command, id string, success bool) {
+	if id == "" {
+		return
+	}
+	if command == protocol.CommandShellSessionOpen && !success ||
+		command == protocol.CommandShellSessionClose && success {
+		r.close(id)
+	}
 }
 
 func (r *shellSessionRegistry) ownsTopic(topic, homeID, userID string) bool {

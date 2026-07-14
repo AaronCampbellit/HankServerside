@@ -82,13 +82,14 @@ type appConnection struct {
 }
 
 type pendingRequest struct {
-	requestID string
-	homeID    string
-	command   string
-	fileJobID string
-	app       *appConnection
-	startedAt time.Time
-	timer     *time.Timer
+	requestID      string
+	homeID         string
+	command        string
+	shellSessionID string
+	fileJobID      string
+	app            *appConnection
+	startedAt      time.Time
+	timer          *time.Timer
 }
 
 type AgentSnapshot struct {
@@ -264,23 +265,11 @@ func (r *Router) AppsForTopic(topic string) []*appConnection {
 
 func (r *Router) UnregisterApp(connectionID string) {
 	r.mu.Lock()
-	app, ok := r.appsByConnectionID[connectionID]
 	delete(r.appsByConnectionID, connectionID)
-	if ok {
-		for requestID, pending := range r.pendingByID {
-			if pending.app.connectionID == app.connectionID {
-				if pending.timer != nil {
-					pending.timer.Stop()
-				}
-				pending.app.release()
-				delete(r.pendingByID, requestID)
-			}
-		}
-	}
 	r.mu.Unlock()
 }
 
-func (r *Router) AddPending(ctx context.Context, requestID string, homeID string, command string, fileJobID string, app *appConnection, timeout time.Duration, onTimeout func(context.Context, *pendingRequest)) (*pendingRequest, error) {
+func (r *Router) AddPending(ctx context.Context, requestID string, homeID string, command string, shellSessionID string, fileJobID string, app *appConnection, timeout time.Duration, onTimeout func(context.Context, *pendingRequest)) (*pendingRequest, error) {
 	if !app.acquire() {
 		return nil, ErrTooManyInFlight
 	}
@@ -293,12 +282,13 @@ func (r *Router) AddPending(ctx context.Context, requestID string, homeID string
 	}
 
 	pending := &pendingRequest{
-		requestID: requestID,
-		homeID:    homeID,
-		command:   command,
-		fileJobID: fileJobID,
-		app:       app,
-		startedAt: time.Now().UTC(),
+		requestID:      requestID,
+		homeID:         homeID,
+		command:        command,
+		shellSessionID: shellSessionID,
+		fileJobID:      fileJobID,
+		app:            app,
+		startedAt:      time.Now().UTC(),
 	}
 	pending.timer = time.AfterFunc(timeout, func() {
 		r.mu.Lock()
