@@ -16,6 +16,12 @@ export type AppSettingsField = {
   options?: Array<{ value: unknown; label?: string }>;
 };
 
+export type AppSlashCommand = {
+  command: string;
+  command_id: string;
+  description?: string;
+};
+
 export type AppSummary = {
   id?: string;
   app_id?: string;
@@ -23,6 +29,7 @@ export type AppSummary = {
   version?: string;
   publisher?: string;
   description?: string;
+  slash_commands?: AppSlashCommand[];
   enabled?: boolean;
   status?: string;
   last_error?: string;

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "../ui/primitives";
 import { HankAIPage } from "./HankAIPage";
 
@@ -12,6 +12,10 @@ const hankAIClient = vi.hoisted(() => ({
   deleteSession: vi.fn(),
 }));
 
+const appsClient = vi.hoisted(() => ({
+  listApps: vi.fn(),
+}));
+
 vi.mock("../api/hankAI", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/hankAI")>();
   return {
@@ -20,7 +24,19 @@ vi.mock("../api/hankAI", async (importOriginal) => {
   };
 });
 
+vi.mock("../api/apps", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/apps")>();
+  return {
+    ...actual,
+    appsClient,
+  };
+});
+
 describe("HankAIPage", () => {
+  beforeEach(() => {
+    appsClient.listApps.mockResolvedValue({ apps: [] });
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -138,5 +154,62 @@ describe("HankAIPage", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Selected chat" })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Next chat" })).toBeInTheDocument();
     expect(screen.getByText("message load failed")).toBeInTheDocument();
+  });
+
+  it("shows enabled installed app slash commands and inserts the selected token", async () => {
+    hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
+    hankAIClient.listSessions.mockResolvedValue({ sessions: [] });
+    appsClient.listApps.mockResolvedValue({
+      apps: [{
+        id: "gramaton",
+        name: "Gramaton",
+        enabled: true,
+        slash_commands: [{
+          command: "/gramaton",
+          command_id: "search",
+          description: "Search for a movie or TV show on Gramaton.",
+        }],
+      }],
+    });
+
+    render(<ConfirmDialogProvider><HankAIPage /></ConfirmDialogProvider>);
+
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    fireEvent.change(composer, { target: { value: "/gra" } });
+    fireEvent.mouseDown(screen.getByRole("option", { name: /gramaton/i }));
+
+    expect(composer).toHaveValue("/gramaton ");
+    expect(appsClient.listApps).toHaveBeenCalledTimes(1);
+  });
+
+  it("excludes disabled installed app slash commands", async () => {
+    hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
+    hankAIClient.listSessions.mockResolvedValue({ sessions: [] });
+    appsClient.listApps.mockResolvedValue({
+      apps: [{
+        id: "gramaton",
+        name: "Gramaton",
+        enabled: false,
+        slash_commands: [{ command: "/gramaton", command_id: "search" }],
+      }],
+    });
+
+    render(<ConfirmDialogProvider><HankAIPage /></ConfirmDialogProvider>);
+
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    fireEvent.change(composer, { target: { value: "/" } });
+    expect(screen.queryByRole("option", { name: /gramaton/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps built-in commands when installed app discovery fails", async () => {
+    hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
+    hankAIClient.listSessions.mockResolvedValue({ sessions: [] });
+    appsClient.listApps.mockRejectedValue(new Error("apps unavailable"));
+
+    render(<ConfirmDialogProvider><HankAIPage /></ConfirmDialogProvider>);
+
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    fireEvent.change(composer, { target: { value: "/fi" } });
+    expect(screen.getByRole("option", { name: /files/i })).toBeInTheDocument();
   });
 });

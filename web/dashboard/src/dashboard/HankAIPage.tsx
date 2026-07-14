@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { appsClient, type AppSummary } from "../api/apps";
 import { hankAIClient, type HankAIMessage, type HankAISession } from "../api/hankAI";
 import { useConfirmDialog } from "../ui/primitives";
+
+type SlashCommand = { token: string; hint: string };
 
 type State =
   | { status: "loading" }
@@ -14,11 +17,10 @@ type State =
       draft: string;
       notice: string;
       sending: boolean;
+      slashCommands: SlashCommand[];
     };
 
-// Representative built-in slash commands (hank.js). Client-only: selecting one
-// inserts its token into the draft; the agent resolves it to an intent on send.
-const SLASH_COMMANDS: Array<{ token: string; hint: string }> = [
+const BUILT_IN_SLASH_COMMANDS: SlashCommand[] = [
   { token: "/ha", hint: "Control Home Assistant entities" },
   { token: "/files", hint: "Search or browse the file server" },
   { token: "/notes", hint: "Find or append to a note" },
@@ -27,6 +29,26 @@ const SLASH_COMMANDS: Array<{ token: string; hint: string }> = [
   { token: "/docs", hint: "Search project docs" },
   { token: "/status", hint: "Report connector + agent status" },
 ];
+
+function slashCommandsForApps(apps: AppSummary[]): SlashCommand[] {
+  const commands = [...BUILT_IN_SLASH_COMMANDS];
+  const seen = new Set(commands.map((command) => command.token.toLowerCase()));
+  for (const app of apps) {
+    if (!app.enabled) continue;
+    for (const slashCommand of app.slash_commands || []) {
+      const token = slashCommand.command?.trim();
+      if (!token?.startsWith("/") || token.includes(" ")) continue;
+      const identity = token.toLowerCase();
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      commands.push({
+        token,
+        hint: slashCommand.description?.trim() || `Run ${app.name?.trim() || app.id || app.app_id || "installed app"}`,
+      });
+    }
+  }
+  return commands;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "HankAI could not be loaded.";
@@ -47,9 +69,10 @@ export function HankAIPage() {
 
   async function load() {
     try {
-      const [assistantStatus, sessionPayload] = await Promise.all([
+      const [assistantStatus, sessionPayload, appsPayload] = await Promise.all([
         hankAIClient.status(),
         hankAIClient.listSessions(),
+        appsClient.listApps().catch(() => ({ apps: [] })),
       ]);
       const sessions = sessionPayload.sessions || [];
       const selectedSessionID = sessions[0]?.id || "";
@@ -63,6 +86,7 @@ export function HankAIPage() {
         draft: "",
         notice: "",
         sending: false,
+        slashCommands: slashCommandsForApps(appsPayload.apps),
       });
     } catch (error) {
       setState({ status: "error", message: errorMessage(error) });
@@ -192,7 +216,7 @@ export function HankAIPage() {
   const draftTrimmed = state.draft.trim();
   const showPalette = draftTrimmed.startsWith("/") && !draftTrimmed.includes(" ");
   const paletteMatches = showPalette
-    ? SLASH_COMMANDS.filter((command) => command.token.startsWith(draftTrimmed.toLowerCase()))
+    ? state.slashCommands.filter((command) => command.token.toLowerCase().startsWith(draftTrimmed.toLowerCase()))
     : [];
 
   return (
