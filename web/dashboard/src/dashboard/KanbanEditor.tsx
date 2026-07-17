@@ -119,7 +119,8 @@ function safeHref(value: string): string {
 function attachmentForReference(reference: string, attachments: NoteAttachment[]): NoteAttachment | undefined {
   const match = /^hank-note-attachment:\/\/(.+)$/i.exec(reference.trim());
   if (!match) return undefined;
-  return attachments.find((attachment) => attachment.id === match[1]);
+  const attachmentID = match[1].split(/[?#]/, 1)[0];
+  return attachments.find((attachment) => attachment.id === attachmentID);
 }
 
 function renderInline(value: string, attachments: NoteAttachment[], keyPrefix: string): ReactNode[] {

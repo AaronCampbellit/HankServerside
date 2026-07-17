@@ -8,7 +8,7 @@ const attachments: NoteAttachment[] = [{
   filename: "wireframe.png",
   content_type: "image/png",
   download_url: "/v1/me/notes/work/attachments/natt-1",
-  markdown_reference: "![wireframe.png](hank-note-attachment://natt-1)",
+  markdown_reference: "![wireframe.png](hank-note-attachment://natt-1?filename=wireframe.png&scope=profile)",
 }];
 
 function workBoard(): KanbanBoard {
