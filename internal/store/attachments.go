@@ -267,6 +267,48 @@ func (s *Store) ListNoteAttachments(ctx context.Context, noteID string) ([]domai
 	return attachments, rows.Err()
 }
 
+func (s *Store) ListLiveNoteAttachmentInventory(ctx context.Context) ([]domain.NoteAttachmentInventoryRecord, error) {
+	rows, err := s.query(ctx, `SELECT
+			na.id, na.note_id, na.home_id, na.owner_user_id, na.filename, na.content_type,
+			na.size_bytes, na.checksum_sha256, na.storage_key, na.deleted_at, na.created_at, na.updated_at,
+			un.note_id, un.title,
+			CASE WHEN un.home_id IS NULL THEN 'profile' ELSE 'home' END,
+			un.page_type, u.email, un.body_markdown, un.board_json
+		FROM note_attachments na
+		JOIN user_notes un ON un.id = na.note_id
+		JOIN users u ON u.id = na.owner_user_id
+		WHERE na.deleted_at IS NULL AND un.deleted_at IS NULL
+		ORDER BY na.created_at DESC, na.id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []domain.NoteAttachmentInventoryRecord{}
+	for rows.Next() {
+		item, err := scanNoteAttachmentInventory(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetLiveNoteAttachmentInventoryByID(ctx context.Context, attachmentID string) (domain.NoteAttachmentInventoryRecord, error) {
+	row := s.queryRow(ctx, `SELECT
+			na.id, na.note_id, na.home_id, na.owner_user_id, na.filename, na.content_type,
+			na.size_bytes, na.checksum_sha256, na.storage_key, na.deleted_at, na.created_at, na.updated_at,
+			un.note_id, un.title,
+			CASE WHEN un.home_id IS NULL THEN 'profile' ELSE 'home' END,
+			un.page_type, u.email, un.body_markdown, un.board_json
+		FROM note_attachments na
+		JOIN user_notes un ON un.id = na.note_id
+		JOIN users u ON u.id = na.owner_user_id
+		WHERE na.id = ? AND na.deleted_at IS NULL AND un.deleted_at IS NULL`, attachmentID)
+	return scanNoteAttachmentInventory(row)
+}
+
 func (s *Store) ListLiveNoteAttachmentStorageKeys(ctx context.Context) (map[string]struct{}, error) {
 	rows, err := s.query(ctx, `SELECT storage_key FROM note_attachments WHERE deleted_at IS NULL`)
 	if err != nil {
@@ -444,4 +486,44 @@ func scanNoteAttachment(scanner interface{ Scan(dest ...any) error }) (domain.No
 		attachment.DeletedAt = &deletedAt.Time
 	}
 	return attachment, nil
+}
+
+func scanNoteAttachmentInventory(scanner interface{ Scan(dest ...any) error }) (domain.NoteAttachmentInventoryRecord, error) {
+	var item domain.NoteAttachmentInventoryRecord
+	var homeID sql.NullString
+	var deletedAt sql.NullTime
+	err := scanner.Scan(
+		&item.Attachment.ID,
+		&item.Attachment.NoteID,
+		&homeID,
+		&item.Attachment.OwnerUserID,
+		&item.Attachment.Filename,
+		&item.Attachment.ContentType,
+		&item.Attachment.SizeBytes,
+		&item.Attachment.ChecksumSHA256,
+		&item.Attachment.StorageKey,
+		&deletedAt,
+		&item.Attachment.CreatedAt,
+		&item.Attachment.UpdatedAt,
+		&item.NoteID,
+		&item.NoteTitle,
+		&item.NoteScope,
+		&item.NotePageType,
+		&item.OwnerEmail,
+		&item.BodyMarkdown,
+		&item.BoardJSON,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.NoteAttachmentInventoryRecord{}, ErrNotFound
+		}
+		return domain.NoteAttachmentInventoryRecord{}, err
+	}
+	if homeID.Valid {
+		item.Attachment.HomeID = homeID.String
+	}
+	if deletedAt.Valid {
+		item.Attachment.DeletedAt = &deletedAt.Time
+	}
+	return item, nil
 }

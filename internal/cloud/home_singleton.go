@@ -162,6 +162,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeNotesAPITokens(w, r, home, auth, membership, parts) {
 		return
 	}
+	if s.handleHomeNoteAttachmentsAdmin(w, r, home, auth, membership, parts) {
+		return
+	}
 	if s.handleHomeServiceProfiles(w, r, home, auth, membership, parts) {
 		return
 	}

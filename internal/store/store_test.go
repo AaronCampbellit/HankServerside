@@ -350,6 +350,46 @@ func TestPruneLifecycleRemovesExpiredOperationalRows(t *testing.T) {
 	assertNoRowsStore(t, db, ctx, "note attachment row", `SELECT 1 FROM note_attachments WHERE id = ?`, "natt_old")
 }
 
+func TestListLiveNoteAttachmentInventory(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	deletedAt := now.Add(time.Minute)
+	user := domain.User{ID: "usr_attachment_inventory", Email: "inventory@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_attachment_inventory", UserID: user.ID, Name: "Inventory Home", CreatedAt: now, UpdatedAt: now}
+	profileNote := domain.UserNote{ID: "note_inventory_profile", NoteID: "profile.md", OwnerUserID: user.ID, Title: "Profile files", BodyMarkdown: "profile", BodyFormat: "markdown", PageType: "text", Revision: "rev-profile", Checksum: "sum-profile", CRDTStateJSON: "{}", CreatedAt: now, UpdatedAt: now, UpdatedBy: user.ID}
+	homeNote := domain.UserNote{ID: "note_inventory_home", NoteID: "home.md", OwnerUserID: user.ID, HomeID: home.ID, Title: "Home files", BodyMarkdown: "home", BodyFormat: "markdown", PageType: "text", Revision: "rev-home", Checksum: "sum-home", CRDTStateJSON: "{}", CreatedAt: now, UpdatedAt: now, UpdatedBy: user.ID}
+	mustStore(t, db.CreateUser(ctx, user))
+	mustStore(t, db.CreateHome(ctx, home))
+	mustStore(t, db.UpsertUserNote(ctx, profileNote))
+	mustStore(t, db.UpsertUserNote(ctx, homeNote))
+	for _, attachment := range []domain.NoteAttachment{
+		{ID: "natt_profile", NoteID: profileNote.ID, OwnerUserID: user.ID, Filename: "profile.png", ContentType: "image/png", SizeBytes: 5, ChecksumSHA256: "sum-profile", StorageKey: "profile/natt_profile.png", CreatedAt: now, UpdatedAt: now},
+		{ID: "natt_home", NoteID: homeNote.ID, HomeID: home.ID, OwnerUserID: user.ID, Filename: "home.pdf", ContentType: "application/pdf", SizeBytes: 7, ChecksumSHA256: "sum-home", StorageKey: "home/natt_home.pdf", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)},
+		{ID: "natt_deleted", NoteID: homeNote.ID, HomeID: home.ID, OwnerUserID: user.ID, Filename: "deleted.txt", ContentType: "text/plain", SizeBytes: 9, ChecksumSHA256: "sum-deleted", StorageKey: "home/natt_deleted.txt", DeletedAt: &deletedAt, CreatedAt: now.Add(2 * time.Second), UpdatedAt: deletedAt},
+	} {
+		mustStore(t, db.CreateNoteAttachment(ctx, attachment))
+	}
+
+	items, err := db.ListLiveNoteAttachmentInventory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("inventory length = %d, want 2: %#v", len(items), items)
+	}
+	if items[0].Attachment.ID != "natt_home" || items[0].NoteTitle != "Home files" || items[0].NoteScope != "home" || items[0].OwnerEmail != user.Email {
+		t.Fatalf("home inventory item = %#v", items[0])
+	}
+	if items[1].Attachment.ID != "natt_profile" || items[1].NoteScope != "profile" {
+		t.Fatalf("profile inventory item = %#v", items[1])
+	}
+}
+
 func TestListAuditEventsSortsBoundedResults(t *testing.T) {
 	t.Parallel()
 

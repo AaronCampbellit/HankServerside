@@ -26,6 +26,17 @@ type UserNote struct {
 	UpdatedBy     string     `json:"updated_by"`
 }
 
+type NoteAttachmentInventoryRecord struct {
+	Attachment   NoteAttachment `json:"attachment"`
+	NoteID       string         `json:"note_id"`
+	NoteTitle    string         `json:"note_title"`
+	NoteScope    string         `json:"note_scope"`
+	NotePageType string         `json:"note_page_type"`
+	OwnerEmail   string         `json:"owner_email"`
+	BodyMarkdown string         `json:"body_markdown"`
+	BoardJSON    string         `json:"board_json"`
+}
+
 type NoteShare struct {
 	NoteID       string    `json:"note_id"`
 	HomeID       string    `json:"home_id"`

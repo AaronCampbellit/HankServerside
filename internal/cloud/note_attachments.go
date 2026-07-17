@@ -247,8 +247,7 @@ func noteWithAttachmentReference(note domain.UserNote, scope string, userID stri
 
 func removeNoteAttachmentReferences(note domain.UserNote, userID string, attachment domain.NoteAttachment) (domain.UserNote, int, error) {
 	body := noteBodyText(note)
-	escapedID := regexp.QuoteMeta(url.PathEscape(attachment.ID))
-	pattern, err := regexp.Compile(`(?m)\n{0,2}!?\[[^\]]+\]\(hank-note-attachment://` + escapedID + `[^)]*\)`)
+	pattern, err := noteAttachmentReferencePattern(attachment.ID)
 	if err != nil {
 		return domain.UserNote{}, 0, err
 	}
@@ -307,9 +306,14 @@ func (s *Server) deleteStoredNoteAttachment(ctx context.Context, note domain.Use
 		s.logger.Error("note attachment file cleanup failed", "attachment_id", attachment.ID, "note_id", note.NoteID, "error", err)
 	}
 
-	s.enqueueAssistantNoteIndexJob(ctx, updatedNote.HomeID, userID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
-	s.emitNoteAttachmentChanged(ctx, updatedNote, scope, userID)
+	s.enqueueAssistantNoteIndexJob(ctx, updatedNote.HomeID, updatedNote.OwnerUserID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
+	s.emitNoteAttachmentChanged(ctx, updatedNote, scope, updatedNote.OwnerUserID)
 	return updatedNote, cleanupComplete, nil
+}
+
+func noteAttachmentReferencePattern(attachmentID string) (*regexp.Regexp, error) {
+	escapedID := regexp.QuoteMeta(url.PathEscape(strings.TrimSpace(attachmentID)))
+	return regexp.Compile(`(?m)\n{0,2}!?\[[^\]]+\]\(hank-note-attachment://` + escapedID + `[^)]*\)`)
 }
 
 func (s *Server) serveNoteAttachment(w http.ResponseWriter, r *http.Request, attachment domain.NoteAttachment) {
