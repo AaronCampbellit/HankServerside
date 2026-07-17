@@ -144,8 +144,34 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 	if string(downloaded) != "fake-png-bytes" {
 		t.Fatalf("downloaded attachment = %q", downloaded)
 	}
+	noteRecord, err := db.GetProfileNote(ctx, user.ID, "api-token-note.md")
+	if err != nil {
+		t.Fatalf("get note record: %v", err)
+	}
+	attachmentRecord, err := db.GetNoteAttachment(ctx, noteRecord.ID, uploaded.ID)
+	if err != nil {
+		t.Fatalf("get attachment record: %v", err)
+	}
+	attachmentPath := filepath.Join(root, attachmentRecord.StorageKey)
+	if _, err := os.Stat(attachmentPath); err != nil {
+		t.Fatalf("stat uploaded attachment: %v", err)
+	}
+	var deleted protocol.NoteAttachmentDeleteResponse
+	requestJSON(t, testServer, adminToken, http.MethodDelete, uploaded.DownloadURL, nil, &deleted)
+	if !deleted.OK || !deleted.CleanupComplete || deleted.NoteRevision == "" {
+		t.Fatalf("delete response = %#v", deleted)
+	}
+	if _, err := os.Stat(attachmentPath); !os.IsNotExist(err) {
+		t.Fatalf("attachment file still exists after delete: %v", err)
+	}
+	response := requestJSONStatus(t, testServer, adminToken, http.MethodGet, uploaded.DownloadURL, nil, http.StatusNotFound)
+	response.Body.Close()
+	requestJSON(t, testServer, adminToken, http.MethodGet, "/v1/me/notes/api-token-note.md", nil, &fetched)
+	if strings.Contains(fetched.BodyMarkdown, uploaded.ID) || len(fetched.Attachments) != 0 {
+		t.Fatalf("deleted attachment remained in note: %#v", fetched)
+	}
 
-	response := requestJSONStatus(t, testServer, created.Token, http.MethodDelete, "/v1/me/notes/api-token-note.md", nil, http.StatusForbidden)
+	response = requestJSONStatus(t, testServer, created.Token, http.MethodDelete, "/v1/me/notes/api-token-note.md", nil, http.StatusForbidden)
 	response.Body.Close()
 
 	var list struct {

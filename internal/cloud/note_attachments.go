@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -118,12 +119,8 @@ func (s *Server) handleNoteAttachmentsHTTP(w http.ResponseWriter, r *http.Reques
 	case http.MethodGet:
 		s.serveNoteAttachment(w, r, attachment)
 	case http.MethodDelete:
-		updatedNote, err := noteWithoutAttachmentReference(note, userID, attachment)
+		updatedNote, cleanupComplete, err := s.deleteStoredNoteAttachment(r.Context(), note, scope, userID, attachment)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := s.store.DeleteNoteAttachmentAndSaveNote(r.Context(), note.ID, attachmentID, time.Now().UTC(), updatedNote); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				http.NotFound(w, r)
 				return
@@ -131,12 +128,15 @@ func (s *Server) handleNoteAttachmentsHTTP(w http.ResponseWriter, r *http.Reques
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if attachmentPath, err := s.noteAttachmentPath(attachment.StorageKey); err == nil {
-			_ = os.Remove(attachmentPath)
+		status := http.StatusOK
+		if !cleanupComplete {
+			status = http.StatusInternalServerError
 		}
-		s.enqueueAssistantNoteIndexJob(r.Context(), updatedNote.HomeID, userID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
-		s.emitNoteAttachmentChanged(r.Context(), note, scope, userID)
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, status, protocol.NoteAttachmentDeleteResponse{
+			OK:              true,
+			NoteRevision:    updatedNote.Revision,
+			CleanupComplete: cleanupComplete,
+		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -245,26 +245,71 @@ func noteWithAttachmentReference(note domain.UserNote, scope string, userID stri
 	return note, nil
 }
 
-func noteWithoutAttachmentReference(note domain.UserNote, userID string, attachment domain.NoteAttachment) (domain.UserNote, error) {
+func removeNoteAttachmentReferences(note domain.UserNote, userID string, attachment domain.NoteAttachment) (domain.UserNote, int, error) {
 	body := noteBodyText(note)
 	escapedID := regexp.QuoteMeta(url.PathEscape(attachment.ID))
 	pattern, err := regexp.Compile(`(?m)\n{0,2}!?\[[^\]]+\]\(hank-note-attachment://` + escapedID + `[^)]*\)`)
 	if err != nil {
-		return domain.UserNote{}, err
+		return domain.UserNote{}, 0, err
 	}
+	removed := len(pattern.FindAllStringIndex(body, -1))
 	body = strings.TrimSpace(pattern.ReplaceAllString(body, ""))
-	revision, checksum, err := revisionAndChecksum(body, note.PageType, note.BoardJSON)
+	boardJSON := note.BoardJSON
+	if note.PageType == protocol.NotePageTypeKanban && strings.TrimSpace(boardJSON) != "" {
+		var board protocol.KanbanBoard
+		if err := json.Unmarshal([]byte(boardJSON), &board); err != nil {
+			return domain.UserNote{}, 0, fmt.Errorf("decode kanban attachment references: %w", err)
+		}
+		for columnIndex := range board.Columns {
+			for cardIndex := range board.Columns[columnIndex].Cards {
+				card := &board.Columns[columnIndex].Cards[cardIndex]
+				removed += len(pattern.FindAllStringIndex(card.Text, -1))
+				card.Text = strings.TrimSpace(pattern.ReplaceAllString(card.Text, ""))
+			}
+		}
+		encoded, err := json.Marshal(board)
+		if err != nil {
+			return domain.UserNote{}, 0, fmt.Errorf("encode kanban attachment references: %w", err)
+		}
+		boardJSON = string(encoded)
+	}
+	revision, checksum, err := revisionAndChecksum(body, note.PageType, boardJSON)
 	if err != nil {
-		return domain.UserNote{}, err
+		return domain.UserNote{}, 0, err
 	}
 	note.Content = body
 	note.BodyMarkdown = body
 	note.BodyFormat = "markdown"
+	note.BoardJSON = boardJSON
 	note.Revision = revision
 	note.Checksum = checksum
 	note.UpdatedAt = time.Now().UTC()
 	note.UpdatedBy = userID
-	return note, nil
+	return note, removed, nil
+}
+
+func (s *Server) deleteStoredNoteAttachment(ctx context.Context, note domain.UserNote, scope string, userID string, attachment domain.NoteAttachment) (domain.UserNote, bool, error) {
+	updatedNote, _, err := removeNoteAttachmentReferences(note, userID, attachment)
+	if err != nil {
+		return domain.UserNote{}, false, err
+	}
+	if err := s.store.DeleteNoteAttachmentAndSaveNote(ctx, note.ID, attachment.ID, time.Now().UTC(), updatedNote); err != nil {
+		return domain.UserNote{}, false, err
+	}
+
+	cleanupComplete := true
+	attachmentPath, pathErr := s.noteAttachmentPath(attachment.StorageKey)
+	if pathErr != nil {
+		cleanupComplete = false
+		s.logger.Error("note attachment cleanup path failed", "attachment_id", attachment.ID, "note_id", note.NoteID, "error", pathErr)
+	} else if err := os.Remove(attachmentPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		cleanupComplete = false
+		s.logger.Error("note attachment file cleanup failed", "attachment_id", attachment.ID, "note_id", note.NoteID, "error", err)
+	}
+
+	s.enqueueAssistantNoteIndexJob(ctx, updatedNote.HomeID, userID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
+	s.emitNoteAttachmentChanged(ctx, updatedNote, scope, userID)
+	return updatedNote, cleanupComplete, nil
 }
 
 func (s *Server) serveNoteAttachment(w http.ResponseWriter, r *http.Request, attachment domain.NoteAttachment) {

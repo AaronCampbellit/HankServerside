@@ -101,6 +101,12 @@ type NoteAttachmentsResponse struct {
 	Attachments []NoteAttachment `json:"attachments"`
 }
 
+type NoteAttachmentDeleteResponse struct {
+	OK              bool   `json:"ok"`
+	NoteRevision    string `json:"note_revision"`
+	CleanupComplete bool   `json:"cleanup_complete"`
+}
+
 type NotesSaveRequest struct {
 	NoteID           string       `json:"note_id"`
 	Title            string       `json:"title"`

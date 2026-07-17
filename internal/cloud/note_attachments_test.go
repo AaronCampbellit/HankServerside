@@ -2,10 +2,34 @@ package cloud
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
 )
+
+func TestRemoveNoteAttachmentReferencesUpdatesMarkdownAndKanbanBoard(t *testing.T) {
+	note := domain.UserNote{
+		PageType:     protocol.NotePageTypeKanban,
+		BodyMarkdown: "![capture](hank-note-attachment://natt-1)",
+		BoardJSON:    `{"columns":[{"id":"inbox","cards":[{"id":"one","text":"One\n![capture](hank-note-attachment://natt-1)"},{"id":"two","text":"Keep me"}]}]}`,
+	}
+
+	updated, removed, err := removeNoteAttachmentReferences(note, "user-1", domain.NoteAttachment{ID: "natt-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed < 2 {
+		t.Fatalf("removed references = %d, want at least 2", removed)
+	}
+	if strings.Contains(updated.BodyMarkdown+updated.BoardJSON, "natt-1") {
+		t.Fatalf("attachment reference remained: %#v", updated)
+	}
+	if !strings.Contains(updated.BoardJSON, "Keep me") {
+		t.Fatalf("unrelated card changed: %s", updated.BoardJSON)
+	}
+}
 
 func TestNoteAttachmentResponseIncludesPostUploadRevision(t *testing.T) {
 	response := noteAttachmentToProtocol(
