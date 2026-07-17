@@ -19,6 +19,8 @@ export type KanbanCard = {
   text?: string;
   title?: string;
   sort_order?: number;
+  color?: string;
+  due_date?: string;
 };
 
 export type KanbanColumn = {
@@ -32,11 +34,22 @@ export type KanbanBoard = {
   columns?: KanbanColumn[];
 };
 
+export type NoteAttachment = {
+  id: string;
+  note_id?: string;
+  filename: string;
+  content_type: string;
+  size_bytes?: number;
+  download_url: string;
+  markdown_reference: string;
+};
+
 export type ProfileNote = ProfileNoteSummary & {
   content?: string;
   body_markdown?: string;
   body_format?: string;
   board?: KanbanBoard | null;
+  attachments?: NoteAttachment[];
 };
 
 export type SaveProfileNoteInput = {
@@ -47,6 +60,7 @@ export type SaveProfileNoteInput = {
   page_type: string;
   parent_id: string;
   mcp_excluded?: boolean;
+  board?: KanbanBoard | null;
 };
 
 export type SaveProfileNoteResponse = {
@@ -72,7 +86,7 @@ export class ProfileNotesClient {
   }
 
   saveNote(input: SaveProfileNoteInput) {
-    const body = {
+    const body: Record<string, unknown> = {
       note_id: input.note_id,
       title: input.title,
       content: input.body_markdown,
@@ -83,6 +97,7 @@ export class ProfileNotesClient {
       parent_id: input.parent_id,
       mcp_excluded: Boolean(input.mcp_excluded),
     };
+    if (input.page_type === "kanban") body.board = input.board || { columns: [] };
     if (input.note_id) {
       return this.api.request<SaveProfileNoteResponse>(`/v1/me/notes/${encodeURIComponent(input.note_id)}`, {
         method: "PUT",
@@ -94,6 +109,17 @@ export class ProfileNotesClient {
 
   deleteNote(id: string) {
     return this.api.request<{ ok: boolean }>(`/v1/me/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  uploadAttachment(noteID: string, file: File) {
+    return this.api.request<NoteAttachment>(
+      `/v1/me/notes/${encodeURIComponent(noteID)}/attachments?filename=${encodeURIComponent(file.name)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      },
+    );
   }
 }
 

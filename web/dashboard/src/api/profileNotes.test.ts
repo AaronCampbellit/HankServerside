@@ -61,4 +61,46 @@ describe("ProfileNotesClient", () => {
     });
     expect(request).toHaveBeenNthCalledWith(5, "/v1/me/notes/daily.md", { method: "DELETE" });
   });
+
+  it("persists kanban board data and uploads note attachments as binary", async () => {
+    const request = vi.fn(async <T>() => ({
+      id: "natt-1",
+      filename: "board.png",
+      content_type: "image/png",
+      download_url: "/v1/me/notes/work/attachments/natt-1",
+      markdown_reference: "![board.png](hank-note-attachment://natt-1)",
+    }) as T);
+    const client = new ProfileNotesClient({ request: request as unknown as ApiTransport["request"] });
+    const board = {
+      columns: [{
+        id: "todo",
+        title: "To do",
+        sort_order: 0,
+        cards: [{ id: "task", text: "Ship it", sort_order: 0, color: "cyan", due_date: "2026-07-18" }],
+      }],
+    };
+
+    await client.saveNote({
+      note_id: "work",
+      title: "Work",
+      body_markdown: "",
+      expected_revision: "1",
+      page_type: "kanban",
+      parent_id: "",
+      board,
+    });
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "board.png", { type: "image/png" });
+    const attachment = await client.uploadAttachment("work", file);
+
+    expect(request).toHaveBeenNthCalledWith(1, "/v1/me/notes/work", {
+      method: "PUT",
+      body: expect.objectContaining({ board }),
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "/v1/me/notes/work/attachments?filename=board.png", {
+      method: "POST",
+      headers: { "Content-Type": "image/png" },
+      body: file,
+    });
+    expect(attachment.markdown_reference).toContain("hank-note-attachment://natt-1");
+  });
 });

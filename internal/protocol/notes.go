@@ -15,6 +15,8 @@ type KanbanCard struct {
 	ID        string    `json:"id"`
 	Text      string    `json:"text"`
 	SortOrder int       `json:"sort_order"`
+	Color     string    `json:"color,omitempty"`
+	DueDate   string    `json:"due_date,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
