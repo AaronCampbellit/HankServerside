@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { KanbanBoard, KanbanCard, KanbanColumn, NoteAttachment } from "../api/profileNotes";
+import { KanbanCardModal, type DescriptionSelection } from "./KanbanCardModal";
 
 type CardLocation = { columnID: string; cardID: string };
 
@@ -20,7 +21,6 @@ type KanbanEditorProps = {
 };
 
 const defaultColumnTitles = ["Inbox", "In progress", "Done"];
-const cardColors = ["default", "cyan", "blue", "green", "amber", "violet"] as const;
 let fallbackID = 0;
 
 function uniqueID(prefix: string): string {
@@ -193,9 +193,9 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   const [dropTarget, setDropTarget] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const suppressOpenRef = useRef(false);
   const dragReleaseTimerRef = useRef<number | null>(null);
+  const cardButtonRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const selectedColumn = selected ? columns.find((column) => column.id === selected.columnID) : undefined;
   const selectedCard = selectedColumn?.cards?.find((card) => card.id === selected?.cardID);
@@ -205,15 +205,6 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     if (!selected || selectedCard) return;
     setSelected(null);
   }, [selected, selectedCard]);
-
-  useEffect(() => {
-    if (!selected) return;
-    const close = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setSelected(null);
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [selected]);
 
   useEffect(() => () => {
     if (dragReleaseTimerRef.current !== null) window.clearTimeout(dragReleaseTimerRef.current);
@@ -316,18 +307,19 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     setSelected(location);
   }
 
-  function formatDescription(prefix: string, suffix = prefix, placeholder = "text") {
+  function closeCard() {
+    const cardID = selected?.cardID || "";
+    setSelected(null);
+    requestAnimationFrame(() => cardButtonRefs.current.get(cardID)?.focus());
+  }
+
+  function formatDescription(prefix: string, suffix = prefix, placeholder = "text", selection?: DescriptionSelection) {
     if (!selected || !selectedCard || !selectedParts) return;
-    const input = descriptionRef.current;
-    const start = input?.selectionStart ?? selectedParts.description.length;
-    const end = input?.selectionEnd ?? start;
+    const start = selection?.start ?? selectedParts.description.length;
+    const end = selection?.end ?? start;
     const selectedText = selectedParts.description.slice(start, end) || placeholder;
     const description = `${selectedParts.description.slice(0, start)}${prefix}${selectedText}${suffix}${selectedParts.description.slice(end)}`;
     updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, description) }));
-    requestAnimationFrame(() => {
-      input?.focus();
-      input?.setSelectionRange(start + prefix.length, start + prefix.length + selectedText.length);
-    });
   }
 
   async function upload(file?: File) {
@@ -344,6 +336,10 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     } finally {
       setUploading(false);
     }
+  }
+
+  async function uploadFiles(files: File[]) {
+    for (const file of files) await upload(file);
   }
 
   async function deleteSelected() {
@@ -426,7 +422,16 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => { event.stopPropagation(); dropCard(event, column.id || "", cardIndex); }}
                       >
-                        <button className="kanban-card-open" type="button" aria-label={`Open task ${parts.title}`} onClick={() => openCard({ columnID: column.id || "", cardID: card.id || "" })}>
+                        <button
+                          ref={(node) => {
+                            if (node) cardButtonRefs.current.set(card.id || "", node);
+                            else cardButtonRefs.current.delete(card.id || "");
+                          }}
+                          className="kanban-card-open"
+                          type="button"
+                          aria-label={`Open task ${parts.title}`}
+                          onClick={() => openCard({ columnID: column.id || "", cardID: card.id || "" })}
+                        >
                           <span className="kanban-card-grip" aria-hidden="true"><SmallIcon name="grip" /></span>
                           <strong>{parts.title}</strong>
                           <CardDescription value={parts.description} attachments={attachments} />
@@ -478,105 +483,29 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
       </div>
 
       {selectedCard && selected && selectedParts ? (
-        <aside className="kanban-details" role="dialog" aria-modal="false" aria-label="Task details">
-          <header>
-            <div>
-              <span>Task details</span>
-              <small>{selectedColumn?.title}</small>
-            </div>
-            <button type="button" aria-label="Close task details" onClick={() => setSelected(null)}><SmallIcon name="close" /></button>
-          </header>
-          <div className="kanban-details-scroll">
-            <label className="kanban-detail-title">
-              <span>Title</span>
-              <textarea
-                aria-label="Task title"
-                rows={2}
-                value={selectedParts.title}
-                onChange={(event) => updateCard(selected, (card) => ({ ...card, text: cardText(event.target.value, selectedParts.description) }))}
-              />
-            </label>
-
-            <section className="kanban-detail-section">
-              <h3>Description</h3>
-              <div className="kanban-formatbar" aria-label="Description formatting">
-                <button type="button" aria-label="Bold" onClick={() => formatDescription("**", "**", "bold text")}><strong>B</strong></button>
-                <button type="button" aria-label="Italic" onClick={() => formatDescription("_", "_", "italic text")}><em>I</em></button>
-                <button type="button" aria-label="Bulleted list" onClick={() => formatDescription("- ", "", "list item")}>• List</button>
-                <button type="button" aria-label="Link" onClick={() => formatDescription("[", "](https://example.com)", "link title")}>Link</button>
-              </div>
-              <label>
-                <span className="visually-hidden">Description</span>
-                <textarea
-                  ref={descriptionRef}
-                  aria-label="Description"
-                  rows={8}
-                  value={selectedParts.description}
-                  onChange={(event) => updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, event.target.value) }))}
-                  placeholder="Add context, links, checklists, or notes…"
-                />
-              </label>
-            </section>
-
-            <div className="kanban-detail-grid">
-              <label>
-                <span>Column</span>
-                <select value={selected.columnID} onChange={(event) => moveCard(selected, event.target.value)}>
-                  {columns.map((column) => <option key={column.id} value={column.id}>{column.title}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>Due date</span>
-                <input aria-label="Due date" type="date" value={selectedCard.due_date || ""} onChange={(event) => updateCard(selected, (card) => ({ ...card, due_date: event.target.value }))} />
-              </label>
-            </div>
-
-            <section className="kanban-detail-section">
-              <h3>Card color</h3>
-              <div className="kanban-color-picker">
-                {cardColors.map((color) => (
-                  <button
-                    className={`color-${color}`}
-                    type="button"
-                    key={color}
-                    aria-label={`${color === "default" ? "Default" : color[0].toUpperCase() + color.slice(1)} card`}
-                    aria-pressed={(selectedCard.color || "default") === color}
-                    onClick={() => updateCard(selected, (card) => ({ ...card, color: color === "default" ? "" : color }))}
-                  />
-                ))}
-              </div>
-            </section>
-
-            <section className="kanban-detail-section">
-              <h3>Links &amp; files</h3>
-              <label
-                className={`kanban-upload${uploading ? " is-uploading" : ""}`}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  void upload(event.dataTransfer.files?.[0]);
-                }}
-              >
-                <SmallIcon name="upload" />
-                <span>{uploading ? "Uploading…" : "Drop a screenshot here or choose a file"}</span>
-                <input aria-label="Add screenshot or file" type="file" disabled={uploading} onChange={(event) => void upload(event.target.files?.[0])} />
-              </label>
-              {uploadError ? <p className="kanban-upload-error" role="alert">{uploadError}</p> : null}
-              <div className="kanban-attachment-list">
-                {attachments.filter((attachment) => selectedParts.description.includes(`hank-note-attachment://${attachment.id}`)).map((attachment) => (
-                  <a key={attachment.id} href={attachment.download_url} target="_blank" rel="noopener noreferrer">{attachment.filename}</a>
-                ))}
-              </div>
-            </section>
-          </div>
-          <footer>
-            <div>
-              <button type="button" aria-label="Move task left" disabled={columns.findIndex((column) => column.id === selected.columnID) === 0} onClick={() => moveSelected(-1)}><SmallIcon name="left" /> Move left</button>
-              <button type="button" aria-label="Move task right" disabled={columns.findIndex((column) => column.id === selected.columnID) === columns.length - 1} onClick={() => moveSelected(1)}>Move right <SmallIcon name="right" /></button>
-            </div>
-            <button className="danger" type="button" onClick={() => void deleteSelected()}><SmallIcon name="trash" /> Delete task</button>
-          </footer>
-        </aside>
+        <KanbanCardModal
+          card={selectedCard}
+          title={selectedParts.title}
+          description={selectedParts.description}
+          columnID={selected.columnID}
+          columns={columns}
+          attachments={attachments}
+          uploading={uploading}
+          uploadError={uploadError}
+          onTitleChange={(value) => updateCard(selected, (card) => ({ ...card, text: cardText(value, selectedParts.description) }))}
+          onDescriptionChange={(value) => updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, value) }))}
+          onFormat={formatDescription}
+          onMove={(columnID) => moveCard(selected, columnID, Number.MAX_SAFE_INTEGER, true)}
+          onDueDateChange={(value) => updateCard(selected, (card) => ({ ...card, due_date: value }))}
+          onColorChange={(value) => updateCard(selected, (card) => ({ ...card, color: value }))}
+          onUploadFiles={uploadFiles}
+          onMoveLeft={() => moveSelected(-1)}
+          onMoveRight={() => moveSelected(1)}
+          canMoveLeft={columns.findIndex((column) => column.id === selected.columnID) > 0}
+          canMoveRight={columns.findIndex((column) => column.id === selected.columnID) < columns.length - 1}
+          onDelete={() => void deleteSelected()}
+          onClose={closeCard}
+        />
       ) : null}
     </div>
   );

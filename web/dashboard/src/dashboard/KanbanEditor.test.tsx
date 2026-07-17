@@ -62,16 +62,18 @@ describe("KanbanEditor", () => {
     expect(screen.getByRole("button", { name: "Open task Prepare invoice" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Open task Prepare invoice" }));
-    const drawer = screen.getByRole("dialog", { name: "Task details" });
-    fireEvent.change(within(drawer).getByLabelText("Description"), { target: { value: "Send today" } });
-    fireEvent.click(within(drawer).getByRole("button", { name: "Bold" }));
-    fireEvent.change(within(drawer).getByLabelText("Due date"), { target: { value: "2026-07-18" } });
-    fireEvent.click(within(drawer).getByRole("button", { name: "Cyan card" }));
-    fireEvent.click(within(drawer).getByRole("button", { name: "Move task right" }));
+    const modal = screen.getByRole("dialog", { name: "Task details" });
+    expect(modal).toHaveAttribute("aria-modal", "true");
+    fireEvent.change(within(modal).getByLabelText("Description"), { target: { value: "Send today" } });
+    fireEvent.click(within(modal).getByRole("button", { name: "Bold" }));
+    fireEvent.change(within(modal).getByLabelText("Due date"), { target: { value: "2026-07-18" } });
+    fireEvent.click(within(modal).getByRole("button", { name: "Cyan card" }));
+    fireEvent.click(within(modal).getByRole("button", { name: "Move task right" }));
 
     expect(screen.getByRole("heading", { name: "In progress" }).closest("section")).toHaveTextContent("Prepare invoice");
-    expect(within(drawer).getByLabelText("Due date")).toHaveValue("2026-07-18");
-    expect(within(drawer).getByRole("button", { name: "Cyan card" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("dialog", { name: "Task details" })).toBeInTheDocument();
+    expect(within(modal).getByLabelText("Due date")).toHaveValue("2026-07-18");
+    expect(within(modal).getByRole("button", { name: "Cyan card" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("time")).toHaveAttribute("datetime", "2026-07-18");
     expect(change).toHaveBeenCalled();
 

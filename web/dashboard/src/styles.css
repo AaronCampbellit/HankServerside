@@ -4584,7 +4584,7 @@ button.secondary:disabled {
 }
 
 .kanban-workspace.details-open {
-  grid-template-columns: minmax(0, 1fr) var(--kanban-drawer-width);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .kanban-main {
@@ -4985,6 +4985,134 @@ button.secondary:disabled {
   border-radius: 9px;
   background: rgba(255,255,255,.02);
   color: var(--muted);
+}
+
+.kanban-card-modal-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 8, 15, .74);
+  backdrop-filter: blur(6px);
+}
+
+.kanban-card-modal {
+  --card-accent: transparent;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(86vh, 860px);
+  min-height: min(620px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 84%, transparent);
+  border-left: 4px solid var(--card-accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 96%, #0b1a28);
+  box-shadow: 0 28px 90px rgba(0,0,0,.58);
+}
+
+.kanban-card-modal.color-cyan { --card-accent: #4fc3d6; }
+.kanban-card-modal.color-blue { --card-accent: #6b9fea; }
+.kanban-card-modal.color-green { --card-accent: #57b886; }
+.kanban-card-modal.color-amber { --card-accent: #d5a44e; }
+.kanban-card-modal.color-violet { --card-accent: #9a7bd8; }
+
+.kanban-card-modal-header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  padding: 18px 18px 15px 22px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 92%, var(--card-accent) 8%);
+}
+
+.kanban-card-modal-header .kanban-detail-title > span {
+  color: color-mix(in srgb, var(--card-accent) 70%, var(--muted));
+  font: 700 10.5px/1.2 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.kanban-card-modal-header .kanban-detail-title textarea {
+  font-size: clamp(21px, 3vw, 28px);
+}
+
+.kanban-card-modal-header > button {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,.025);
+  color: var(--muted);
+}
+
+.kanban-card-modal-header > button:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.kanban-card-modal-header svg,
+.kanban-card-modal-footer svg {
+  width: 15px;
+  height: 15px;
+}
+
+.kanban-card-modal-scroll {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  overflow: auto;
+  padding: 20px 22px 24px;
+}
+
+.kanban-card-modal-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 92%, #07111d);
+}
+
+.kanban-card-modal-footer > div {
+  display: flex;
+  gap: 8px;
+}
+
+.kanban-card-modal-footer button {
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  color: var(--muted);
+  font: 700 11px var(--font-sans);
+}
+
+.kanban-card-modal-footer button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.kanban-card-modal-footer button.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  color: var(--danger);
+}
+
+.kanban-card-modal-footer button:disabled {
+  opacity: .35;
 }
 
 .kanban-details {
@@ -6557,6 +6685,32 @@ button.secondary:disabled {
 }
 
 @media (max-width: 680px) {
+  .kanban-card-modal-backdrop {
+    padding: 10px;
+  }
+
+  .kanban-card-modal {
+    width: calc(100vw - 20px);
+    min-height: calc(100vh - 20px);
+    max-height: calc(100vh - 20px);
+    border-radius: 10px;
+  }
+
+  .kanban-card-modal-header,
+  .kanban-card-modal-scroll {
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  .kanban-card-modal-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kanban-card-modal-footer > div,
+  .kanban-card-modal-footer button {
+    width: 100%;
+  }
+
   .kanban-workbar {
     flex-wrap: wrap;
   }
