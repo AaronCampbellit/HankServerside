@@ -80,6 +80,37 @@ describe("KanbanEditor", () => {
     expect(screen.queryByRole("button", { name: "Open task Review brief" })).not.toBeInTheDocument();
   });
 
+  it("moves a dragged card without opening its editor", () => {
+    Harness({});
+    const open = screen.getByRole("button", { name: "Open task Review brief" });
+    const card = open.closest("article");
+    const target = screen.getByRole("heading", { name: "In progress" }).closest("section");
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn() };
+
+    expect(card).not.toBeNull();
+    expect(target).not.toBeNull();
+    fireEvent.dragStart(card!, { dataTransfer });
+    fireEvent.drop(target!, { dataTransfer });
+    fireEvent.dragEnd(card!, { dataTransfer });
+
+    expect(target).toHaveTextContent("Review brief");
+    expect(screen.queryByRole("dialog", { name: "Task details" })).not.toBeInTheDocument();
+  });
+
+  it("suppresses the click emitted immediately after dragging", () => {
+    Harness({});
+    const open = screen.getByRole("button", { name: "Open task Review brief" });
+    const card = open.closest("article");
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn() };
+
+    expect(card).not.toBeNull();
+    fireEvent.dragStart(card!, { dataTransfer });
+    fireEvent.dragEnd(card!, { dataTransfer });
+    fireEvent.click(open);
+
+    expect(screen.queryByRole("dialog", { name: "Task details" })).not.toBeInTheDocument();
+  });
+
   it("uploads and renders a screenshot in a card", async () => {
     const upload = vi.fn(async () => attachments[0]);
     Harness({ onUpload: upload });

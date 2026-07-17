@@ -194,6 +194,8 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const suppressOpenRef = useRef(false);
+  const dragReleaseTimerRef = useRef<number | null>(null);
 
   const selectedColumn = selected ? columns.find((column) => column.id === selected.columnID) : undefined;
   const selectedCard = selectedColumn?.cards?.find((card) => card.id === selected?.cardID);
@@ -212,6 +214,10 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [selected]);
+
+  useEffect(() => () => {
+    if (dragReleaseTimerRef.current !== null) window.clearTimeout(dragReleaseTimerRef.current);
+  }, []);
 
   function commit(next: KanbanBoard) {
     onChange(normalizeBoard(next));
@@ -252,7 +258,12 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     commit({ columns: columns.filter((item) => item.id !== column.id) });
   }
 
-  function moveCard(location: CardLocation, targetColumnID: string, targetIndex = Number.MAX_SAFE_INTEGER) {
+  function moveCard(
+    location: CardLocation,
+    targetColumnID: string,
+    targetIndex = Number.MAX_SAFE_INTEGER,
+    preserveEditor = selected?.cardID === location.cardID,
+  ) {
     const sourceColumn = columns.find((column) => column.id === location.columnID);
     const card = sourceColumn?.cards?.find((item) => item.id === location.cardID);
     if (!card) return;
@@ -266,7 +277,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     cards.splice(Math.min(targetIndex, cards.length), 0, card);
     target.cards = cards;
     commit({ columns: nextColumns });
-    setSelected({ columnID: targetColumnID, cardID: location.cardID });
+    if (preserveEditor) setSelected({ columnID: targetColumnID, cardID: location.cardID });
   }
 
   function moveSelected(direction: -1 | 1) {
@@ -278,9 +289,31 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
 
   function dropCard(event: DragEvent, columnID: string, targetIndex: number) {
     event.preventDefault();
-    if (dragging) moveCard(dragging, columnID, targetIndex);
+    if (dragging) moveCard(dragging, columnID, targetIndex, false);
     setDragging(null);
     setDropTarget("");
+  }
+
+  function beginCardDrag(location: CardLocation, event: DragEvent<HTMLElement>) {
+    if (dragReleaseTimerRef.current !== null) window.clearTimeout(dragReleaseTimerRef.current);
+    suppressOpenRef.current = true;
+    setDragging(location);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", location.cardID);
+  }
+
+  function endCardDrag() {
+    setDragging(null);
+    setDropTarget("");
+    dragReleaseTimerRef.current = window.setTimeout(() => {
+      suppressOpenRef.current = false;
+      dragReleaseTimerRef.current = null;
+    }, 0);
+  }
+
+  function openCard(location: CardLocation) {
+    if (suppressOpenRef.current) return;
+    setSelected(location);
   }
 
   function formatDescription(prefix: string, suffix = prefix, placeholder = "text") {
@@ -388,24 +421,20 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                         className={`kanban-card color-${card.color || "default"}${dragging?.cardID === card.id ? " is-dragging" : ""}`}
                         key={card.id}
                         draggable
-                        onDragStart={(event) => {
-                          setDragging({ columnID: column.id || "", cardID: card.id || "" });
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", card.id || "");
-                        }}
-                        onDragEnd={() => { setDragging(null); setDropTarget(""); }}
+                        onDragStart={(event) => beginCardDrag({ columnID: column.id || "", cardID: card.id || "" }, event)}
+                        onDragEnd={endCardDrag}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={(event) => { event.stopPropagation(); dropCard(event, column.id || "", cardIndex); }}
                       >
-                        <button className="kanban-card-open" type="button" aria-label={`Open task ${parts.title}`} onClick={() => setSelected({ columnID: column.id || "", cardID: card.id || "" })}>
+                        <button className="kanban-card-open" type="button" aria-label={`Open task ${parts.title}`} onClick={() => openCard({ columnID: column.id || "", cardID: card.id || "" })}>
                           <span className="kanban-card-grip" aria-hidden="true"><SmallIcon name="grip" /></span>
                           <strong>{parts.title}</strong>
                           <CardDescription value={parts.description} attachments={attachments} />
                           {card.due_date ? <time dateTime={card.due_date}>{new Date(`${card.due_date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time> : null}
                         </button>
                         <div className="kanban-card-move">
-                          <button type="button" aria-label={`Move ${parts.title} left`} disabled={columnIndex === 0} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex - 1]?.id || "")}><SmallIcon name="left" /></button>
-                          <button type="button" aria-label={`Move ${parts.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex + 1]?.id || "")}><SmallIcon name="right" /></button>
+                          <button type="button" aria-label={`Move ${parts.title} left`} disabled={columnIndex === 0} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex - 1]?.id || "", Number.MAX_SAFE_INTEGER, false)}><SmallIcon name="left" /></button>
+                          <button type="button" aria-label={`Move ${parts.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex + 1]?.id || "", Number.MAX_SAFE_INTEGER, false)}><SmallIcon name="right" /></button>
                         </div>
                       </article>
                     );
