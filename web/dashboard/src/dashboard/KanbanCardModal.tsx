@@ -129,7 +129,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
         <header className="kanban-card-modal-header">
           <label className="kanban-detail-title">
             <span>Task in {currentColumn?.title || "board"}</span>
-            <textarea autoFocus aria-label="Task title" rows={2} value={title} onChange={(event) => onTitleChange(event.target.value)} />
+            <textarea autoFocus aria-label="Task title" rows={1} value={title} onChange={(event) => onTitleChange(event.target.value)} />
           </label>
           <button type="button" aria-label="Close task details" onClick={onClose}><ModalIcon name="close" /></button>
         </header>

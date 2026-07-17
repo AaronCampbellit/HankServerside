@@ -145,6 +145,7 @@ describe("KanbanCardModal", () => {
     const options = screen.getByTestId("kanban-card-options");
     const description = screen.getByRole("heading", { name: "Description" }).closest("section");
 
+    expect(screen.getByLabelText("Task title")).toHaveAttribute("rows", "1");
     expect(within(options).getByLabelText("Column")).toBeInTheDocument();
     expect(within(options).getByLabelText("Due date")).toBeInTheDocument();
     expect(within(options).getByRole("button", { name: "Move task right" })).toBeInTheDocument();

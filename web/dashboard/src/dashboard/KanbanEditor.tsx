@@ -414,6 +414,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                   <div className="kanban-column-actions">
                     <button type="button" aria-label={`Move ${column.title} left`} disabled={columnIndex === 0} onClick={() => moveColumn(column.id || "", -1)}><SmallIcon name="left" /></button>
                     <button type="button" aria-label={`Move ${column.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveColumn(column.id || "", 1)}><SmallIcon name="right" /></button>
+                    <button className="kanban-column-add" type="button" aria-label={`Add task to ${column.title}`} title={`Add task to ${column.title}`} onClick={() => setAddingColumnID(column.id || "")}><SmallIcon name="plus" /></button>
                     <button type="button" aria-label={`Delete ${column.title}`} disabled={deleting} onClick={() => void deleteColumn(column)}><SmallIcon name="trash" /></button>
                   </div>
                 </header>
@@ -441,9 +442,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                       <button type="button" onClick={() => { setAddingColumnID(""); setTaskDraft(""); }}>Cancel</button>
                     </div>
                   </form>
-                ) : (
-                  <button className="add-card-button" type="button" aria-label={`Add task to ${column.title}`} onClick={() => setAddingColumnID(column.id || "")}><SmallIcon name="plus" /> Add task</button>
-                )}
+                ) : null}
 
                 <div className="kanban-card-stack">
                   {visibleCards.map((card) => {

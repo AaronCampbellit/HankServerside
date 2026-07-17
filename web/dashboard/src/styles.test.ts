@@ -47,4 +47,11 @@ describe("dashboard stylesheet", () => {
 
     expect(confirmZIndex).toBeGreaterThan(kanbanZIndex);
   });
+
+  it("keeps Kanban card editing chrome compact", () => {
+    expect(ruleBodies(".kanban-card-modal").at(0)).toContain("min-height: min(520px");
+    expect(ruleBodies(".kanban-card-modal-header").at(0)).toContain("padding: 12px 14px 10px 16px");
+    expect(ruleBodies(".kanban-formatbar").at(0)).toContain("padding: 2px");
+    expect(ruleBodies(".kanban-upload").at(0)).toContain("min-height: 44px");
+  });
 });

@@ -4623,7 +4623,6 @@ button.secondary:disabled {
 .kanban-card-move svg,
 .kanban-details button svg,
 .kanban-upload svg,
-.add-card-button svg,
 .kanban-empty-board svg {
   width: 16px;
   height: 16px;
@@ -4683,8 +4682,8 @@ button.secondary:disabled {
 .kanban-column {
   min-width: var(--kanban-column-width);
   min-height: 490px;
-  display: grid;
-  grid-template-rows: auto minmax(80px, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 9px;
   padding: 9px;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
@@ -4761,9 +4760,9 @@ button.secondary:disabled {
 .kanban-column-actions button,
 .kanban-card-move button,
 .kanban-details header > button {
-  width: 26px;
-  min-width: 26px;
-  min-height: 26px;
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
   display: inline-grid;
   place-items: center;
   padding: 0;
@@ -4785,7 +4784,12 @@ button.secondary:disabled {
   opacity: .24;
 }
 
+.kanban-column-actions .kanban-column-add {
+  color: color-mix(in srgb, var(--brand-dark) 86%, var(--ink));
+}
+
 .kanban-card-stack {
+  flex: 1 1 auto;
   min-height: 70px;
   display: grid;
   align-content: start;
@@ -4892,7 +4896,7 @@ button.secondary:disabled {
 }
 
 .kanban-description-preview {
-  min-height: 150px;
+  min-height: 220px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 0 0 7px 7px;
@@ -4966,25 +4970,6 @@ button.secondary:disabled {
   font-size: 11.5px;
 }
 
-.add-card-button {
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font: 650 11.5px var(--font-sans);
-}
-
-.add-card-button:hover {
-  background: rgba(255,255,255,.045);
-  color: var(--ink);
-}
-
 .kanban-task-composer {
   display: grid;
   gap: 7px;
@@ -5043,9 +5028,9 @@ button.secondary:disabled {
 
 .kanban-card-modal {
   --card-accent: transparent;
-  width: min(720px, calc(100vw - 48px));
-  max-height: min(86vh, 860px);
-  min-height: min(620px, calc(100vh - 48px));
+  width: min(680px, calc(100vw - 48px));
+  max-height: min(84vh, 760px);
+  min-height: min(520px, calc(100vh - 48px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -5066,28 +5051,29 @@ button.secondary:disabled {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 16px;
-  padding: 18px 18px 15px 22px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 10px 16px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-strong) 92%, var(--card-accent) 8%);
 }
 
 .kanban-card-modal-header .kanban-detail-title > span {
   color: color-mix(in srgb, var(--card-accent) 70%, var(--muted));
-  font: 700 10.5px/1.2 var(--font-mono);
+  font: 700 9.5px/1.1 var(--font-mono);
   text-transform: uppercase;
   letter-spacing: .06em;
 }
 
 .kanban-card-modal-header .kanban-detail-title textarea {
-  font-size: clamp(21px, 3vw, 28px);
+  font-size: clamp(17px, 2.4vw, 21px);
+  line-height: 1.2;
 }
 
 .kanban-card-modal-header > button {
-  width: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
   display: grid;
   place-items: center;
   border: 1px solid var(--line);
@@ -5111,15 +5097,15 @@ button.secondary:disabled {
   min-height: 0;
   display: grid;
   align-content: start;
-  gap: 20px;
+  gap: 12px;
   overflow: auto;
-  padding: 20px 22px 24px;
+  padding: 12px 16px 16px;
 }
 
 .kanban-card-options {
   display: grid;
-  gap: 13px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid color-mix(in srgb, var(--card-accent) 24%, var(--line));
   border-radius: 9px;
   background: color-mix(in srgb, var(--card-accent) 5%, rgba(255,255,255,.02));
@@ -5129,12 +5115,12 @@ button.secondary:disabled {
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
 }
 
 .kanban-option-colors {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .kanban-option-colors > span {
@@ -5144,15 +5130,15 @@ button.secondary:disabled {
 
 .kanban-option-actions {
   display: flex;
-  gap: 7px;
+  gap: 5px;
 }
 
 .kanban-option-actions button {
-  min-height: 32px;
+  min-height: 28px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 9px;
+  padding: 0 7px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: rgba(255,255,255,.025);
@@ -5277,7 +5263,7 @@ button.secondary:disabled {
 .kanban-detail-section,
 .kanban-detail-grid label {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .kanban-detail-title > span,
@@ -5300,13 +5286,13 @@ button.secondary:disabled {
 }
 
 .kanban-detail-section {
-  padding-top: 2px;
+  min-height: 0;
 }
 
 .kanban-formatbar {
   display: flex;
-  gap: 3px;
-  padding: 4px;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--line);
   border-bottom: 0;
   border-radius: 7px 7px 0 0;
@@ -5314,9 +5300,9 @@ button.secondary:disabled {
 }
 
 .kanban-formatbar button {
-  min-width: 30px;
-  min-height: 28px;
-  padding: 0 8px;
+  min-width: 28px;
+  min-height: 24px;
+  padding: 0 7px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -5340,7 +5326,7 @@ button.secondary:disabled {
 
 .kanban-detail-section textarea {
   width: 100%;
-  min-height: 150px;
+  min-height: 220px;
   display: block;
   resize: vertical;
   padding: 10px;
@@ -5361,14 +5347,14 @@ button.secondary:disabled {
 .kanban-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .kanban-detail-grid input,
 .kanban-detail-grid select {
   min-width: 0;
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -5379,14 +5365,14 @@ button.secondary:disabled {
 
 .kanban-color-picker {
   display: flex;
-  gap: 9px;
+  gap: 7px;
 }
 
 .kanban-color-picker button {
   --swatch: var(--line-strong);
-  width: 23px;
-  min-width: 23px;
-  min-height: 23px;
+  width: 21px;
+  min-width: 21px;
+  min-height: 21px;
   border: 2px solid transparent;
   border-radius: 999px;
   background: var(--swatch);
@@ -5405,12 +5391,12 @@ button.secondary:disabled {
 .kanban-color-picker .color-violet { --swatch: #9a7bd8; }
 
 .kanban-upload {
-  min-height: 86px;
-  display: grid;
-  place-items: center;
-  align-content: center;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 7px;
-  padding: 12px;
+  padding: 6px 10px;
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
   color: var(--muted);
