@@ -183,6 +183,8 @@ function SmallIcon({ name }: { name: "plus" | "search" | "left" | "right" | "tra
 
 export function KanbanEditor({ board, attachments = [], onChange, onUpload, confirmDelete }: KanbanEditorProps) {
   const normalized = useMemo(() => normalizeBoard(board), [board]);
+  const boardRef = useRef(normalized);
+  boardRef.current = normalized;
   const columns = normalized.columns || [];
   const [query, setQuery] = useState("");
   const [addingColumnID, setAddingColumnID] = useState("");
@@ -211,7 +213,9 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   }, []);
 
   function commit(next: KanbanBoard) {
-    onChange(normalizeBoard(next));
+    const normalizedNext = normalizeBoard(next);
+    boardRef.current = normalizedNext;
+    onChange(normalizedNext);
   }
 
   function updateColumn(columnID: string, updater: (column: KanbanColumn) => KanbanColumn) {
@@ -223,6 +227,15 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
       ...column,
       cards: ordered(column.cards).map((card) => card.id === location.cardID ? updater(card) : card),
     }));
+  }
+
+  function updateCardByID(cardID: string, updater: (card: KanbanCard) => KanbanCard) {
+    commit({
+      columns: ordered(boardRef.current.columns).map((column) => ({
+        ...column,
+        cards: ordered(column.cards).map((card) => card.id === cardID ? updater(card) : card),
+      })),
+    });
   }
 
   function addTask(columnID: string) {
@@ -322,24 +335,37 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, description) }));
   }
 
-  async function upload(file?: File) {
-    if (!file || !selected || !selectedCard || !selectedParts) return;
+  async function uploadFiles(files: File[], selection?: DescriptionSelection) {
+    if (!files.length || !selected) return;
+    const cardID = selected.cardID;
     setUploading(true);
     setUploadError("");
+    let insertionStart = selection?.start;
+    let replacementEnd = selection?.end;
     try {
-      const attachment = await onUpload(file);
-      const reference = attachment.markdown_reference || `![${attachment.filename}](hank-note-attachment://${attachment.id})`;
-      const description = [selectedParts.description, reference].filter(Boolean).join("\n\n");
-      updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, description) }));
+      for (const file of files) {
+        const attachment = await onUpload(file);
+        const reference = attachment.markdown_reference || `![${attachment.filename}](hank-note-attachment://${attachment.id})`;
+        updateCardByID(cardID, (card) => {
+          const parts = cardTitleAndDescription(card);
+          const start = Math.min(insertionStart ?? parts.description.length, parts.description.length);
+          const end = Math.max(start, Math.min(replacementEnd ?? start, parts.description.length));
+          const before = parts.description.slice(0, start);
+          const after = parts.description.slice(end);
+          const prefix = before && !before.endsWith("\n") ? "\n\n" : "";
+          const suffix = after && !after.startsWith("\n") ? "\n\n" : "";
+          const inserted = `${prefix}${reference}`;
+          insertionStart = before.length + inserted.length;
+          replacementEnd = insertionStart;
+          const description = `${before}${inserted}${suffix}${after}`;
+          return { ...card, text: cardText(parts.title, description) };
+        });
+      }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "File could not be uploaded.");
     } finally {
       setUploading(false);
     }
-  }
-
-  async function uploadFiles(files: File[]) {
-    for (const file of files) await upload(file);
   }
 
   async function deleteSelected() {

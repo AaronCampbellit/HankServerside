@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider, ToastProvider } from "../ui/primitives";
 import { ProfileNotesPage } from "./ProfileNotesPage";
@@ -104,7 +104,7 @@ describe("ProfileNotesPage", () => {
     }));
   });
 
-  it("autosaves the canonical attachment reference after a kanban upload", async () => {
+  it("autosaves the canonical attachment reference after a kanban screenshot paste", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [{ note_id: "work", title: "Client Work", preview: "Kanban", page_type: "kanban", revision: "1" }],
     });
@@ -130,7 +130,13 @@ describe("ProfileNotesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open task Review brief" }));
     vi.useFakeTimers();
     const file = new File(["image"], "wireframe.png", { type: "image/png" });
-    fireEvent.change(screen.getByLabelText("Add screenshot or file"), { target: { files: [file] } });
+    const description = screen.getByLabelText("Description");
+    const paste = createEvent.paste(description, {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }] },
+    });
+    fireEvent(description, paste);
     await vi.advanceTimersByTimeAsync(750);
 
     expect(profileNotesClient.uploadAttachment).toHaveBeenCalledWith("work", file);

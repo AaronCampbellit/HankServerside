@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KanbanBoard, NoteAttachment } from "../api/profileNotes";
 import { boardFromMarkdown, boardToMarkdown, KanbanEditor } from "./KanbanEditor";
@@ -124,6 +124,40 @@ describe("KanbanEditor", () => {
 
     expect(await within(drawer).findByText("wireframe.png")).toBeInTheDocument();
     expect(upload).toHaveBeenCalledWith(file);
-    expect(await screen.findByRole("img", { name: "wireframe.png" })).toHaveAttribute("src", attachments[0].download_url);
+    expect(await within(drawer).findByRole("img", { name: "wireframe.png" })).toHaveAttribute("src", attachments[0].download_url);
+    expect(within(screen.getByRole("button", { name: "Open task Review brief" })).getByRole("img", { name: "wireframe.png" })).toHaveAttribute("src", attachments[0].download_url);
+  });
+
+  it("keeps successful pasted screenshots when a later upload fails", async () => {
+    const upload = vi.fn()
+      .mockResolvedValueOnce(attachments[0])
+      .mockRejectedValueOnce(new Error("Second screenshot failed"));
+    const { change } = Harness({ onUpload: upload });
+    fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
+    const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
+    description.setSelectionRange(description.value.length, description.value.length);
+    const first = new File(["one"], "wireframe.png", { type: "image/png" });
+    const second = new File(["two"], "second.png", { type: "image/png" });
+    const paste = createEvent.paste(description, {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: {
+        items: [
+          { kind: "file", type: "image/png", getAsFile: () => first },
+          { kind: "file", type: "image/png", getAsFile: () => second },
+        ],
+      },
+    });
+
+    fireEvent(description, paste);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Second screenshot failed");
+    expect(upload).toHaveBeenNthCalledWith(1, first);
+    expect(upload).toHaveBeenNthCalledWith(2, second);
+    await waitFor(() => {
+      const latest = change.mock.calls.at(-1)?.[0];
+      const saved = latest?.columns?.flatMap((column) => column.cards || []).find((card) => card.id === "brief");
+      expect(saved?.text).toContain("hank-note-attachment://natt-1");
+    });
   });
 });

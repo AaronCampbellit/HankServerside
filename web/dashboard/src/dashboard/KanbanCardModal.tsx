@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useRef, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { KanbanCard, KanbanColumn, NoteAttachment } from "../api/profileNotes";
 
 export type DescriptionSelection = { start: number; end: number };
@@ -92,6 +92,25 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
     });
   }
 
+  function handleDescriptionPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (!files.length) return;
+    event.preventDefault();
+    const input = event.currentTarget;
+    const selection = { start: input.selectionStart, end: input.selectionEnd };
+    void onUploadFiles(files, selection).then(() => {
+      requestAnimationFrame(() => {
+        const current = descriptionRef.current;
+        if (!current) return;
+        current.focus();
+        current.setSelectionRange(current.value.length, current.value.length);
+      });
+    });
+  }
+
   return (
     <div className="kanban-card-modal-backdrop" data-testid="kanban-card-modal-backdrop" onMouseDown={handleBackdropMouseDown}>
       <article
@@ -128,6 +147,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
                 rows={9}
                 value={description}
                 onChange={(event) => onDescriptionChange(event.target.value)}
+                onPaste={handleDescriptionPaste}
                 placeholder="Add context, links, checklists, or notes…"
               />
             </label>
@@ -177,6 +197,15 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
               <input aria-label="Add screenshot or file" type="file" multiple disabled={uploading} onChange={(event) => void onUploadFiles(Array.from(event.target.files || []))} />
             </label>
             {uploadError ? <p className="kanban-upload-error" role="alert">{uploadError}</p> : null}
+            {cardAttachments.some((attachment) => attachment.content_type.startsWith("image/")) ? (
+              <div className="kanban-card-modal-media">
+                {cardAttachments.filter((attachment) => attachment.content_type.startsWith("image/")).map((attachment) => (
+                  <a key={attachment.id} href={attachment.download_url} target="_blank" rel="noopener noreferrer">
+                    <img src={attachment.download_url} alt={attachment.filename} />
+                  </a>
+                ))}
+              </div>
+            ) : null}
             <div className="kanban-attachment-list">
               {cardAttachments.map((attachment) => (
                 <a key={attachment.id} href={attachment.download_url} target="_blank" rel="noopener noreferrer">{attachment.filename}</a>

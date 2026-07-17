@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KanbanCardModal, type KanbanCardModalProps } from "./KanbanCardModal";
 
@@ -74,5 +74,52 @@ describe("KanbanCardModal", () => {
     title.focus();
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(deleteButton).toHaveFocus();
+  });
+
+  it("routes pasted images through inline upload at the caret", () => {
+    const onUploadFiles = vi.fn(async () => undefined);
+    render(<KanbanCardModal {...modalProps({ onUploadFiles, description: "Before after" })} />);
+    const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
+    description.setSelectionRange(7, 7);
+    const image = new File(["png"], "capture.png", { type: "image/png" });
+    const paste = createEvent.paste(description, {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => image }] },
+    });
+
+    fireEvent(description, paste);
+
+    expect(paste.defaultPrevented).toBe(true);
+    expect(onUploadFiles).toHaveBeenCalledWith([image], { start: 7, end: 7 });
+  });
+
+  it("leaves ordinary text paste to the browser", () => {
+    const onUploadFiles = vi.fn(async () => undefined);
+    render(<KanbanCardModal {...modalProps({ onUploadFiles })} />);
+    const description = screen.getByLabelText("Description");
+    const paste = createEvent.paste(description, {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: { items: [{ kind: "string", type: "text/plain", getAsFile: () => null }] },
+    });
+
+    fireEvent(description, paste);
+
+    expect(paste.defaultPrevented).toBe(false);
+    expect(onUploadFiles).not.toHaveBeenCalled();
+  });
+
+  it("renders referenced screenshots inline in the modal card", () => {
+    const attachment = {
+      id: "natt-1",
+      filename: "capture.png",
+      content_type: "image/png",
+      download_url: "/v1/me/notes/work/attachments/natt-1",
+      markdown_reference: "![capture.png](hank-note-attachment://natt-1)",
+    };
+    render(<KanbanCardModal {...modalProps({ description: attachment.markdown_reference, attachments: [attachment] })} />);
+
+    expect(screen.getByRole("img", { name: "capture.png" })).toHaveAttribute("src", attachment.download_url);
   });
 });
