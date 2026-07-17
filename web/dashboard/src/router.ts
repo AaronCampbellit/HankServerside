@@ -29,6 +29,7 @@ export const appRoutes: RouteDefinition[] = [
   { path: "/dashboard/settings/connections", heading: "Connections", nav: true },
   { path: "/dashboard/settings/ai", heading: "AI & MCP", nav: true },
   { path: "/dashboard/settings/apps", heading: "Apps", nav: true, adminOnly: true },
+  { path: "/dashboard/settings/attachments", heading: "Attachments", nav: true, adminOnly: true },
   { path: "/dashboard/settings/backups", heading: "Backups & Storage", nav: true, adminOnly: true },
   { path: "/dashboard/settings/recovery", heading: "Recovery", nav: true, adminOnly: true },
   { path: "/dashboard/settings/logs", heading: "Logs", nav: true, adminOnly: true },

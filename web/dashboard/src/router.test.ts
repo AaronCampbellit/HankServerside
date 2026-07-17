@@ -12,6 +12,7 @@ describe("router", () => {
     const navItems = navItemsForRoutes(appRoutes);
 
     expect(navItems.some((item) => item.href === "/dashboard/settings/apps" && item.adminOnly)).toBe(true);
+    expect(navItems.some((item) => item.href === "/dashboard/settings/attachments" && item.adminOnly)).toBe(true);
     expect(navItems.some((item) => item.href === "/join")).toBe(false);
   });
 

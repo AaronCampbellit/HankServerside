@@ -25,6 +25,7 @@ describe("SettingsLayout", () => {
     expect(appsLink).toHaveAttribute("aria-current", "page");
     expect(appsLink.querySelector(".settings-tab-icon")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "Backups ADMIN" })).toHaveAttribute("href", "/dashboard/settings/backups");
+    expect(within(nav).getByRole("link", { name: "Attachments ADMIN" })).toHaveAttribute("href", "/dashboard/settings/attachments");
     expect(within(nav).getByRole("link", { name: "Recovery ADMIN" })).toHaveAttribute("href", "/dashboard/settings/recovery");
     expect(within(nav).getByRole("link", { name: "Logs ADMIN" })).toHaveAttribute("href", "/dashboard/settings/logs");
     expect(within(nav).getByRole("link", { name: "Join Home" })).toHaveAttribute("href", "/dashboard/settings/join-home");
@@ -40,6 +41,7 @@ describe("SettingsLayout", () => {
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(nav).queryByRole("link", { name: "Apps ADMIN" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Backups ADMIN" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Attachments ADMIN" })).not.toBeInTheDocument();
     expect(within(nav).queryByText("Admin")).not.toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
   });

@@ -19,6 +19,7 @@ import { HomeAssistantPage } from "./dashboard/HomeAssistantPage";
 import { ProfileNotesPage } from "./dashboard/ProfileNotesPage";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { AppsSettings } from "./settings/AppsSettings";
+import { AttachmentsSettings } from "./settings/AttachmentsSettings";
 import { BackupsSettings } from "./settings/BackupsSettings";
 import { ConnectionsSettings } from "./settings/ConnectionsSettings";
 import { HomeSettings } from "./settings/HomeSettings";
@@ -75,6 +76,7 @@ function pageForRoute(route: RouteDefinition): ReactNode {
     case "/dashboard/settings/people": return <PeopleSettings />;
     case "/dashboard/settings/ai": return <AssistantSettings />;
     case "/dashboard/settings/apps": return <AppsSettings />;
+    case "/dashboard/settings/attachments": return <AttachmentsSettings />;
     case "/dashboard/settings/backups": return <BackupsSettings />;
     case "/dashboard/settings/connections": return <ConnectionsSettings />;
     case "/dashboard/settings/join-home": return <JoinHomeSettings />;

@@ -5807,6 +5807,99 @@ button.secondary:disabled {
   font-size: 13px;
 }
 
+.attachment-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.attachment-summary > div {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.attachment-summary span,
+.attachment-inventory-main small,
+.attachment-inventory-meta span,
+.attachment-inventory-meta time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.attachment-summary strong {
+  font-size: 22px;
+}
+
+.attachment-inventory {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.attachment-inventory-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.attachment-inventory-row:last-child { border-bottom: 0; }
+
+.attachment-file-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--accent);
+  font: 700 10px var(--font-mono);
+}
+
+.attachment-inventory-main,
+.attachment-inventory-meta,
+.attachment-inventory-actions {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.attachment-inventory-main > span,
+.attachment-inventory-main small,
+.attachment-inventory-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-inventory-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.attachment-inventory-meta { justify-items: end; }
+.attachment-inventory-actions { grid-auto-flow: column; }
+
+.warning-badge {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  font: 700 9px var(--font-mono);
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .attachment-inventory-row { grid-template-columns: auto minmax(0, 1fr); }
+  .attachment-inventory-meta { justify-items: start; grid-column: 2; }
+  .attachment-inventory-actions { grid-column: 2; justify-content: start; }
+}
+
 .file-server-page.file-guide-surface {
   gap: 12px;
 }

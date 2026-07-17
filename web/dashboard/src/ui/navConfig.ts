@@ -30,6 +30,7 @@ export const settingsTabs: SettingsTab[] = [
   { href: "/dashboard/settings/connections", label: "Connections" },
   { href: "/dashboard/settings/ai", label: "AI & MCP" },
   { href: "/dashboard/settings/apps", label: "Apps", adminOnly: true },
+  { href: "/dashboard/settings/attachments", label: "Attachments", adminOnly: true },
   { href: "/dashboard/settings/backups", label: "Backups & Storage", adminOnly: true },
   { href: "/dashboard/settings/recovery", label: "Recovery", adminOnly: true },
   { href: "/dashboard/settings/logs", label: "Logs", adminOnly: true },

@@ -57,6 +57,7 @@ describe("App routes", () => {
     ["/dashboard/settings/connections", "Connections"],
     ["/dashboard/settings/ai", "AI & MCP"],
     ["/dashboard/settings/apps", "Apps"],
+    ["/dashboard/settings/attachments", "Attachments"],
     ["/dashboard/settings/backups", "Backups & Storage"],
     ["/dashboard/settings/recovery", "Recovery"],
     ["/dashboard/settings/logs", "Logs"],

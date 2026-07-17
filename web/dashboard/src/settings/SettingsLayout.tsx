@@ -3,7 +3,7 @@ import { settingsTabs, type SettingsTab } from "../ui/navConfig";
 
 const settingsGroups = [
   { label: "Home", hrefs: ["/dashboard/settings/home", "/dashboard/settings/quick-links", "/dashboard/settings/people", "/dashboard/settings/connections", "/dashboard/settings/ai"] },
-  { label: "Admin", hrefs: ["/dashboard/settings/apps", "/dashboard/settings/backups", "/dashboard/settings/recovery", "/dashboard/settings/logs"] },
+  { label: "Admin", hrefs: ["/dashboard/settings/apps", "/dashboard/settings/attachments", "/dashboard/settings/backups", "/dashboard/settings/recovery", "/dashboard/settings/logs"] },
   { label: "Membership", hrefs: ["/dashboard/settings/join-home"] },
 ];
 
@@ -21,6 +21,7 @@ function iconFor(tab: SettingsTab): string {
   if (tab.href.endsWith("/connections")) return "plug";
   if (tab.href.endsWith("/ai")) return "spark";
   if (tab.href.endsWith("/apps")) return "apps";
+  if (tab.href.endsWith("/attachments")) return "attachments";
   if (tab.href.endsWith("/backups")) return "backup";
   if (tab.href.endsWith("/recovery")) return "recovery";
   if (tab.href.endsWith("/logs")) return "logs";
@@ -43,6 +44,7 @@ function SettingsIcon({ name }: { name: string }) {
       {name === "plug" ? <><path d="M8 4v5M16 4v5" {...common} /><path d="M7 9h10v4a5 5 0 0 1-10 0z" {...common} /><path d="M12 18v2" {...common} /></> : null}
       {name === "spark" ? <><path d="M12 3l1.5 5.2L19 10l-5.5 1.8L12 17l-1.5-5.2L5 10l5.5-1.8z" {...common} /><path d="M5 16l.7 2.2L8 19l-2.3.8L5 22l-.7-2.2L2 19l2.3-.8z" {...common} /></> : null}
       {name === "apps" ? <><rect x="4" y="4" width="6" height="6" rx="1.5" {...common} /><rect x="14" y="4" width="6" height="6" rx="1.5" {...common} /><rect x="4" y="14" width="6" height="6" rx="1.5" {...common} /><rect x="14" y="14" width="6" height="6" rx="1.5" {...common} /></> : null}
+      {name === "attachments" ? <><path d="M8.5 12.5 14 7a3 3 0 0 1 4.2 4.2l-7.4 7.4a5 5 0 0 1-7.1-7.1l7.1-7.1" {...common} /><path d="m7 15 7-7a1.5 1.5 0 0 1 2.1 2.1l-6.7 6.7a3 3 0 0 1-4.2-4.2L12 5.8" {...common} /></> : null}
       {name === "backup" ? <><path d="M6 8a7 7 0 1 1 .8 9.2" {...common} /><path d="M6 13v4H2" {...common} /><path d="M12 8v5l3 2" {...common} /></> : null}
       {name === "recovery" ? <><path d="M5 12a7 7 0 0 1 12-5" {...common} /><path d="M17 4v4h-4" {...common} /><path d="M19 12a7 7 0 0 1-12 5" {...common} /><path d="M7 20v-4h4" {...common} /></> : null}
       {name === "logs" ? <><path d="M7 4h10a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" {...common} /><path d="M9 8h6M9 12h6M9 16h4" {...common} /></> : null}
