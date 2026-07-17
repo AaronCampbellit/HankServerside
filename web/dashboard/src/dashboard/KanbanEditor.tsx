@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { KanbanBoard, KanbanCard, KanbanColumn, NoteAttachment } from "../api/profileNotes";
 import { KanbanCardModal, type DescriptionSelection } from "./KanbanCardModal";
+import { KanbanRichText } from "./KanbanRichText";
 
 type CardLocation = { columnID: string; cardID: string };
 
@@ -111,60 +112,9 @@ function cardText(title: string, description: string): string {
   return [title.trim() || "Untitled task", description.trim()].filter(Boolean).join("\n");
 }
 
-function safeHref(value: string): string {
-  const href = value.trim();
-  return /^(https?:|mailto:|\/|#)/i.test(href) ? href : "";
-}
-
-function attachmentForReference(reference: string, attachments: NoteAttachment[]): NoteAttachment | undefined {
-  const match = /^hank-note-attachment:\/\/(.+)$/i.exec(reference.trim());
-  if (!match) return undefined;
-  const attachmentID = match[1].split(/[?#]/, 1)[0];
-  return attachments.find((attachment) => attachment.id === attachmentID);
-}
-
-function renderInline(value: string, attachments: NoteAttachment[], keyPrefix: string): ReactNode[] {
-  const tokenPattern = /(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*\n]+)\*\*|_([^_\n]+)_)/g;
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  let tokenIndex = 0;
-  for (const match of value.matchAll(tokenPattern)) {
-    const index = match.index || 0;
-    if (index > cursor) nodes.push(value.slice(cursor, index));
-    const key = `${keyPrefix}-${tokenIndex}`;
-    if (match[2] !== undefined) {
-      const attachment = attachmentForReference(match[3], attachments);
-      const src = attachment?.download_url || safeHref(match[3]);
-      if (src) nodes.push(<img className="kanban-card-image" key={key} src={src} alt={match[2] || attachment?.filename || "Task attachment"} />);
-      else nodes.push(match[2] || "Attachment");
-    } else if (match[4] !== undefined) {
-      const href = safeHref(match[5]);
-      nodes.push(href ? <a key={key} href={href} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>{match[4]}</a> : match[4]);
-    } else if (match[6] !== undefined) {
-      nodes.push(<strong key={key}>{match[6]}</strong>);
-    } else if (match[7] !== undefined) {
-      nodes.push(<em key={key}>{match[7]}</em>);
-    }
-    cursor = index + match[0].length;
-    tokenIndex += 1;
-  }
-  if (cursor < value.length) nodes.push(value.slice(cursor));
-  return nodes;
-}
-
 function CardDescription({ value, attachments }: { value: string; attachments: NoteAttachment[] }) {
   if (!value.trim()) return null;
-  return (
-    <div className="kanban-card-description">
-      {value.split(/\r?\n/).filter(Boolean).slice(0, 5).map((line, index) => {
-        const bullet = /^[-*]\s+/.test(line);
-        const content = line.replace(/^[-*]\s+/, "");
-        return bullet
-          ? <p className="kanban-card-bullet" key={`${index}-${line}`}>{renderInline(content, attachments, `bullet-${index}`)}</p>
-          : <p key={`${index}-${line}`}>{renderInline(content, attachments, `line-${index}`)}</p>;
-      })}
-    </div>
-  );
+  return <div className="kanban-card-description"><KanbanRichText value={value} attachments={attachments} maxLines={5} /></div>;
 }
 
 function SmallIcon({ name }: { name: "plus" | "search" | "left" | "right" | "trash" | "close" | "grip" | "upload" }) {
@@ -293,7 +243,10 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
 
   function dropCard(event: DragEvent, columnID: string, targetIndex: number) {
     event.preventDefault();
-    if (dragging) moveCard(dragging, columnID, targetIndex, false);
+    if (dragging) {
+      moveCard(dragging, columnID, targetIndex, false);
+      scheduleDragRelease();
+    }
     setDragging(null);
     setDropTarget("");
   }
@@ -306,13 +259,18 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     event.dataTransfer.setData("text/plain", location.cardID);
   }
 
-  function endCardDrag() {
-    setDragging(null);
-    setDropTarget("");
+  function scheduleDragRelease() {
+    if (dragReleaseTimerRef.current !== null) window.clearTimeout(dragReleaseTimerRef.current);
     dragReleaseTimerRef.current = window.setTimeout(() => {
       suppressOpenRef.current = false;
       dragReleaseTimerRef.current = null;
     }, 0);
+  }
+
+  function endCardDrag() {
+    setDragging(null);
+    setDropTarget("");
+    scheduleDragRelease();
   }
 
   function openCard(location: CardLocation) {

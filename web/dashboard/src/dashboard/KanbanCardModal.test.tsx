@@ -1,4 +1,4 @@
-import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KanbanCardModal, type KanbanCardModalProps } from "./KanbanCardModal";
 
@@ -79,6 +79,7 @@ describe("KanbanCardModal", () => {
   it("routes pasted images through inline upload at the caret", () => {
     const onUploadFiles = vi.fn(async () => undefined);
     render(<KanbanCardModal {...modalProps({ onUploadFiles, description: "Before after" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
     const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
     description.setSelectionRange(7, 7);
     const image = new File(["png"], "capture.png", { type: "image/png" });
@@ -97,6 +98,7 @@ describe("KanbanCardModal", () => {
   it("leaves ordinary text paste to the browser", () => {
     const onUploadFiles = vi.fn(async () => undefined);
     render(<KanbanCardModal {...modalProps({ onUploadFiles })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
     const description = screen.getByLabelText("Description");
     const paste = createEvent.paste(description, {
       bubbles: true,
@@ -110,7 +112,7 @@ describe("KanbanCardModal", () => {
     expect(onUploadFiles).not.toHaveBeenCalled();
   });
 
-  it("renders referenced screenshots inline in the modal card", () => {
+  it("renders referenced screenshots inside the description instead of exposing their markdown", () => {
     const attachment = {
       id: "natt-1",
       filename: "capture.png",
@@ -120,6 +122,12 @@ describe("KanbanCardModal", () => {
     };
     render(<KanbanCardModal {...modalProps({ description: attachment.markdown_reference, attachments: [attachment] })} />);
 
-    expect(screen.getByRole("img", { name: "capture.png" })).toHaveAttribute("src", attachment.download_url);
+    const descriptionSection = screen.getByRole("heading", { name: "Description" }).closest("section");
+    expect(descriptionSection).not.toBeNull();
+    expect(within(descriptionSection!).getByRole("img", { name: "capture.png" })).toHaveAttribute("src", attachment.download_url);
+    expect(within(descriptionSection!).queryByText(attachment.markdown_reference)).not.toBeInTheDocument();
+
+    fireEvent.click(within(descriptionSection!).getByRole("button", { name: "Edit description" }));
+    expect(screen.getByLabelText("Description")).toHaveValue(attachment.markdown_reference);
   });
 });

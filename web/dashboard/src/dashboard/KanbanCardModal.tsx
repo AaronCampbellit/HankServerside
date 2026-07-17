@@ -1,5 +1,6 @@
-import { useRef, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { KanbanCard, KanbanColumn, NoteAttachment } from "../api/profileNotes";
+import { KanbanRichText } from "./KanbanRichText";
 
 export type DescriptionSelection = { start: number; end: number };
 
@@ -53,6 +54,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
   } = props;
   const dialogRef = useRef<HTMLElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const [editingDescription, setEditingDescription] = useState(false);
   const cardAttachments = referencedAttachments(description, attachments);
   const currentColumn = columns.find((column) => column.id === columnID);
 
@@ -102,6 +104,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
     const input = event.currentTarget;
     const selection = { start: input.selectionStart, end: input.selectionEnd };
     void onUploadFiles(files, selection).then(() => {
+      setEditingDescription(false);
       requestAnimationFrame(() => {
         const current = descriptionRef.current;
         if (!current) return;
@@ -134,23 +137,35 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
           <section className="kanban-detail-section">
             <h3>Description</h3>
             <div className="kanban-formatbar" aria-label="Description formatting">
-              <button type="button" aria-label="Bold" onClick={() => formatDescription("**", "**", "bold text")}><strong>B</strong></button>
-              <button type="button" aria-label="Italic" onClick={() => formatDescription("_", "_", "italic text")}><em>I</em></button>
-              <button type="button" aria-label="Bulleted list" onClick={() => formatDescription("- ", "", "list item")}>• List</button>
-              <button type="button" aria-label="Link" onClick={() => formatDescription("[", "](https://example.com)", "link title")}>Link</button>
+              <button type="button" aria-label="Bold" disabled={!editingDescription} onClick={() => formatDescription("**", "**", "bold text")}><strong>B</strong></button>
+              <button type="button" aria-label="Italic" disabled={!editingDescription} onClick={() => formatDescription("_", "_", "italic text")}><em>I</em></button>
+              <button type="button" aria-label="Bulleted list" disabled={!editingDescription} onClick={() => formatDescription("- ", "", "list item")}>• List</button>
+              <button type="button" aria-label="Link" disabled={!editingDescription} onClick={() => formatDescription("[", "](https://example.com)", "link title")}>Link</button>
+              <button className="kanban-description-mode" type="button" aria-label={editingDescription ? "Preview description" : "Edit description"} onClick={() => setEditingDescription((current) => !current)}>
+                {editingDescription ? "Preview" : "Edit"}
+              </button>
             </div>
-            <label>
-              <span className="visually-hidden">Description</span>
-              <textarea
-                ref={descriptionRef}
-                aria-label="Description"
-                rows={9}
-                value={description}
-                onChange={(event) => onDescriptionChange(event.target.value)}
-                onPaste={handleDescriptionPaste}
-                placeholder="Add context, links, checklists, or notes…"
-              />
-            </label>
+            {editingDescription ? (
+              <label>
+                <span className="visually-hidden">Description</span>
+                <textarea
+                  ref={descriptionRef}
+                  autoFocus
+                  aria-label="Description"
+                  rows={9}
+                  value={description}
+                  onChange={(event) => onDescriptionChange(event.target.value)}
+                  onPaste={handleDescriptionPaste}
+                  placeholder="Add context, links, checklists, or notes…"
+                />
+              </label>
+            ) : (
+              <div className="kanban-description-preview">
+                {description.trim()
+                  ? <KanbanRichText value={description} attachments={attachments} />
+                  : <button type="button" onClick={() => setEditingDescription(true)}>Add a description</button>}
+              </div>
+            )}
           </section>
 
           <div className="kanban-detail-grid">
@@ -197,17 +212,8 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
               <input aria-label="Add screenshot or file" type="file" multiple disabled={uploading} onChange={(event) => void onUploadFiles(Array.from(event.target.files || []))} />
             </label>
             {uploadError ? <p className="kanban-upload-error" role="alert">{uploadError}</p> : null}
-            {cardAttachments.some((attachment) => attachment.content_type.startsWith("image/")) ? (
-              <div className="kanban-card-modal-media">
-                {cardAttachments.filter((attachment) => attachment.content_type.startsWith("image/")).map((attachment) => (
-                  <a key={attachment.id} href={attachment.download_url} target="_blank" rel="noopener noreferrer">
-                    <img src={attachment.download_url} alt={attachment.filename} />
-                  </a>
-                ))}
-              </div>
-            ) : null}
             <div className="kanban-attachment-list">
-              {cardAttachments.map((attachment) => (
+              {cardAttachments.filter((attachment) => !attachment.content_type.startsWith("image/")).map((attachment) => (
                 <a key={attachment.id} href={attachment.download_url} target="_blank" rel="noopener noreferrer">{attachment.filename}</a>
               ))}
             </div>

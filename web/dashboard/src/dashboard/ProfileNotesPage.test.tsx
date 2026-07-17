@@ -129,6 +129,7 @@ describe("ProfileNotesPage", () => {
 
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
     vi.useFakeTimers();
     const file = new File(["image"], "wireframe.png", { type: "image/png" });
     const description = screen.getByLabelText("Description");

@@ -42,7 +42,10 @@ function Harness({ initial = workBoard(), onUpload = vi.fn() }: { initial?: Kanb
 }
 
 describe("KanbanEditor", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
   it("migrates legacy markdown into stable board data and back", () => {
     const board = boardFromMarkdown("# Client Work\n\n## Inbox\n- Review brief\n\n## Doing\n- Draft proposal");
 
@@ -64,6 +67,7 @@ describe("KanbanEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open task Prepare invoice" }));
     const modal = screen.getByRole("dialog", { name: "Task details" });
     expect(modal).toHaveAttribute("aria-modal", "true");
+    fireEvent.click(within(modal).getByRole("button", { name: "Edit description" }));
     fireEvent.change(within(modal).getByLabelText("Description"), { target: { value: "Send today" } });
     fireEvent.click(within(modal).getByRole("button", { name: "Bold" }));
     fireEvent.change(within(modal).getByLabelText("Due date"), { target: { value: "2026-07-18" } });
@@ -99,6 +103,29 @@ describe("KanbanEditor", () => {
     expect(screen.queryByRole("dialog", { name: "Task details" })).not.toBeInTheDocument();
   });
 
+  it("allows a deliberate click after a dropped card unmounts before dragend", async () => {
+    vi.useFakeTimers();
+    Harness({});
+    const open = screen.getByRole("button", { name: "Open task Review brief" });
+    const card = open.closest("article");
+    const target = screen.getByRole("heading", { name: "In progress" }).closest("section");
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn() };
+
+    expect(card).not.toBeNull();
+    expect(target).not.toBeNull();
+    fireEvent.dragStart(card!, { dataTransfer });
+    fireEvent.drop(target!, { dataTransfer });
+
+    const moved = screen.getByRole("button", { name: "Open task Review brief" });
+    fireEvent.click(moved);
+    expect(screen.queryByRole("dialog", { name: "Task details" })).not.toBeInTheDocument();
+
+    await vi.runAllTimersAsync();
+    fireEvent.click(moved);
+    expect(screen.getByRole("dialog", { name: "Task details" })).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it("suppresses the click emitted immediately after dragging", () => {
     Harness({});
     const open = screen.getByRole("button", { name: "Open task Review brief" });
@@ -122,7 +149,6 @@ describe("KanbanEditor", () => {
 
     fireEvent.change(within(drawer).getByLabelText("Add screenshot or file"), { target: { files: [file] } });
 
-    expect(await within(drawer).findByText("wireframe.png")).toBeInTheDocument();
     expect(upload).toHaveBeenCalledWith(file);
     expect(await within(drawer).findByRole("img", { name: "wireframe.png" })).toHaveAttribute("src", attachments[0].download_url);
     expect(within(screen.getByRole("button", { name: "Open task Review brief" })).getByRole("img", { name: "wireframe.png" })).toHaveAttribute("src", attachments[0].download_url);
@@ -134,6 +160,7 @@ describe("KanbanEditor", () => {
       .mockRejectedValueOnce(new Error("Second screenshot failed"));
     const { change } = Harness({ onUpload: upload });
     fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
     const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
     description.setSelectionRange(description.value.length, description.value.length);
     const first = new File(["one"], "wireframe.png", { type: "image/png" });

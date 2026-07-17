@@ -4880,7 +4880,7 @@ button.secondary:disabled {
   color: var(--faint);
 }
 
-.kanban-card-image {
+.kanban-rich-image {
   width: 100%;
   max-height: 142px;
   display: block;
@@ -4889,6 +4889,43 @@ button.secondary:disabled {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
+}
+
+.kanban-description-preview {
+  min-height: 150px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 0 0 7px 7px;
+  background: rgba(0,0,0,.1);
+  color: var(--ink);
+  font: 500 12.5px/1.55 var(--font-sans);
+}
+
+.kanban-description-preview .kanban-rich-text {
+  display: grid;
+  gap: 9px;
+}
+
+.kanban-description-preview p {
+  margin: 0;
+}
+
+.kanban-description-preview a {
+  color: color-mix(in srgb, var(--brand-dark) 88%, white);
+}
+
+.kanban-description-preview .kanban-rich-image {
+  max-height: none;
+  margin: 8px 0 2px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.kanban-description-preview > button {
+  min-height: 44px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
 }
 
 .kanban-card time {
@@ -5236,6 +5273,15 @@ button.secondary:disabled {
 .kanban-formatbar button:hover {
   background: rgba(255,255,255,.06);
   color: var(--ink);
+}
+
+.kanban-formatbar button:disabled {
+  opacity: .42;
+}
+
+.kanban-formatbar .kanban-description-mode {
+  margin-left: auto;
+  color: color-mix(in srgb, var(--card-accent) 72%, var(--ink));
 }
 
 .kanban-detail-section textarea {
