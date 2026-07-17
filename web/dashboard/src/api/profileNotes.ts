@@ -45,6 +45,12 @@ export type NoteAttachment = {
   markdown_reference: string;
 };
 
+export type NoteAttachmentDeleteResponse = {
+  ok: boolean;
+  note_revision: string;
+  cleanup_complete: boolean;
+};
+
 export type ProfileNote = ProfileNoteSummary & {
   content?: string;
   body_markdown?: string;
@@ -120,6 +126,13 @@ export class ProfileNotesClient {
         headers: { "Content-Type": file.type || "application/octet-stream" },
         body: file,
       },
+    );
+  }
+
+  deleteAttachment(noteID: string, attachmentID: string) {
+    return this.api.request<NoteAttachmentDeleteResponse>(
+      `/v1/me/notes/${encodeURIComponent(noteID)}/attachments/${encodeURIComponent(attachmentID)}`,
+      { method: "DELETE" },
     );
   }
 }

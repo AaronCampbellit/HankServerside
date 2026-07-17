@@ -10,6 +10,7 @@ import {
 import type { KanbanBoard, KanbanCard, KanbanColumn, NoteAttachment } from "../api/profileNotes";
 import { KanbanCardModal, type DescriptionSelection } from "./KanbanCardModal";
 import { KanbanRichText } from "./KanbanRichText";
+import { attachmentDeletionMessage, attachmentDeletionPlan } from "./kanbanAttachments";
 
 type CardLocation = { columnID: string; cardID: string };
 
@@ -19,6 +20,7 @@ type KanbanEditorProps = {
   onChange: (board: KanbanBoard) => void;
   onUpload: (file: File) => Promise<NoteAttachment>;
   confirmDelete: (message: string) => Promise<boolean>;
+  onDeleteItems: (board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>;
 };
 
 const defaultColumnTitles = ["Inbox", "In progress", "Done"];
@@ -131,7 +133,7 @@ function SmallIcon({ name }: { name: "plus" | "search" | "left" | "right" | "tra
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
-export function KanbanEditor({ board, attachments = [], onChange, onUpload, confirmDelete }: KanbanEditorProps) {
+export function KanbanEditor({ board, attachments = [], onChange, onUpload, confirmDelete, onDeleteItems }: KanbanEditorProps) {
   const normalized = useMemo(() => normalizeBoard(board), [board]);
   const boardRef = useRef(normalized);
   boardRef.current = normalized;
@@ -145,6 +147,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   const [dropTarget, setDropTarget] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const suppressOpenRef = useRef(false);
   const dragReleaseTimerRef = useRef<number | null>(null);
   const cardButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -207,9 +210,20 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   }
 
   async function deleteColumn(column: KanbanColumn) {
+    if (deleting) return;
     const count = column.cards?.length || 0;
-    if (count && !await confirmDelete(`Delete “${column.title}” and its ${count} ${count === 1 ? "task" : "tasks"}?`)) return;
-    commit({ columns: columns.filter((item) => item.id !== column.id) });
+    const nextBoard = normalizeBoard({ columns: columns.filter((item) => item.id !== column.id) });
+    if (!count) { commit(nextBoard); return; }
+    const removedCardIDs = new Set((column.cards || []).map((card) => card.id || "").filter(Boolean));
+    const plan = attachmentDeletionPlan(normalized, removedCardIDs, attachments);
+    const message = attachmentDeletionMessage(`Delete “${column.title}” and its ${count} ${count === 1 ? "task" : "tasks"}?`, plan);
+    if (!await confirmDelete(message)) return;
+    setDeleting(true);
+    try {
+      if (await onDeleteItems(nextBoard, plan.exclusive)) commit(nextBoard);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function moveCard(
@@ -327,10 +341,22 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   }
 
   async function deleteSelected() {
-    if (!selected || !selectedCard || !selectedParts) return;
-    if (!await confirmDelete(`Delete “${selectedParts.title}”?`)) return;
-    updateColumn(selected.columnID, (column) => ({ ...column, cards: ordered(column.cards).filter((card) => card.id !== selected.cardID) }));
-    setSelected(null);
+    if (deleting || !selected || !selectedCard || !selectedParts) return;
+    const nextBoard = normalizeBoard({
+      columns: columns.map((column) => column.id === selected.columnID
+        ? { ...column, cards: ordered(column.cards).filter((card) => card.id !== selected.cardID) }
+        : column),
+    });
+    const plan = attachmentDeletionPlan(normalized, new Set([selected.cardID]), attachments);
+    if (!await confirmDelete(attachmentDeletionMessage(`Delete “${selectedParts.title}”?`, plan))) return;
+    setDeleting(true);
+    try {
+      if (!await onDeleteItems(nextBoard, plan.exclusive)) return;
+      commit(nextBoard);
+      setSelected(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function addColumn() {
@@ -388,7 +414,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                   <div className="kanban-column-actions">
                     <button type="button" aria-label={`Move ${column.title} left`} disabled={columnIndex === 0} onClick={() => moveColumn(column.id || "", -1)}><SmallIcon name="left" /></button>
                     <button type="button" aria-label={`Move ${column.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveColumn(column.id || "", 1)}><SmallIcon name="right" /></button>
-                    <button type="button" aria-label={`Delete ${column.title}`} onClick={() => void deleteColumn(column)}><SmallIcon name="trash" /></button>
+                    <button type="button" aria-label={`Delete ${column.title}`} disabled={deleting} onClick={() => void deleteColumn(column)}><SmallIcon name="trash" /></button>
                   </div>
                 </header>
 
@@ -476,6 +502,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
           columns={columns}
           attachments={attachments}
           uploading={uploading}
+          deleting={deleting}
           uploadError={uploadError}
           onTitleChange={(value) => updateCard(selected, (card) => ({ ...card, text: cardText(value, selectedParts.description) }))}
           onDescriptionChange={(value) => updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, value) }))}

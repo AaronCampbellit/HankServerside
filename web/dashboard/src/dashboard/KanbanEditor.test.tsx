@@ -26,7 +26,17 @@ function workBoard(): KanbanBoard {
   };
 }
 
-function Harness({ initial = workBoard(), onUpload = vi.fn() }: { initial?: KanbanBoard; onUpload?: (file: File) => Promise<NoteAttachment> }) {
+function Harness({
+  initial = workBoard(),
+  onUpload = vi.fn(),
+  confirmDelete = vi.fn(async () => true),
+  onDeleteItems = vi.fn(async () => true),
+}: {
+  initial?: KanbanBoard;
+  onUpload?: (file: File) => Promise<NoteAttachment>;
+  confirmDelete?: (message: string) => Promise<boolean>;
+  onDeleteItems?: (board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>;
+}) {
   let board = initial;
   const change = vi.fn((next: KanbanBoard) => { board = next; rerender(); });
   const props = () => ({
@@ -34,7 +44,8 @@ function Harness({ initial = workBoard(), onUpload = vi.fn() }: { initial?: Kanb
     attachments,
     onChange: change,
     onUpload,
-    confirmDelete: vi.fn(async () => true),
+    confirmDelete,
+    onDeleteItems,
   });
   const rendered = render(<KanbanEditor {...props()} />);
   const rerender = () => rendered.rerender(<KanbanEditor {...props()} />);
@@ -147,6 +158,50 @@ describe("KanbanEditor", () => {
     fireEvent.click(open);
 
     expect(screen.queryByRole("dialog", { name: "Task details" })).not.toBeInTheDocument();
+  });
+
+  it("describes and serializes task attachment deletion before changing the board", async () => {
+    const initial = workBoard();
+    initial.columns![0].cards![0].text += `\n${attachments[0].markdown_reference}`;
+    const confirmDelete = vi.fn<(message: string) => Promise<boolean>>(async () => true);
+    const onDeleteItems = vi.fn<(board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>>(async () => true);
+    Harness({ initial, confirmDelete, onDeleteItems });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(onDeleteItems).toHaveBeenCalledTimes(1));
+    expect(confirmDelete.mock.calls[0][0]).toContain("wireframe.png");
+    expect(confirmDelete.mock.calls[0][0]).toContain("permanently delete 1 attached file");
+    expect(onDeleteItems.mock.calls[0][0].columns?.[0].cards).toHaveLength(0);
+    expect(onDeleteItems.mock.calls[0][1]).toEqual(attachments);
+    expect(screen.queryByRole("button", { name: "Open task Review brief" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a task visible when the persisted deletion fails", async () => {
+    const onDeleteItems = vi.fn<(board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>>(async () => false);
+    Harness({ onDeleteItems });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(onDeleteItems).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: "Task details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open task Review brief" })).toBeInTheDocument();
+  });
+
+  it("uses attachment-aware orchestration when deleting a populated column", async () => {
+    const initial = workBoard();
+    initial.columns![0].cards![0].text += `\n${attachments[0].markdown_reference}`;
+    const confirmDelete = vi.fn<(message: string) => Promise<boolean>>(async () => true);
+    const onDeleteItems = vi.fn<(board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>>(async () => true);
+    Harness({ initial, confirmDelete, onDeleteItems });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Inbox" }));
+
+    await waitFor(() => expect(onDeleteItems).toHaveBeenCalled());
+    expect(confirmDelete.mock.calls[0][0]).toContain("wireframe.png");
+    expect(onDeleteItems.mock.calls[0][0].columns?.map((column) => column.id)).not.toContain("inbox");
   });
 
   it("uploads and renders a screenshot in a card", async () => {

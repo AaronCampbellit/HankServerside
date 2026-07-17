@@ -9,6 +9,7 @@ const profileNotesClient = vi.hoisted(() => ({
   saveNote: vi.fn(),
   deleteNote: vi.fn(),
   uploadAttachment: vi.fn(),
+  deleteAttachment: vi.fn(),
 }));
 
 vi.mock("../api/profileNotes", async (importOriginal) => {
@@ -151,6 +152,70 @@ describe("ProfileNotesPage", () => {
         })],
       }),
     }));
+  });
+
+  it("saves a task deletion before permanently deleting its exclusive attachment", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "work", title: "Client Work", preview: "Kanban", page_type: "kanban", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "work",
+      title: "Client Work",
+      body_markdown: "# Client Work\n\n## Inbox\n- Review brief",
+      revision: "1",
+      page_type: "kanban",
+      board: { columns: [{ id: "inbox", title: "Inbox", sort_order: 0, cards: [{ id: "brief", text: "Review brief\n![wireframe](hank-note-attachment://natt-1)", sort_order: 0 }] }] },
+      attachments: [{
+        id: "natt-1",
+        filename: "wireframe.png",
+        content_type: "image/png",
+        size_bytes: 2_048,
+        download_url: "/v1/me/notes/work/attachments/natt-1",
+        markdown_reference: "![wireframe.png](hank-note-attachment://natt-1)",
+      }],
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "work", revision: "2" });
+    profileNotesClient.deleteAttachment.mockResolvedValue({ ok: true, note_revision: "3", cleanup_complete: true });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+    expect(await screen.findByText(/wireframe.png/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(profileNotesClient.deleteAttachment).toHaveBeenCalledWith("work", "natt-1"));
+    expect(profileNotesClient.saveNote.mock.invocationCallOrder[0]).toBeLessThan(profileNotesClient.deleteAttachment.mock.invocationCallOrder[0]);
+    expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
+      expected_revision: "1",
+      board: expect.objectContaining({ columns: [expect.objectContaining({ cards: [] })] }),
+    }));
+    expect(screen.queryByRole("button", { name: "Open task Review brief" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the task and attachment when the board deletion save fails", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "work", title: "Client Work", preview: "Kanban", page_type: "kanban", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "work",
+      title: "Client Work",
+      body_markdown: "# Client Work\n\n## Inbox\n- Review brief",
+      revision: "1",
+      page_type: "kanban",
+      board: { columns: [{ id: "inbox", title: "Inbox", sort_order: 0, cards: [{ id: "brief", text: "Review brief", sort_order: 0 }] }] },
+      attachments: [],
+    });
+    profileNotesClient.saveNote.mockRejectedValue(new Error("Save failed"));
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalled());
+    expect(profileNotesClient.deleteAttachment).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Open task Review brief" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Task details" })).toBeInTheDocument();
   });
 
   it("matches the guide notes anatomy with rich toolbar, notebook dialog, rendered text page, and kanban controls", async () => {

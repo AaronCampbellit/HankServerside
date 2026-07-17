@@ -91,6 +91,7 @@ describe("ProfileNotesClient", () => {
     });
     const file = new File([new Uint8Array([137, 80, 78, 71])], "board.png", { type: "image/png" });
     const attachment = await client.uploadAttachment("work", file);
+    await client.deleteAttachment("work", "natt-1");
 
     expect(request).toHaveBeenNthCalledWith(1, "/v1/me/notes/work", {
       method: "PUT",
@@ -101,6 +102,7 @@ describe("ProfileNotesClient", () => {
       headers: { "Content-Type": "image/png" },
       body: file,
     });
+    expect(request).toHaveBeenNthCalledWith(3, "/v1/me/notes/work/attachments/natt-1", { method: "DELETE" });
     expect(attachment.markdown_reference).toContain("hank-note-attachment://natt-1");
   });
 });

@@ -1010,6 +1010,67 @@ export function ProfileNotesPage() {
     return attachment;
   }
 
+  async function deleteKanbanItems(nextBoard: KanbanBoard, exclusiveAttachments: NoteAttachment[]): Promise<boolean> {
+    clearAutosaveTimer();
+    if (savingRef.current) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const startedAt = Date.now();
+          const waitForSave = () => {
+            if (!savingRef.current) { resolve(); return; }
+            if (Date.now() - startedAt > 10_000) { reject(new Error("The board is still saving. Try deleting again.")); return; }
+            window.setTimeout(waitForSave, 40);
+          };
+          waitForSave();
+        });
+      } catch (error) {
+        showToast(errorMessage(error), "error");
+        return false;
+      }
+    }
+
+    const current = latestEditorRef.current;
+    const nextEditor: Editor = {
+      ...current,
+      board: nextBoard,
+      body: boardToMarkdown(current.title, nextBoard),
+    };
+    const saved = await saveNote(nextEditor, true);
+    if (!saved) return false;
+
+    let revision = saved.revision;
+    let remaining = [...saved.attachments];
+    let cleanupIncomplete = false;
+    for (const attachment of exclusiveAttachments) {
+      try {
+        const response = await profileNotesClient.deleteAttachment(saved.noteID, attachment.id);
+        revision = response.note_revision || revision;
+        remaining = remaining.filter((item) => item.id !== attachment.id);
+        if (!response.cleanup_complete) cleanupIncomplete = true;
+      } catch {
+        cleanupIncomplete = true;
+      }
+    }
+
+    const finalEditor: Editor = { ...saved, revision, attachments: remaining };
+    latestEditorRef.current = finalEditor;
+    latestSavedEditorRef.current = finalEditor;
+    setState((state) => {
+      if (state.status !== "ready" || state.editor.instanceKey !== current.instanceKey) return state;
+      return {
+        ...state,
+        editor: finalEditor,
+        savedEditor: finalEditor,
+        notes: state.notes.map((note) => noteID(note) === finalEditor.noteID ? { ...note, revision } : note),
+        message: cleanupIncomplete ? "Task deleted, but attachment cleanup is incomplete." : state.message,
+      };
+    });
+    if (cleanupIncomplete) {
+      showToast("Task deleted, but one or more files could not be removed. Check Settings > Attachments.", "error");
+    }
+    return true;
+  }
+
   async function deleteNote() {
     if (!readyState.editor.noteID) return;
     await deleteNoteByID(readyState.editor.noteID, readyState.editor.title || readyState.editor.noteID);
@@ -1286,6 +1347,7 @@ export function ProfileNotesPage() {
                   });
                 }}
                 onUpload={uploadKanbanAttachment}
+                onDeleteItems={deleteKanbanItems}
                 confirmDelete={(message) => dialog.confirm({
                   title: "Delete from board",
                   message,

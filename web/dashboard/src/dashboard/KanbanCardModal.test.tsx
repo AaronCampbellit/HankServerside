@@ -14,6 +14,7 @@ function modalProps(overrides: Partial<KanbanCardModalProps> = {}): KanbanCardMo
     ],
     attachments: [],
     uploading: false,
+    deleting: false,
     uploadError: "",
     onTitleChange: vi.fn(),
     onDescriptionChange: vi.fn(),

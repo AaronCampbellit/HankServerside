@@ -12,6 +12,7 @@ export type KanbanCardModalProps = {
   columns: KanbanColumn[];
   attachments: NoteAttachment[];
   uploading: boolean;
+  deleting: boolean;
   uploadError: string;
   onTitleChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
@@ -48,7 +49,7 @@ function referencedAttachments(description: string, attachments: NoteAttachment[
 
 export function KanbanCardModal(props: KanbanCardModalProps) {
   const {
-    card, title, description, columnID, columns, attachments, uploading, uploadError,
+    card, title, description, columnID, columns, attachments, uploading, deleting, uploadError,
     onTitleChange, onDescriptionChange, onFormat, onMove, onDueDateChange, onColorChange,
     onUploadFiles, onMoveLeft, onMoveRight, canMoveLeft, canMoveRight, onDelete, onClose,
   } = props;
@@ -166,7 +167,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
               <div className="kanban-option-actions">
                 <button type="button" aria-label="Move task left" disabled={!canMoveLeft} onClick={onMoveLeft}><ModalIcon name="left" /> Move left</button>
                 <button type="button" aria-label="Move task right" disabled={!canMoveRight} onClick={onMoveRight}>Move right <ModalIcon name="right" /></button>
-                <button className="danger" type="button" aria-label="Delete task" onClick={onDelete}><ModalIcon name="trash" /> Delete</button>
+                <button className="danger" type="button" aria-label="Delete task" disabled={deleting} onClick={onDelete}><ModalIcon name="trash" /> {deleting ? "Deleting…" : "Delete"}</button>
               </div>
             </div>
           </section>
