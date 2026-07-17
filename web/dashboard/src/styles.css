@@ -4899,6 +4899,12 @@ button.secondary:disabled {
   background: rgba(0,0,0,.1);
   color: var(--ink);
   font: 500 12.5px/1.55 var(--font-sans);
+  cursor: text;
+}
+
+.kanban-description-preview:focus {
+  border-color: var(--acc-line);
+  outline: 0;
 }
 
 .kanban-description-preview .kanban-rich-text {
@@ -5041,7 +5047,7 @@ button.secondary:disabled {
   max-height: min(86vh, 860px);
   min-height: min(620px, calc(100vh - 48px));
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--line-strong) 84%, transparent);
   border-left: 4px solid var(--card-accent);
@@ -5096,7 +5102,7 @@ button.secondary:disabled {
 }
 
 .kanban-card-modal-header svg,
-.kanban-card-modal-footer svg {
+.kanban-option-actions svg {
   width: 15px;
   height: 15px;
 }
@@ -5109,6 +5115,54 @@ button.secondary:disabled {
   overflow: auto;
   padding: 20px 22px 24px;
 }
+
+.kanban-card-options {
+  display: grid;
+  gap: 13px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--card-accent) 24%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--card-accent) 5%, rgba(255,255,255,.02));
+}
+
+.kanban-option-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.kanban-option-colors {
+  display: grid;
+  gap: 7px;
+}
+
+.kanban-option-colors > span {
+  color: var(--muted);
+  font: 720 11px/1.2 var(--font-sans);
+}
+
+.kanban-option-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.kanban-option-actions button {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  color: var(--muted);
+  font: 700 10.5px var(--font-sans);
+}
+
+.kanban-option-actions button:hover:not(:disabled) { border-color: var(--line-strong); color: var(--ink); }
+.kanban-option-actions button:disabled { opacity: .35; }
+.kanban-option-actions button.danger { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); color: var(--danger); }
 
 .kanban-card-modal-media {
   display: grid;
@@ -6863,14 +6917,9 @@ button.secondary:disabled {
     padding-right: 15px;
   }
 
-  .kanban-card-modal-footer {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .kanban-card-modal-footer > div,
-  .kanban-card-modal-footer button {
-    width: 100%;
-  }
+  .kanban-option-row { align-items: stretch; flex-direction: column; }
+  .kanban-option-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kanban-option-actions button { justify-content: center; }
 
   .kanban-workbar {
     flex-wrap: wrap;

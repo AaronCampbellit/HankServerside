@@ -64,16 +64,16 @@ describe("KanbanCardModal", () => {
   it("wraps keyboard focus within the modal", () => {
     render(<KanbanCardModal {...modalProps()} />);
     const title = screen.getByLabelText("Task title");
-    const deleteButton = screen.getByRole("button", { name: "Delete task" });
+    const lastControl = screen.getByLabelText("Add screenshot or file");
     const dialog = screen.getByRole("dialog", { name: "Task details" });
 
-    deleteButton.focus();
+    lastControl.focus();
     fireEvent.keyDown(dialog, { key: "Tab" });
     expect(title).toHaveFocus();
 
     title.focus();
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
-    expect(deleteButton).toHaveFocus();
+    expect(lastControl).toHaveFocus();
   });
 
   it("routes pasted images through inline upload at the caret", () => {
@@ -129,5 +129,25 @@ describe("KanbanCardModal", () => {
 
     fireEvent.click(within(descriptionSection!).getByRole("button", { name: "Edit description" }));
     expect(screen.getByLabelText("Description")).toHaveValue(attachment.markdown_reference);
+  });
+
+  it("opens the editor when the description surface is clicked", () => {
+    render(<KanbanCardModal {...modalProps()} />);
+
+    fireEvent.click(screen.getByTestId("kanban-description-preview"));
+
+    expect(screen.getByLabelText("Description")).toHaveFocus();
+  });
+
+  it("keeps all task options together above the description", () => {
+    render(<KanbanCardModal {...modalProps()} />);
+    const options = screen.getByTestId("kanban-card-options");
+    const description = screen.getByRole("heading", { name: "Description" }).closest("section");
+
+    expect(within(options).getByLabelText("Column")).toBeInTheDocument();
+    expect(within(options).getByLabelText("Due date")).toBeInTheDocument();
+    expect(within(options).getByRole("button", { name: "Move task right" })).toBeInTheDocument();
+    expect(within(options).getByRole("button", { name: "Delete task" })).toBeInTheDocument();
+    expect(options.compareDocumentPosition(description!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });

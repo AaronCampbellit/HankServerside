@@ -134,6 +134,43 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
         </header>
 
         <div className="kanban-card-modal-scroll">
+          <section className="kanban-card-options" data-testid="kanban-card-options" aria-label="Task options">
+            <div className="kanban-detail-grid">
+              <label>
+                <span>Column</span>
+                <select aria-label="Column" value={columnID} onChange={(event) => onMove(event.target.value)}>
+                  {columns.map((column) => <option key={column.id} value={column.id}>{column.title}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Due date</span>
+                <input aria-label="Due date" type="date" value={card.due_date || ""} onChange={(event) => onDueDateChange(event.target.value)} />
+              </label>
+            </div>
+            <div className="kanban-option-row">
+              <div className="kanban-option-colors">
+                <span>Card color</span>
+                <div className="kanban-color-picker">
+                  {cardColors.map((color) => (
+                    <button
+                      className={`color-${color}`}
+                      type="button"
+                      key={color}
+                      aria-label={`${color === "default" ? "Default" : color[0].toUpperCase() + color.slice(1)} card`}
+                      aria-pressed={(card.color || "default") === color}
+                      onClick={() => onColorChange(color === "default" ? "" : color)}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="kanban-option-actions">
+                <button type="button" aria-label="Move task left" disabled={!canMoveLeft} onClick={onMoveLeft}><ModalIcon name="left" /> Move left</button>
+                <button type="button" aria-label="Move task right" disabled={!canMoveRight} onClick={onMoveRight}>Move right <ModalIcon name="right" /></button>
+                <button className="danger" type="button" aria-label="Delete task" onClick={onDelete}><ModalIcon name="trash" /> Delete</button>
+              </div>
+            </div>
+          </section>
+
           <section className="kanban-detail-section">
             <h3>Description</h3>
             <div className="kanban-formatbar" aria-label="Description formatting">
@@ -160,41 +197,27 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
                 />
               </label>
             ) : (
-              <div className="kanban-description-preview">
+              <div
+                className="kanban-description-preview"
+                data-testid="kanban-description-preview"
+                tabIndex={0}
+                aria-label="Edit description area"
+                onClick={(event) => {
+                  if ((event.target as HTMLElement).closest("a, button")) return;
+                  setEditingDescription(true);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setEditingDescription(true);
+                  }
+                }}
+              >
                 {description.trim()
                   ? <KanbanRichText value={description} attachments={attachments} />
                   : <button type="button" onClick={() => setEditingDescription(true)}>Add a description</button>}
               </div>
             )}
-          </section>
-
-          <div className="kanban-detail-grid">
-            <label>
-              <span>Column</span>
-              <select value={columnID} onChange={(event) => onMove(event.target.value)}>
-                {columns.map((column) => <option key={column.id} value={column.id}>{column.title}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Due date</span>
-              <input aria-label="Due date" type="date" value={card.due_date || ""} onChange={(event) => onDueDateChange(event.target.value)} />
-            </label>
-          </div>
-
-          <section className="kanban-detail-section">
-            <h3>Card color</h3>
-            <div className="kanban-color-picker">
-              {cardColors.map((color) => (
-                <button
-                  className={`color-${color}`}
-                  type="button"
-                  key={color}
-                  aria-label={`${color === "default" ? "Default" : color[0].toUpperCase() + color.slice(1)} card`}
-                  aria-pressed={(card.color || "default") === color}
-                  onClick={() => onColorChange(color === "default" ? "" : color)}
-                />
-              ))}
-            </div>
           </section>
 
           <section className="kanban-detail-section">
@@ -220,13 +243,6 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
           </section>
         </div>
 
-        <footer className="kanban-card-modal-footer">
-          <div>
-            <button type="button" aria-label="Move task left" disabled={!canMoveLeft} onClick={onMoveLeft}><ModalIcon name="left" /> Move left</button>
-            <button type="button" aria-label="Move task right" disabled={!canMoveRight} onClick={onMoveRight}>Move right <ModalIcon name="right" /></button>
-          </div>
-          <button className="danger" type="button" aria-label="Delete task" onClick={onDelete}><ModalIcon name="trash" /> Delete task</button>
-        </footer>
       </article>
     </div>
   );

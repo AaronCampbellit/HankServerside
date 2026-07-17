@@ -392,6 +392,33 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                   </div>
                 </header>
 
+                {addingColumnID === column.id ? (
+                  <form className="kanban-task-composer" onSubmit={(event) => { event.preventDefault(); addTask(column.id || ""); }}>
+                    <label>
+                      <span className="visually-hidden">Task title</span>
+                      <textarea
+                        autoFocus
+                        aria-label="Task title"
+                        value={taskDraft}
+                        onChange={(event) => setTaskDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || event.shiftKey) return;
+                          event.preventDefault();
+                          addTask(column.id || "");
+                        }}
+                        placeholder="What needs doing?"
+                        rows={2}
+                      />
+                    </label>
+                    <div>
+                      <button type="submit" disabled={!taskDraft.trim()}>Create task</button>
+                      <button type="button" onClick={() => { setAddingColumnID(""); setTaskDraft(""); }}>Cancel</button>
+                    </div>
+                  </form>
+                ) : (
+                  <button className="add-card-button" type="button" aria-label={`Add task to ${column.title}`} onClick={() => setAddingColumnID(column.id || "")}><SmallIcon name="plus" /> Add task</button>
+                )}
+
                 <div className="kanban-card-stack">
                   {visibleCards.map((card) => {
                     const parts = cardTitleAndDescription(card);
@@ -431,32 +458,6 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                   {!visibleCards.length ? <p className="kanban-column-empty">{normalizedQuery && cards.length ? "No matching tasks" : "Drop tasks here"}</p> : null}
                 </div>
 
-                {addingColumnID === column.id ? (
-                  <form className="kanban-task-composer" onSubmit={(event) => { event.preventDefault(); addTask(column.id || ""); }}>
-                    <label>
-                      <span className="visually-hidden">Task title</span>
-                      <textarea
-                        autoFocus
-                        aria-label="Task title"
-                        value={taskDraft}
-                        onChange={(event) => setTaskDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey) return;
-                          event.preventDefault();
-                          addTask(column.id || "");
-                        }}
-                        placeholder="What needs doing?"
-                        rows={2}
-                      />
-                    </label>
-                    <div>
-                      <button type="submit" disabled={!taskDraft.trim()}>Create task</button>
-                      <button type="button" onClick={() => { setAddingColumnID(""); setTaskDraft(""); }}>Cancel</button>
-                    </div>
-                  </form>
-                ) : (
-                  <button className="add-card-button" type="button" aria-label={`Add task to ${column.title}`} onClick={() => setAddingColumnID(column.id || "")}><SmallIcon name="plus" /> Add task</button>
-                )}
               </section>
             );
           })}

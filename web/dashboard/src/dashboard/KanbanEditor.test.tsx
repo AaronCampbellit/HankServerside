@@ -86,6 +86,15 @@ describe("KanbanEditor", () => {
     expect(screen.queryByRole("button", { name: "Open task Review brief" })).not.toBeInTheDocument();
   });
 
+  it("places the add task action above the task stack", () => {
+    Harness({});
+    const column = screen.getByRole("heading", { name: "Inbox" }).closest("section")!;
+    const addTask = within(column).getByRole("button", { name: "Add task to Inbox" });
+    const stack = column.querySelector(".kanban-card-stack")!;
+
+    expect(addTask.compareDocumentPosition(stack)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("moves a dragged card without opening its editor", () => {
     Harness({});
     const open = screen.getByRole("button", { name: "Open task Review brief" });
