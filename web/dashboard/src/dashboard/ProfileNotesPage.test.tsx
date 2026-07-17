@@ -8,6 +8,7 @@ const profileNotesClient = vi.hoisted(() => ({
   fetchNote: vi.fn(),
   saveNote: vi.fn(),
   deleteNote: vi.fn(),
+  uploadAttachment: vi.fn(),
 }));
 
 vi.mock("../api/profileNotes", async (importOriginal) => {
@@ -64,6 +65,43 @@ describe("ProfileNotesPage", () => {
     expect(await screen.findByText("To do")).toBeInTheDocument();
     expect(screen.getByText("Doing")).toBeInTheDocument();
     expect(screen.queryByText("Done")).not.toBeInTheDocument();
+  });
+
+  it("autosaves interactive kanban changes with board data", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "work", title: "Client Work", preview: "Kanban", page_type: "kanban", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "work",
+      title: "Client Work",
+      body_markdown: "# Client Work\n\n## Inbox\n- Review brief\n\n## Done",
+      revision: "1",
+      page_type: "kanban",
+      board: {
+        columns: [
+          { id: "inbox", title: "Inbox", sort_order: 0, cards: [{ id: "brief", text: "Review brief", sort_order: 0 }] },
+          { id: "done", title: "Done", sort_order: 1, cards: [] },
+        ],
+      },
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "work", revision: "2" });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Add task to Inbox" }));
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Prepare invoice" } });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await vi.advanceTimersByTimeAsync(750);
+
+    expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
+      note_id: "work",
+      page_type: "kanban",
+      board: expect.objectContaining({
+        columns: expect.arrayContaining([
+          expect.objectContaining({ cards: expect.arrayContaining([expect.objectContaining({ text: "Prepare invoice" })]) }),
+        ]),
+      }),
+    }));
   });
 
   it("matches the guide notes anatomy with rich toolbar, notebook dialog, rendered text page, and kanban controls", async () => {

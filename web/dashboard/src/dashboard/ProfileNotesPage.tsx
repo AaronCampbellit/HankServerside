@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   type KanbanBoard,
+  type NoteAttachment,
   noteID,
   profileNotesClient,
   type ProfileNote,
   type ProfileNoteSummary,
 } from "../api/profileNotes";
 import { useConfirmDialog, useToast } from "../ui/primitives";
+import { boardFromMarkdown, boardToMarkdown, KanbanEditor } from "./KanbanEditor";
 
 type Editor = {
   instanceKey: string;
@@ -18,6 +20,7 @@ type Editor = {
   parentID: string;
   mcpExcluded: boolean;
   board: KanbanBoard | null;
+  attachments: NoteAttachment[];
   updatedAt: string;
   shared: boolean;
 };
@@ -54,6 +57,7 @@ const emptyEditor: Editor = {
   parentID: "",
   mcpExcluded: false,
   board: null,
+  attachments: [],
   updatedAt: "",
   shared: false,
 };
@@ -104,6 +108,7 @@ function editorFromNote(note: ProfileNote): Editor {
     parentID: note.parent_id || "",
     mcpExcluded: Boolean(note.mcp_excluded),
     board: note.board || null,
+    attachments: note.attachments || [],
     updatedAt: note.updated_at || "",
     shared: Boolean(note.shared),
   };
@@ -811,8 +816,23 @@ export function ProfileNotesPage() {
   }
 
   function applyEditorAction(action: string) {
-    if (action === "kanban" || action === "text") {
-      updateEditor({ ...readyState.editor, pageType: action });
+    if (action === "kanban") {
+      const board = readyState.editor.board || boardFromMarkdown(readyState.editor.body);
+      updateEditor({
+        ...readyState.editor,
+        pageType: "kanban",
+        board,
+        body: boardToMarkdown(readyState.editor.title, board),
+      });
+      return;
+    }
+    if (action === "text") {
+      updateEditor({
+        ...readyState.editor,
+        pageType: "text",
+        body: readyState.editor.board ? boardToMarkdown(readyState.editor.title, readyState.editor.board) : readyState.editor.body,
+        board: null,
+      });
       return;
     }
     if (action === "undo") { undoBody(); return; }
@@ -859,11 +879,11 @@ export function ProfileNotesPage() {
     }
   }
 
-  async function saveNote(editor = readyState.editor, background = false) {
+  async function saveNote(editor = readyState.editor, background = false): Promise<Editor | null> {
     if (!background) clearAutosaveTimer();
     if (savingRef.current) {
       const active = activeSaveRef.current;
-      if (active?.editor.instanceKey === editor.instanceKey && !editorChanged(active.editor, editor)) return;
+      if (active?.editor.instanceKey === editor.instanceKey && !editorChanged(active.editor, editor)) return null;
       const pendingIndex = pendingSaveRef.current.findIndex((pending) => pending.editor.instanceKey === editor.instanceKey);
       const pending = pendingIndex >= 0 ? pendingSaveRef.current[pendingIndex] : null;
       const nextPending = {
@@ -872,12 +892,13 @@ export function ProfileNotesPage() {
       };
       if (pendingIndex >= 0) pendingSaveRef.current[pendingIndex] = nextPending;
       else pendingSaveRef.current.push(nextPending);
-      return;
+      return null;
     }
     savingRef.current = true;
     activeSaveRef.current = { editor, background };
     setReady({ saving: true });
     let queuedSave: PendingSave | null = null;
+    let savedResult: Editor | null = null;
     try {
       const response = await profileNotesClient.saveNote({
         note_id: editor.noteID,
@@ -887,6 +908,7 @@ export function ProfileNotesPage() {
         page_type: editor.pageType,
         parent_id: editor.parentID,
         mcp_excluded: editor.mcpExcluded,
+        board: editor.pageType === "kanban" ? editor.board : undefined,
       });
       const savedEditor = {
         ...editor,
@@ -894,6 +916,16 @@ export function ProfileNotesPage() {
         revision: response.revision || editor.revision,
         updatedAt: response.updated_at || editor.updatedAt,
       };
+      savedResult = savedEditor;
+      if (latestEditorRef.current.instanceKey === editor.instanceKey) {
+        latestEditorRef.current = {
+          ...latestEditorRef.current,
+          noteID: savedEditor.noteID,
+          revision: savedEditor.revision,
+          updatedAt: savedEditor.updatedAt,
+        };
+        latestSavedEditorRef.current = savedEditor;
+      }
       const savedID = savedEditor.noteID;
       setState((current) => {
         if (current.status !== "ready") return current;
@@ -941,6 +973,40 @@ export function ProfileNotesPage() {
       savingRef.current = false;
       if (queuedSave) void saveNote(queuedSave.editor, queuedSave.background);
     }
+    return savedResult;
+  }
+
+  async function uploadKanbanAttachment(file: File): Promise<NoteAttachment> {
+    if (savingRef.current) {
+      await new Promise<void>((resolve, reject) => {
+        const startedAt = Date.now();
+        const waitForSave = () => {
+          if (!savingRef.current) { resolve(); return; }
+          if (Date.now() - startedAt > 10_000) { reject(new Error("The board is still saving. Try the upload again.")); return; }
+          window.setTimeout(waitForSave, 40);
+        };
+        waitForSave();
+      });
+    }
+    let editor = latestEditorRef.current;
+    if (!editor.noteID || editorChanged(editor, latestSavedEditorRef.current)) {
+      const saved = await saveNote(editor, true);
+      if (saved) editor = saved;
+    }
+    if (!editor.noteID) throw new Error("Save the board before adding a file.");
+    const attachment = await profileNotesClient.uploadAttachment(editor.noteID, file);
+    const attachments = [...editor.attachments.filter((item) => item.id !== attachment.id), attachment];
+    latestEditorRef.current = { ...editor, attachments };
+    latestSavedEditorRef.current = { ...latestSavedEditorRef.current, attachments };
+    setState((current) => {
+      if (current.status !== "ready" || current.editor.instanceKey !== editor.instanceKey) return current;
+      return {
+        ...current,
+        editor: { ...current.editor, attachments },
+        savedEditor: { ...current.savedEditor, attachments },
+      };
+    });
+    return attachment;
   }
 
   async function deleteNote() {
@@ -1200,14 +1266,32 @@ export function ProfileNotesPage() {
             )}
           </div>
 
-          <div className="notes-content-scroll">
+          <div className={`notes-content-scroll${state.editor.pageType === "kanban" ? " is-kanban" : ""}`}>
             {editorEffectiveExclusion ? (
               <p className={`notes-mcp-state${editorInheritedExclusion ? " inherited" : ""}`}>
                 {editorInheritedExclusion ? "Excluded because its notebook is locked" : "Excluded from MCP"}
               </p>
             ) : null}
             {state.editor.pageType === "kanban" ? (
-              <KanbanEditor body={state.editor.body} board={state.editor.board} />
+              <KanbanEditor
+                board={state.editor.board || boardFromMarkdown(state.editor.body)}
+                attachments={state.editor.attachments}
+                onChange={(board) => {
+                  const editor = latestEditorRef.current;
+                  updateEditor({
+                    ...editor,
+                    board,
+                    body: boardToMarkdown(editor.title, board),
+                  });
+                }}
+                onUpload={uploadKanbanAttachment}
+                confirmDelete={(message) => dialog.confirm({
+                  title: "Delete from board",
+                  message,
+                  confirmLabel: "Delete",
+                  tone: "danger",
+                })}
+              />
             ) : state.editor.pageType === "notebook" ? (
               <NotebookEditor
                 notes={state.notes}
@@ -1287,73 +1371,6 @@ function ToolbarButton({
     >
       {icon ? <Icon name={icon} /> : <span>{text}</span>}
     </button>
-  );
-}
-
-function markdownLines(body: string): string[] {
-  return body.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-}
-
-type KanbanColumnView = {
-  title: string;
-  items: string[];
-};
-
-function sortedByOrder<T extends { sort_order?: number }>(items: T[] | undefined): T[] {
-  return [...(items || [])].sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0));
-}
-
-function kanbanColumnsFromBoard(board: KanbanBoard | null): KanbanColumnView[] {
-  return sortedByOrder(board?.columns)
-    .map((column) => ({
-      title: column.title?.trim() || "Untitled column",
-      items: sortedByOrder(column.cards)
-        .map((card) => (card.text || card.title || "").trim())
-        .filter(Boolean),
-    }))
-    .filter((column) => column.title || column.items.length);
-}
-
-function kanbanColumnsFromMarkdown(body: string): KanbanColumnView[] {
-  const columns: KanbanColumnView[] = [];
-  let current: KanbanColumnView | null = null;
-  for (const line of markdownLines(body)) {
-    if (line.startsWith("## ")) {
-      current = { title: line.replace(/^##\s+/, "").trim() || "Untitled column", items: [] };
-      columns.push(current);
-      continue;
-    }
-    if (!current || line.startsWith("# ")) continue;
-    const card = line.replace(/^[-*]\s*/, "").trim();
-    if (card) current.items.push(card);
-  }
-  return columns;
-}
-
-function KanbanEditor({ body, board }: { body: string; board: KanbanBoard | null }) {
-  const columns = kanbanColumnsFromBoard(board);
-  const renderedColumns = columns.length ? columns : kanbanColumnsFromMarkdown(body);
-  if (!renderedColumns.length) {
-    return <p className="empty-state">No kanban columns yet.</p>;
-  }
-  return (
-    <div className="kanban-board" aria-label="Kanban board">
-      {renderedColumns.map((column) => (
-        <section className="kanban-column" key={column.title} aria-labelledby={`kanban-${column.title.replace(/\s+/g, "-").toLowerCase()}`}>
-          <header className="kanban-column-head">
-            <h2 id={`kanban-${column.title.replace(/\s+/g, "-").toLowerCase()}`}>{column.title}</h2>
-            <span className="kanban-count">{column.items.length}</span>
-          </header>
-          <div className="kanban-card-stack">
-            {column.items.length ? column.items.map((item, index) => (
-              <article className="kanban-card" key={`${column.title}-${index}-${item}`}>
-                <strong>{item}</strong>
-              </article>
-            )) : <p className="file-panel-empty">No cards in this column.</p>}
-          </div>
-        </section>
-      ))}
-    </div>
   );
 }
 
