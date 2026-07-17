@@ -1169,7 +1169,7 @@ button:disabled {
 
 /* confirmation card (replaces window.confirm) */
 .confirm-scrim {
-  position: fixed; inset: 0; z-index: 70;
+  position: fixed; inset: 0; z-index: 200;
   display: grid; place-items: center; padding: 24px;
   background: rgba(6, 9, 15, 0.6); backdrop-filter: blur(3px);
   animation: hk-scrim 0.16s ease-out;

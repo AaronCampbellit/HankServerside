@@ -40,4 +40,11 @@ describe("dashboard stylesheet", () => {
     expect(ruleBodies(".file-list-scroll").some((body) => body.includes("overflow: auto"))).toBe(true);
     expect(ruleBodies(".file-guide-table").some((body) => body.includes("min-width: 560px"))).toBe(true);
   });
+
+  it("layers confirmation dialogs above the Kanban card modal", () => {
+    const confirmZIndex = Number(ruleBodies(".confirm-scrim").at(0)?.match(/z-index:\s*(\d+)/)?.[1]);
+    const kanbanZIndex = Number(ruleBodies(".kanban-card-modal-backdrop").at(0)?.match(/z-index:\s*(\d+)/)?.[1]);
+
+    expect(confirmZIndex).toBeGreaterThan(kanbanZIndex);
+  });
 });
