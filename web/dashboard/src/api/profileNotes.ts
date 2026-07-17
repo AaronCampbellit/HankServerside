@@ -37,6 +37,7 @@ export type KanbanBoard = {
 export type NoteAttachment = {
   id: string;
   note_id?: string;
+  note_revision?: string;
   filename: string;
   content_type: string;
   size_bytes?: number;

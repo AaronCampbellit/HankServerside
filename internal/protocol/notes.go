@@ -86,6 +86,7 @@ type NotesFetchResponse struct {
 type NoteAttachment struct {
 	ID             string    `json:"id"`
 	NoteID         string    `json:"note_id"`
+	NoteRevision   string    `json:"note_revision,omitempty"`
 	Filename       string    `json:"filename"`
 	ContentType    string    `json:"content_type"`
 	SizeBytes      int64     `json:"size_bytes"`

@@ -996,14 +996,15 @@ export function ProfileNotesPage() {
     if (!editor.noteID) throw new Error("Save the board before adding a file.");
     const attachment = await profileNotesClient.uploadAttachment(editor.noteID, file);
     const attachments = [...editor.attachments.filter((item) => item.id !== attachment.id), attachment];
-    latestEditorRef.current = { ...editor, attachments };
-    latestSavedEditorRef.current = { ...latestSavedEditorRef.current, attachments };
+    const revision = attachment.note_revision || editor.revision;
+    latestEditorRef.current = { ...editor, revision, attachments };
+    latestSavedEditorRef.current = { ...latestSavedEditorRef.current, revision, attachments };
     setState((current) => {
       if (current.status !== "ready" || current.editor.instanceKey !== editor.instanceKey) return current;
       return {
         ...current,
-        editor: { ...current.editor, attachments },
-        savedEditor: { ...current.savedEditor, attachments },
+        editor: { ...current.editor, revision, attachments },
+        savedEditor: { ...current.savedEditor, revision, attachments },
       };
     });
     return attachment;

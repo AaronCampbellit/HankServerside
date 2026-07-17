@@ -93,7 +93,10 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 		body, _ := io.ReadAll(uploadResp.Body)
 		t.Fatalf("upload status = %d body = %s", uploadResp.StatusCode, body)
 	}
-	var uploaded protocol.NoteAttachment
+	var uploaded struct {
+		protocol.NoteAttachment
+		NoteRevision string `json:"note_revision"`
+	}
 	if err := json.NewDecoder(uploadResp.Body).Decode(&uploaded); err != nil {
 		t.Fatalf("decode uploaded attachment: %v", err)
 	}
@@ -102,6 +105,9 @@ func TestNotesAPITokenLifecycleScopesAndRevocation(t *testing.T) {
 	}
 	if !strings.HasPrefix(uploaded.MarkdownRef, "![screenshot.png](hank-note-attachment://") {
 		t.Fatalf("uploaded markdown reference = %q, want inline image reference", uploaded.MarkdownRef)
+	}
+	if uploaded.NoteRevision == "" || uploaded.NoteRevision == save.Revision {
+		t.Fatalf("uploaded note revision = %q, want the post-upload revision", uploaded.NoteRevision)
 	}
 
 	requestJSON(t, testServer, created.Token, http.MethodGet, "/v1/me/notes/api-token-note.md", nil, &fetched)

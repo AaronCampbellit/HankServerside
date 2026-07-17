@@ -123,8 +123,9 @@ describe("ProfileNotesPage", () => {
       content_type: "image/png",
       download_url: "/v1/me/notes/work/attachments/natt-1",
       markdown_reference: "![wireframe.png](hank-note-attachment://natt-1?filename=wireframe.png&scope=profile)",
+      note_revision: "2",
     });
-    profileNotesClient.saveNote.mockResolvedValue({ note_id: "work", revision: "2" });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "work", revision: "3" });
 
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Open task Review brief" }));
@@ -142,6 +143,7 @@ describe("ProfileNotesPage", () => {
     expect(profileNotesClient.uploadAttachment).toHaveBeenCalledWith("work", file);
     expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
       note_id: "work",
+      expected_revision: "2",
       board: expect.objectContaining({
         columns: [expect.objectContaining({
           cards: [expect.objectContaining({ text: expect.stringContaining("hank-note-attachment://natt-1") })],

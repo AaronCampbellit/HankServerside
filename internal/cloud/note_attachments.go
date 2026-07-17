@@ -91,13 +91,13 @@ func (s *Server) handleNoteAttachmentsHTTP(w http.ResponseWriter, r *http.Reques
 				Attachments: noteAttachmentsToProtocol(attachments, note, scope),
 			})
 		case http.MethodPost:
-			attachment, err := s.storeUploadedNoteAttachment(r, note, scope, userID)
+			attachment, updatedNote, err := s.storeUploadedNoteAttachment(r, note, scope, userID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			s.emitNoteAttachmentChanged(r.Context(), note, scope, userID)
-			writeJSON(w, http.StatusCreated, noteAttachmentToProtocol(attachment, note, scope))
+			s.emitNoteAttachmentChanged(r.Context(), updatedNote, scope, userID)
+			writeJSON(w, http.StatusCreated, noteAttachmentToProtocol(attachment, updatedNote, scope))
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -142,7 +142,7 @@ func (s *Server) handleNoteAttachmentsHTTP(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNote, scope string, userID string) (domain.NoteAttachment, error) {
+func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNote, scope string, userID string) (domain.NoteAttachment, domain.UserNote, error) {
 	filename := safeAttachmentFilename(firstNonBlank(r.URL.Query().Get("filename"), r.Header.Get("X-Hank-Filename"), "Attachment"))
 	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
 	if parsed, _, err := mime.ParseMediaType(contentType); err == nil && parsed != "" {
@@ -156,21 +156,21 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 	storageKey := filepath.Join(note.ID, attachmentID+"-"+filename)
 	targetPath, err := s.noteAttachmentPathForWrite(storageKey)
 	if err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), noteAttachmentDirMode); err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if err := os.Chmod(s.noteAttachmentRoot, noteAttachmentDirMode); err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if err := os.Chmod(filepath.Dir(targetPath), noteAttachmentDirMode); err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	tempPath := targetPath + ".tmp"
 	file, err := os.Create(tempPath)
 	if err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	defer file.Close()
 	defer os.Remove(tempPath)
@@ -179,22 +179,22 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 	hasher := sha256.New()
 	written, err := io.Copy(file, io.TeeReader(limited, hasher))
 	if err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if written > maxNoteAttachmentBytes {
-		return domain.NoteAttachment{}, errors.New("attachment is too large")
+		return domain.NoteAttachment{}, domain.UserNote{}, errors.New("attachment is too large")
 	}
 	if written <= 0 {
-		return domain.NoteAttachment{}, errors.New("attachment body is empty")
+		return domain.NoteAttachment{}, domain.UserNote{}, errors.New("attachment body is empty")
 	}
 	if err := file.Close(); err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if err := os.Rename(tempPath, targetPath); err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if err := os.Chmod(targetPath, noteAttachmentFileMode); err != nil {
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 
 	now := time.Now().UTC()
@@ -214,14 +214,14 @@ func (s *Server) storeUploadedNoteAttachment(r *http.Request, note domain.UserNo
 	updatedNote, err := noteWithAttachmentReference(note, scope, userID, attachment)
 	if err != nil {
 		_ = os.Remove(targetPath)
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	if err := s.store.CreateNoteAttachmentAndSaveNote(r.Context(), attachment, updatedNote); err != nil {
 		_ = os.Remove(targetPath)
-		return domain.NoteAttachment{}, err
+		return domain.NoteAttachment{}, domain.UserNote{}, err
 	}
 	s.enqueueAssistantNoteIndexJob(r.Context(), updatedNote.HomeID, userID, updatedNote.NoteID, assistantNoteSourceType(updatedNote))
-	return attachment, nil
+	return attachment, updatedNote, nil
 }
 
 func noteWithAttachmentReference(note domain.UserNote, scope string, userID string, attachment domain.NoteAttachment) (domain.UserNote, error) {
@@ -499,6 +499,7 @@ func noteAttachmentToProtocol(attachment domain.NoteAttachment, note domain.User
 	return protocol.NoteAttachment{
 		ID:             attachment.ID,
 		NoteID:         note.NoteID,
+		NoteRevision:   note.Revision,
 		Filename:       attachment.Filename,
 		ContentType:    attachment.ContentType,
 		SizeBytes:      attachment.SizeBytes,
