@@ -104,6 +104,46 @@ describe("ProfileNotesPage", () => {
     }));
   });
 
+  it("autosaves the canonical attachment reference after a kanban upload", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "work", title: "Client Work", preview: "Kanban", page_type: "kanban", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "work",
+      title: "Client Work",
+      body_markdown: "# Client Work\n\n## Inbox\n- Review brief",
+      revision: "1",
+      page_type: "kanban",
+      board: { columns: [{ id: "inbox", title: "Inbox", sort_order: 0, cards: [{ id: "brief", text: "Review brief", sort_order: 0 }] }] },
+      attachments: [],
+    });
+    profileNotesClient.uploadAttachment.mockResolvedValue({
+      id: "natt-1",
+      filename: "wireframe.png",
+      content_type: "image/png",
+      download_url: "/v1/me/notes/work/attachments/natt-1",
+      markdown_reference: "![wireframe.png](hank-note-attachment://natt-1?filename=wireframe.png&scope=profile)",
+    });
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "work", revision: "2" });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Open task Review brief" }));
+    vi.useFakeTimers();
+    const file = new File(["image"], "wireframe.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Add screenshot or file"), { target: { files: [file] } });
+    await vi.advanceTimersByTimeAsync(750);
+
+    expect(profileNotesClient.uploadAttachment).toHaveBeenCalledWith("work", file);
+    expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
+      note_id: "work",
+      board: expect.objectContaining({
+        columns: [expect.objectContaining({
+          cards: [expect.objectContaining({ text: expect.stringContaining("hank-note-attachment://natt-1") })],
+        })],
+      }),
+    }));
+  });
+
   it("matches the guide notes anatomy with rich toolbar, notebook dialog, rendered text page, and kanban controls", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
