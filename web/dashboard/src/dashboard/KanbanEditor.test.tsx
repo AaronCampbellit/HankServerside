@@ -70,6 +70,9 @@ describe("KanbanEditor", () => {
     fireEvent.click(within(drawer).getByRole("button", { name: "Move task right" }));
 
     expect(screen.getByRole("heading", { name: "In progress" }).closest("section")).toHaveTextContent("Prepare invoice");
+    expect(within(drawer).getByLabelText("Due date")).toHaveValue("2026-07-18");
+    expect(within(drawer).getByRole("button", { name: "Cyan card" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("time")).toHaveAttribute("datetime", "2026-07-18");
     expect(change).toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Search cards"), { target: { value: "invoice" } });
