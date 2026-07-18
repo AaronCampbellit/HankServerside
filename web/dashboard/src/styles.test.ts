@@ -76,4 +76,8 @@ describe("dashboard stylesheet", () => {
     expect(styles).toContain('.app-shell[data-mobile-search-open="true"] .mobile-topbar-title');
     expect(styles).toContain("visibility: hidden");
   });
+
+  it("removes the desktop Home Assistant table minimum width on mobile", () => {
+    expect(lastRuleBody(".ha-entities-table")).toContain("min-width: 0");
+  });
 });

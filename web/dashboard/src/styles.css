@@ -7393,6 +7393,10 @@ button.secondary:disabled {
     overflow: visible;
   }
 
+  .ha-entities-table {
+    min-width: 0;
+  }
+
   .ha-entities-table,
   .ha-entities-table tbody,
   .ha-entities-table tr,
