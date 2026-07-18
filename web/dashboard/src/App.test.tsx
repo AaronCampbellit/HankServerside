@@ -112,7 +112,7 @@ describe("App routes", () => {
     expect(await screen.findByRole("heading", { name: "Setup Guide" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Loading notes" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("link", { name: "Notes" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("link", { name: "Notes" }));
     expect(screen.getByDisplayValue("Daily")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Loading notes" })).not.toBeInTheDocument();
     expect(calls.filter((path) => path === "/v1/me/notes")).toHaveLength(1);

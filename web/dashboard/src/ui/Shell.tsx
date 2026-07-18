@@ -28,6 +28,13 @@ const RESULT_GLYPH: Record<string, string> = {
 };
 
 const COLLAPSE_KEY = "hank.nav.collapsed";
+const MOBILE_PRIMARY_HREFS = new Set([
+  "/dashboard",
+  "/dashboard/hank",
+  "/dashboard/profile-notes",
+  "/dashboard/home-assistant",
+  "/dashboard/file-server",
+]);
 
 function initialsFor(value: string): string {
   const local = value.includes("@") ? value.split("@")[0] : value;
@@ -78,6 +85,10 @@ export function Shell({
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileSearchButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch { /* ignore */ }
@@ -130,7 +141,7 @@ export function Shell({
     };
   }, [notifOpen]);
 
-  // ⌘K / Ctrl-K focuses search
+  // ⌘K / Ctrl-K focuses search and Escape dismisses mobile overlays.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -138,11 +149,20 @@ export function Shell({
         searchInputRef.current?.focus();
         setSearchOpen(true);
       }
-      if (e.key === "Escape") setSearchOpen(false);
+      if (e.key !== "Escape") return;
+      setSearchOpen(false);
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        mobileMenuButtonRef.current?.focus();
+      }
+      if (mobileSearchOpen) {
+        setMobileSearchOpen(false);
+        mobileSearchButtonRef.current?.focus();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [mobileMenuOpen, mobileSearchOpen]);
 
   function chooseResult(result: SearchResult) {
     setSearchOpen(false);
@@ -190,9 +210,17 @@ export function Shell({
   const footerName = footerNameFor(userEmail || "Aaron D.");
   const roleLabel = userRole || "admin";
   const initials = initialsFor(footerName);
+  const mobilePrimaryItems = navItems.filter((item) => MOBILE_PRIMARY_HREFS.has(item.href));
+  const mobileOverflowItems = navItems.filter((item) => !MOBILE_PRIMARY_HREFS.has(item.href));
 
   return (
-    <div className="app-shell" data-nav-collapsed={collapsed ? "true" : "false"} onClick={handleClick}>
+    <div
+      className="app-shell"
+      data-nav-collapsed={collapsed ? "true" : "false"}
+      data-mobile-search-open={mobileSearchOpen ? "true" : "false"}
+      data-mobile-menu-open={mobileMenuOpen ? "true" : "false"}
+      onClick={handleClick}
+    >
       <nav className="app-nav" aria-label="Main">
         <div className="sidebar-brand">
           <img className="sidebar-brand-icon" src="/assets/hank-icon-192.png" alt="" />
@@ -253,6 +281,43 @@ export function Shell({
 
       <div className="app-content">
         <header className="app-topbar">
+          <div className="mobile-topbar-title">
+            <img src="/assets/hank-icon-192.png" alt="" />
+            <strong>{current?.label || "Hank Remote"}</strong>
+          </div>
+          <button
+            ref={mobileSearchButtonRef}
+            className="mobile-topbar-action"
+            type="button"
+            aria-label="Open search"
+            onClick={() => {
+              setNotifOpen(false);
+              setMobileMenuOpen(false);
+              setMobileSearchOpen(true);
+              window.requestAnimationFrame(() => searchInputRef.current?.focus());
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3-3" />
+            </svg>
+          </button>
+          <button
+            ref={mobileMenuButtonRef}
+            className="mobile-topbar-action"
+            type="button"
+            aria-label="Open menu"
+            aria-expanded={mobileMenuOpen}
+            onClick={() => {
+              setNotifOpen(false);
+              setMobileSearchOpen(false);
+              setMobileMenuOpen((open) => !open);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 7h14M5 12h14M5 17h14" />
+            </svg>
+          </button>
           <nav className="topbar-crumbs" aria-label="Breadcrumb">
             <a href="/dashboard">Home</a>
             {crumbLabel ? (
@@ -281,6 +346,20 @@ export function Shell({
                 />
                 <kbd>⌘K</kbd>
               </label>
+              {mobileSearchOpen ? (
+                <button
+                  className="mobile-search-close"
+                  type="button"
+                  aria-label="Close search"
+                  onClick={() => {
+                    setMobileSearchOpen(false);
+                    setSearchOpen(false);
+                    mobileSearchButtonRef.current?.focus();
+                  }}
+                >
+                  ×
+                </button>
+              ) : null}
               {showResults ? (
                 <div className="search-results" role="listbox">
                   {results.length === 0 ? (
@@ -356,6 +435,63 @@ export function Shell({
         </header>
         <main className="app-main">{children}</main>
       </div>
+      <nav className="mobile-bottom-nav" aria-label="Mobile primary">
+        {mobilePrimaryItems.map((item) => (
+          <a
+            key={item.href}
+            href={item.href}
+            aria-label={item.label}
+            aria-current={isActive(item.href) ? "page" : undefined}
+            onFocus={() => onPrefetch?.(item.href)}
+            onTouchStart={() => onPrefetch?.(item.href)}
+          >
+            <NavIcon href={item.href} />
+            <span>{item.label === "Home Assistant" ? "HA" : item.label === "File Server" ? "Files" : item.label}</span>
+          </a>
+        ))}
+      </nav>
+      {mobileMenuOpen ? (
+        <div
+          className="mobile-menu-scrim"
+          role="presentation"
+          onPointerDown={() => {
+            setMobileMenuOpen(false);
+            mobileMenuButtonRef.current?.focus();
+          }}
+        >
+          <section
+            className="mobile-menu"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mobile menu"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <strong>{footerName}</strong>
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  mobileMenuButtonRef.current?.focus();
+                }}
+              >
+                ×
+              </button>
+            </header>
+            <p>{connectorOnline ? "Connector online" : "Connector offline"} · {roleLabel}</p>
+            <nav aria-label="More destinations">
+              {mobileOverflowItems.map((item) => (
+                <a key={item.href} href={item.href} onClick={() => setMobileMenuOpen(false)}>
+                  <NavIcon href={item.href} />
+                  <span>{item.label}</span>
+                </a>
+              ))}
+            </nav>
+            <button type="button" onClick={onLogout}>Sign out</button>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

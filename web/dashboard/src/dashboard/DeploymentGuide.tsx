@@ -27,7 +27,7 @@ const firstChecks = [
 
 export function DeploymentGuide() {
   return (
-    <section className="dashboard-page" aria-labelledby="route-title">
+    <section className="dashboard-page deployment-page" aria-labelledby="route-title">
       <header className="dashboard-header">
         <div>
           <p className="eyebrow">Hank Remote</p>

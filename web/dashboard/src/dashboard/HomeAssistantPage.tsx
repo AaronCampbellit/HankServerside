@@ -290,12 +290,12 @@ function EntityTable({
             const action = entityAction(entity);
             return (
               <tr key={entity.entity_id}>
-                <td>
+                <td data-label="Entity">
                   <strong>{name}</strong>
                   <span>{entity.entity_id}</span>
                 </td>
-                <td>{domain}</td>
-                <td>
+                <td data-label="Domain">{domain}</td>
+                <td data-label="State">
                   {action?.kind === "toggle" ? (
                     <span className="ha-state-control">
                       <button
@@ -326,7 +326,7 @@ function EntityTable({
                     <span className="status-pill">{entity.state}</span>
                   )}
                 </td>
-                <td>
+                <td data-label="Tile">
                   <button
                     className="secondary"
                     type="button"

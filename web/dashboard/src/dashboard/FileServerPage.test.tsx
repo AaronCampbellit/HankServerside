@@ -111,6 +111,12 @@ describe("FileServerPage", () => {
     renderPage();
 
     expect(await screen.findByRole("button", { name: "sunset-beach.jpg" })).toBeInTheDocument();
+    const filesTable = screen.getByRole("table", { name: "Files" });
+    const rows = within(filesTable).getAllByRole("row");
+    expect(rows[1].querySelector('[data-label="Name"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-label="Size"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-label="Type"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-label="Modified"]')).not.toBeNull();
     const gridButton = screen.getByRole("button", { name: "Grid" });
     expect(gridButton).toBeEnabled();
     fireEvent.click(gridButton);

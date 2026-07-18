@@ -54,4 +54,26 @@ describe("dashboard stylesheet", () => {
     expect(ruleBodies(".kanban-formatbar").at(0)).toContain("padding: 2px");
     expect(ruleBodies(".kanban-upload").at(0)).toContain("min-height: 44px");
   });
+
+  it("defines the authoritative safe-area mobile shell", () => {
+    expect(styles).toContain("/* Mobile responsive pass */");
+    expect(styles).toContain("--mobile-bottom-nav-height: 68px");
+    expect(styles).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(styles).toContain("env(safe-area-inset-bottom)");
+    expect(styles).toContain("min-height: 100dvh");
+    expect(styles).toContain("max-height: calc(100dvh - 16px)");
+  });
+
+  it("defines touch-sized Notes and snapping Kanban behavior", () => {
+    expect(styles).toContain("scroll-snap-type: x mandatory");
+    expect(styles).toContain("grid-auto-columns: min(86vw, 340px)");
+    expect(styles).toContain(".notes-toolbar .icon-button");
+    expect(styles).toContain(".kanban-card-modal-scroll");
+  });
+
+  it("keeps mobile topbar actions visually subordinate to page actions", () => {
+    expect(ruleBodies(".mobile-topbar-action").some((body) => body.includes("background: transparent") && body.includes("color: var(--ink)"))).toBe(true);
+    expect(styles).toContain('.app-shell[data-mobile-search-open="true"] .mobile-topbar-title');
+    expect(styles).toContain("visibility: hidden");
+  });
 });

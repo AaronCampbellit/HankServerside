@@ -594,14 +594,14 @@ export function FileServerPage() {
         <button className="file-check" type="button" aria-label={`Select ${name}`} aria-pressed={selected} onClick={(event) => { event.stopPropagation(); selectItem(item); }}>
           {selected ? <Icon name="check" /> : null}
         </button>
-        <span className="file-guide-name" role="cell">
+        <span className="file-guide-name" role="cell" data-label="Name">
           <span className="file-guide-glyph" style={{ color: fileIconTone(item) }} aria-hidden="true"><Icon name={fileIcon(item)} /></span>
           <button className="file-name-button" type="button" onClick={(event) => { event.stopPropagation(); openItem(item); }}>{name}</button>
         </span>
-        <span className="file-guide-mono" role="cell">{formatSize(item)}</span>
-        <span className="file-guide-muted" role="cell">{fileType(item)}</span>
-        <span className="file-guide-mono" role="cell">{formatModified(item)}</span>
-        <span className="file-guide-menu-cell" role="cell">
+        <span className="file-guide-mono" role="cell" data-label="Size">{formatSize(item)}</span>
+        <span className="file-guide-muted" role="cell" data-label="Type">{fileType(item)}</span>
+        <span className="file-guide-mono" role="cell" data-label="Modified">{formatModified(item)}</span>
+        <span className="file-guide-menu-cell" role="cell" data-label="Actions">
           <button className="file-menu-button" type="button" aria-label={`More actions for ${name}`} onClick={(event) => { event.stopPropagation(); setReady({ menuPath: readyState.menuPath === item.path ? "" : item.path }); }}>
             <Icon name="dots" />
           </button>
