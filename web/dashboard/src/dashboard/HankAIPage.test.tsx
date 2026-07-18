@@ -60,6 +60,18 @@ describe("HankAIPage", () => {
     expect(screen.queryByText("lease-2026.pdf")).not.toBeInTheDocument();
   });
 
+  it("toggles the mobile conversation list", async () => {
+    hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
+    hankAIClient.listSessions.mockResolvedValue({ sessions: [] });
+
+    render(<ConfirmDialogProvider><HankAIPage /></ConfirmDialogProvider>);
+
+    expect(await screen.findByRole("textbox", { name: "Message" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show conversations" }));
+    expect(screen.getByRole("region", { name: "Conversations" })).toHaveClass("mobile-conversations-open");
+    expect(screen.getByRole("button", { name: "Hide conversations" })).toBeInTheDocument();
+  });
+
   it("shows live conversation messages without canned tool review cards", async () => {
     hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
     hankAIClient.listSessions.mockResolvedValue({

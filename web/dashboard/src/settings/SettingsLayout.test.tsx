@@ -56,4 +56,17 @@ describe("SettingsLayout", () => {
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
   });
+
+  it("renders a permission-filtered mobile section chooser", () => {
+    render(
+      <SettingsLayout currentPath="/dashboard/settings/people" isAdmin={false}>
+        <section>People page</section>
+      </SettingsLayout>,
+    );
+
+    const chooser = screen.getByRole("group", { name: "Mobile settings section" });
+    expect(chooser.querySelector("summary strong")).toHaveTextContent("People");
+    expect(within(chooser).getByRole("link", { name: "Home" })).toBeInTheDocument();
+    expect(within(chooser).queryByRole("link", { name: "Apps ADMIN" })).not.toBeInTheDocument();
+  });
 });

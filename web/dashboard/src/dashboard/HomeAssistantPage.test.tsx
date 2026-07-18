@@ -127,6 +127,11 @@ describe("HomeAssistantPage", () => {
     expect(within(table).getByRole("columnheader", { name: "Tile" })).toBeInTheDocument();
     expect(within(table).getByRole("cell", { name: "sensor" })).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "Add Humidity to dashboard" })).toBeInTheDocument();
+    const humidityRow = within(table).getByRole("row", { name: /Humidity/ });
+    expect(humidityRow.querySelector('[data-label="Entity"]')).not.toBeNull();
+    expect(humidityRow.querySelector('[data-label="Domain"]')).not.toBeNull();
+    expect(humidityRow.querySelector('[data-label="State"]')).not.toBeNull();
+    expect(humidityRow.querySelector('[data-label="Tile"]')).not.toBeNull();
   });
 
   it("offers open/close for covers and run for scripts on dashboard tiles", async () => {

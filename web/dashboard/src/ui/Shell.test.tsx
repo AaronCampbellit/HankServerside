@@ -90,4 +90,61 @@ describe("Shell", () => {
     expect(within(footer).getByText("admin")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toHaveClass("nav-footer-signout");
   });
+
+  it("partitions daily mobile routes from the overflow menu", () => {
+    render(
+      <Shell
+        navItems={[
+          { href: "/dashboard", label: "Home" },
+          { href: "/dashboard/hank", label: "Hank" },
+          { href: "/dashboard/profile-notes", label: "Notes" },
+          { href: "/dashboard/home-assistant", label: "Home Assistant" },
+          { href: "/dashboard/file-server", label: "File Server" },
+          { href: "/dashboard/agents", label: "Agents" },
+          { href: "/dashboard/settings", label: "Settings" },
+          { href: "/docs/deployment", label: "Setup Guide" },
+        ]}
+        currentPath="/dashboard/profile-notes"
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+      >
+        <div>Notes content</div>
+      </Shell>,
+    );
+
+    const primary = screen.getByRole("navigation", { name: "Mobile primary" });
+    expect(within(primary).getByRole("link", { name: "Notes" })).toHaveAttribute("aria-current", "page");
+    expect(within(primary).getAllByRole("link")).toHaveLength(5);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const menu = screen.getByRole("dialog", { name: "Mobile menu" });
+    expect(within(menu).getByRole("link", { name: "Agents" })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "Setup Guide" })).toBeInTheDocument();
+  });
+
+  it("dismisses mobile overlays with Escape and restores focus", () => {
+    render(
+      <Shell
+        navItems={[{ href: "/dashboard", label: "Home" }]}
+        currentPath="/dashboard"
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+      >
+        <div>Home</div>
+      </Shell>,
+    );
+
+    const menuButton = screen.getByRole("button", { name: "Open menu" });
+    fireEvent.click(menuButton);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Mobile menu" })).not.toBeInTheDocument();
+    expect(menuButton).toHaveFocus();
+
+    const searchButton = screen.getByRole("button", { name: "Open search" });
+    fireEvent.click(searchButton);
+    expect(screen.getByRole("button", { name: "Close search" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(searchButton).toHaveFocus();
+  });
 });

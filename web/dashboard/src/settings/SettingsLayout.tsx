@@ -67,12 +67,38 @@ export function SettingsLayout({
   children: ReactNode;
 }) {
   const normalizedCurrentPath = currentPath === "/dashboard/settings" ? "/dashboard/settings/home" : currentPath;
-  const tabsByHref = new Map(settingsTabs
-    .filter((tab) => !tab.adminOnly || isAdmin)
-    .map((tab) => [tab.href, tab]));
+  const visibleTabs = settingsTabs.filter((tab) => !tab.adminOnly || isAdmin);
+  const activeTab = visibleTabs.find((tab) => tab.href === normalizedCurrentPath) || visibleTabs[0];
+  const tabsByHref = new Map(visibleTabs.map((tab) => [tab.href, tab]));
 
   return (
     <div className="settings-layout">
+      <details className="settings-mobile-chooser" aria-label="Mobile settings section">
+        <summary>
+          <span>Settings</span>
+          <strong>{activeTab ? guideLabel(activeTab) : "Home"}</strong>
+        </summary>
+        <nav aria-label="Mobile settings destinations">
+          {visibleTabs.map((tab) => {
+            const label = guideLabel(tab);
+            const accessibleLabel = tab.adminOnly ? `${label} ADMIN` : label;
+            return (
+              <a
+                key={tab.href}
+                href={tab.href}
+                aria-current={tab.href === normalizedCurrentPath ? "page" : undefined}
+                aria-label={accessibleLabel}
+                onFocus={() => onPrefetch?.(tab.href)}
+                onTouchStart={() => onPrefetch?.(tab.href)}
+              >
+                <SettingsIcon name={iconFor(tab)} />
+                <span>{label}</span>
+                {tab.adminOnly ? <span className="admin-badge" aria-hidden="true">ADMIN</span> : null}
+              </a>
+            );
+          })}
+        </nav>
+      </details>
       <nav className="settings-subnav" aria-label="Settings sections">
         <h2 className="settings-subnav-title">Settings</h2>
         {settingsGroups.map((group) => {

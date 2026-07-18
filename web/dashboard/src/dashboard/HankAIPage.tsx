@@ -64,6 +64,7 @@ function sessionTitle(session: HankAISession): string {
 
 export function HankAIPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [mobileConversationsOpen, setMobileConversationsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dialog = useConfirmDialog();
 
@@ -127,6 +128,7 @@ export function HankAIPage() {
     try {
       const payload = await hankAIClient.listMessages(sessionID);
       setReady({ selectedSessionID: sessionID, messages: payload.messages || [], notice: "" });
+      setMobileConversationsOpen(false);
     } catch (error) {
       setReady({ notice: errorMessage(error) });
     }
@@ -227,6 +229,15 @@ export function HankAIPage() {
           <h1 id="route-title">HankAI</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <button
+            className="secondary hank-mobile-conversations-toggle"
+            type="button"
+            aria-expanded={mobileConversationsOpen}
+            aria-label={mobileConversationsOpen ? "Hide conversations" : "Show conversations"}
+            onClick={() => setMobileConversationsOpen((open) => !open)}
+          >
+            Conversations
+          </button>
           <span className={`status-pill ${state.sending ? "" : "status-online"}`}>
             <span className={`status-dot ${state.sending ? "warn" : "ok"}`} aria-hidden="true" />
             {state.sending ? "Working…" : "Ready"}
@@ -238,7 +249,7 @@ export function HankAIPage() {
       {state.notice ? <p className="notice-state">{state.notice}</p> : null}
 
       <div className="hank-layout">
-        <section className="settings-panel conversations-panel" aria-label="Conversations">
+        <section className={`settings-panel conversations-panel${mobileConversationsOpen ? " mobile-conversations-open" : ""}`} aria-label="Conversations">
           <div className="panel-heading">
             <h2>Conversations</h2>
             <button type="button" className="secondary" onClick={() => void createSession()}>New chat</button>
