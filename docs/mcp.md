@@ -62,10 +62,37 @@ docs tools.
 | `append_note` | `notes:append` or `notes:write` |
 | `delete_note` | `notes:delete` |
 | `list_context_sources`, `list_context_files`, `search_context`, `read_context_file` | `docs:read` |
+| `list_kanban_boards`, `list_kanban_cards`, `get_kanban_card` | `notes:read` |
+| `create_kanban_card`, `update_kanban_card`, `append_kanban_worklog`, `move_kanban_card` | `notes:write` |
 
 The user picks which scopes to grant on the consent screen; `notes:delete` is unchecked by
 default. Note access is always scoped to the **authenticated user's own profile notes** and is
 audited (`mcp.tool_called`, `mcp_oauth.*`).
+
+### Kanban cards
+
+Kanban tools operate on the existing profile Notes Kanban boards; they do not create a second
+task database. In the Kanban UI, use **Set as default board**, choose an **intake** column, and
+optionally assign unique semantic roles: Planning, Active Work, Rework, Needs Human, Review, and
+Complete. When a create call omits a destination, the server uses the configured default board,
+then its intake column, then its first ordered column. A missing or stale default returns the
+visible board choices instead of guessing.
+
+Read tools expose stable board, column, and card IDs. Writes require those exact IDs and never
+select a card from a human-readable title. `list_kanban_cards` hides columns with the Complete role
+by default, supports text/tag/due-date filters, returns at most 100 cards, and never exposes raw
+`board_json`. `create_kanban_card` should be called only after the user explicitly asks to capture
+a task. MCP cannot delete cards or create, delete, rename, or reorder boards and columns.
+
+Card writes patch the loaded board through the existing Notes revision check. A save conflict is
+retried at most twice after the initial attempt only when the target card and required columns are
+unchanged; otherwise the tool returns the latest targeted state for review. Work-log entries append
+server-dated UTC Progress, Verification, Blocker, or Outcome sections without replacing earlier
+brainstorming or requirements. Successful writes audit identifiers only, never card titles,
+Markdown details, tags, or work-log content.
+
+ChatGPT typed conversations and Codex can use these tools. ChatGPT Voice cannot currently invoke
+apps, so Voice use remains deferred until OpenAI enables apps in Voice.
 
 ### Note and notebook exclusions
 
@@ -99,7 +126,7 @@ and 20 MB of inspected text; individual reads are limited to 400 KB.
 ## Privacy
 
 When used from a cloud assistant, the **content of the docs, the `code-reference/` source
-snapshot, and the notes accessed is sent to that assistant's provider** (e.g. OpenAI for ChatGPT).
+snapshot, and the notes or Kanban cards accessed is sent to that assistant's provider** (e.g. OpenAI for ChatGPT).
 Notes can be personal even though other personal-data surfaces are excluded, and the snapshot
 exposes your application source. Grant a read-only set of scopes if you only want to pull context
 in, and prefer Claude if you do not want note or source content reaching OpenAI.

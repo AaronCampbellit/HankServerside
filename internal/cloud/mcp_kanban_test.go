@@ -181,6 +181,25 @@ func TestMCPKanbanCreateUsesDefaultIntakeAndNormalizesTags(t *testing.T) {
 	}
 }
 
+func TestMCPKanbanCreateFallsBackWhenIntakeColumnIsStale(t *testing.T) {
+	legacy := testMCPKanbanBoard()
+	legacy.IntakeColumnID = "deleted-column"
+	if err := validateKanbanBoard(legacy); err != nil {
+		t.Fatalf("stale intake should remain usable: %v", err)
+	}
+
+	ctx, service, notes, _, userID := setupMCPKanbanService(t)
+	saveMCPKanbanBoard(t, ctx, notes, userID, "work", "Work", false, legacy)
+
+	created, err := service.CreateCard(ctx, userID, mcpKanbanCreateArgs{BoardID: "work", Title: "Fallback task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ColumnID != "planning" {
+		t.Fatalf("created column = %q", created.ColumnID)
+	}
+}
+
 func TestMCPKanbanUpdatePatchesOnlySuppliedFields(t *testing.T) {
 	ctx, service, notes, _, userID := setupMCPKanbanService(t)
 	saveMCPKanbanBoard(t, ctx, notes, userID, "work", "Work", false, testMCPKanbanBoard())

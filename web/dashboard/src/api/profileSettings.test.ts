@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ApiTransport } from "./client";
+import { ApiError, type ApiTransport } from "./client";
 import { mergeDefaultKanbanBoard, ProfileSettingsClient } from "./profileSettings";
 
 describe("ProfileSettingsClient", () => {
@@ -24,5 +24,14 @@ describe("ProfileSettingsClient", () => {
     const current = { dashboard: { density: "compact" }, assistant: { model: "gpt" } };
     expect(mergeDefaultKanbanBoard(current, "work")).toEqual({ ...current, kanban_default_board_id: "work" });
     expect(mergeDefaultKanbanBoard({ ...current, kanban_default_board_id: "work" }, "")).toEqual(current);
+  });
+
+  it("treats missing profile settings as an empty first revision", async () => {
+    const request = vi.fn(async () => {
+      throw new ApiError(404, "not_found", "not found", { error: "not found" });
+    });
+    const client = new ProfileSettingsClient({ request: request as unknown as ApiTransport["request"] });
+
+    await expect(client.load()).resolves.toEqual({ revision: 0, settings: {} });
   });
 });

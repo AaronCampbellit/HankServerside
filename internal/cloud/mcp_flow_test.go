@@ -216,6 +216,37 @@ func TestMCPOAuthEndToEndFlow(t *testing.T) {
 		t.Fatalf("initialize failed: %v", init)
 	}
 
+	saveMCPKanbanBoard(t, ctx, server.notes, user.ID, "work", "Work", false, testMCPKanbanBoard())
+	if _, err := db.SaveUserProfileSettings(ctx, user.ID, nil, json.RawMessage(`{"kanban_default_board_id":"work"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if listed := call(`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"list_kanban_boards","arguments":{}}}`); !strings.Contains(mcpResultText(listed), `"board_id": "work"`) {
+		t.Fatalf("list_kanban_boards result = %v", listed)
+	}
+	if listed := call(`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"list_kanban_cards","arguments":{"query":"offline"}}}`); !strings.Contains(mcpResultText(listed), `"card_id": "research"`) {
+		t.Fatalf("list_kanban_cards result = %v", listed)
+	}
+	if fetched := call(`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"get_kanban_card","arguments":{"card_id":"research"}}}`); !strings.Contains(mcpResultText(fetched), "Capture requirements") {
+		t.Fatalf("get_kanban_card result = %v", fetched)
+	}
+	createdCard := call(`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"create_kanban_card","arguments":{"title":"Voice capture","tags":["Hank"]}}}`)
+	var cardResult mcpKanbanCardResult
+	if err := json.Unmarshal([]byte(mcpResultText(createdCard)), &cardResult); err != nil || cardResult.CardID == "" {
+		t.Fatalf("create_kanban_card result = %v err=%v", createdCard, err)
+	}
+	updatedCard := call(fmt.Sprintf(`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"update_kanban_card","arguments":{"card_id":%q,"title":"Typed capture"}}}`, cardResult.CardID))
+	if !strings.Contains(mcpResultText(updatedCard), "Typed capture") {
+		t.Fatalf("update_kanban_card result = %v", updatedCard)
+	}
+	loggedCard := call(fmt.Sprintf(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"append_kanban_worklog","arguments":{"card_id":%q,"kind":"verification","entry_markdown":"tests passed"}}}`, cardResult.CardID))
+	if !strings.Contains(mcpResultText(loggedCard), "Work log") {
+		t.Fatalf("append_kanban_worklog result = %v", loggedCard)
+	}
+	movedCard := call(fmt.Sprintf(`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"move_kanban_card","arguments":{"card_id":%q,"target_column_id":"active"}}}`, cardResult.CardID))
+	if !strings.Contains(mcpResultText(movedCard), `"column_id": "active"`) {
+		t.Fatalf("move_kanban_card result = %v", movedCard)
+	}
+
 	created := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_note","arguments":{"title":"From MCP","content":"hello from mcp"}}}`)
 	if mcpToolIsError(created) {
 		t.Fatalf("create_note failed: %v", created)

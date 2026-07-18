@@ -1,4 +1,4 @@
-import { apiClient, type ApiTransport } from "./client";
+import { apiClient, ApiError, type ApiTransport } from "./client";
 
 export type ProfileSettings = Record<string, unknown>;
 
@@ -10,8 +10,13 @@ export type ProfileSettingsResponse = {
 export class ProfileSettingsClient {
   constructor(private readonly api: ApiTransport = apiClient) {}
 
-  load() {
-    return this.api.request<ProfileSettingsResponse>("/v1/me/profile");
+  async load(): Promise<ProfileSettingsResponse> {
+    try {
+      return await this.api.request<ProfileSettingsResponse>("/v1/me/profile");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return { revision: 0, settings: {} };
+      throw error;
+    }
   }
 
   save(expectedRevision: number, settings: ProfileSettings) {

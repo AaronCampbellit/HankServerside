@@ -104,23 +104,35 @@ type mcpKanbanNoDefaultError struct {
 }
 
 type mcpKanbanCreateArgs struct {
-	BoardID, ColumnID, Title, DetailsMarkdown, DueDate string
-	Tags                                               []string
+	BoardID         string   `json:"board_id"`
+	ColumnID        string   `json:"column_id"`
+	Title           string   `json:"title"`
+	DetailsMarkdown string   `json:"details_markdown"`
+	DueDate         string   `json:"due_date"`
+	Tags            []string `json:"tags"`
 }
 
 type mcpKanbanUpdateArgs struct {
-	BoardID, CardID                 string
-	Title, DetailsMarkdown, DueDate *string
-	Tags                            *[]string
+	BoardID         string    `json:"board_id"`
+	CardID          string    `json:"card_id"`
+	Title           *string   `json:"title"`
+	DetailsMarkdown *string   `json:"details_markdown"`
+	DueDate         *string   `json:"due_date"`
+	Tags            *[]string `json:"tags"`
 }
 
 type mcpKanbanWorklogArgs struct {
-	BoardID, CardID, EntryMarkdown, Kind string
+	BoardID       string `json:"board_id"`
+	CardID        string `json:"card_id"`
+	EntryMarkdown string `json:"entry_markdown"`
+	Kind          string `json:"kind"`
 }
 
 type mcpKanbanMoveArgs struct {
-	BoardID, CardID, TargetColumnID string
-	TargetIndex                     *int
+	BoardID        string `json:"board_id"`
+	CardID         string `json:"card_id"`
+	TargetColumnID string `json:"target_column_id"`
+	TargetIndex    *int   `json:"target_index"`
 }
 
 type mcpKanbanConflictError struct {
@@ -668,9 +680,6 @@ func validateKanbanBoard(board *protocol.KanbanBoard) error {
 				return err
 			}
 		}
-	}
-	if board.IntakeColumnID != "" && !columnIDs[board.IntakeColumnID] {
-		return errors.New("intake_column_id does not identify a column")
 	}
 	return nil
 }

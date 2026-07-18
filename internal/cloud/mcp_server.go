@@ -136,7 +136,8 @@ func (s *Server) mcpInitializeResult(params json.RawMessage) map[string]any {
 		"serverInfo":      map[string]any{"name": "hank-mcp", "version": "0.1.0"},
 		"instructions": "Hank project context. Use list_docs/search_docs/read_doc to read HankServerside " +
 			"documentation, and the *_note tools to read and write your Hank notes (e.g. save a plan with " +
-			"create_note, or read one with get_note and act on it).",
+			"create_note, or read one with get_note and act on it). Kanban tools list, read, create, update, " +
+			"work-log, and move cards on your configured profile Notes Kanban boards.",
 	}
 }
 

@@ -181,6 +181,9 @@ func TestMCPInitializeAndDispatchNoDB(t *testing.T) {
 	if res["protocolVersion"] != mcpProtocolVersion {
 		t.Fatalf("expected default protocol version, got %v", res["protocolVersion"])
 	}
+	if !strings.Contains(res["instructions"].(string), "Kanban") {
+		t.Fatalf("initialize instructions do not advertise Kanban tools: %v", res["instructions"])
+	}
 
 	auth := mcpAuthContext{}
 	// tools/list returns the tool list
@@ -265,6 +268,23 @@ func TestMCPKanbanAuditMetadataContainsOnlyIdentifiers(t *testing.T) {
 		if !strings.Contains(text, identifier) {
 			t.Fatalf("audit metadata missing %q: %s", identifier, text)
 		}
+	}
+}
+
+func TestMCPKanbanArgumentsDecodeSnakeCaseFields(t *testing.T) {
+	var create mcpKanbanCreateArgs
+	if err := decodeMCPToolArgs(json.RawMessage(`{"board_id":"work","column_id":"ideas","title":"Task","details_markdown":"Details","due_date":"2026-07-25","tags":["Hank"]}`), &create); err != nil {
+		t.Fatal(err)
+	}
+	if create.BoardID != "work" || create.ColumnID != "ideas" || create.DetailsMarkdown != "Details" || create.DueDate != "2026-07-25" {
+		t.Fatalf("create args = %#v", create)
+	}
+	var move mcpKanbanMoveArgs
+	if err := decodeMCPToolArgs(json.RawMessage(`{"board_id":"work","card_id":"card-1","target_column_id":"review","target_index":2}`), &move); err != nil {
+		t.Fatal(err)
+	}
+	if move.BoardID != "work" || move.CardID != "card-1" || move.TargetColumnID != "review" || move.TargetIndex == nil || *move.TargetIndex != 2 {
+		t.Fatalf("move args = %#v", move)
 	}
 }
 
