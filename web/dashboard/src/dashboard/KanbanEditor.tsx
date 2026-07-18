@@ -92,7 +92,7 @@ export function boardToMarkdown(title: string, board: KanbanBoard): string {
   for (const column of ordered(board.columns)) {
     lines.push(`## ${column.title?.trim() || "Untitled column"}`);
     for (const card of ordered(column.cards)) {
-      const cardTitle = cardTitleAndDescription(card).title;
+      const cardTitle = cardTitleAndDescription(card).title.trim();
       if (cardTitle) lines.push(`- ${cardTitle}`);
     }
     lines.push("");
@@ -105,13 +105,14 @@ function cardTitleAndDescription(card: KanbanCard): { title: string; description
   const titleIndex = lines.findIndex((line) => line.trim());
   if (titleIndex < 0) return { title: "Untitled task", description: "" };
   return {
-    title: lines[titleIndex].trim(),
-    description: lines.slice(titleIndex + 1).join("\n").trim(),
+    title: lines[titleIndex],
+    description: lines.slice(titleIndex + 1).join("\n"),
   };
 }
 
 function cardText(title: string, description: string): string {
-  return [title.trim() || "Untitled task", description.trim()].filter(Boolean).join("\n");
+  const safeTitle = title.trim() ? title : "Untitled task";
+  return description.length ? `${safeTitle}\n${description}` : safeTitle;
 }
 
 function CardDescription({ value, attachments }: { value: string; attachments: NoteAttachment[] }) {

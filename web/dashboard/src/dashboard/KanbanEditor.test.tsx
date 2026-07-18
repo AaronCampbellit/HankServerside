@@ -106,6 +106,18 @@ describe("KanbanEditor", () => {
     expect(within(actions).getByRole("button", { name: "Delete Inbox" })).toBeInTheDocument();
   });
 
+  it("preserves a trailing space while editing a task description", () => {
+    Harness({});
+    fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    const description = screen.getByLabelText<HTMLTextAreaElement>("Description");
+    const nextValue = `${description.value} `;
+
+    fireEvent.change(description, { target: { value: nextValue } });
+
+    expect(screen.getByLabelText("Description")).toHaveValue(nextValue);
+  });
+
   it("moves a dragged card without opening its editor", () => {
     Harness({});
     const open = screen.getByRole("button", { name: "Open task Review brief" });
