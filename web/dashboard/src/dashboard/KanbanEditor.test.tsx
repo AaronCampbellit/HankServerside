@@ -79,7 +79,9 @@ describe("KanbanEditor", () => {
     const modal = screen.getByRole("dialog", { name: "Task details" });
     expect(modal).toHaveAttribute("aria-modal", "true");
     fireEvent.click(within(modal).getByRole("button", { name: "Edit description" }));
-    fireEvent.change(within(modal).getByLabelText("Description"), { target: { value: "Send today" } });
+    const description = within(modal).getByLabelText("Description");
+    description.innerHTML = "<p>Send today</p>";
+    fireEvent.input(description, { inputType: "insertText" });
     fireEvent.click(within(modal).getByRole("button", { name: "Bold" }));
     fireEvent.change(within(modal).getByLabelText("Due date"), { target: { value: "2026-07-18" } });
     fireEvent.click(within(modal).getByRole("button", { name: "Cyan card" }));
@@ -110,12 +112,14 @@ describe("KanbanEditor", () => {
     Harness({});
     fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
-    const description = screen.getByLabelText<HTMLTextAreaElement>("Description");
-    const nextValue = `${description.value} `;
+    const description = screen.getByLabelText("Description");
+    const initialText = description.textContent || "";
+    description.innerHTML = `<p>${initialText} </p>`;
+    fireEvent.input(description, { inputType: "insertText" });
+    description.querySelector("p")!.append("next");
+    fireEvent.input(description, { inputType: "insertText" });
 
-    fireEvent.change(description, { target: { value: nextValue } });
-
-    expect(screen.getByLabelText("Description")).toHaveValue(nextValue);
+    expect(screen.getByLabelText("Description")).toHaveTextContent(`${initialText} next`);
   });
 
   it("moves a dragged card without opening its editor", () => {
@@ -237,8 +241,13 @@ describe("KanbanEditor", () => {
     const { change } = Harness({ onUpload: upload });
     fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
-    const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
-    description.setSelectionRange(description.value.length, description.value.length);
+    const description = screen.getByLabelText("Description");
+    const range = document.createRange();
+    range.selectNodeContents(description);
+    range.collapse(false);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
     const first = new File(["one"], "wireframe.png", { type: "image/png" });
     const second = new File(["two"], "second.png", { type: "image/png" });
     const paste = createEvent.paste(description, {

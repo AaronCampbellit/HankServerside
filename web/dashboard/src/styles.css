@@ -5324,24 +5324,55 @@ button.secondary:disabled {
   color: color-mix(in srgb, var(--card-accent) 72%, var(--ink));
 }
 
-.kanban-detail-section textarea {
+.kanban-description-editor {
   width: 100%;
   min-height: 220px;
   display: block;
-  resize: vertical;
   padding: 10px;
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 0 0 7px 7px;
   background: rgba(0,0,0,.1);
   color: var(--ink);
   font: 500 12.5px/1.55 var(--font-sans);
   outline: 0;
+  white-space: pre-wrap;
 }
 
-.kanban-detail-section textarea:focus,
+.kanban-description-editor:focus,
 .kanban-detail-grid input:focus,
 .kanban-detail-grid select:focus {
   border-color: var(--acc-line);
+}
+
+.kanban-description-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--faint);
+}
+
+.kanban-description-editor p,
+.kanban-description-editor ul,
+.kanban-description-editor ol {
+  margin: 0 0 8px;
+}
+
+.kanban-description-editor ul,
+.kanban-description-editor ol {
+  padding-left: 22px;
+}
+
+.kanban-description-editor a {
+  color: color-mix(in srgb, var(--brand-dark) 88%, white);
+}
+
+.kanban-description-editor .kanban-rich-image,
+.kanban-description-editor img {
+  max-width: 100%;
+  max-height: 360px;
+  display: block;
+  margin: 8px 0;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
 .kanban-detail-grid {

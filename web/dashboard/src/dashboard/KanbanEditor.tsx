@@ -299,15 +299,6 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     requestAnimationFrame(() => cardButtonRefs.current.get(cardID)?.focus());
   }
 
-  function formatDescription(prefix: string, suffix = prefix, placeholder = "text", selection?: DescriptionSelection) {
-    if (!selected || !selectedCard || !selectedParts) return;
-    const start = selection?.start ?? selectedParts.description.length;
-    const end = selection?.end ?? start;
-    const selectedText = selectedParts.description.slice(start, end) || placeholder;
-    const description = `${selectedParts.description.slice(0, start)}${prefix}${selectedText}${suffix}${selectedParts.description.slice(end)}`;
-    updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, description) }));
-  }
-
   async function uploadFiles(files: File[], selection?: DescriptionSelection) {
     if (!files.length || !selected) return;
     const cardID = selected.cardID;
@@ -506,7 +497,6 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
           uploadError={uploadError}
           onTitleChange={(value) => updateCard(selected, (card) => ({ ...card, text: cardText(value, selectedParts.description) }))}
           onDescriptionChange={(value) => updateCard(selected, (card) => ({ ...card, text: cardText(selectedParts.title, value) }))}
-          onFormat={formatDescription}
           onMove={(columnID) => moveCard(selected, columnID, Number.MAX_SAFE_INTEGER, true)}
           onDueDateChange={(value) => updateCard(selected, (card) => ({ ...card, due_date: value }))}
           onColorChange={(value) => updateCard(selected, (card) => ({ ...card, color: value }))}

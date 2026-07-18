@@ -1,6 +1,7 @@
-import { useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { KanbanCard, KanbanColumn, NoteAttachment } from "../api/profileNotes";
 import { KanbanRichText } from "./KanbanRichText";
+import { htmlToMarkdown, markdownToHTML } from "./richTextMarkdown";
 
 export type DescriptionSelection = { start: number; end: number };
 
@@ -16,7 +17,6 @@ export type KanbanCardModalProps = {
   uploadError: string;
   onTitleChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
-  onFormat: (prefix: string, suffix?: string, placeholder?: string, selection?: DescriptionSelection) => void;
   onMove: (columnID: string) => void;
   onDueDateChange: (value: string) => void;
   onColorChange: (value: string) => void;
@@ -50,14 +50,32 @@ function referencedAttachments(description: string, attachments: NoteAttachment[
 export function KanbanCardModal(props: KanbanCardModalProps) {
   const {
     card, title, description, columnID, columns, attachments, uploading, deleting, uploadError,
-    onTitleChange, onDescriptionChange, onFormat, onMove, onDueDateChange, onColorChange,
+    onTitleChange, onDescriptionChange, onMove, onDueDateChange, onColorChange,
     onUploadFiles, onMoveLeft, onMoveRight, canMoveLeft, canMoveRight, onDelete, onClose,
   } = props;
   const dialogRef = useRef<HTMLElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionRef = useRef<HTMLDivElement>(null);
+  const lastRenderedDescriptionRef = useRef("");
+  const richCommandPendingRef = useRef(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const cardAttachments = referencedAttachments(description, attachments);
   const currentColumn = columns.find((column) => column.id === columnID);
+
+  useEffect(() => {
+    const editor = descriptionRef.current;
+    if (!editingDescription || !editor) return;
+    if (lastRenderedDescriptionRef.current !== description) {
+      editor.innerHTML = markdownToHTML(description, {
+        resolveImage: (target) => {
+          const match = /^hank-note-attachment:\/\/([^?#]+)/i.exec(target);
+          if (match) return attachments.find((attachment) => attachment.id === match[1])?.download_url || "";
+          return /^(https?:|\/)/i.test(target) ? target : "";
+        },
+      });
+      lastRenderedDescriptionRef.current = description;
+    }
+    editor.focus();
+  }, [attachments, description, editingDescription]);
 
   function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
@@ -83,35 +101,137 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
     if (event.target === event.currentTarget) onClose();
   }
 
-  function formatDescription(prefix: string, suffix = prefix, placeholder = "text") {
-    const input = descriptionRef.current;
-    const start = input?.selectionStart ?? description.length;
-    const end = input?.selectionEnd ?? start;
-    const selectedText = description.slice(start, end) || placeholder;
-    onFormat(prefix, suffix, placeholder, { start, end });
-    requestAnimationFrame(() => {
-      input?.focus();
-      input?.setSelectionRange(start + prefix.length, start + prefix.length + selectedText.length);
-    });
+  function selectionInDescription(): boolean {
+    const editor = descriptionRef.current;
+    const selection = window.getSelection?.();
+    if (!editor || !selection || !selection.rangeCount) return false;
+    return editor.contains(selection.getRangeAt(0).commonAncestorContainer);
   }
 
-  function handleDescriptionPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+  function placeCaretAtEnd(element: HTMLElement) {
+    const selection = window.getSelection?.();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function syncDescriptionFromEditor() {
+    const editor = descriptionRef.current;
+    if (!editor) return;
+    const nextDescription = htmlToMarkdown(editor);
+    lastRenderedDescriptionRef.current = nextDescription;
+    onDescriptionChange(nextDescription);
+  }
+
+  function runRichCommand(command: string, value?: string) {
+    const editor = descriptionRef.current;
+    if (!editor) return;
+    editor.focus();
+    if (!selectionInDescription()) placeCaretAtEnd(editor);
+
+    if (command === "insertUnorderedList" && !(editor.textContent || "").trim()) {
+      const list = document.createElement("ul");
+      const item = document.createElement("li");
+      item.append(document.createElement("br"));
+      list.append(item);
+      editor.replaceChildren(list);
+      placeCaretAtEnd(item);
+      syncDescriptionFromEditor();
+      return;
+    }
+
+    let effectiveCommand = command;
+    let effectiveValue = value;
+    if (command === "createLink" && (window.getSelection?.()?.isCollapsed ?? true)) {
+      effectiveCommand = "insertHTML";
+      effectiveValue = `<a href="${value}" rel="noreferrer">Link</a>`;
+    }
+    if (typeof document.execCommand === "function") {
+      richCommandPendingRef.current = true;
+      document.execCommand(effectiveCommand, false, effectiveValue);
+      if (richCommandPendingRef.current) {
+        richCommandPendingRef.current = false;
+        syncDescriptionFromEditor();
+      }
+      return;
+    }
+    if (command === "insertUnorderedList") {
+      const list = document.createElement("ul");
+      const item = document.createElement("li");
+      item.append(document.createElement("br"));
+      list.append(item);
+      editor.append(list);
+      placeCaretAtEnd(item);
+      syncDescriptionFromEditor();
+    }
+  }
+
+  function handleDescriptionKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter") return;
+    const editor = descriptionRef.current;
+    const selection = window.getSelection?.();
+    if (!editor || !selection || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const selectionElement = range.endContainer.nodeType === Node.ELEMENT_NODE
+      ? range.endContainer as Element
+      : range.endContainer.parentElement;
+    const item = selectionElement?.closest("li");
+    if (!item || !editor.contains(item) || !(item.textContent || "").trim()) return;
+
+    event.preventDefault();
+    if (!range.collapsed) range.deleteContents();
+    const tail = document.createRange();
+    tail.selectNodeContents(item);
+    tail.setStart(range.endContainer, range.endOffset);
+    const remainder = tail.extractContents();
+    const nextItem = document.createElement("li");
+    if (remainder.childNodes.length) nextItem.append(remainder);
+    else nextItem.append(document.createElement("br"));
+    item.after(nextItem);
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(nextItem);
+    nextRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(nextRange);
+    syncDescriptionFromEditor();
+  }
+
+  function markdownSelection(): DescriptionSelection | undefined {
+    const editor = descriptionRef.current;
+    const selection = window.getSelection?.();
+    if (!editor || !selection || !selection.rangeCount) return undefined;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return undefined;
+    const startMarker = document.createTextNode("\uE000");
+    const endMarker = document.createTextNode("\uE001");
+    const endRange = range.cloneRange();
+    endRange.collapse(false);
+    endRange.insertNode(endMarker);
+    const startRange = range.cloneRange();
+    startRange.collapse(true);
+    startRange.insertNode(startMarker);
+    const marked = htmlToMarkdown(editor);
+    startMarker.remove();
+    endMarker.remove();
+    const start = marked.indexOf("\uE000");
+    const markedEnd = marked.indexOf("\uE001");
+    if (start < 0 || markedEnd < start) return undefined;
+    return { start, end: markedEnd - 1 };
+  }
+
+  function handleDescriptionPaste(event: ClipboardEvent<HTMLDivElement>) {
     const files = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file));
     if (!files.length) return;
     event.preventDefault();
-    const input = event.currentTarget;
-    const selection = { start: input.selectionStart, end: input.selectionEnd };
+    const selection = markdownSelection();
     void onUploadFiles(files, selection).then(() => {
       setEditingDescription(false);
-      requestAnimationFrame(() => {
-        const current = descriptionRef.current;
-        if (!current) return;
-        current.focus();
-        current.setSelectionRange(current.value.length, current.value.length);
-      });
     });
   }
 
@@ -175,28 +295,31 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
           <section className="kanban-detail-section">
             <h3>Description</h3>
             <div className="kanban-formatbar" aria-label="Description formatting">
-              <button type="button" aria-label="Bold" disabled={!editingDescription} onClick={() => formatDescription("**", "**", "bold text")}><strong>B</strong></button>
-              <button type="button" aria-label="Italic" disabled={!editingDescription} onClick={() => formatDescription("_", "_", "italic text")}><em>I</em></button>
-              <button type="button" aria-label="Bulleted list" disabled={!editingDescription} onClick={() => formatDescription("- ", "", "list item")}>• List</button>
-              <button type="button" aria-label="Link" disabled={!editingDescription} onClick={() => formatDescription("[", "](https://example.com)", "link title")}>Link</button>
+              <button type="button" aria-label="Bold" disabled={!editingDescription} onClick={() => runRichCommand("bold")}><strong>B</strong></button>
+              <button type="button" aria-label="Italic" disabled={!editingDescription} onClick={() => runRichCommand("italic")}><em>I</em></button>
+              <button type="button" aria-label="Bulleted list" disabled={!editingDescription} onClick={() => runRichCommand("insertUnorderedList")}>• List</button>
+              <button type="button" aria-label="Link" disabled={!editingDescription} onClick={() => runRichCommand("createLink", "https://example.com")}>Link</button>
               <button className="kanban-description-mode" type="button" aria-label={editingDescription ? "Preview description" : "Edit description"} onClick={() => setEditingDescription((current) => !current)}>
                 {editingDescription ? "Preview" : "Edit"}
               </button>
             </div>
             {editingDescription ? (
-              <label>
-                <span className="visually-hidden">Description</span>
-                <textarea
-                  ref={descriptionRef}
-                  autoFocus
-                  aria-label="Description"
-                  rows={9}
-                  value={description}
-                  onChange={(event) => onDescriptionChange(event.target.value)}
-                  onPaste={handleDescriptionPaste}
-                  placeholder="Add context, links, checklists, or notes…"
-                />
-              </label>
+              <div
+                ref={descriptionRef}
+                className="kanban-description-editor"
+                contentEditable
+                data-placeholder="Add context, links, checklists, or notes…"
+                role="textbox"
+                aria-label="Description"
+                aria-multiline="true"
+                suppressContentEditableWarning
+                onInput={() => {
+                  richCommandPendingRef.current = false;
+                  syncDescriptionFromEditor();
+                }}
+                onKeyDown={handleDescriptionKeyDown}
+                onPaste={handleDescriptionPaste}
+              />
             ) : (
               <div
                 className="kanban-description-preview"

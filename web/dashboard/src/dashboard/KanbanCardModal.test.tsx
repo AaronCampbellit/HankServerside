@@ -18,7 +18,6 @@ function modalProps(overrides: Partial<KanbanCardModalProps> = {}): KanbanCardMo
     uploadError: "",
     onTitleChange: vi.fn(),
     onDescriptionChange: vi.fn(),
-    onFormat: vi.fn(),
     onMove: vi.fn(),
     onDueDateChange: vi.fn(),
     onColorChange: vi.fn(),
@@ -34,7 +33,10 @@ function modalProps(overrides: Partial<KanbanCardModalProps> = {}): KanbanCardMo
 }
 
 describe("KanbanCardModal", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    Reflect.deleteProperty(document, "execCommand");
+  });
 
   it("opens as a modal card and focuses its title", () => {
     render(<KanbanCardModal {...modalProps()} />);
@@ -81,8 +83,15 @@ describe("KanbanCardModal", () => {
     const onUploadFiles = vi.fn(async () => undefined);
     render(<KanbanCardModal {...modalProps({ onUploadFiles, description: "Before after" })} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
-    const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
-    description.setSelectionRange(7, 7);
+    const description = screen.getByLabelText("Description");
+    const text = description.querySelector("p")?.firstChild;
+    expect(text).not.toBeNull();
+    const range = document.createRange();
+    range.setStart(text!, 7);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
     const image = new File(["png"], "capture.png", { type: "image/png" });
     const paste = createEvent.paste(description, {
       bubbles: true,
@@ -129,7 +138,69 @@ describe("KanbanCardModal", () => {
     expect(within(descriptionSection!).queryByText(attachment.markdown_reference)).not.toBeInTheDocument();
 
     fireEvent.click(within(descriptionSection!).getByRole("button", { name: "Edit description" }));
-    expect(screen.getByLabelText("Description")).toHaveValue(attachment.markdown_reference);
+    const editor = screen.getByLabelText("Description");
+    expect(within(editor).getByRole("img", { name: "capture.png" })).toHaveAttribute("src", attachment.download_url);
+    expect(editor).not.toHaveTextContent(attachment.markdown_reference);
+  });
+
+  it("renders markdown formatting while the description is being edited", () => {
+    render(<KanbanCardModal {...modalProps({ description: "**bold text**" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+
+    const editor = screen.getByLabelText("Description");
+    expect(editor.tagName).toBe("DIV");
+    expect(editor.querySelector("strong")).toHaveTextContent("bold text");
+    expect(editor).not.toHaveTextContent("**");
+  });
+
+  it("starts an empty bullet without inserting placeholder text", () => {
+    const onDescriptionChange = vi.fn();
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => true),
+    });
+    render(<KanbanCardModal {...modalProps({ description: "", onDescriptionChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
+
+    const editor = screen.getByLabelText("Description");
+    expect(editor.querySelectorAll("li")).toHaveLength(1);
+    expect(editor).not.toHaveTextContent("list item");
+    expect(onDescriptionChange).toHaveBeenLastCalledWith("-");
+  });
+
+  it("continues a bullet on the next line when Enter is pressed", () => {
+    const onDescriptionChange = vi.fn();
+    render(<KanbanCardModal {...modalProps({ description: "- First item", onDescriptionChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    const editor = screen.getByLabelText("Description");
+    const item = editor.querySelector("li");
+    expect(item).not.toBeNull();
+    const range = document.createRange();
+    range.selectNodeContents(item!);
+    range.collapse(false);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(editor.querySelectorAll("li")).toHaveLength(2);
+    expect(onDescriptionChange).toHaveBeenLastCalledWith("- First item\n-");
+  });
+
+  it("does not save empty inline formatting nodes as markdown markers", () => {
+    const onDescriptionChange = vi.fn();
+    render(<KanbanCardModal {...modalProps({ description: "", onDescriptionChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    const editor = screen.getByLabelText("Description");
+    editor.innerHTML = "<ul><li>First item</li><li>Second item<strong><br></strong></li></ul>";
+
+    fireEvent.input(editor, { inputType: "insertText" });
+
+    expect(onDescriptionChange).toHaveBeenLastCalledWith("- First item\n- Second item");
   });
 
   it("opens the editor when the description surface is clicked", () => {
