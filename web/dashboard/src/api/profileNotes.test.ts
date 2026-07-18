@@ -72,11 +72,13 @@ describe("ProfileNotesClient", () => {
     }) as T);
     const client = new ProfileNotesClient({ request: request as unknown as ApiTransport["request"] });
     const board = {
+      intake_column_id: "todo",
       columns: [{
         id: "todo",
         title: "To do",
+        role: "planning",
         sort_order: 0,
-        cards: [{ id: "task", text: "Ship it", sort_order: 0, color: "cyan", due_date: "2026-07-18" }],
+        cards: [{ id: "task", text: "Ship it", sort_order: 0, color: "cyan", due_date: "2026-07-18", tags: ["Hank", "Release"] }],
       }],
     };
 

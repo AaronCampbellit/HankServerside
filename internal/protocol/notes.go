@@ -17,6 +17,7 @@ type KanbanCard struct {
 	SortOrder int       `json:"sort_order"`
 	Color     string    `json:"color,omitempty"`
 	DueDate   string    `json:"due_date,omitempty"`
+	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -24,6 +25,7 @@ type KanbanCard struct {
 type KanbanColumn struct {
 	ID        string       `json:"id"`
 	Title     string       `json:"title"`
+	Role      string       `json:"role,omitempty"`
 	SortOrder int          `json:"sort_order"`
 	Cards     []KanbanCard `json:"cards"`
 	CreatedAt time.Time    `json:"created_at"`
@@ -31,9 +33,10 @@ type KanbanColumn struct {
 }
 
 type KanbanBoard struct {
-	Columns   []KanbanColumn `json:"columns"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	IntakeColumnID string         `json:"intake_column_id,omitempty"`
+	Columns        []KanbanColumn `json:"columns"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
 type NoteSummary struct {

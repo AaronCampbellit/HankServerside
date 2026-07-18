@@ -21,16 +21,19 @@ export type KanbanCard = {
   sort_order?: number;
   color?: string;
   due_date?: string;
+  tags?: string[];
 };
 
 export type KanbanColumn = {
   id?: string;
   title?: string;
+  role?: "planning" | "active" | "rework" | "human" | "review" | "complete" | string;
   sort_order?: number;
   cards?: KanbanCard[];
 };
 
 export type KanbanBoard = {
+  intake_column_id?: string;
   columns?: KanbanColumn[];
 };
 

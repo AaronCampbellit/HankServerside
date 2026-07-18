@@ -47,6 +47,52 @@ func TestAppendNoteContentRequiresContent(t *testing.T) {
 	}
 }
 
+func TestProfileNotesKanbanWorkflowMetadataRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_kanban_metadata", Email: "kanban-metadata@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	token := "kanban-metadata-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_kanban_metadata", UserID: user.ID, TokenHash: hashToken(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	board := &protocol.KanbanBoard{
+		IntakeColumnID: "ideas",
+		Columns: []protocol.KanbanColumn{{
+			ID: "ideas", Title: "Brainstorm", Role: "planning", SortOrder: 0,
+			Cards: []protocol.KanbanCard{{
+				ID: "offline-sync", Text: "Research offline sync\nCapture constraints",
+				SortOrder: 0, Color: "cyan", DueDate: "2026-07-24",
+				Tags: []string{"Hank", "Research"},
+			}},
+		}},
+	}
+
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", protocol.NotesSaveRequest{
+		NoteID: "work", Title: "Work", PageType: protocol.NotePageTypeKanban, Board: board,
+	}, nil)
+
+	var fetched protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/work", nil, &fetched)
+	if fetched.Board == nil || fetched.Board.IntakeColumnID != "ideas" {
+		t.Fatalf("fetched board = %#v", fetched.Board)
+	}
+	column := fetched.Board.Columns[0]
+	card := column.Cards[0]
+	if column.Role != "planning" || card.Color != "cyan" || card.DueDate != "2026-07-24" || strings.Join(card.Tags, ",") != "Hank,Research" {
+		t.Fatalf("fetched workflow metadata = column:%#v card:%#v", column, card)
+	}
+}
+
 func TestExternalProfileNotesAPIReadSearchTagsAndAppend(t *testing.T) {
 	t.Parallel()
 
