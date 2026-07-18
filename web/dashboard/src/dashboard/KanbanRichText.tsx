@@ -31,7 +31,7 @@ function renderInline(value: string, attachments: NoteAttachment[], keyPrefix: s
       const href = safeHref(match[5]);
       nodes.push(href ? <a key={key} href={href} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>{match[4]}</a> : match[4]);
     } else if (match[6] !== undefined) {
-      nodes.push(<strong key={key}>{match[6]}</strong>);
+      nodes.push(<strong className="kanban-rich-strong" key={key}>{match[6]}</strong>);
     } else if (match[7] !== undefined) {
       nodes.push(<em key={key}>{match[7]}</em>);
     }

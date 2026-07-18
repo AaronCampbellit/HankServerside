@@ -4869,6 +4869,12 @@ button.secondary:disabled {
   margin: 0;
 }
 
+.kanban-card-description .kanban-rich-strong {
+  color: color-mix(in srgb, var(--ink) 92%, var(--muted));
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+
 .kanban-card-description a {
   color: color-mix(in srgb, var(--brand-dark) 88%, white);
   text-decoration: none;

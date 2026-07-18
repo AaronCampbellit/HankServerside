@@ -66,6 +66,12 @@ describe("KanbanEditor", () => {
     expect(boardToMarkdown("Client Work", board)).toContain("## Doing\n- Draft proposal");
   });
 
+  it("marks bold card text for stronger visual contrast", () => {
+    Harness({});
+
+    expect(screen.getByText("scope")).toHaveClass("kanban-rich-strong");
+  });
+
   it("adds, edits, formats, searches, and explicitly moves a task", async () => {
     const { change } = Harness({});
 
