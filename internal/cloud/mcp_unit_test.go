@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
+	"github.com/dropfile/hankremote/internal/protocol"
 )
 
 // These tests cover the DB-independent MCP logic and run without Postgres.
@@ -125,10 +128,10 @@ func TestMCPDocsIndex(t *testing.T) {
 
 func TestMCPToolListAndLookup(t *testing.T) {
 	defs := mcpToolDefs()
-	if len(defs) != 15 {
-		t.Fatalf("expected 15 tools, got %d", len(defs))
+	if len(defs) != 22 {
+		t.Fatalf("expected 22 tools, got %d", len(defs))
 	}
-	for _, name := range []string{"list_docs", "search_docs", "read_doc", "create_note", "delete_note", "append_note", "list_context_sources", "list_context_files", "search_context", "read_context_file"} {
+	for _, name := range []string{"list_docs", "search_docs", "read_doc", "create_note", "delete_note", "append_note", "list_context_sources", "list_context_files", "search_context", "read_context_file", "list_kanban_boards", "list_kanban_cards", "get_kanban_card", "create_kanban_card", "update_kanban_card", "append_kanban_worklog", "move_kanban_card"} {
 		if _, ok := mcpToolByName(name); !ok {
 			t.Fatalf("tool %q not found", name)
 		}
@@ -146,6 +149,23 @@ func TestMCPToolListAndLookup(t *testing.T) {
 		if schema["type"] != "object" {
 			t.Fatalf("tool %v has non-object inputSchema", tool["name"])
 		}
+		name, _ := tool["name"].(string)
+		if strings.Contains(name, "kanban") {
+			annotations, _ := tool["annotations"].(map[string]any)
+			readOnly, _ := annotations["readOnlyHint"].(bool)
+			isRead := strings.HasPrefix(name, "list_") || strings.HasPrefix(name, "get_")
+			if readOnly != isRead {
+				t.Fatalf("tool %s annotations = %#v", name, annotations)
+			}
+			if !isRead && annotations["destructiveHint"] != false {
+				t.Fatalf("tool %s must be non-destructive: %#v", name, annotations)
+			}
+		}
+	}
+	readDef, _ := mcpToolByName("list_kanban_boards")
+	writeDef, _ := mcpToolByName("create_kanban_card")
+	if strings.Join(readDef.Scopes, ",") != domain.NotesAPIScopeRead || strings.Join(writeDef.Scopes, ",") != domain.NotesAPIScopeWrite {
+		t.Fatalf("Kanban scopes read=%v write=%v", readDef.Scopes, writeDef.Scopes)
 	}
 }
 
@@ -183,6 +203,68 @@ func TestMCPInitializeAndDispatchNoDB(t *testing.T) {
 	resp, _ = s.handleMCPMessage(context.Background(), auth, []byte(`{"jsonrpc":"2.0","id":3,"method":"bogus"}`))
 	if _, ok := resp.(map[string]any)["error"]; !ok {
 		t.Fatalf("unknown method should be a JSON-RPC error: %v", resp)
+	}
+}
+
+type staticMCPKanbanStore struct {
+	notes    []domain.UserNote
+	settings domain.UserProfileSettings
+}
+
+func (s staticMCPKanbanStore) ListProfileNotes(context.Context, string, bool) ([]domain.UserNote, error) {
+	return s.notes, nil
+}
+
+func (s staticMCPKanbanStore) GetUserProfileSettings(context.Context, string) (domain.UserProfileSettings, error) {
+	return s.settings, nil
+}
+
+type staticMCPKanbanNotes struct{ fetched protocol.NotesFetchResponse }
+
+func (s *staticMCPKanbanNotes) FetchProfile(context.Context, string, string) (protocol.NotesFetchResponse, error) {
+	return s.fetched, nil
+}
+
+func (s *staticMCPKanbanNotes) SaveProfile(context.Context, string, string, protocol.NotesSaveRequest) (protocol.NotesSaveResponse, error) {
+	return protocol.NotesSaveResponse{}, errors.New("unexpected save")
+}
+
+func TestMCPDispatchesKanbanReadWithoutDB(t *testing.T) {
+	board := testMCPKanbanBoard()
+	kanbanStore := staticMCPKanbanStore{
+		notes:    []domain.UserNote{{NoteID: "work", OwnerUserID: "u1", Title: "Work", PageType: protocol.NotePageTypeKanban}},
+		settings: domain.UserProfileSettings{Settings: json.RawMessage(`{"kanban_default_board_id":"work"}`)},
+	}
+	kanbanNotes := &staticMCPKanbanNotes{fetched: protocol.NotesFetchResponse{NoteID: "work", Title: "Work", Revision: "1", PageType: protocol.NotePageTypeKanban, Board: board}}
+	s := &Server{kanban: newMCPKanbanService(kanbanStore, kanbanNotes, time.Now)}
+	auth := mcpAuthContext{User: domain.User{ID: "u1"}, Token: domain.MCPToken{Scopes: []string{domain.NotesAPIScopeRead}}}
+
+	result := s.mcpToolsCall(context.Background(), auth, json.RawMessage(`{"name":"list_kanban_boards","arguments":{}}`))
+	if result["isError"] == true || !strings.Contains(mcpFirstText(result), `"board_id": "work"`) {
+		t.Fatalf("list_kanban_boards = %#v", result)
+	}
+}
+
+func TestMCPKanbanAuditMetadataContainsOnlyIdentifiers(t *testing.T) {
+	result := mcpKanbanCardResult{
+		BoardID: "work", CardID: "card-1", ColumnID: "review",
+		Title: "Secret title", DetailsMarkdown: "Secret details", Tags: []string{"Secret"},
+	}
+	metadata := mcpKanbanAuditMetadata("move_kanban_card", "chatgpt", result, map[string]string{"source_column_id": "active"})
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, secret := range []string{"Secret title", "Secret details", "Secret"} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("audit metadata leaked card content: %s", text)
+		}
+	}
+	for _, identifier := range []string{"work", "card-1", "review", "active", "chatgpt"} {
+		if !strings.Contains(text, identifier) {
+			t.Fatalf("audit metadata missing %q: %s", identifier, text)
+		}
 	}
 }
 

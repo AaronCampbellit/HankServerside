@@ -19,6 +19,55 @@ import (
 	"github.com/dropfile/hankremote/internal/domain"
 )
 
+func TestMCPKanbanToolsEndToEnd(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := storeForTest(t)
+	defer db.Close()
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_mcp_kanban_flow", Email: "mcp-kanban-flow@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	must(t, db.CreateUser(ctx, user))
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	saveMCPKanbanBoard(t, ctx, server.notes, user.ID, "work", "Work", false, testMCPKanbanBoard())
+	if _, err := db.SaveUserProfileSettings(ctx, user.ID, nil, json.RawMessage(`{"kanban_default_board_id":"work"}`)); err != nil {
+		t.Fatal(err)
+	}
+	auth := mcpAuthContext{User: user, Token: domain.MCPToken{ClientID: "chatgpt", Scopes: []string{domain.NotesAPIScopeRead, domain.NotesAPIScopeWrite}}}
+
+	call := func(name, arguments string) string {
+		t.Helper()
+		text, err := server.executeMCPTool(ctx, auth, name, json.RawMessage(arguments))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !json.Valid([]byte(text)) || strings.Contains(text, "board_json") {
+			t.Fatalf("%s returned invalid or raw JSON: %s", name, text)
+		}
+		return text
+	}
+
+	if text := call("list_kanban_boards", `{}`); !strings.Contains(text, `"board_id": "work"`) {
+		t.Fatalf("list boards = %s", text)
+	}
+	if text := call("list_kanban_cards", `{"query":"offline"}`); !strings.Contains(text, `"card_id": "research"`) {
+		t.Fatalf("list cards = %s", text)
+	}
+	call("get_kanban_card", `{"card_id":"research"}`)
+	var created mcpKanbanCardResult
+	if err := json.Unmarshal([]byte(call("create_kanban_card", `{"title":"MCP task","tags":["Hank"]}`)), &created); err != nil || created.CardID == "" {
+		t.Fatalf("created = %#v err=%v", created, err)
+	}
+	call("update_kanban_card", fmt.Sprintf(`{"card_id":%q,"title":"Updated MCP task"}`, created.CardID))
+	call("append_kanban_worklog", fmt.Sprintf(`{"card_id":%q,"kind":"verification","entry_markdown":"tests passed"}`, created.CardID))
+	call("move_kanban_card", fmt.Sprintf(`{"card_id":%q,"target_column_id":"active"}`, created.CardID))
+
+	readOnly := mcpAuthContext{User: user, Token: domain.MCPToken{Scopes: []string{domain.NotesAPIScopeRead}}}
+	denied := server.mcpToolsCall(ctx, readOnly, json.RawMessage(`{"name":"create_kanban_card","arguments":{"title":"Denied"}}`))
+	if denied["isError"] != true {
+		t.Fatalf("write without notes:write = %#v", denied)
+	}
+}
+
 // TestMCPOAuthEndToEndFlow exercises the full remote MCP path against a real
 // store: DCR -> authorize/consent -> token (PKCE) -> POST /v1/mcp tools, plus
 // scope enforcement, code single-use, unauthorized discovery, and refresh.

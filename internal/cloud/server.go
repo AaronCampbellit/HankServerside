@@ -45,6 +45,7 @@ type Server struct {
 	appTickets                 *appWebSocketTicketRegistry
 	appPackages                *appPackageStagingRegistry
 	notes                      *cloudNotesService
+	kanban                     *mcpKanbanService
 	collaboration              *noteCollaborationHub
 	agentRequests              *agentRequestRegistry
 	syncs                      *homeSyncController
@@ -133,6 +134,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		runtimeVersion:        "dev",
 		httpBaseCancel:        httpBaseCancel,
 	}
+	server.kanban = newMCPKanbanService(server.store, server.notes, func() time.Time { return time.Now().UTC() })
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.handleLoginPage)

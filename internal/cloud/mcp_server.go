@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -197,6 +198,20 @@ func mcpAuthHasAnyScope(auth mcpAuthContext, scopes []string) bool {
 }
 
 func mcpFriendlyError(err error) string {
+	var noDefault *mcpKanbanNoDefaultError
+	if errors.As(err, &noDefault) {
+		text, marshalErr := jsonText(map[string]any{"error": noDefault.Error(), "boards": noDefault.Boards})
+		if marshalErr == nil {
+			return text
+		}
+	}
+	var conflict *mcpKanbanConflictError
+	if errors.As(err, &conflict) {
+		text, marshalErr := jsonText(conflict)
+		if marshalErr == nil {
+			return text
+		}
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return "not found"
 	}
@@ -219,6 +234,83 @@ func (s *Server) executeMCPTool(ctx context.Context, auth mcpAuthContext, name s
 		return nil
 	}
 	switch name {
+	case "list_kanban_boards":
+		boards, err := s.kanban.ListBoards(ctx, userID)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(map[string]any{"boards": boards})
+	case "list_kanban_cards":
+		var args mcpKanbanListCardsArgs
+		if err := decodeMCPToolArgs(rawArgs, &args); err != nil {
+			return "", err
+		}
+		cards, err := s.kanban.ListCards(ctx, userID, args)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(map[string]any{"cards": cards})
+	case "get_kanban_card":
+		var args struct {
+			BoardID string `json:"board_id"`
+			CardID  string `json:"card_id"`
+		}
+		if err := decodeMCPToolArgs(rawArgs, &args); err != nil {
+			return "", err
+		}
+		card, err := s.kanban.GetCard(ctx, userID, args.BoardID, args.CardID)
+		if err != nil {
+			return "", err
+		}
+		return jsonText(card)
+	case "create_kanban_card":
+		var args mcpKanbanCreateArgs
+		if err := decodeMCPToolArgs(rawArgs, &args); err != nil {
+			return "", err
+		}
+		card, err := s.kanban.CreateCard(ctx, userID, args)
+		if err != nil {
+			return "", err
+		}
+		s.auditMCPKanbanWrite(ctx, auth, name, card, nil)
+		return jsonText(card)
+	case "update_kanban_card":
+		var args mcpKanbanUpdateArgs
+		if err := decodeMCPToolArgs(rawArgs, &args); err != nil {
+			return "", err
+		}
+		card, err := s.kanban.UpdateCard(ctx, userID, args)
+		if err != nil {
+			return "", err
+		}
+		s.auditMCPKanbanWrite(ctx, auth, name, card, nil)
+		return jsonText(card)
+	case "append_kanban_worklog":
+		var args mcpKanbanWorklogArgs
+		if err := decodeMCPToolArgs(rawArgs, &args); err != nil {
+			return "", err
+		}
+		card, err := s.kanban.AppendWorklog(ctx, userID, args)
+		if err != nil {
+			return "", err
+		}
+		s.auditMCPKanbanWrite(ctx, auth, name, card, nil)
+		return jsonText(card)
+	case "move_kanban_card":
+		var args mcpKanbanMoveArgs
+		if err := decodeMCPToolArgs(rawArgs, &args); err != nil {
+			return "", err
+		}
+		before, err := s.kanban.GetCard(ctx, userID, args.BoardID, args.CardID)
+		if err != nil {
+			return "", err
+		}
+		card, err := s.kanban.MoveCard(ctx, userID, args)
+		if err != nil {
+			return "", err
+		}
+		s.auditMCPKanbanWrite(ctx, auth, name, card, map[string]string{"source_column_id": before.ColumnID, "destination_column_id": card.ColumnID})
+		return jsonText(card)
 	case "list_context_sources":
 		sources, err := s.store.ListMCPContextSourcesByUser(ctx, userID, true)
 		if err != nil {
@@ -471,6 +563,35 @@ func (s *Server) auditMCPWrite(ctx context.Context, auth mcpAuthContext, tool st
 		"tool":      tool,
 		"client_id": auth.Token.ClientID,
 	})
+}
+
+func (s *Server) auditMCPKanbanWrite(ctx context.Context, auth mcpAuthContext, tool string, result mcpKanbanCardResult, extra map[string]string) {
+	metadata := mcpKanbanAuditMetadata(tool, auth.Token.ClientID, result, extra)
+	s.audit(ctx, "mcp.tool_called", auditSeverityInfo, auth.User.ID, "", "", requestIDFromContext(ctx), "mcp_kanban_card", result.CardID, metadata)
+}
+
+func mcpKanbanAuditMetadata(tool string, clientID string, result mcpKanbanCardResult, extra map[string]string) map[string]any {
+	metadata := map[string]any{
+		"tool": tool, "client_id": clientID,
+		"board_id": result.BoardID, "card_id": result.CardID,
+		"column_id": result.ColumnID,
+	}
+	for key, value := range extra {
+		metadata[key] = value
+	}
+	return metadata
+}
+
+func decodeMCPToolArgs(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid tool arguments: %w", err)
+	}
+	return nil
 }
 
 func jsonText(v any) (string, error) {

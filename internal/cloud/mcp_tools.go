@@ -9,6 +9,7 @@ type mcpToolDef struct {
 	Description string
 	InputSchema map[string]any
 	Scopes      []string
+	Annotations map[string]any
 }
 
 func mcpObjectSchema(props map[string]any, required ...string) map[string]any {
@@ -27,6 +28,24 @@ func mcpStr(desc string) map[string]any { return map[string]any{"type": "string"
 func mcpInt(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
+func mcpBool(desc string) map[string]any {
+	return map[string]any{"type": "boolean", "description": desc}
+}
+func mcpStringArray(desc string) map[string]any {
+	return map[string]any{"type": "array", "description": desc, "items": map[string]any{"type": "string"}}
+}
+func mcpEnum(desc string, values ...string) map[string]any {
+	items := make([]any, len(values))
+	for index, value := range values {
+		items[index] = value
+	}
+	return map[string]any{"type": "string", "description": desc, "enum": items}
+}
+
+var (
+	mcpReadOnlyAnnotations  = map[string]any{"readOnlyHint": true}
+	mcpSafeWriteAnnotations = map[string]any{"readOnlyHint": false, "destructiveHint": false}
+)
 
 func mcpToolDefs() []mcpToolDef {
 	return []mcpToolDef{
@@ -126,6 +145,71 @@ func mcpToolDefs() []mcpToolDef {
 			}, "note_id"),
 			Scopes: []string{domain.NotesAPIScopeDelete},
 		},
+		{
+			Name: "list_kanban_boards", Description: "List your MCP-visible profile Notes Kanban boards, ordered columns, workflow roles, intake configuration, card counts, revisions, and usable default board.",
+			InputSchema: mcpObjectSchema(map[string]any{}), Scopes: []string{domain.NotesAPIScopeRead}, Annotations: mcpReadOnlyAnnotations,
+		},
+		{
+			Name: "list_kanban_cards", Description: "List and filter cards on an exact board_id or the configured default Kanban board. Completed cards are hidden unless requested.",
+			InputSchema: mcpObjectSchema(map[string]any{
+				"board_id":         mcpStr("Optional exact board ID; defaults to the configured default board."),
+				"column_id":        mcpStr("Optional exact column ID."),
+				"role":             mcpEnum("Optional semantic column role.", "planning", "active", "rework", "human", "review", "complete"),
+				"query":            mcpStr("Optional case-insensitive title and Markdown details query."),
+				"tags":             mcpStringArray("Optional tags; every supplied tag must match."),
+				"due_from":         mcpStr("Optional inclusive YYYY-MM-DD lower due-date bound."),
+				"due_through":      mcpStr("Optional inclusive YYYY-MM-DD upper due-date bound."),
+				"include_complete": mcpBool("Include cards in a column with the complete role."),
+				"limit":            map[string]any{"type": "integer", "description": "Maximum results; defaults to 50.", "minimum": 1, "maximum": 100},
+			}), Scopes: []string{domain.NotesAPIScopeRead}, Annotations: mcpReadOnlyAnnotations,
+		},
+		{
+			Name: "get_kanban_card", Description: "Read one Kanban card by exact card_id from an exact board_id or the configured default board, including Markdown details and workflow context.",
+			InputSchema: mcpObjectSchema(map[string]any{
+				"board_id": mcpStr("Optional exact board ID; defaults to the configured default board."),
+				"card_id":  mcpStr("Exact card ID returned by a Kanban read tool."),
+			}, "card_id"), Scopes: []string{domain.NotesAPIScopeRead}, Annotations: mcpReadOnlyAnnotations,
+		},
+		{
+			Name: "create_kanban_card", Description: "Create a Kanban card. Call only after the user explicitly asks to capture a task. Uses an exact destination or the configured default board and intake column.",
+			InputSchema: mcpObjectSchema(map[string]any{
+				"board_id":         mcpStr("Optional exact board ID; defaults to the configured default board."),
+				"column_id":        mcpStr("Optional exact destination column ID; defaults to intake then first column."),
+				"title":            mcpStr("Required card title."),
+				"details_markdown": mcpStr("Optional Markdown details."),
+				"due_date":         mcpStr("Optional YYYY-MM-DD due date."),
+				"tags":             mcpStringArray("Optional card tags."),
+			}, "title"), Scopes: []string{domain.NotesAPIScopeWrite}, Annotations: mcpSafeWriteAnnotations,
+		},
+		{
+			Name: "update_kanban_card", Description: "Patch supplied fields on one exact Kanban card without rewriting unrelated card or board data.",
+			InputSchema: mcpObjectSchema(map[string]any{
+				"board_id":         mcpStr("Optional exact board ID; defaults to the configured default board."),
+				"card_id":          mcpStr("Exact card ID returned by a Kanban read tool."),
+				"title":            mcpStr("Optional replacement title; cannot be empty."),
+				"details_markdown": mcpStr("Optional replacement Markdown details."),
+				"due_date":         mcpStr("Optional YYYY-MM-DD due date; empty clears it."),
+				"tags":             mcpStringArray("Optional replacement tags; empty clears them."),
+			}, "card_id"), Scopes: []string{domain.NotesAPIScopeWrite}, Annotations: mcpSafeWriteAnnotations,
+		},
+		{
+			Name: "append_kanban_worklog", Description: "Append a server-dated progress, verification, blocker, or outcome entry while preserving the card's original Markdown details.",
+			InputSchema: mcpObjectSchema(map[string]any{
+				"board_id":       mcpStr("Optional exact board ID; defaults to the configured default board."),
+				"card_id":        mcpStr("Exact card ID returned by a Kanban read tool."),
+				"entry_markdown": mcpStr("Markdown work-log entry to append."),
+				"kind":           mcpEnum("Work-log entry kind.", "progress", "verification", "blocker", "outcome"),
+			}, "card_id", "entry_markdown", "kind"), Scopes: []string{domain.NotesAPIScopeWrite}, Annotations: mcpSafeWriteAnnotations,
+		},
+		{
+			Name: "move_kanban_card", Description: "Move or reorder one exact Kanban card in an exact destination column. The server does not impose a workflow order.",
+			InputSchema: mcpObjectSchema(map[string]any{
+				"board_id":         mcpStr("Optional exact board ID; defaults to the configured default board."),
+				"card_id":          mcpStr("Exact card ID returned by a Kanban read tool."),
+				"target_column_id": mcpStr("Exact destination column ID returned by a Kanban read tool."),
+				"target_index":     map[string]any{"type": "integer", "description": "Optional zero-based destination index; defaults to the end.", "minimum": 0},
+			}, "card_id", "target_column_id"), Scopes: []string{domain.NotesAPIScopeWrite}, Annotations: mcpSafeWriteAnnotations,
+		},
 	}
 }
 
@@ -133,11 +217,15 @@ func mcpToolList() []map[string]any {
 	defs := mcpToolDefs()
 	out := make([]map[string]any, 0, len(defs))
 	for _, d := range defs {
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"name":        d.Name,
 			"description": d.Description,
 			"inputSchema": d.InputSchema,
-		})
+		}
+		if len(d.Annotations) > 0 {
+			item["annotations"] = d.Annotations
+		}
+		out = append(out, item)
 	}
 	return out
 }
