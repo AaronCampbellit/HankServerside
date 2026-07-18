@@ -7,6 +7,12 @@ import {
   type ProfileNote,
   type ProfileNoteSummary,
 } from "../api/profileNotes";
+import { ApiError } from "../api/client";
+import {
+  mergeDefaultKanbanBoard,
+  profileSettingsClient,
+  type ProfileSettingsResponse,
+} from "../api/profileSettings";
 import { useConfirmDialog, useToast } from "../ui/primitives";
 import { boardFromMarkdown, boardToMarkdown, KanbanEditor } from "./KanbanEditor";
 import { htmlToMarkdown, markdownToHTML } from "./richTextMarkdown";
@@ -293,6 +299,7 @@ function Icon({ name }: { name: string }) {
 
 export function ProfileNotesPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [profileSettings, setProfileSettings] = useState<ProfileSettingsResponse>({ revision: 0, settings: {} });
   const [history, setHistory] = useState<HistoryState>({ past: [], future: [] });
   const bodyInputRef = useRef<HTMLDivElement>(null);
   const lastRenderedBodyRef = useRef("");
@@ -339,7 +346,8 @@ export function ProfileNotesPage() {
 
   async function load(message = "") {
     try {
-      const payload = await profileNotesClient.listNotes();
+      const [payload, settings] = await Promise.all([profileNotesClient.listNotes(), profileSettingsClient.load()]);
+      setProfileSettings({ revision: settings.revision || 0, settings: settings.settings || {} });
       const notes = sortNotes(payload.notes || []);
       const currentSelected = state.status === "ready" ? state.selectedID : "";
       const selectedID = currentSelected && notes.some((note) => noteID(note) === currentSelected)
@@ -372,6 +380,26 @@ export function ProfileNotesPage() {
     // Initial load only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function saveDefaultBoard(boardID: string) {
+    let current = profileSettings;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const settings = mergeDefaultKanbanBoard(current.settings, boardID);
+      try {
+        const saved = await profileSettingsClient.save(current.revision, settings);
+        setProfileSettings({ revision: saved.revision || current.revision, settings: saved.settings || settings });
+        return;
+      } catch (error) {
+        if (attempt === 0 && error instanceof ApiError && error.status === 409) {
+          const latest = await profileSettingsClient.load();
+          current = { revision: latest.revision || 0, settings: latest.settings || {} };
+          continue;
+        }
+        showToast(errorMessage(error), "error");
+        return;
+      }
+    }
+  }
 
   const visibleNotes = useMemo(() => {
     if (state.status !== "ready") return [];
@@ -1185,6 +1213,8 @@ export function ProfileNotesPage() {
               <KanbanEditor
                 board={state.editor.board || boardFromMarkdown(state.editor.body)}
                 attachments={state.editor.attachments}
+                isDefaultBoard={profileSettings.settings.kanban_default_board_id === state.editor.noteID}
+                onSetDefaultBoard={(enabled) => void saveDefaultBoard(enabled ? state.editor.noteID : "")}
                 onChange={(board) => {
                   const editor = latestEditorRef.current;
                   updateEditor({

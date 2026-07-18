@@ -11,6 +11,10 @@ const profileNotesClient = vi.hoisted(() => ({
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
+const profileSettingsClient = vi.hoisted(() => ({
+  load: vi.fn(async () => ({ revision: 0, settings: {} })),
+  save: vi.fn(async (_revision: number, settings: Record<string, unknown>) => ({ revision: 1, settings })),
+}));
 
 vi.mock("../api/profileNotes", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/profileNotes")>();
@@ -18,6 +22,11 @@ vi.mock("../api/profileNotes", async (importOriginal) => {
     ...actual,
     profileNotesClient,
   };
+});
+
+vi.mock("../api/profileSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/profileSettings")>();
+  return { ...actual, profileSettingsClient };
 });
 
 function renderPage() {
@@ -102,6 +111,31 @@ describe("ProfileNotesPage", () => {
           expect.objectContaining({ cards: expect.arrayContaining([expect.objectContaining({ text: "Prepare invoice" })]) }),
         ]),
       }),
+    }));
+  });
+
+  it("sets and clears the default board without replacing unrelated profile settings", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [{ note_id: "work", title: "Client Work", preview: "Kanban", page_type: "kanban", revision: "1" }],
+    });
+    profileNotesClient.fetchNote.mockResolvedValue({
+      note_id: "work", title: "Client Work", body_markdown: "# Client Work\n\n## Inbox", revision: "1", page_type: "kanban",
+      board: { columns: [{ id: "inbox", title: "Inbox", sort_order: 0, cards: [] }] },
+    });
+    profileSettingsClient.load.mockResolvedValue({ revision: 7, settings: { dashboard: { density: "compact" }, assistant: { model: "gpt" } } });
+    profileSettingsClient.save
+      .mockImplementationOnce(async (_revision: number, settings: Record<string, unknown>) => ({ revision: 8, settings }))
+      .mockImplementationOnce(async (_revision: number, settings: Record<string, unknown>) => ({ revision: 9, settings }));
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Set as default board" }));
+
+    await waitFor(() => expect(profileSettingsClient.save).toHaveBeenNthCalledWith(1, 7, {
+      dashboard: { density: "compact" }, assistant: { model: "gpt" }, kanban_default_board_id: "work",
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear default board" }));
+    await waitFor(() => expect(profileSettingsClient.save).toHaveBeenNthCalledWith(2, 8, {
+      dashboard: { density: "compact" }, assistant: { model: "gpt" },
     }));
   });
 

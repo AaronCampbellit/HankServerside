@@ -31,11 +31,15 @@ function Harness({
   onUpload = vi.fn(),
   confirmDelete = vi.fn(async () => true),
   onDeleteItems = vi.fn(async () => true),
+  isDefaultBoard = false,
+  onSetDefaultBoard = vi.fn(),
 }: {
   initial?: KanbanBoard;
   onUpload?: (file: File) => Promise<NoteAttachment>;
   confirmDelete?: (message: string) => Promise<boolean>;
   onDeleteItems?: (board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>;
+  isDefaultBoard?: boolean;
+  onSetDefaultBoard?: (enabled: boolean) => void;
 }) {
   let board = initial;
   const change = vi.fn((next: KanbanBoard) => { board = next; rerender(); });
@@ -46,10 +50,12 @@ function Harness({
     onUpload,
     confirmDelete,
     onDeleteItems,
+    isDefaultBoard,
+    onSetDefaultBoard,
   });
   const rendered = render(<KanbanEditor {...props()} />);
   const rerender = () => rendered.rerender(<KanbanEditor {...props()} />);
-  return { change };
+  return { change, onSetDefaultBoard };
 }
 
 describe("KanbanEditor", () => {
@@ -70,6 +76,49 @@ describe("KanbanEditor", () => {
     Harness({});
 
     expect(screen.getByText("scope")).toHaveClass("kanban-rich-strong");
+  });
+
+  it("configures the default board, intake column, and unique workflow roles", () => {
+    const initial = workBoard();
+    initial.intake_column_id = "inbox";
+    initial.columns![0].role = "planning";
+    initial.columns![1].role = "active";
+    const onSetDefaultBoard = vi.fn();
+    const { change } = Harness({ initial, onSetDefaultBoard });
+
+    fireEvent.click(screen.getByRole("button", { name: "Set as default board" }));
+    expect(onSetDefaultBoard).toHaveBeenCalledWith(true);
+    expect(screen.getByText("Intake")).toBeInTheDocument();
+    expect(screen.getByText("Planning")).toBeInTheDocument();
+    expect(screen.getByText("Active Work")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Column options for In progress" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set In progress as intake" }));
+    fireEvent.change(screen.getByLabelText("Role for In progress"), { target: { value: "planning" } });
+
+    const latest = change.mock.calls.at(-1)?.[0];
+    expect(latest?.intake_column_id).toBe("doing");
+    expect(latest?.columns?.find((column) => column.id === "doing")?.role).toBe("planning");
+    expect(latest?.columns?.find((column) => column.id === "inbox")?.role).toBe("");
+  });
+
+  it("clears intake metadata when its column is deleted", async () => {
+    const initial: KanbanBoard = {
+      intake_column_id: "ideas",
+      columns: [
+        { id: "ideas", title: "Ideas", role: "planning", sort_order: 0, cards: [] },
+        { id: "work", title: "Work", role: "active", sort_order: 1, cards: [] },
+      ],
+    };
+    const { change } = Harness({ initial });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Ideas" }));
+
+    await waitFor(() => {
+      const latest = change.mock.calls.at(-1)?.[0];
+      expect(latest?.intake_column_id).toBe("");
+      expect(latest?.columns?.map((column) => column.id)).toEqual(["work"]);
+    });
   });
 
   it("adds, edits, formats, searches, and explicitly moves a task", async () => {

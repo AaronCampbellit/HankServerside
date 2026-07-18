@@ -11,6 +11,7 @@ import type { KanbanBoard, KanbanCard, KanbanColumn, NoteAttachment } from "../a
 import { KanbanCardModal, type DescriptionSelection } from "./KanbanCardModal";
 import { KanbanRichText } from "./KanbanRichText";
 import { attachmentDeletionMessage, attachmentDeletionPlan } from "./kanbanAttachments";
+import "./kanbanWorkflow.css";
 
 type CardLocation = { columnID: string; cardID: string };
 
@@ -21,9 +22,21 @@ type KanbanEditorProps = {
   onUpload: (file: File) => Promise<NoteAttachment>;
   confirmDelete: (message: string) => Promise<boolean>;
   onDeleteItems: (board: KanbanBoard, attachments: NoteAttachment[]) => Promise<boolean>;
+  isDefaultBoard?: boolean;
+  onSetDefaultBoard?: (enabled: boolean) => void;
 };
 
 const defaultColumnTitles = ["Inbox", "In progress", "Done"];
+const kanbanRoles = [
+  ["", "None"],
+  ["planning", "Planning"],
+  ["active", "Active Work"],
+  ["rework", "Rework"],
+  ["human", "Needs Human"],
+  ["review", "Review"],
+  ["complete", "Complete"],
+] as const;
+const kanbanRoleLabels = Object.fromEntries(kanbanRoles) as Record<string, string>;
 let fallbackID = 0;
 
 function uniqueID(prefix: string): string {
@@ -39,6 +52,8 @@ function ordered<T extends { sort_order?: number }>(items: T[] | undefined): T[]
 
 function normalizeBoard(board: KanbanBoard): KanbanBoard {
   return {
+    ...board,
+    intake_column_id: board.intake_column_id || "",
     columns: ordered(board.columns).map((column, columnIndex) => ({
       ...column,
       id: column.id || uniqueID("column"),
@@ -134,7 +149,16 @@ function SmallIcon({ name }: { name: "plus" | "search" | "left" | "right" | "tra
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
-export function KanbanEditor({ board, attachments = [], onChange, onUpload, confirmDelete, onDeleteItems }: KanbanEditorProps) {
+export function KanbanEditor({
+  board,
+  attachments = [],
+  onChange,
+  onUpload,
+  confirmDelete,
+  onDeleteItems,
+  isDefaultBoard = false,
+  onSetDefaultBoard = () => undefined,
+}: KanbanEditorProps) {
   const normalized = useMemo(() => normalizeBoard(board), [board]);
   const boardRef = useRef(normalized);
   boardRef.current = normalized;
@@ -149,6 +173,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [columnMenuID, setColumnMenuID] = useState("");
   const suppressOpenRef = useRef(false);
   const dragReleaseTimerRef = useRef<number | null>(null);
   const cardButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -167,7 +192,7 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   }, []);
 
   function commit(next: KanbanBoard) {
-    const normalizedNext = normalizeBoard(next);
+    const normalizedNext = normalizeBoard({ ...boardRef.current, ...next });
     boardRef.current = normalizedNext;
     onChange(normalizedNext);
   }
@@ -213,7 +238,11 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
   async function deleteColumn(column: KanbanColumn) {
     if (deleting) return;
     const count = column.cards?.length || 0;
-    const nextBoard = normalizeBoard({ columns: columns.filter((item) => item.id !== column.id) });
+    const nextBoard = normalizeBoard({
+      ...normalized,
+      intake_column_id: normalized.intake_column_id === column.id ? "" : normalized.intake_column_id,
+      columns: columns.filter((item) => item.id !== column.id),
+    });
     if (!count) { commit(nextBoard); return; }
     const removedCardIDs = new Set((column.cards || []).map((card) => card.id || "").filter(Boolean));
     const plan = attachmentDeletionPlan(normalized, removedCardIDs, attachments);
@@ -357,6 +386,19 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
     setEditingColumnID(column.id || "");
   }
 
+  function setIntakeColumn(columnID: string) {
+    commit({ intake_column_id: columnID, columns });
+  }
+
+  function setColumnRole(columnID: string, role: string) {
+    commit({
+      columns: columns.map((column) => ({
+        ...column,
+        role: column.id === columnID ? role : role && column.role === role ? "" : column.role,
+      })),
+    });
+  }
+
   const normalizedQuery = query.trim().toLowerCase();
 
   return (
@@ -369,6 +411,10 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
             <input aria-label="Search cards" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search cards" />
           </label>
           <span className="kanban-board-summary">{columns.reduce((total, column) => total + (column.cards?.length || 0), 0)} tasks · {columns.length} columns</span>
+          {isDefaultBoard ? <span className="kanban-workflow-badge">Default board</span> : null}
+          <button className="kanban-default-board" type="button" onClick={() => onSetDefaultBoard(!isDefaultBoard)}>
+            {isDefaultBoard ? "Clear default board" : "Set as default board"}
+          </button>
           <button className="kanban-add-column" type="button" onClick={addColumn}><SmallIcon name="plus" /> Add column</button>
         </header>
 
@@ -402,14 +448,31 @@ export function KanbanEditor({ board, attachments = [], onChange, onUpload, conf
                       <h2 id={`kanban-column-${column.id}`}>{column.title}</h2>
                     </button>
                   )}
+                  {normalized.intake_column_id === column.id ? <span className="kanban-workflow-badge">Intake</span> : null}
+                  {column.role ? <span className="kanban-workflow-badge">{kanbanRoleLabels[column.role] || column.role}</span> : null}
                   <span className="kanban-count">{cards.length}</span>
                   <div className="kanban-column-actions">
                     <button type="button" aria-label={`Move ${column.title} left`} disabled={columnIndex === 0} onClick={() => moveColumn(column.id || "", -1)}><SmallIcon name="left" /></button>
                     <button type="button" aria-label={`Move ${column.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveColumn(column.id || "", 1)}><SmallIcon name="right" /></button>
                     <button className="kanban-column-add" type="button" aria-label={`Add task to ${column.title}`} title={`Add task to ${column.title}`} onClick={() => setAddingColumnID(column.id || "")}><SmallIcon name="plus" /></button>
+                    <button type="button" aria-label={`Column options for ${column.title}`} aria-expanded={columnMenuID === column.id} onClick={() => setColumnMenuID((current) => current === column.id ? "" : column.id || "")}>•••</button>
                     <button type="button" aria-label={`Delete ${column.title}`} disabled={deleting} onClick={() => void deleteColumn(column)}><SmallIcon name="trash" /></button>
                   </div>
                 </header>
+
+                {columnMenuID === column.id ? (
+                  <div className="kanban-column-menu">
+                    <button type="button" onClick={() => setIntakeColumn(column.id || "")}>
+                      {normalized.intake_column_id === column.id ? `${column.title} is intake` : `Set ${column.title} as intake`}
+                    </button>
+                    <label>
+                      <span>Role for {column.title}</span>
+                      <select aria-label={`Role for ${column.title}`} value={column.role || ""} onChange={(event) => setColumnRole(column.id || "", event.target.value)}>
+                        {kanbanRoles.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
 
                 {addingColumnID === column.id ? (
                   <form className="kanban-task-composer" onSubmit={(event) => { event.preventDefault(); addTask(column.id || ""); }}>
