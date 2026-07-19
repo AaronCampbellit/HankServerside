@@ -285,23 +285,6 @@ export function Shell({
             <img src="/assets/hank-icon-192.png" alt="" />
             <strong>{current?.label || "Hank Remote"}</strong>
           </div>
-          <button
-            ref={mobileSearchButtonRef}
-            className="mobile-topbar-action"
-            type="button"
-            aria-label="Open search"
-            onClick={() => {
-              setNotifOpen(false);
-              setMobileMenuOpen(false);
-              setMobileSearchOpen(true);
-              window.requestAnimationFrame(() => searchInputRef.current?.focus());
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-3-3" />
-            </svg>
-          </button>
           <nav className="topbar-crumbs" aria-label="Breadcrumb">
             <a href="/dashboard">Home</a>
             {crumbLabel ? (
@@ -311,7 +294,24 @@ export function Shell({
               </>
             ) : null}
           </nav>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="topbar-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              ref={mobileSearchButtonRef}
+              className="mobile-topbar-action"
+              type="button"
+              aria-label="Open search"
+              onClick={() => {
+                setNotifOpen(false);
+                setMobileMenuOpen(false);
+                setMobileSearchOpen(true);
+                window.requestAnimationFrame(() => searchInputRef.current?.focus());
+              }}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3-3" />
+              </svg>
+            </button>
             <div className="topbar-search-wrap">
               <label className="topbar-search">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -415,23 +415,23 @@ export function Shell({
                 )}
               </div>
             ) : null}
+            <button
+              ref={mobileMenuButtonRef}
+              className="mobile-topbar-action"
+              type="button"
+              aria-label="Open menu"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => {
+                setNotifOpen(false);
+                setMobileSearchOpen(false);
+                setMobileMenuOpen((open) => !open);
+              }}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 7h14M5 12h14M5 17h14" />
+              </svg>
+            </button>
           </div>
-          <button
-            ref={mobileMenuButtonRef}
-            className="mobile-topbar-action"
-            type="button"
-            aria-label="Open menu"
-            aria-expanded={mobileMenuOpen}
-            onClick={() => {
-              setNotifOpen(false);
-              setMobileSearchOpen(false);
-              setMobileMenuOpen((open) => !open);
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M5 7h14M5 12h14M5 17h14" />
-            </svg>
-          </button>
         </header>
         <main className="app-main">{children}</main>
       </div>

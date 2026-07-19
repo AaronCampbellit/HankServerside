@@ -103,7 +103,12 @@ describe("Shell", () => {
       </Shell>,
     );
 
-    const actions = within(screen.getByRole("banner"))
+    const header = screen.getByRole("banner");
+    const actionGroup = header.querySelector<HTMLElement>(".topbar-actions");
+
+    expect(actionGroup).not.toBeNull();
+
+    const actions = within(actionGroup!)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
 
