@@ -91,6 +91,25 @@ describe("Shell", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toHaveClass("nav-footer-signout");
   });
 
+  it("orders mobile header actions as search, notifications, then menu", () => {
+    render(
+      <Shell
+        navItems={[{ href: "/dashboard", label: "Home", group: "Main" }]}
+        currentPath="/dashboard"
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+      >
+        <div>Dashboard content</div>
+      </Shell>,
+    );
+
+    const actions = within(screen.getByRole("banner"))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+
+    expect(actions).toEqual(["Open search", "Notifications", "Open menu"]);
+  });
+
   it("partitions daily mobile routes from the overflow menu", () => {
     render(
       <Shell

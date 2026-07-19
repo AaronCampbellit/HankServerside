@@ -302,22 +302,6 @@ export function Shell({
               <path d="m20 20-3-3" />
             </svg>
           </button>
-          <button
-            ref={mobileMenuButtonRef}
-            className="mobile-topbar-action"
-            type="button"
-            aria-label="Open menu"
-            aria-expanded={mobileMenuOpen}
-            onClick={() => {
-              setNotifOpen(false);
-              setMobileSearchOpen(false);
-              setMobileMenuOpen((open) => !open);
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M5 7h14M5 12h14M5 17h14" />
-            </svg>
-          </button>
           <nav className="topbar-crumbs" aria-label="Breadcrumb">
             <a href="/dashboard">Home</a>
             {crumbLabel ? (
@@ -432,6 +416,22 @@ export function Shell({
               </div>
             ) : null}
           </div>
+          <button
+            ref={mobileMenuButtonRef}
+            className="mobile-topbar-action"
+            type="button"
+            aria-label="Open menu"
+            aria-expanded={mobileMenuOpen}
+            onClick={() => {
+              setNotifOpen(false);
+              setMobileSearchOpen(false);
+              setMobileMenuOpen((open) => !open);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 7h14M5 12h14M5 17h14" />
+            </svg>
+          </button>
         </header>
         <main className="app-main">{children}</main>
       </div>
