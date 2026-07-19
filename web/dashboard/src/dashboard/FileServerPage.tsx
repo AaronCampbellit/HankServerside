@@ -192,6 +192,12 @@ function previewURL(item: FileMeta, sourceID: string, agentID: string): string {
   return `/v1/home/files/preview?${params.toString()}`;
 }
 
+function shouldOpenPreviewByDefault(): boolean {
+  return typeof window === "undefined"
+    || typeof window.matchMedia !== "function"
+    || !window.matchMedia("(max-width: 720px)").matches;
+}
+
 function startBrowserDownload(url: string, filename: string) {
   const link = document.createElement("a");
   link.href = url;
@@ -325,7 +331,7 @@ export function FileServerPage() {
         viewMode: current.status === "ready" ? current.viewMode : "list",
         selectedPaths: current.status === "ready" ? current.selectedPaths.filter((selectedPath) => items.some((item) => item.path === selectedPath)) : [],
         previewPath: current.status === "ready" && items.some((item) => item.path === current.previewPath) ? current.previewPath : defaultPreview,
-        previewOpen: current.status === "ready" ? current.previewOpen : true,
+        previewOpen: current.status === "ready" ? current.previewOpen : shouldOpenPreviewByDefault(),
         sharePickerOpen: false,
         menuPath: "",
         dialog: null,

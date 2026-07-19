@@ -93,8 +93,35 @@ describe("FileServerPage", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
     window.history.pushState({}, "", "/dashboard/file-server");
+  });
+
+  it("starts in the file list on mobile instead of opening a default preview", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(max-width: 720px)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({
+      path: "/",
+      items: [{ path: "/readme.txt", name: "readme.txt", size: 120 }],
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "readme.txt" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("File preview")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "readme.txt" }));
+    expect(screen.getByLabelText("File preview")).toBeInTheDocument();
   });
 
   it("keeps transfer activity behind a mobile disclosure", async () => {
