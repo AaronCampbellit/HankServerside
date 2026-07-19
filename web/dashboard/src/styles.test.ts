@@ -69,6 +69,14 @@ describe("dashboard stylesheet", () => {
     expect(ruleBodies(".kanban-upload").at(0)).toContain("min-height: 44px");
   });
 
+  it("keeps Kanban body and bold weights consistent between cards and the editor", () => {
+    expect(lastRuleBody(".kanban-card-open")).toContain("font: 500");
+    expect(lastRuleBody(".kanban-description-preview")).toContain("font: 500");
+    expect(lastRuleBody(".kanban-description-editor")).toContain("font: 500");
+    expect(lastRuleBody(".kanban-rich-strong")).toContain("font-weight: 700");
+    expect(lastRuleBody(".kanban-description-editor strong")).toContain("font-weight: 700");
+  });
+
   it("defines the authoritative safe-area mobile shell", () => {
     expect(styles).toContain("/* Mobile responsive pass */");
     expect(styles).toContain("--mobile-bottom-nav-height: 68px");

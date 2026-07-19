@@ -4869,10 +4869,9 @@ button.secondary:disabled {
   margin: 0;
 }
 
-.kanban-card-description .kanban-rich-strong {
-  color: color-mix(in srgb, var(--ink) 92%, var(--muted));
-  font-weight: 800;
-  letter-spacing: -.01em;
+.kanban-rich-strong {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .kanban-card-description a {
@@ -5369,6 +5368,12 @@ button.secondary:disabled {
 
 .kanban-description-editor a {
   color: color-mix(in srgb, var(--brand-dark) 88%, white);
+}
+
+.kanban-description-editor b,
+.kanban-description-editor strong {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .kanban-description-editor .kanban-rich-image,
