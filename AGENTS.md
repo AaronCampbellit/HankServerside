@@ -1,125 +1,137 @@
-# Hank Remote Agent Guide
+# Hank Platform Agent Guide
+
+## Project Authority
+
+`HankServerside` is the primary and canonical project for the Hank ecosystem. It owns the platform contracts, server behavior, shared protocol, persistence model, operator dashboard, core services, and installable app runtime.
+
+Other Hank projects—including mobile clients, desktop clients, standalone agents, and installable apps—are consumers or extensions of this platform. They should conform to HankServerside's stable contracts. When a client conflicts with an established platform contract, fix the client in its owning repository unless the product direction explicitly requires a platform change.
 
 ## Project Intent
 
-`HankServerside` is the server-side project for Hank remote access. Its job is to let the Hank iPhone app work outside the home network without requiring a separate VPN app.
+HankServerside is Hank's stable platform and runtime. It provides the cloud service, outbound-connected home agent, dashboard, shared protocol, durable storage, core Home Assistant/file/notes/media/assistant services, and the runtime for optional `.hankapp` extensions.
 
-The target architecture is:
-
-- `Hank iPhone App`
-- `Hank Remote Cloud`
-- `Hank Remote Agent` running inside the home network
-
-The app should talk only to the Hank cloud service over normal HTTPS/WebSocket connections. The home agent maintains an outbound connection to the cloud and performs local work against Home Assistant, files, notes, and media sources.
+Existing `Hank Remote`, `hank-remote-*`, and `HANK_REMOTE_*` names remain current technical identifiers.
 
 ## Repo Boundaries
 
-This repo is only for the remote backend system.
+This repository owns the shared Hank platform.
 
 Do:
 
-- build cloud services
-- build the home agent
-- define and evolve the shared protocol
-- add tests for cloud/agent behavior
-- add adapters for Home Assistant and file operations
+- build and operate the cloud services, home agent, dashboard, persistence layer, and shared protocol
+- define stable app-facing and agent-facing contracts
+- provide core Home Assistant, files, notes, media, assistant, backup, and restore capabilities
+- maintain the generic runtime and compatibility contract for installable Hank apps
+- add tests and operational tooling for platform behavior
 
 Do not:
 
-- edit the Hank iOS app here
-- add direct SMB exposure to the public internet
+- implement client-specific behavior that belongs in an iOS, macOS, Windows, or other consumer repository
+- weaken a stable platform contract to preserve a client-side workaround
+- expose SMB, Home Assistant, local files, or other raw local protocols directly to the public internet
 - design around a VPN requirement
-- make the iPhone app speak SMB remotely once a higher-level file API exists
-
-## Current System Shape
-
-- The first production target is a single-home self-hosted deployment, not multi-home SaaS or multi-node cloud clustering.
-- The cloud serves app/dashboard auth, home management, routing, relay, management UI, readiness, metrics, and storage operations.
-- The agent connects outbound to the cloud and owns local Home Assistant, file, notes, and media access.
-- PostgreSQL is the durable store for users, homes, agents, sessions, notes, assistant state, tokens, and operational metadata.
-- Schema work must use the repo's migration/status/drift-check path instead of hidden startup mutations.
-- The dashboard is an operator surface for setup, tokens, settings, storage, assistant controls, and troubleshooting.
+- let optional Hank apps replace core platform services
 
 ## Product Direction
 
-The desired user experience is:
+The intended system flow is:
 
-1. The Hank app signs into a Hank account.
+1. A Hank client signs into the Hank platform.
 2. The user registers a home agent.
-3. The home agent connects outbound to Hank Cloud.
-4. The app uses Hank Cloud to reach Home Assistant, files, and notes remotely.
+3. The home agent connects outbound to HankServerside.
+4. Clients use HankServerside's stable HTTPS/WebSocket APIs to access core services.
+5. Optional Hank apps extend the platform through the versioned app-runtime contract.
 
-This should replace app-side protocol hacks with the cloud-and-agent remote-access path.
+Clients should not independently recreate networking, persistence, authorization, or local-service protocols already owned by HankServerside.
+
+## Current System Shape
+
+- HankServerside is the source of truth for shared product behavior and compatibility contracts.
+- The first production target remains a single-home self-hosted deployment, not multi-home SaaS or multi-node clustering.
+- The cloud owns authentication, authorization, routing, relay, management APIs, the dashboard, readiness, metrics, storage operations, and the installable-app runtime.
+- The home agent connects outbound and owns access to local credentials, Home Assistant, files, notes, media, and other home-network resources.
+- PostgreSQL is the durable store for users, homes, agents, sessions, notes, assistant state, apps, tokens, and operational metadata.
+- Schema changes use the versioned migration, status, and drift-check workflow.
+- Other Hank clients and services consume these platform capabilities through stable contracts.
 
 ## Current Priorities
 
-Use the current task docs and repair plan rather than the old initial-build order.
-
-1. Preserve the single-home cloud-and-agent model.
-2. Keep auth, authorization, database safety, and secret handling ahead of feature convenience.
-3. Continue the production-readiness work in `docs/backend-production-repair-plan.md`.
-4. Strengthen Home Assistant, file, notes, media, assistant, backup, and restore flows with tests.
-5. Keep operator setup and deployment docs aligned with real scripts and current behavior.
+1. Treat HankServerside as the primary project and land shared behavior here first.
+2. Preserve the single-home cloud-and-agent architecture.
+3. Keep authentication, authorization, database safety, file safety, and secret handling ahead of convenience.
+4. Protect the shared API, protocol, and `.hankapp` compatibility contracts.
+5. Complete release-readiness evidence tracked in `RELEASE.md`.
+6. Strengthen core services and operator workflows with focused tests.
+7. Keep setup, deployment, API, and compatibility documentation aligned with actual behavior.
 
 ## Technical Principles
 
-- Prefer one stable app-facing API instead of protocol-specific app networking.
-- Treat `HankServerside` like Hank's stable OS/runtime.
-- Treat Hank apps as installable first-party extensions for optional workflows, not as replacements for core Hank services.
-- Keep the `.hankapp` package format and app runtime APIs as a strict compatibility contract; breaking changes need a new schema version or migration path.
-- The home agent should own local credentials and local network access.
-- The cloud should relay and route, not require raw SMB credentials.
-- Never expose SMB directly to the internet.
-- Prefer outbound-only home connectivity.
-- Keep protocol messages versioned from day one.
-- Start with simple JSON over HTTPS/WebSocket unless there is a strong reason to add more complexity.
-- Do not add multi-home, multi-cloud-node, or SaaS assumptions unless the user explicitly changes product scope.
+- Design shared capabilities in HankServerside first; keep clients thin and contract-driven.
+- Prefer one stable app-facing API over client-specific networking or protocol logic.
+- Treat HankServerside as Hank's stable OS/runtime.
+- Treat Hank apps as optional first-party extensions, not replacements for core services.
+- Keep API, protocol, and `.hankapp` compatibility surfaces versioned; breaking changes require a new version or documented migration path.
+- Keep cloud, home-agent, dashboard, protocol, persistence, and installable-app responsibilities explicit.
+- Keep local credentials and local-network access inside the home agent.
+- Prefer outbound-only home connectivity and never expose raw SMB or other local protocols publicly.
+- Continue using the established JSON-over-HTTPS/WebSocket protocol unless a measured requirement justifies changing it.
+- Do not introduce multi-home, multi-cloud-node, or SaaS assumptions unless the user explicitly changes product scope.
 
-## Agent Change Guardrails
+## Working Safely
 
-For non-trivial features, bug fixes, cleanup, database work, security changes, or deployment changes, read `docs/agent-change-guardrails.md` before editing and use its security, database, cleanup, and validation checklist before finishing.
+Before editing:
+
+- inspect the current branch, worktree status, and relevant diff
+- preserve unrelated or uncommitted user work
+- identify the owning layer before changing a shared contract
+- read `docs/agent-change-guardrails.md` for non-trivial code, database, security, cleanup, or deployment changes
+- use the repository migration workflow for schema changes; never hide schema mutation in startup code
+- do not modify another Hank repository unless the user explicitly includes it in scope
+- do not commit, push, tag, publish, or deploy unless the user explicitly asks
 
 ## Project Layout
 
-- `cmd/hank-remote-cloud`: public cloud service
-- `cmd/hank-remote-agent`: local home agent service
-- `cmd/hank-db-ops`: backup, restore-test, and storage operation worker
-- `internal/cloud`: auth, routing, relay, dashboard, readiness, metrics, and cloud handlers
-- `internal/agent`: reconnect loop, command dispatch, and local capability adapters
-- `internal/protocol`: shared wire contract, envelopes, command names, and payloads
+- `cmd/`: cloud, home-agent, and database-operations entry points
+- `internal/cloud`: HTTP/WebSocket APIs, auth, routing, relay, dashboard serving, and app runtime
+- `internal/agent`: home-agent connection lifecycle and local capability adapters
+- `internal/protocol`: shared versioned cloud/agent wire contract
 - `internal/store`: PostgreSQL persistence
-- `internal/migrations`: migration status and checksum checks
-- `internal/storageops`: backup/restore operation coordination
-- `internal/observability`: metrics aggregation
-- `docs/architecture.md`: system design notes
-- `docs/hank-app-platform-contract.md`: stable runtime vs installable app boundary and `.hankapp` compatibility rules
-- `docs/project-knowledge-index.md`: markdown index used by HankAI
+- `internal/migrations`: versioned schema and migration checks
+- `internal/domain`, `internal/config`, and `internal/maintenance`: shared platform models, configuration, and lifecycle work
+- `internal/storageops` and `internal/observability`: backup/restore coordination and metrics
+- `web/dashboard`: React/Vite/TypeScript operator dashboard
+- `schemas`: versioned external compatibility schemas
+- `scripts`, `tools`, and `ops`: setup, validation, administration, release, and monitoring tooling
+- `docs`: architecture, contracts, deployment guidance, runbooks, and plans
 
-## Local Development Commands
+## Development Commands
 
-Use these first:
+Whole-platform checks:
 
 ```bash
 make tidy
 make fmt
+go test ./...
 make build
+```
+
+Frontend-specific checks:
+
+```bash
+make frontend-test
+make frontend-check
+make frontend-build
+```
+
+Local services:
+
+```bash
 make run-cloud
 make run-agent
 make run-db-ops
 ```
 
-Equivalent direct commands:
-
-```bash
-go mod tidy
-gofmt -w ./cmd ./internal
-go build ./...
-go run ./cmd/hank-remote-cloud
-go run ./cmd/hank-remote-agent
-go run ./cmd/hank-db-ops
-```
-
-Database and deployment checks:
+Database and operator checks:
 
 ```bash
 make migrate-status
@@ -127,69 +139,53 @@ make schema-drift-check
 scripts/doctor.sh
 ```
 
+Use the smallest relevant checks during development. Use the complete gate in `RELEASE.md` for release work.
+
 ## Configuration
 
-Cloud:
+Runtime environment files are `.env.cloud` and `.env.agent` in the repository root. Treat them as sensitive and never commit, print, or copy their secret values into logs or documentation.
 
-- `HANK_REMOTE_CLOUD_ADDR`
-- `HANK_REMOTE_CLOUD_DATABASE_URL`
-- `HANK_REMOTE_DB_OPS_INTENT_SECRET`
-- `HANK_REMOTE_DB_OPS_REPO_CIPHER_PASS`
+Use `docs/deployment.md` as the source of truth for supported environment variables and setup. Keep it synchronized when configuration behavior changes.
 
-Agent:
+## Validation Expectations
 
-- `HANK_REMOTE_AGENT_CLOUD_URL`
-- `HANK_REMOTE_AGENT_ID`
-- `HANK_REMOTE_AGENT_TOKEN`
-- `HANK_REMOTE_AGENT_HOME_NAME`
+Match validation to the changed surface, then broaden it when risk justifies it.
 
-Runtime env files now live in the repo root:
+- Go or protocol changes: run `make fmt`, targeted tests, `go test ./...`, and `make build`
+- Dashboard changes: run targeted frontend tests, `make frontend-test`, `make frontend-check`, and `make frontend-build`
+- Database changes: run relevant store tests, `make migrate-status`, and `make schema-drift-check`
+- Auth, routing, files, storage, agent-command, or secret-handling changes: add focused security and failure-path coverage
+- Deployment or release changes: use `scripts/doctor.sh` and the applicable `RELEASE.md` gate
+- Documentation-only changes: verify referenced paths, commands, links, and `git diff --check`
 
-- `.env.cloud`
-- `.env.agent`
+PostgreSQL-backed tests that skip without `HANK_REMOTE_TEST_DATABASE_URL` do not count as full database validation.
 
-Env examples live in `docs/deployment.md`. The `configs/` folder is for real non-env config assets such as `pgbackrest.conf`.
+Before reporting completion, state:
 
-## Testing Expectations
-
-When making meaningful changes:
-
-- run `gofmt -w ./cmd ./internal`
-- run `go build ./...`
-- run `go test ./...`
-- add or update tests when behavior changes
-
-For connection, auth, storage, or database changes, prefer tests for:
-
-- registration
-- heartbeat handling
-- reconnect behavior
-- unauthorized agent rejection
-- protocol decoding/encoding
-- cookie, bearer, CSRF, and role authorization behavior
-- migration status, schema drift, and store read/write behavior
-- file traversal, symlink containment, transfer retry, and destructive operation safety
+- security impact
+- database or migration impact
+- validation performed and anything skipped
 
 ## Coding Expectations
 
-- Keep packages small and explicit.
-- Prefer standard library primitives unless a dependency clearly earns its place.
-- Add logs around connection lifecycle, routing decisions, and external service calls.
-- Keep cloud and agent responsibilities separate.
-- Keep user-facing APIs stable when changing cloud/agent internals.
-- Update docs when env vars, setup steps, routes, migrations, or operator workflows change.
+- Put shared product behavior in the platform layer that owns it.
+- Keep packages and interfaces small, explicit, and testable.
+- Prefer standard-library primitives unless a dependency clearly earns its place.
+- Preserve stable client-facing APIs when changing internal implementations.
+- Add useful lifecycle, routing, and external-call logs without logging secrets or private file contents.
+- Update tests and documentation when behavior, configuration, routes, schemas, setup, or operator workflows change.
+- Avoid duplicating platform behavior in the dashboard, agent, or consuming clients.
 
-## Reference Files
+## Reference Routing
 
-Read these first when starting work:
+Read the files relevant to the task instead of loading every reference for every change.
 
-- `README.md`
-- `docs/architecture.md`
-- `docs/hank-app-platform-contract.md`
-- `docs/agent-change-guardrails.md`
-- `docs/backend-production-repair-plan.md`
-- `internal/protocol/messages.go`
-- `internal/cloud/server.go`
-- `internal/agent/client.go`
-- `internal/store/store.go`
-- `internal/migrations/migrations.go`
+- Platform architecture: `README.md` and `docs/architecture.md`
+- Security, database, cleanup, or deployment changes: `docs/agent-change-guardrails.md`
+- App-runtime or package compatibility: `docs/hank-app-platform-contract.md`
+- Release work: `RELEASE.md` and `docs/demo-validation.md`
+- Protocol work: `internal/protocol/messages.go`
+- Cloud/API work: `internal/cloud/server.go` and the owning handler
+- Agent work: `internal/agent/client.go` and the owning adapter
+- Persistence work: `internal/store` and `internal/migrations`
+- Dashboard work: `web/dashboard` plus the corresponding server API
