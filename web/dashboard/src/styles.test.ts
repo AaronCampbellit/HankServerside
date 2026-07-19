@@ -92,4 +92,10 @@ describe("dashboard stylesheet", () => {
     expect(styles).toContain(".home-mobile-services-toggle");
     expect(styles).toContain("min-height: calc(100dvh");
   });
+
+  it("centers the mobile file toolbar icons inside their compact buttons", () => {
+    const mobileFileAction = lastRuleBody(".file-guide-actions button");
+    expect(mobileFileAction).toContain("font-size: 0");
+    expect(mobileFileAction).toContain("gap: 0");
+  });
 });

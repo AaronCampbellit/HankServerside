@@ -8192,9 +8192,11 @@ button.secondary:disabled {
   .file-guide-actions button {
     width: 44px;
     min-width: 44px;
+    gap: 0;
     padding: 0;
     overflow: hidden;
     color: transparent;
+    font-size: 0;
   }
 
   .file-guide-actions button svg {
