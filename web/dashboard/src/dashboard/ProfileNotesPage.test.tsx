@@ -48,6 +48,41 @@ describe("ProfileNotesPage", () => {
     Reflect.deleteProperty(document, "execCommand");
   });
 
+  it("uses browser and editor modes for the mobile notes workflow", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "daily", title: "Daily", preview: "Today", page_type: "text" },
+        { note_id: "ideas", title: "Ideas", preview: "Later", page_type: "text" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "ideas" ? "Ideas" : "Daily",
+      body_markdown: id === "ideas" ? "Build something" : "Plan today",
+      revision: "1",
+      page_type: "text",
+    }));
+
+    renderPage();
+
+    const layout = await screen.findByTestId("notes-mobile-workspace");
+    expect(layout).toHaveAttribute("data-mobile-pane", "browser");
+
+    fireEvent.click(screen.getByRole("button", { name: "Ideas" }));
+    await waitFor(() => expect(layout).toHaveAttribute("data-mobile-pane", "editor"));
+    expect(screen.getByRole("button", { name: "Back to notes" })).toBeInTheDocument();
+    const formatting = screen.getByRole("button", { name: "More formatting" });
+    expect(formatting).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(formatting);
+    expect(formatting).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to notes" }));
+    expect(layout).toHaveAttribute("data-mobile-pane", "browser");
+
+    fireEvent.click(screen.getByRole("button", { name: "New note" }));
+    expect(layout).toHaveAttribute("data-mobile-pane", "editor");
+  });
+
   it("renders the redesigned editor chrome and kanban/notebook states", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [

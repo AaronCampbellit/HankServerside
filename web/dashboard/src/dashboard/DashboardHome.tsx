@@ -249,6 +249,7 @@ function HomeAssistantControlsPanel({ payload }: { payload: HomeAssistantLoadPay
 
 export function DashboardHome() {
   const toast = useToast();
+  const [serviceListExpanded, setServiceListExpanded] = useState(false);
   const state: DashboardState = useAsyncLoad(async () => {
     const bootstrap = await bootstrapClient.load();
     const hasHome = Boolean(bootstrap.home);
@@ -410,6 +411,11 @@ export function DashboardHome() {
           <p className="eyebrow">Hank Remote</p>
           <h1 id="route-title">{greeting()}, {displayName(userEmail)}</h1>
           <p>{healthLooksGood ? `Everything at ${homeName} is running smoothly.` : `${homeName} has a few things that need attention.`}</p>
+          <div className={`home-mobile-connection tone-${online ? "ok" : "bad"}`} role="status" aria-label="Home connection">
+            <span className="activity-dot" aria-hidden="true" />
+            <strong>{online ? "Connected" : titleCase(agentStatus)}</strong>
+            <small>{agent?.name || "Connector not registered"} · {relativeTime(agent?.last_seen_at)}</small>
+          </div>
         </div>
         <div className="home-hero-actions">
           <button
@@ -458,11 +464,23 @@ export function DashboardHome() {
           <section className="home-panel services-panel" aria-labelledby="services-title">
             <div className="home-panel-heading">
               <h2 id="services-title">Services</h2>
-              <a href="/dashboard/settings/connections">Connections</a>
+              <span className="home-services-heading-actions">
+                <button
+                  className="home-mobile-services-toggle"
+                  type="button"
+                  aria-expanded={serviceListExpanded}
+                  aria-controls="home-service-list"
+                  aria-label={`${serviceListExpanded ? "Hide healthy services" : "Show all services"}`}
+                  onClick={() => setServiceListExpanded((expanded) => !expanded)}
+                >
+                  {serviceListExpanded ? "Attention only" : "All services"}
+                </button>
+                <a href="/dashboard/settings/connections">Connections</a>
+              </span>
             </div>
-            <div className="service-list">
+            <div id="home-service-list" className={`service-list${serviceListExpanded ? " is-expanded" : ""}`}>
               {serviceRows.map((row) => (
-                <article className="service-row" key={row.title}>
+                <article className={`service-row${row.tone === "ok" || row.tone === "neutral" ? " is-healthy" : " needs-attention"}`} key={row.title}>
                   <span className={`service-glyph tone-${row.tone}`} aria-hidden="true">{row.glyph}</span>
                   <span className="service-copy">
                     <strong>{row.title}</strong>

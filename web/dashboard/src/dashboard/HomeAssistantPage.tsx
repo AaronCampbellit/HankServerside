@@ -347,6 +347,17 @@ function EntityTable({
 
 export function HomeAssistantPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [visibleEntityLimit, setVisibleEntityLimit] = useState(24);
+  const [mobileViewport, setMobileViewport] = useState(() => typeof window.matchMedia !== "function" || window.matchMedia("(max-width: 760px)").matches);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(max-width: 760px)");
+    const update = () => setMobileViewport(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -384,6 +395,10 @@ export function HomeAssistantPage() {
     if (!query) return ready.states.slice(0, 80);
     return ready.states.filter((entity) => searchableText(entity).includes(query)).slice(0, 80);
   }, [ready]);
+
+  useEffect(() => {
+    setVisibleEntityLimit(24);
+  }, [ready?.query]);
 
   if (state.status === "loading") {
     return (
@@ -456,6 +471,7 @@ export function HomeAssistantPage() {
     .map((entityID) => state.states.find((entity) => entity.entity_id === entityID))
     .filter((entity): entity is HomeAssistantEntity => Boolean(entity));
   const agentOnline = state.agent?.status?.toLowerCase() === "online";
+  const displayedEntities = mobileViewport ? visibleEntities.slice(0, visibleEntityLimit) : visibleEntities;
 
   return (
     <section className="dashboard-page home-assistant-page" aria-labelledby="route-title">
@@ -526,12 +542,22 @@ export function HomeAssistantPage() {
           </form>
         </div>
         {visibleEntities.length ? (
-          <EntityTable
-            dashboardEntityIDs={state.dashboardEntityIDs}
-            entities={visibleEntities}
-            onDashboard={(nextEntity) => void toggleDashboardEntity(nextEntity)}
-            onToggle={(nextEntity) => void toggleEntity(nextEntity)}
-          />
+          <>
+            <EntityTable
+              dashboardEntityIDs={state.dashboardEntityIDs}
+              entities={displayedEntities}
+              onDashboard={(nextEntity) => void toggleDashboardEntity(nextEntity)}
+              onToggle={(nextEntity) => void toggleEntity(nextEntity)}
+            />
+            <div className="ha-mobile-results-footer">
+              <span>Showing {displayedEntities.length} of {visibleEntities.length} entities</span>
+              {displayedEntities.length < visibleEntities.length ? (
+                <button className="secondary" type="button" aria-label="Show more entities" onClick={() => setVisibleEntityLimit((limit) => limit + 24)}>
+                  Show more
+                </button>
+              ) : null}
+            </div>
+          </>
         ) : (
           <p className="empty-state">No matching entities.</p>
         )}

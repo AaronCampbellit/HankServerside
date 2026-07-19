@@ -72,6 +72,16 @@ describe("HankAIPage", () => {
     expect(screen.getByRole("button", { name: "Hide conversations" })).toBeInTheDocument();
   });
 
+  it("uses one compact provider and readiness status", async () => {
+    hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
+    hankAIClient.listSessions.mockResolvedValue({ sessions: [] });
+
+    render(<ConfirmDialogProvider><HankAIPage /></ConfirmDialogProvider>);
+
+    expect(await screen.findByLabelText("Assistant status: Ready, gpt-5-codex")).toBeInTheDocument();
+    expect(screen.getAllByText("Ready")).toHaveLength(1);
+  });
+
   it("shows live conversation messages without canned tool review cards", async () => {
     hankAIClient.status.mockResolvedValue({ provider: "gpt-5-codex", ready: true });
     hankAIClient.listSessions.mockResolvedValue({

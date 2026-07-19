@@ -24,7 +24,7 @@ export type SettingsTab = {
 };
 
 export const settingsTabs: SettingsTab[] = [
-  { href: "/dashboard/settings/home", label: "Home & Connector" },
+  { href: "/dashboard/settings/home", label: "Home & Connector", adminOnly: true },
   { href: "/dashboard/settings/quick-links", label: "Quick Links" },
   { href: "/dashboard/settings/people", label: "People" },
   { href: "/dashboard/settings/connections", label: "Connections" },

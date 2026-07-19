@@ -80,4 +80,16 @@ describe("dashboard stylesheet", () => {
   it("removes the desktop Home Assistant table minimum width on mobile", () => {
     expect(lastRuleBody(".ha-entities-table")).toContain("min-width: 0");
   });
+
+  it("defines task-focused mobile workspaces for the primary routes", () => {
+    expect(styles).toContain("/* Task-focused mobile workspaces */");
+    expect(styles).toContain('.notes-guide-layout[data-mobile-pane="browser"] .notes-guide-editor');
+    expect(styles).toContain('.notes-guide-layout[data-mobile-pane="editor"] .notes-guide-rail');
+    expect(styles).toContain(".ha-mobile-results-footer");
+    expect(styles).toContain("max-height: 76px");
+    expect(styles).toContain(".file-tree-pane");
+    expect(styles).toContain(".file-activity-region.is-mobile-collapsed");
+    expect(styles).toContain(".home-mobile-services-toggle");
+    expect(styles).toContain("min-height: calc(100dvh");
+  });
 });

@@ -276,6 +276,7 @@ function Icon({ name }: { name: string }) {
 export function FileServerPage() {
   const [state, setState] = useState<State>({ status: "loading", path: initialPathFromLocation() });
   const [transferJobs, setTransferJobs] = useState<TransferJobsState>({ status: "loading", jobs: [] });
+  const [activityOpen, setActivityOpen] = useState(false);
   const [targets, setTargets] = useState<FileTarget[]>([]);
   const [activeTargetKey, setActiveTargetKey] = useState("");
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -422,6 +423,7 @@ export function FileServerPage() {
 
   const readyState = state;
   const isRefreshing = Boolean(readyState.refreshingPath);
+  const activeTransferCount = transferJobs.jobs.filter((job) => !isTerminalJob(job.status)).length;
   const commandSourceID = activeTarget.sourceID;
   const commandAgentID = activeTarget.agentID;
   const moveTargets = targetOptions.filter((target) => target.agentID === commandAgentID);
@@ -672,6 +674,16 @@ export function FileServerPage() {
           <button type="button" aria-label="List" aria-current={readyState.viewMode === "list" ? "true" : undefined} onClick={() => setReady({ viewMode: "list" })}><Icon name="list" /></button>
           <button type="button" aria-label="Grid" aria-current={readyState.viewMode === "grid" ? "true" : undefined} onClick={() => setReady({ viewMode: "grid" })}><Icon name="grid" /></button>
         </div>
+        <button
+          className="secondary file-mobile-activity-toggle"
+          type="button"
+          aria-expanded={activityOpen}
+          aria-controls="file-activity-panel"
+          aria-label={`${activityOpen ? "Hide" : "Show"} file activity, ${activeTransferCount} active`}
+          onClick={() => setActivityOpen((open) => !open)}
+        >
+          Activity{activeTransferCount ? <span>{activeTransferCount}</span> : null}
+        </button>
       </div>
 
       <div className={`file-guide-panes${readyState.previewOpen ? "" : " preview-closed"}`}>
@@ -802,7 +814,14 @@ export function FileServerPage() {
         ) : null}
       </div>
 
-      <TransferJobsPanel state={transferJobs} onRefresh={() => void loadTransferJobs()} />
+      <div
+        id="file-activity-panel"
+        className={`file-activity-region${activityOpen ? "" : " is-mobile-collapsed"}`}
+        role="region"
+        aria-label="File activity"
+      >
+        <TransferJobsPanel state={transferJobs} onRefresh={() => void loadTransferJobs()} />
+      </div>
 
       {readyState.menuPath ? (
         <FileActionMenu

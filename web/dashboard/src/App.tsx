@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell } from "./ui/Shell";
 import { primaryNav } from "./ui/navConfig";
-import { SettingsLayout } from "./settings/SettingsLayout";
+import { SettingsLayout, settingsLandingPath } from "./settings/SettingsLayout";
 import { authClient } from "./api/auth";
 import { ConfirmDialogProvider, ToastProvider } from "./ui/primitives";
 import { bootstrapClient, type BootstrapState } from "./api/bootstrap";
@@ -37,6 +37,16 @@ function RouteStub({ route }: { route: RouteDefinition }) {
         <p className="eyebrow">Hank Remote</p>
         <h1 id="route-title">{route.heading}</h1>
       </div>
+    </section>
+  );
+}
+
+function SettingsLoadingPage() {
+  return (
+    <section className="settings-page" aria-labelledby="route-title">
+      <p className="eyebrow">Hank Remote</p>
+      <h1 id="route-title">Settings</h1>
+      <p className="loading-state"><span className="spinner" aria-hidden="true" />Loading settings...</p>
     </section>
   );
 }
@@ -168,7 +178,9 @@ export function App() {
 
   function renderCachedRoute(path: string) {
     const cachedRoute = routeForPath(path);
-    const page = pageForRoute(cachedRoute);
+    const isSettingsRoot = cachedRoute.path === "/dashboard/settings";
+    const resolvedRoute = isSettingsRoot && bootstrap ? routeForPath(settingsLandingPath(isAdmin)) : cachedRoute;
+    const page = isSettingsRoot && !bootstrap ? <SettingsLoadingPage /> : pageForRoute(resolvedRoute);
     return cachedRoute.path.startsWith("/dashboard/settings") ? (
       <SettingsLayout currentPath={cachedRoute.path} isAdmin={isAdmin} onPrefetch={prefetchRoute}>
         {page}

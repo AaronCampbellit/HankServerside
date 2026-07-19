@@ -50,7 +50,7 @@ describe("App routes", () => {
     ["/dashboard/home-assistant", "Home Assistant"],
     ["/dashboard/profile-notes", "Loading notes"],
     ["/dashboard/file-server", "Loading files"],
-    ["/dashboard/settings", "Home & Connector"],
+    ["/dashboard/settings", "Settings"],
     ["/dashboard/settings/home", "Home & Connector"],
     ["/dashboard/settings/quick-links", "Quick Links"],
     ["/dashboard/settings/people", "People"],
@@ -66,7 +66,7 @@ describe("App routes", () => {
   ])("renders %s", (path, heading) => {
     window.history.pushState({}, "", path);
     render(<App />);
-    expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: heading, level: 1 })).toBeInTheDocument();
   });
 
   it("keeps visited dashboard tabs mounted so returning does not reload the page", async () => {
@@ -117,6 +117,36 @@ describe("App routes", () => {
     expect(screen.queryByRole("heading", { name: "Loading notes" })).not.toBeInTheDocument();
     expect(calls.filter((path) => path === "/v1/me/notes")).toHaveLength(1);
     expect(calls.filter((path) => path === "/v1/me/notes/daily")).toHaveLength(1);
+  });
+
+  it("lands members on a permitted settings page from the generic Settings route", async () => {
+    window.history.pushState({}, "", "/dashboard/settings");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
+      const path = String(input);
+      if (path === "/v1/ui/bootstrap") {
+        return new Response(JSON.stringify({
+          user: { id: "usr_member", email: "member@example.com" },
+          home: { id: "home_1", name: "Campbell Home" },
+          membership: { role: "member" },
+          permissions: { is_admin: false, can_manage_settings: false },
+          agent: null,
+          setup_status: { first_setup_visible: false },
+          features: {},
+          server: { version: "dev" },
+          navigation: [],
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      if (path === "/v1/home/quick-links") {
+        return new Response(JSON.stringify({ can_edit: false, links: [] }), { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Quick Links" })).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Home & Connector" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("link", { name: "Quick Links" })).toHaveAttribute("aria-current", "page");
   });
 
   it("submits login and register from the public auth route", async () => {
@@ -387,6 +417,8 @@ describe("App routes", () => {
     expect(screen.getByRole("button", { name: "Restart connector" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Create setup file" })).toHaveAttribute("href", "/dashboard/settings/home");
     expect(screen.getByRole("heading", { name: "Services" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Home connection" })).toHaveTextContent("Campbell Agent");
+    expect(screen.getByRole("button", { name: "Show all services" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("heading", { name: "Recent activity" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Quick links" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "People" })).toBeInTheDocument();
@@ -2391,13 +2423,29 @@ describe("App routes", () => {
     expect(screen.getByText(/home_2/)).toBeInTheDocument();
   });
 
-  it("opens the settings root on the Home settings page with the guide rail", () => {
+  it("opens the settings root on the Home settings page with the guide rail for admins", async () => {
     window.history.pushState({}, "", "/dashboard/settings");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
+      if (String(input) === "/v1/ui/bootstrap") {
+        return new Response(JSON.stringify({
+          user: { id: "usr_admin", email: "owner@example.com" },
+          home: { id: "home_1", name: "Campbell Home" },
+          membership: { role: "admin" },
+          permissions: { is_admin: true, can_manage_settings: true },
+          agent: null,
+          setup_status: { first_setup_visible: false },
+          features: {},
+          server: { version: "dev" },
+          navigation: [],
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("not found", { status: 404 });
+    }));
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Home & Connector" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Home & Connector" })).toBeInTheDocument();
     const settingsRail = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(settingsRail).getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
+    expect(within(settingsRail).getByRole("link", { name: "Home ADMIN" })).toHaveAttribute("aria-current", "page");
     expect(within(settingsRail).getByRole("link", { name: "Quick Links" })).toHaveAttribute("href", "/dashboard/settings/quick-links");
     expect(screen.queryByRole("region", { name: "Settings sections" })).not.toBeInTheDocument();
   });

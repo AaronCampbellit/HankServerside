@@ -14,6 +14,10 @@ function guideLabel(tab: SettingsTab): string {
   return tab.label;
 }
 
+export function settingsLandingPath(isAdmin: boolean): string {
+  return settingsTabs.find((tab) => !tab.adminOnly || isAdmin)?.href || "/dashboard/settings/join-home";
+}
+
 function iconFor(tab: SettingsTab): string {
   if (tab.href.endsWith("/home")) return "home";
   if (tab.href.endsWith("/quick-links")) return "link";
@@ -66,7 +70,7 @@ export function SettingsLayout({
   onPrefetch?: (href: string) => void;
   children: ReactNode;
 }) {
-  const normalizedCurrentPath = currentPath === "/dashboard/settings" ? "/dashboard/settings/home" : currentPath;
+  const normalizedCurrentPath = currentPath === "/dashboard/settings" ? settingsLandingPath(isAdmin) : currentPath;
   const visibleTabs = settingsTabs.filter((tab) => !tab.adminOnly || isAdmin);
   const activeTab = visibleTabs.find((tab) => tab.href === normalizedCurrentPath) || visibleTabs[0];
   const tabsByHref = new Map(visibleTabs.map((tab) => [tab.href, tab]));

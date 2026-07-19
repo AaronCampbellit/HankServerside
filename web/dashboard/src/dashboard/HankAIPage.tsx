@@ -215,6 +215,7 @@ export function HankAIPage() {
 
   const provider = typeof state.assistantStatus.provider === "string" ? state.assistantStatus.provider : "assistant";
   const ready = state.assistantStatus.ready === true;
+  const assistantStateLabel = state.sending ? "Working" : ready ? "Ready" : "Unavailable";
   const draftTrimmed = state.draft.trim();
   const showPalette = draftTrimmed.startsWith("/") && !draftTrimmed.includes(" ");
   const paletteMatches = showPalette
@@ -238,11 +239,14 @@ export function HankAIPage() {
           >
             Conversations
           </button>
-          <span className={`status-pill ${state.sending ? "" : "status-online"}`}>
+          <span
+            className={`status-pill hank-assistant-status ${state.sending || !ready ? "" : "status-online"}`}
+            aria-label={`Assistant status: ${assistantStateLabel}, ${provider}`}
+          >
             <span className={`status-dot ${state.sending ? "warn" : "ok"}`} aria-hidden="true" />
-            {state.sending ? "Working…" : "Ready"}
+            <span>{state.sending ? "Working…" : assistantStateLabel}</span>
+            <small>{provider}</small>
           </span>
-          <span className={`status-pill ${ready ? "status-online" : ""}`}>{provider}</span>
         </div>
       </header>
 
@@ -282,9 +286,6 @@ export function HankAIPage() {
               <span className="eyebrow">Conversation</span>
               <h2>Hank</h2>
               <strong>{state.sessions.find((session) => session.id === state.selectedSessionID)?.title || "New conversation"}</strong>
-            </div>
-            <div className="chat-panel-actions">
-              <span className="status-pill status-online">Ready</span>
             </div>
           </div>
           <div className="chat-thread">

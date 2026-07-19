@@ -299,6 +299,8 @@ function Icon({ name }: { name: string }) {
 
 export function ProfileNotesPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [mobilePane, setMobilePane] = useState<"browser" | "editor">("browser");
+  const [moreFormattingOpen, setMoreFormattingOpen] = useState(false);
   const [profileSettings, setProfileSettings] = useState<ProfileSettingsResponse>({ revision: 0, settings: {} });
   const [history, setHistory] = useState<HistoryState>({ past: [], future: [] });
   const bodyInputRef = useRef<HTMLDivElement>(null);
@@ -495,6 +497,7 @@ export function ProfileNotesPage() {
       const editor = editorFromNote(note);
       latestEditorRef.current = editor;
       setReady({ selectedID: id, editor, savedEditor: editor, message: "" });
+      setMobilePane("editor");
     } catch (error) {
       setReady({ message: errorMessage(error) });
     }
@@ -512,6 +515,7 @@ export function ProfileNotesPage() {
       savedEditor: { ...emptyEditor, instanceKey: editor.instanceKey },
       message: "",
     });
+    setMobilePane("editor");
   }
 
   function newNoteInNotebook(parentID: string) {
@@ -526,6 +530,7 @@ export function ProfileNotesPage() {
       savedEditor: { ...emptyEditor, instanceKey: editor.instanceKey },
       message: "",
     });
+    setMobilePane("editor");
   }
 
   function openNotebookDialog() {
@@ -565,6 +570,7 @@ export function ProfileNotesPage() {
         notebookDraft: "",
         message: "Notebook created.",
       });
+      setMobilePane("editor");
       showToast("Notebook created.");
     } catch (error) {
       showToast(errorMessage(error), "error");
@@ -1024,7 +1030,11 @@ export function ProfileNotesPage() {
     <section className="dashboard-page notes-guide-page" aria-labelledby="route-title">
       {state.message ? <p className="notice-state">{state.message}</p> : null}
 
-      <div className={`notes-guide-layout${state.railOpen ? "" : " rail-closed"}`}>
+      <div
+        className={`notes-guide-layout${state.railOpen ? "" : " rail-closed"}`}
+        data-mobile-pane={mobilePane}
+        data-testid="notes-mobile-workspace"
+      >
         {state.railOpen ? (
           <aside className="notes-guide-rail" aria-label="Notes list">
             <header className="notes-rail-head">
@@ -1134,6 +1144,9 @@ export function ProfileNotesPage() {
 
         <section className="notes-guide-editor" aria-label="Note editor">
           <header className="notes-editor-header">
+            <button className="notes-mobile-back" type="button" aria-label="Back to notes" onClick={() => setMobilePane("browser")}>
+              <span aria-hidden="true">‹</span> Notes
+            </button>
             <span className="notes-title-kind" aria-hidden="true"><Icon name={noteIconName(state.editor)} /></span>
             <label className="visually-hidden" htmlFor="noteTitle">Note title</label>
             <input
@@ -1189,16 +1202,28 @@ export function ProfileNotesPage() {
                 <ToolbarButton label="Bold" text="B" onClick={() => applyEditorAction("bold")} />
                 <ToolbarButton label="Italic" text="I" onClick={() => applyEditorAction("italic")} />
                 <ToolbarButton label="Underline" text="U" onClick={() => applyEditorAction("underline")} />
-                <ToolbarButton label="Smaller heading" text="A-" onClick={() => applyEditorAction("small")} />
-                <ToolbarButton label="Heading" text="H" onClick={() => applyEditorAction("heading")} />
-                <ToolbarButton label="Larger heading" text="A+" onClick={() => applyEditorAction("large")} />
-                <ToolbarButton label="Bulleted list" icon="list" onClick={() => applyEditorAction("bullets")} />
-                <ToolbarButton label="Numbered list" icon="ordered" onClick={() => applyEditorAction("numbers")} />
-                <span className="notes-toolbar-separator" aria-hidden="true" />
-                <ToolbarButton label="Text page" icon="note" pressed={state.editor.pageType === "text"} onClick={() => applyEditorAction("text")} />
-                <ToolbarButton label="Kanban page" icon="kanban" pressed={state.editor.pageType === "kanban"} onClick={() => applyEditorAction("kanban")} />
-                <ToolbarButton label="Tag" icon="tag" onClick={() => applyEditorAction("tag")} />
-                <ToolbarButton label="Link" icon="link" onClick={() => applyEditorAction("link")} />
+                <button
+                  className="notes-more-formatting-toggle"
+                  type="button"
+                  aria-expanded={moreFormattingOpen}
+                  aria-controls="notes-more-formatting-controls"
+                  aria-label="More formatting"
+                  onClick={() => setMoreFormattingOpen((open) => !open)}
+                >
+                  More
+                </button>
+                <div id="notes-more-formatting-controls" className={`notes-more-formatting-controls${moreFormattingOpen ? " is-open" : ""}`}>
+                  <ToolbarButton label="Smaller heading" text="A-" onClick={() => applyEditorAction("small")} />
+                  <ToolbarButton label="Heading" text="H" onClick={() => applyEditorAction("heading")} />
+                  <ToolbarButton label="Larger heading" text="A+" onClick={() => applyEditorAction("large")} />
+                  <ToolbarButton label="Bulleted list" icon="list" onClick={() => applyEditorAction("bullets")} />
+                  <ToolbarButton label="Numbered list" icon="ordered" onClick={() => applyEditorAction("numbers")} />
+                  <span className="notes-toolbar-separator" aria-hidden="true" />
+                  <ToolbarButton label="Text page" icon="note" pressed={state.editor.pageType === "text"} onClick={() => applyEditorAction("text")} />
+                  <ToolbarButton label="Kanban page" icon="kanban" pressed={state.editor.pageType === "kanban"} onClick={() => applyEditorAction("kanban")} />
+                  <ToolbarButton label="Tag" icon="tag" onClick={() => applyEditorAction("tag")} />
+                  <ToolbarButton label="Link" icon="link" onClick={() => applyEditorAction("link")} />
+                </div>
               </>
             )}
           </div>

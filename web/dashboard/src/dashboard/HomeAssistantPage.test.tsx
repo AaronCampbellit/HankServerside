@@ -24,6 +24,32 @@ describe("HomeAssistantPage", () => {
     vi.clearAllMocks();
   });
 
+  it("bounds the initial entity result set and reveals more on demand", async () => {
+    const states = Array.from({ length: 35 }, (_, index) => ({
+      entity_id: `sensor.room_${index + 1}`,
+      state: String(index + 1),
+      attributes: { friendly_name: `Room ${index + 1}` },
+    }));
+    homeAssistantClient.load.mockResolvedValue({
+      agent: { agent_id: "agent-1", name: "Kitchen Mac", status: "online" },
+      profile: { revision: 2, settings: { dashboard_tiles: [] } },
+      dashboardEntityIDs: [],
+      states,
+    });
+    homeAssistantClient.onStateChanged.mockReturnValue(() => {});
+
+    render(<HomeAssistantPage />);
+
+    const table = await screen.findByRole("table", { name: "All Home Assistant entities" });
+    expect(within(table).getAllByRole("row")).toHaveLength(25);
+    expect(screen.getByText("Showing 24 of 35 entities")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show more entities" }));
+
+    expect(within(screen.getByRole("table", { name: "All Home Assistant entities" })).getAllByRole("row")).toHaveLength(36);
+    expect(screen.getByText("Showing 35 of 35 entities")).toBeInTheDocument();
+  });
+
   it("keeps the HTML reference dashboard as the first Home Assistant surface", async () => {
     const dashboardEntityIDs = [
       "light.living_room",

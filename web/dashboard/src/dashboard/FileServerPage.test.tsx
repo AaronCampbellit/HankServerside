@@ -97,6 +97,32 @@ describe("FileServerPage", () => {
     window.history.pushState({}, "", "/dashboard/file-server");
   });
 
+  it("keeps transfer activity behind a mobile disclosure", async () => {
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({ path: "/", items: [{ path: "/Photos", name: "Photos", is_directory: true }] });
+    fileServerClient.listJobs.mockResolvedValue([{
+      id: "job-1",
+      operation: "download",
+      status: "running",
+      source_path: "/Photos/archive.zip",
+      bytes_done: 10,
+      bytes_total: 100,
+      created_at: "2026-07-19T10:00:00Z",
+      updated_at: "2026-07-19T10:00:01Z",
+    }]);
+
+    renderPage();
+
+    const toggle = await screen.findByRole("button", { name: "Show file activity, 1 active" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("region", { name: "File activity" })).toHaveClass("is-mobile-collapsed");
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "File activity" })).not.toHaveClass("is-mobile-collapsed");
+  });
+
   it("supports grid/list switching and a dismissible preview pane", async () => {
     mockDemoShares();
     fileServerClient.list.mockResolvedValue({
