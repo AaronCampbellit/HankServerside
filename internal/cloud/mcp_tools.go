@@ -150,7 +150,7 @@ func mcpToolDefs() []mcpToolDef {
 			InputSchema: mcpObjectSchema(map[string]any{}), Scopes: []string{domain.NotesAPIScopeRead}, Annotations: mcpReadOnlyAnnotations,
 		},
 		{
-			Name: "list_kanban_cards", Description: "List and filter cards on an exact board_id or the configured default Kanban board. Completed cards are hidden unless requested.",
+			Name: "list_kanban_cards", Description: "List and filter ordered cards on an exact board_id or the configured default Kanban board. Completed cards are hidden unless requested. After a human handoff, list the configured intake column and continue with its first ordered unblocked card.",
 			InputSchema: mcpObjectSchema(map[string]any{
 				"board_id":         mcpStr("Optional exact board ID; defaults to the configured default board."),
 				"column_id":        mcpStr("Optional exact column ID."),
@@ -193,7 +193,7 @@ func mcpToolDefs() []mcpToolDef {
 			}, "card_id"), Scopes: []string{domain.NotesAPIScopeWrite}, Annotations: mcpSafeWriteAnnotations,
 		},
 		{
-			Name: "append_kanban_worklog", Description: "Append a server-dated progress, verification, blocker, or outcome entry while preserving the card's original Markdown details.",
+			Name: "append_kanban_worklog", Description: "Append a server-dated progress, verification, blocker, or outcome entry while preserving the card's original Markdown details. Before a human handoff, use a blocker entry to preserve the decision, approval, or review needed.",
 			InputSchema: mcpObjectSchema(map[string]any{
 				"board_id":       mcpStr("Optional exact board ID; defaults to the configured default board."),
 				"card_id":        mcpStr("Exact card ID returned by a Kanban read tool."),
@@ -202,7 +202,7 @@ func mcpToolDefs() []mcpToolDef {
 			}, "card_id", "entry_markdown", "kind"), Scopes: []string{domain.NotesAPIScopeWrite}, Annotations: mcpSafeWriteAnnotations,
 		},
 		{
-			Name: "move_kanban_card", Description: "Move or reorder one exact Kanban card in an exact destination column. The server does not impose a workflow order.",
+			Name: "move_kanban_card", Description: "Move or reorder one exact Kanban card in an exact destination column. For a human handoff, prefer the human role for unfinished decisions or approvals and the review role for completed work awaiting validation, falling back to the other configured role. Then continue with the next intake card rather than waiting. The server does not impose a workflow order.",
 			InputSchema: mcpObjectSchema(map[string]any{
 				"board_id":         mcpStr("Optional exact board ID; defaults to the configured default board."),
 				"card_id":          mcpStr("Exact card ID returned by a Kanban read tool."),

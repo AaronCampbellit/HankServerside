@@ -137,7 +137,11 @@ func (s *Server) mcpInitializeResult(params json.RawMessage) map[string]any {
 		"instructions": "Hank project context. Use list_docs/search_docs/read_doc to read HankServerside " +
 			"documentation, and the *_note tools to read and write your Hank notes (e.g. save a plan with " +
 			"create_note, or read one with get_note and act on it). Kanban tools list, read, create, update, " +
-			"work-log, and move cards on your configured profile Notes Kanban boards.",
+			"work-log, and move cards on your configured profile Notes Kanban boards. When an active card " +
+			"needs human approval, append a blocker work-log entry and move unfinished work to Needs Human " +
+			"or completed work awaiting validation to Review, falling back to the other configured role. " +
+			"Then continue with the next ordered intake card rather than waiting. If neither handoff role " +
+			"exists, report the configuration issue, skip the blocked card, and continue intake work.",
 	}
 }
 

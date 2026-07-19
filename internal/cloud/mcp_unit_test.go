@@ -167,6 +167,19 @@ func TestMCPToolListAndLookup(t *testing.T) {
 	if strings.Join(readDef.Scopes, ",") != domain.NotesAPIScopeRead || strings.Join(writeDef.Scopes, ",") != domain.NotesAPIScopeWrite {
 		t.Fatalf("Kanban scopes read=%v write=%v", readDef.Scopes, writeDef.Scopes)
 	}
+	listCardsDef, _ := mcpToolByName("list_kanban_cards")
+	worklogDef, _ := mcpToolByName("append_kanban_worklog")
+	moveDef, _ := mcpToolByName("move_kanban_card")
+	workflowDescriptions := strings.ToLower(strings.Join([]string{
+		listCardsDef.Description,
+		worklogDef.Description,
+		moveDef.Description,
+	}, " "))
+	for _, required := range []string{"human", "review", "intake", "continue"} {
+		if !strings.Contains(workflowDescriptions, required) {
+			t.Fatalf("Kanban workflow descriptions missing %q: %s", required, workflowDescriptions)
+		}
+	}
 }
 
 func TestMCPInitializeAndDispatchNoDB(t *testing.T) {
@@ -183,6 +196,12 @@ func TestMCPInitializeAndDispatchNoDB(t *testing.T) {
 	}
 	if !strings.Contains(res["instructions"].(string), "Kanban") {
 		t.Fatalf("initialize instructions do not advertise Kanban tools: %v", res["instructions"])
+	}
+	instructions := strings.ToLower(res["instructions"].(string))
+	for _, required := range []string{"human approval", "needs human", "review", "next ordered intake card", "rather than waiting"} {
+		if !strings.Contains(instructions, required) {
+			t.Fatalf("initialize instructions missing %q: %s", required, instructions)
+		}
 	}
 
 	auth := mcpAuthContext{}

@@ -91,6 +91,14 @@ server-dated UTC Progress, Verification, Blocker, or Outcome sections without re
 brainstorming or requirements. Successful writes audit identifiers only, never card titles,
 Markdown details, tags, or work-log content.
 
+When an active card needs a human handoff, append a Blocker work-log entry that preserves the
+decision, approval, or review needed. Move unfinished work to the column with the **Needs Human**
+role and completed work awaiting validation to **Review**; if the preferred role is not configured,
+use the other configured handoff role. Then continue with the first ordered unblocked card in the
+configured intake column instead of waiting for the human response. If neither handoff role exists,
+report the board-configuration issue, leave the blocked card in place, skip it, and continue with the
+next intake card. Role resolution uses semantic column metadata and never guesses from column titles.
+
 ChatGPT typed conversations and Codex can use these tools. ChatGPT Voice cannot currently invoke
 apps, so Voice use remains deferred until OpenAI enables apps in Voice.
 
