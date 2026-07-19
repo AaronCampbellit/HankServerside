@@ -13,6 +13,20 @@ function lastRuleBody(selector: string): string {
 }
 
 describe("dashboard stylesheet", () => {
+  it("keeps the expanded desktop sidebar slim", () => {
+    expect(styles).toContain("--side-nav-width: 204px");
+  });
+
+  it("uses the full desktop workspace without an outer page card", () => {
+    const routeCanvases = ruleBodies(".app-main > .route-cache-panel > .dashboard-page:not(.home-dashboard)");
+    const notesWorkspace = lastRuleBody(".notes-guide-layout");
+
+    expect(styles).toContain("/* Productive edge-to-edge desktop workspace */");
+    expect(routeCanvases.some((body) => body.includes("min-height: calc(100vh - 56px)") && body.includes("padding: 0") && body.includes("max-width: none"))).toBe(true);
+    expect(notesWorkspace).toContain("border: 0");
+    expect(notesWorkspace).toContain("border-radius: 0");
+  });
+
   it("keeps the fixed dashboard shell scrollable inside the content pane", () => {
     expect(ruleBodies(".app-content").some((body) => body.includes("height: 100%"))).toBe(true);
     expect(ruleBodies(".app-content").some((body) => body.includes("display: flex") && body.includes("flex-direction: column"))).toBe(true);
