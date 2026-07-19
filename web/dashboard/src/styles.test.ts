@@ -97,5 +97,6 @@ describe("dashboard stylesheet", () => {
     const mobileFileAction = lastRuleBody(".file-guide-actions button");
     expect(mobileFileAction).toContain("font-size: 0");
     expect(mobileFileAction).toContain("gap: 0");
+    expect(mobileFileAction).toContain("justify-content: center");
   });
 });
