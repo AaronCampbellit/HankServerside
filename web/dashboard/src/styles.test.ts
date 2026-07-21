@@ -69,6 +69,12 @@ describe("dashboard stylesheet", () => {
     expect(ruleBodies(".kanban-upload").at(0)).toContain("min-height: 44px");
   });
 
+  it("distinguishes column dragging from card drop feedback", () => {
+    expect(ruleBodies(".kanban-column-grip").at(0)).toContain("cursor: grab");
+    expect(ruleBodies(".kanban-column.is-column-dragging").at(0)).toContain("opacity:");
+    expect(ruleBodies(".kanban-column.is-column-drop-target").at(0)).toContain("outline:");
+  });
+
   it("keeps Kanban body and bold weights consistent between cards and the editor", () => {
     expect(lastRuleBody(".kanban-card-open")).toContain("font: 500");
     expect(lastRuleBody(".kanban-description-preview")).toContain("font: 500");

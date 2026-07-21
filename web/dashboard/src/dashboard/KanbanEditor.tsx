@@ -15,6 +15,8 @@ import "./kanbanWorkflow.css";
 
 type CardLocation = { columnID: string; cardID: string };
 
+const columnDragDataType = "application/x-hank-kanban-column";
+
 type KanbanEditorProps = {
   board: KanbanBoard;
   attachments?: NoteAttachment[];
@@ -170,6 +172,8 @@ export function KanbanEditor({
   const [selected, setSelected] = useState<CardLocation | null>(null);
   const [dragging, setDragging] = useState<CardLocation | null>(null);
   const [dropTarget, setDropTarget] = useState("");
+  const [draggingColumnID, setDraggingColumnID] = useState("");
+  const [columnDropTargetID, setColumnDropTargetID] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -232,7 +236,37 @@ export function KanbanEditor({
     if (index < 0 || target < 0 || target >= columns.length) return;
     const next = [...columns];
     [next[index], next[target]] = [next[target], next[index]];
-    commit({ columns: next });
+    commit({ columns: next.map((column, sortOrder) => ({ ...column, sort_order: sortOrder })) });
+  }
+
+  function reorderColumn(columnID: string, targetColumnID: string) {
+    const sourceIndex = columns.findIndex((column) => column.id === columnID);
+    const targetIndex = columns.findIndex((column) => column.id === targetColumnID);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+    const next = [...columns];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    commit({ columns: next.map((column, sortOrder) => ({ ...column, sort_order: sortOrder })) });
+  }
+
+  function beginColumnDrag(columnID: string, event: DragEvent<HTMLElement>) {
+    setDraggingColumnID(columnID);
+    setColumnDropTargetID("");
+    setDragging(null);
+    setDropTarget("");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(columnDragDataType, columnID);
+  }
+
+  function dropColumn(event: DragEvent, targetColumnID: string) {
+    event.preventDefault();
+    if (draggingColumnID) reorderColumn(draggingColumnID, targetColumnID);
+    endColumnDrag();
+  }
+
+  function endColumnDrag() {
+    setDraggingColumnID("");
+    setColumnDropTargetID("");
   }
 
   async function deleteColumn(column: KanbanColumn) {
@@ -426,12 +460,26 @@ export function KanbanEditor({
               : cards;
             return (
               <section
-                className={`kanban-column${dropTarget === column.id ? " is-drop-target" : ""}`}
+                className={`kanban-column${dropTarget === column.id ? " is-drop-target" : ""}${draggingColumnID === column.id ? " is-column-dragging" : ""}${columnDropTargetID === column.id ? " is-column-drop-target" : ""}`}
                 key={column.id}
                 aria-labelledby={`kanban-column-${column.id}`}
-                onDragOver={(event) => { event.preventDefault(); setDropTarget(column.id || ""); }}
-                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropTarget(""); }}
-                onDrop={(event) => dropCard(event, column.id || "", cards.length)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  if (draggingColumnID) {
+                    setColumnDropTargetID(column.id || "");
+                    setDropTarget("");
+                    return;
+                  }
+                  setDropTarget(column.id || "");
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                  if (draggingColumnID) setColumnDropTargetID("");
+                  else setDropTarget("");
+                }}
+                onDrop={(event) => draggingColumnID
+                  ? dropColumn(event, column.id || "")
+                  : dropCard(event, column.id || "", cards.length)}
               >
                 <header className="kanban-column-head">
                   {editingColumnID === column.id ? (
@@ -452,6 +500,17 @@ export function KanbanEditor({
                   {column.role ? <span className="kanban-workflow-badge">{kanbanRoleLabels[column.role] || column.role}</span> : null}
                   <span className="kanban-count">{cards.length}</span>
                   <div className="kanban-column-actions">
+                    <button
+                      className="kanban-column-grip"
+                      type="button"
+                      draggable
+                      aria-label={`Drag ${column.title} column`}
+                      aria-grabbed={draggingColumnID === column.id}
+                      onDragStart={(event) => beginColumnDrag(column.id || "", event)}
+                      onDragEnd={endColumnDrag}
+                    >
+                      <SmallIcon name="grip" />
+                    </button>
                     <button type="button" aria-label={`Move ${column.title} left`} disabled={columnIndex === 0} onClick={() => moveColumn(column.id || "", -1)}><SmallIcon name="left" /></button>
                     <button type="button" aria-label={`Move ${column.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveColumn(column.id || "", 1)}><SmallIcon name="right" /></button>
                     <button className="kanban-column-add" type="button" aria-label={`Add task to ${column.title}`} title={`Add task to ${column.title}`} onClick={() => setAddingColumnID(column.id || "")}><SmallIcon name="plus" /></button>
@@ -510,8 +569,12 @@ export function KanbanEditor({
                         draggable
                         onDragStart={(event) => beginCardDrag({ columnID: column.id || "", cardID: card.id || "" }, event)}
                         onDragEnd={endCardDrag}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => { event.stopPropagation(); dropCard(event, column.id || "", cardIndex); }}
+                        onDragOver={(event) => { if (!draggingColumnID) event.preventDefault(); }}
+                        onDrop={(event) => {
+                          if (draggingColumnID) return;
+                          event.stopPropagation();
+                          dropCard(event, column.id || "", cardIndex);
+                        }}
                       >
                         <button
                           ref={(node) => {

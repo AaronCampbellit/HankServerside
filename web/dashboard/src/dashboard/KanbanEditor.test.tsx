@@ -163,6 +163,47 @@ describe("KanbanEditor", () => {
     expect(within(actions).getByRole("button", { name: "Delete Inbox" })).toBeInTheDocument();
   });
 
+  it("reorders columns by dragging a dedicated header grip", () => {
+    const { change } = Harness({});
+    const grip = screen.getByRole("button", { name: "Drag Inbox column" });
+    const target = screen.getByRole("heading", { name: "Done" }).closest("section")!;
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn() };
+
+    fireEvent.dragStart(grip, { dataTransfer });
+    expect(grip).toHaveAttribute("aria-grabbed", "true");
+    fireEvent.dragOver(target, { dataTransfer });
+    expect(target).toHaveClass("is-column-drop-target");
+    fireEvent.drop(target, { dataTransfer });
+
+    const latest = change.mock.calls.at(-1)?.[0];
+    expect(dataTransfer.setData).toHaveBeenCalledWith("application/x-hank-kanban-column", "inbox");
+    expect(latest?.columns?.map((column) => column.id)).toEqual(["doing", "done", "inbox"]);
+    expect(latest?.columns?.map((column) => column.sort_order)).toEqual([0, 1, 2]);
+  });
+
+  it("keeps the named move buttons as a working column reorder fallback", () => {
+    const { change } = Harness({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Move Inbox right" }));
+
+    const latest = change.mock.calls.at(-1)?.[0];
+    expect(latest?.columns?.map((column) => column.id)).toEqual(["doing", "inbox", "done"]);
+    expect(screen.getByRole("button", { name: "Move Inbox left" })).toBeEnabled();
+  });
+
+  it("does not change the board when a column is dropped on itself", () => {
+    const { change } = Harness({});
+    const grip = screen.getByRole("button", { name: "Drag Inbox column" });
+    const inbox = screen.getByRole("heading", { name: "Inbox" }).closest("section")!;
+    const dataTransfer = { effectAllowed: "none", setData: vi.fn() };
+
+    fireEvent.dragStart(grip, { dataTransfer });
+    fireEvent.drop(inbox, { dataTransfer });
+
+    expect(change).not.toHaveBeenCalled();
+    expect(inbox).not.toHaveClass("is-column-drop-target");
+  });
+
   it("preserves a trailing space while editing a task description", () => {
     Harness({});
     fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));

@@ -4699,6 +4699,15 @@ button.secondary:disabled {
   background: color-mix(in srgb, var(--surface) 84%, var(--brand));
 }
 
+.kanban-column.is-column-dragging {
+  opacity: .58;
+}
+
+.kanban-column.is-column-drop-target {
+  outline: 2px solid color-mix(in srgb, var(--brand-dark) 76%, var(--line));
+  outline-offset: -2px;
+}
+
 .kanban-column-head {
   min-height: 34px;
   display: grid;
@@ -4786,6 +4795,14 @@ button.secondary:disabled {
 
 .kanban-column-actions .kanban-column-add {
   color: color-mix(in srgb, var(--brand-dark) 86%, var(--ink));
+}
+
+.kanban-column-grip {
+  cursor: grab;
+}
+
+.kanban-column-grip:active {
+  cursor: grabbing;
 }
 
 .kanban-card-stack {
