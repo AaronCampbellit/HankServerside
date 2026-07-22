@@ -79,6 +79,15 @@ Clients should not independently recreate networking, persistence, authorization
 
 ## Working Safely
 
+### Plan and Milestone Completion
+
+- When the user asks to execute a written plan or milestone, complete every task and checklist item in the active milestone—or the entire plan when it has no milestone boundary—before stopping or sending a final handoff.
+- Do not treat a passing partial batch, an interim verification checkpoint, or progress on only some tasks as completion. Use commentary updates for progress while continuing the work.
+- Do not suggest, begin, or ask the user to approve the next milestone while any task in the current milestone remains incomplete.
+- Continue autonomously through the full active milestone, including across tool calls and context compaction. A status question from the user does not end the work unless the user explicitly asks to pause or change scope.
+- Stop early only for a clear blocker that requires human review, a user decision, new authority, unavailable required access, or an external state change. Exhaust safe in-scope alternatives first, complete any independent remaining tasks, and report the exact blocked checklist item and required human action.
+- A skipped validation that can be reported honestly is not by itself permission to leave the milestone's implementation tasks unfinished.
+
 Before editing:
 
 - inspect the current branch, worktree status, and relevant diff

@@ -16,6 +16,8 @@ import { terminalStore } from "../api/terminalStore";
 import { bootstrapClient } from "../api/bootstrap";
 import { homeClient, type AgentToken, type CreatedAgentToken } from "../api/home";
 import { useConfirmDialog, useToast } from "../ui/primitives";
+import { DesktopReadinessCard } from "../desktop/DesktopReadinessCard";
+import {desktopAuditClient,type DesktopAgentReadiness} from "../api/desktopAudit";
 
 type PageState =
   | { status: "loading" }
@@ -214,6 +216,8 @@ function AgentDetail({
   onAction: (kind: "lock" | "restart" | "wake", agent: HomeAgentEntry) => void;
 }) {
   const online = agentIsOnline(agent);
+  const [desktopReadiness,setDesktopReadiness]=useState<DesktopAgentReadiness|null>(null);
+  useEffect(()=>{let live=true;desktopAuditClient.readiness(agent.agent_id).then(value=>{if(live)setDesktopReadiness(value)}).catch(()=>{if(live)setDesktopReadiness(null)});return()=>{live=false}},[agent.agent_id]);
   const metrics = agent.metrics;
   const ram = percentOf(metrics?.memory_used_bytes, metrics?.memory_total_bytes);
   const disk = percentOf(metrics?.disk_used_bytes, metrics?.disk_total_bytes);
@@ -259,6 +263,7 @@ function AgentDetail({
       </div>
 
       <div className="agent-detail-columns">
+        <DesktopReadinessCard readiness={desktopReadiness} />
         <div className="agent-info-card">
           <h3>Details</h3>
           <dl className="agent-info-list">
@@ -283,6 +288,9 @@ function AgentDetail({
           <h3>Actions</h3>
           {isAdmin ? (
             <div className="agent-actions">
+			  {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? (
+				<a className="button" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
+			  ) : null}
               {agentHasCapability(agent, "host.lock") ? (
                 <button type="button" className="secondary" disabled={!online} onClick={() => onAction("lock", agent)}>Lock screen</button>
               ) : null}

@@ -1,6 +1,6 @@
 # Hank Native Remote Desktop V1 Design
 
-**Status:** Approved design, pending written-spec review
+**Status:** Approved design
 **Date:** 2026-07-21
 **Owning platform:** HankServerside
 **Endpoint implementation repository:** Hankagent
@@ -231,10 +231,13 @@ POST /v1/home/desktop-trust/operator-devices/{deviceID}/revoke
 POST /v1/home/desktop-trust/endpoints/{agentID}/approve
 POST /v1/home/desktop-trust/endpoints/{agentID}/revoke
 POST /v1/home/desktop-trust/recovery
+POST /v1/home/desktop-trust/rotate
 POST /v1/home/desktop-trust/reset
 ```
 
 Route handlers use the established Hank authentication, singleton-home membership, administrator, CSRF, confirmation, and audit patterns.
+
+Recovery proves possession of the current root with a signed, server-issued, single-use challenge before enrolling a replacement operator device. Rotation proves possession of the old root over the next-generation root, recovery-envelope hash, and replacement operator identity. Cryptographic reset is the only path that does not require an old-root proof; it revokes every prior operator and endpoint identity and requires an explicit destructive confirmation.
 
 ## Persistent Model
 
@@ -493,6 +496,8 @@ Operational metrics include active/reconnecting sessions, join/reconnect outcome
 
 ### Milestone 1: Shared foundation
 
+**Implementation plan:** [Milestone 1 shared foundation](../plans/2026-07-21-native-remote-desktop-foundation.md)
+
 - migrations and store interfaces
 - authorization and session APIs
 - trust-root, identity, recovery, revocation, and rotation contracts
@@ -503,6 +508,8 @@ Operational metrics include active/reconnecting sessions, join/reconnect outcome
 
 ### Milestone 2: Synthetic end-to-end slice
 
+**Implementation plan:** [Milestone 2 synthetic end-to-end](../plans/2026-07-21-native-remote-desktop-milestone-2-synthetic-e2e.md)
+
 - browser viewer shell
 - browser and agent key exchange and encrypted record layer
 - in-process binary relay
@@ -512,11 +519,15 @@ Operational metrics include active/reconnecting sessions, join/reconnect outcome
 
 ### Milestone 3: Native viewing
 
+**Implementation plan:** [Milestone 3 native viewing](../plans/2026-07-21-native-remote-desktop-milestone-3-native-viewing.md)
+
 - active-console discovery on both platforms
 - native capture and H.264 encoding
 - display inventory, changes, scaling, quality, statistics, and indicator
 
 ### Milestone 4: Native control
+
+**Implementation plan:** [Milestone 4 native control](../plans/2026-07-21-native-remote-desktop-milestone-4-native-control.md)
 
 - normalized pointer and physical keyboard control
 - view-only/control mode
@@ -526,10 +537,14 @@ Operational metrics include active/reconnecting sessions, join/reconnect outcome
 
 ### Milestone 5: Privileged and permission behavior
 
+**Implementation plan:** [Milestone 5 privileged and permission behavior](../plans/2026-07-21-native-remote-desktop-milestone-5-privileged-permissions.md)
+
 - Windows elevated applications, UAC secure desktop, session switching, and privileged input
 - macOS permission readiness, guided setup, lock-screen transitions, and helper supervision
 
 ### Milestone 6: Production hardening
+
+**Implementation plan:** [Milestone 6 production hardening](../plans/2026-07-21-native-remote-desktop-milestone-6-production-hardening.md)
 
 - adaptive quality and backpressure
 - recovery and rotation UX

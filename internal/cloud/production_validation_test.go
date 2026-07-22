@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,18 @@ import (
 	"github.com/dropfile/hankremote/internal/protocol"
 	"github.com/dropfile/hankremote/internal/store"
 )
+
+func TestProductionDesktopRouteInventoryIncludesMilestoneTwoDataPlane(t *testing.T) {
+	source, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{`mux.HandleFunc("/v1/agents/"`, `mux.HandleFunc("/v1/desktop-sessions/"`, `mux.HandleFunc("/ws/desktop/browser/"`, `mux.HandleFunc("/ws/desktop/agent/"`} {
+		if !bytes.Contains(source, []byte(route)) {
+			t.Fatalf("production route inventory missing %s", route)
+		}
+	}
+}
 
 func TestManagedFileMoveCreatesAndCompletesJob(t *testing.T) {
 	t.Parallel()

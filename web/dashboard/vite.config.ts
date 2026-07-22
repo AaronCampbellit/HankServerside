@@ -8,6 +8,7 @@ import { defineConfig } from "vite";
 // proxy then attaches it as the session cookie so the app is signed in.
 const proxyTarget = process.env.HANK_DEV_API_PROXY;
 const sessionTokenFile = process.env.HANK_DEV_SESSION_TOKEN_FILE;
+const desktopAcceptanceIdentityFile = process.env.HANK_DEV_DESKTOP_IDENTITY_FILE;
 
 function devSessionCookie(): string {
   if (!sessionTokenFile) return "";
@@ -19,13 +20,35 @@ function devSessionCookie(): string {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), {
+    name: "hank-desktop-acceptance-identity",
+    configureServer(server) {
+      if (!desktopAcceptanceIdentityFile) return;
+      server.middlewares.use("/__hank/desktop-acceptance-identity", (_request, response) => {
+        try {
+          const state = JSON.parse(readFileSync(desktopAcceptanceIdentityFile, "utf8")) as Record<string, unknown>;
+          response.setHeader("Cache-Control", "no-store");
+          response.setHeader("Content-Type", "application/json");
+          response.end(JSON.stringify({
+            device_id: state.operator_device_id,
+            private_key_pkcs8: state.operator_private_key_pkcs8,
+            public_key_spki: state.operator_public_key_spki,
+          }));
+        } catch {
+          response.statusCode = 404;
+          response.end("acceptance identity unavailable");
+        }
+      });
+    },
+  }],
   build: {
     outDir: "../../internal/cloud/ui/react",
     emptyOutDir: true,
   },
-  server: proxyTarget
-    ? {
+  server: {
+    fs: { allow: [new URL("../..", import.meta.url).pathname] },
+    ...(proxyTarget
+      ? {
         proxy: {
           "/v1": {
             target: proxyTarget,
@@ -38,7 +61,12 @@ export default defineConfig({
                 const session = devSessionCookie();
                 if (!session) return;
                 const existing = proxyReq.getHeader("cookie");
-                proxyReq.setHeader("cookie", existing ? `${existing}; ${session}` : session);
+                const csrf = "hank-dev-csrf";
+                const credentials = `${session}; hank_remote_csrf=${csrf}`;
+                proxyReq.setHeader("cookie", existing ? `${existing}; ${credentials}` : credentials);
+                if (["POST", "PUT", "PATCH", "DELETE"].includes(proxyReq.method || "")) {
+                  proxyReq.setHeader("X-Hank-CSRF-Token", csrf);
+                }
               };
               proxy.on("proxyReq", appendSession);
               proxy.on("proxyReqWs", appendSession);
@@ -52,7 +80,8 @@ export default defineConfig({
           },
         },
       }
-    : undefined,
+      : {}),
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/setupTests.ts"],

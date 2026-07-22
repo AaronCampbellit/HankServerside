@@ -46,7 +46,9 @@ describe("HomeAssistantPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Show more entities" }));
 
-    expect(within(screen.getByRole("table", { name: "All Home Assistant entities" })).getAllByRole("row")).toHaveLength(36);
+    await waitFor(() => {
+      expect(within(screen.getByRole("table", { name: "All Home Assistant entities" })).getAllByRole("row")).toHaveLength(36);
+    });
     expect(screen.getByText("Showing 35 of 35 entities")).toBeInTheDocument();
   });
 

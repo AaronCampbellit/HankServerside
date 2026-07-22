@@ -135,6 +135,10 @@ If `promtool` is unavailable on the demo host, install Prometheus tooling on tha
 
 ## Generated Artifacts
 
+## Remote Desktop V1
+
+Run `scripts/remote-desktop-load-validation.sh --contract-only` and `scripts/remote-desktop-acceptance.sh --contract-only` in every portable gate. Both execute exact scenario-to-test mappings, explicitly mark integration/physical-only rows as not run, and emit JSONL receipts under `.codex/remote-desktop-evidence/`; `native_evidence:false` means they do not satisfy physical acceptance. Packaged physical-device acceptance requires separate authorization and a metadata-only driver; run `scripts/remote-desktop-acceptance.sh` without `--contract-only` only on disposable Windows/macOS devices. Native evidence belongs under the driver-configured untracked evidence directory and must never contain display, input, clipboard, credential, private-key, recovery-code, or ciphertext content. See `docs/remote-desktop/v1-acceptance.md` and `docs/remote-desktop/v1-operations.md`.
+
 Validation output is intentionally generated under `data/` and should remain untracked:
 
 - `data/restart-validation/`

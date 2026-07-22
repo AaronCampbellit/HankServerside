@@ -62,6 +62,9 @@ type Server struct {
 	requestTimeout             time.Duration
 	assistantAI                AssistantAIConfig
 	chatGPTDeviceAuths         *chatGPTDeviceAuthRegistry
+	desktop                    *desktopService
+	desktopRelay               desktopRelay
+	desktopRelayAuth           desktopRelayAuthorizer
 	noteAttachmentRoot         string
 	assistantTrace             *assistantTraceLog
 	loginBackoff               *loginBackoffRegistry
@@ -135,6 +138,11 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 		httpBaseCancel:        httpBaseCancel,
 	}
 	server.kanban = newMCPKanbanService(server.store, server.notes, func() time.Time { return time.Now().UTC() })
+	server.desktopRelay = newInProcessDesktopRelay(defaultDesktopRelayLimits(), func(_ context.Context, event desktopRelayLifecycleEvent) {
+		go server.recordDesktopRelayLifecycle(event)
+	})
+	server.desktop = newDesktopService(server.store, server.router, func() time.Time { return time.Now().UTC() }, newToken, server.desktopRelay)
+	server.desktopRelayAuth = storeDesktopRelayAuthorizer{store: server.store}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", server.handleLoginPage)
@@ -203,9 +211,13 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/home", server.handleHome)
 	mux.HandleFunc("/v1/home/invitations/accept", server.handleHomeInvitationAccept)
 	mux.HandleFunc("/v1/home/", server.handleHomeSubroutes)
+	mux.HandleFunc("/v1/agents/", server.handleAgentResourceRoutes)
+	mux.HandleFunc("/v1/desktop-sessions/", server.handleDesktopSessionRoutes)
 	mux.HandleFunc("/v1/file-transfers/", server.handleFileTransfer)
 	mux.HandleFunc("/ws/agent", server.handleAgentWebSocket)
 	mux.HandleFunc("/ws/app", server.handleAppWebSocket)
+	mux.HandleFunc("/ws/desktop/browser/", server.handleDesktopBrowserWebSocket)
+	mux.HandleFunc("/ws/desktop/agent/", server.handleDesktopAgentWebSocket)
 
 	server.http = &http.Server{
 		Addr:              addr,
@@ -432,6 +444,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.refreshDesktopSessionMetrics(r.Context())
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = io.WriteString(w, s.metrics.RenderPrometheus())
 	if db := s.store.DB(); db != nil {
@@ -468,6 +481,21 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.storage != nil {
 		if status, err := s.storage.Status(); err == nil {
 			_, _ = io.WriteString(w, storageops.RenderMetrics(status))
+		}
+	}
+}
+
+func (s *Server) refreshDesktopSessionMetrics(ctx context.Context) {
+	if s.metrics == nil || s.store == nil {
+		return
+	}
+	counts, err := s.store.DesktopSessionStatePlatformCounts(ctx)
+	if err != nil {
+		return
+	}
+	for _, platform := range []string{"windows", "macos", "unknown"} {
+		for _, state := range []string{"requested", "offered", "agent_ready", "joining", "active", "reconnecting", "denied", "expired", "terminated", "failed"} {
+			s.metrics.SetDesktopSessions(state, platform, counts[platform+"\x00"+state])
 		}
 	}
 }

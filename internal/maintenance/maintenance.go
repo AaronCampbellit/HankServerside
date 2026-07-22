@@ -44,6 +44,9 @@ func (j Jobs) RunOnce(ctx context.Context) error {
 			"login_backoff_deleted", summary.LoginBackoffDeleted,
 			"assistant_attachments_deleted", summary.AssistantAttachmentsDeleted,
 			"note_attachment_rows_deleted", summary.NoteAttachmentRowsDeleted,
+			"desktop_join_credentials_deleted", summary.DesktopJoinCredentialsDeleted,
+			"desktop_session_events_deleted", summary.DesktopSessionEventsDeleted,
+			"desktop_sessions_deleted", summary.DesktopSessionsDeleted,
 		)
 	}
 	if err == nil && j.AfterPrune != nil {

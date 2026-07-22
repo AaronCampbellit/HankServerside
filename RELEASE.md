@@ -99,3 +99,12 @@ Include in every release's notes:
 - At least one Alertmanager notification receiver is configured and has been
   test-fired.
 - `scripts/metrics-assert.sh` passes against the deployed instance.
+
+## 8. Native Remote Desktop V1 Gate
+
+- `scripts/remote-desktop-load-validation.sh --contract-only` passes.
+- `scripts/remote-desktop-acceptance.sh --contract-only` executes every explicit portable mapping and records integration/physical-only rows as not run. It emits a complete JSONL contract receipt, not native-device evidence.
+- Require metadata-only native-device evidence proving the eight-hour longevity, eleven-point native matrix, compatibility, signed package upgrade/rollback/uninstall, permission/elevation, and resource-baseline requirements in `docs/remote-desktop/v1-acceptance.md`.
+- First privileged activation proves mutually authenticated legacy-credential transfer or explicit re-enrollment, privileged-authority readiness, and retirement of the old reusable credential only after the exact server and agent are bound by the committed receipt.
+- Windows MSI and macOS pkg are signed as one compatible GUI/authority/host unit; macOS notarization is accepted and stapled. Unsigned-test artifacts do not satisfy this gate.
+- No database, signing, packaging, or physical-device skip may be treated as release readiness.

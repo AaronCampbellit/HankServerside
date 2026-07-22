@@ -23,6 +23,14 @@ required=(
   "hank_remote_db_ping_success"
   "hank_remote_cloud_runtime_heartbeat_age_seconds"
   "hank_remote_cloud_runtime_up"
+  "hank_desktop_sessions"
+  "hank_desktop_join_total"
+  "hank_desktop_reconnect_total"
+  "hank_desktop_terminated_total"
+  "hank_desktop_relay_bytes_total"
+  "hank_desktop_relay_backpressure_total"
+  "hank_desktop_readiness"
+  "hank_desktop_readiness_reported"
 )
 
 missing=0

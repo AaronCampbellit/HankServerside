@@ -116,3 +116,42 @@ func TestAgentTypeMigrationEnforcesOnePrimaryPerHome(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteDesktopFoundationMigrationHasSecurityConstraints(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	var body strings.Builder
+	for _, migration := range migrations {
+		if migration.Version != 21 {
+			continue
+		}
+		for _, statement := range migration.Statements {
+			body.WriteString(statement)
+			body.WriteByte('\n')
+		}
+	}
+	text := body.String()
+	for _, required := range []string{
+		"CREATE TABLE IF NOT EXISTS desktop_trust_roots",
+		"CREATE TABLE IF NOT EXISTS desktop_identities",
+		"CREATE TABLE IF NOT EXISTS desktop_sessions",
+		"CREATE TABLE IF NOT EXISTS desktop_join_credentials",
+		"CREATE TABLE IF NOT EXISTS desktop_session_events",
+		"desktop_sessions_one_live_operator_idx",
+		"credential_hash BYTEA NOT NULL UNIQUE",
+		"CHECK (side IN ('browser', 'agent'))",
+		"CHECK (state IN ('requested', 'offered', 'agent_ready', 'joining', 'active', 'reconnecting', 'denied', 'failed', 'expired', 'terminated'))",
+		"CHECK (requested_permissions <@ ARRAY['desktop.view'",
+		"CHECK (key_epoch > 0)",
+		"FOREIGN KEY (home_id, agent_id) REFERENCES agents(home_id, id)",
+		"FOREIGN KEY (home_id, operator_user_id, operator_device_identity_id)",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("migration 21 missing %q", required)
+		}
+	}
+}

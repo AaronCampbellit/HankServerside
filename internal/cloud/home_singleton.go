@@ -192,6 +192,12 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeAgent(w, r, home, auth, membership, parts) {
 		return
 	}
+	if s.handleHomeDesktopSessions(w, r, home, auth, membership, parts) {
+		return
+	}
+	if s.handleHomeDesktopTrust(w, r, home, auth, membership, parts) {
+		return
+	}
 
 	if len(parts) == 2 && parts[0] == "files" && parts[1] == "preview" && r.Method == http.MethodGet {
 		if err := s.requireHomeFeature(r.Context(), home, membership, auth.User.ID, domain.HomePermissionFeatureFiles); err != nil {

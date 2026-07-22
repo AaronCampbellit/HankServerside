@@ -2,11 +2,37 @@ package store
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/dropfile/hankremote/internal/domain"
 )
+
+func TestLifecyclePruneSummaryIncludesDesktopRetention(t *testing.T) {
+	summary := LifecyclePruneSummary{DesktopJoinCredentialsDeleted: 2, DesktopSessionEventsDeleted: 1, DesktopSessionsDeleted: 1}
+	if summary.Empty() {
+		t.Fatal("desktop retention counts were ignored")
+	}
+}
+
+func TestLifecyclePruneExecutesAsOneTransaction(t *testing.T) {
+	source, err := os.ReadFile("production_state.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	function := string(source)
+	start := strings.Index(function, "func (s *Store) PruneLifecycleWithSummary")
+	end := strings.Index(function[start:], "\nfunc scanAppWebSocketTicket")
+	if start < 0 || end < 0 {
+		t.Fatal("PruneLifecycleWithSummary source not found")
+	}
+	function = function[start : start+end]
+	if !strings.Contains(function, "s.beginTx") || !strings.Contains(function, "tx.ExecContext") || !strings.Contains(function, "tx.Commit") || strings.Contains(function, "s.exec(ctx, statement.sql") {
+		t.Fatal("lifecycle retention is not one transaction")
+	}
+}
 
 func TestUpdateFileOperationJobMonotonicDoesNotRegressTerminalState(t *testing.T) {
 	t.Parallel()

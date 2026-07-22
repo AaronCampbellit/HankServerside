@@ -40,6 +40,9 @@ export const appRoutes: RouteDefinition[] = [
 const routeByPath = new Map(appRoutes.map((route) => [route.path, route]));
 
 export function routeForPath(pathname: string): RouteDefinition {
+	if (/^\/dashboard\/agents\/[^/]+\/desktop$/.test(pathname)) {
+		return { path: pathname, heading: "Remote Desktop", adminOnly: true };
+	}
   return routeByPath.get(pathname) ?? { path: pathname, heading: "Not Found" };
 }
 

@@ -61,6 +61,108 @@
   font-size: 16px;
 }
 
+/* Native Remote Desktop viewer */
+.desktop-viewer-page {
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.desktop-viewer-header,
+.desktop-viewer-toolbar,
+.desktop-viewer-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.desktop-viewer-header h1 { margin: 0; }
+.desktop-native-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 55%, var(--line));
+  border-radius: 999px;
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.desktop-viewer-stage {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #07101b;
+  outline-offset: 3px;
+}
+
+.desktop-viewer-stage canvas, .desktop-viewer-stage video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.desktop-viewer-stage[data-scale="actual"] { overflow: auto; }
+.desktop-viewer-stage[data-scale="actual"] canvas,
+.desktop-viewer-stage[data-scale="actual"] video { width: auto; height: auto; max-width: none; max-height: none; object-fit: none; }
+.desktop-viewer-stage [hidden] { display: none; }
+.desktop-viewer-stage[data-control-focused="true"] { outline: 3px solid var(--brand); border-color: var(--brand); }
+.desktop-viewer-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  padding: 20px;
+  text-align: center;
+  background: color-mix(in srgb, #07101b 82%, transparent);
+  color: #f3f7fb;
+}
+.desktop-viewer-overlay strong { font-size: clamp(18px, 3vw, 28px); }
+.desktop-viewer-overlay span { color: #aebdce; }
+.desktop-viewer-toolbar { justify-content: flex-start; }
+.desktop-special-keys { display: flex; flex-wrap: wrap; gap: 8px; }
+.desktop-viewer-toolbar button, .desktop-viewer-toolbar .button { min-height: 44px; }
+.desktop-viewer-toolbar .danger { margin-left: auto; }
+.desktop-display-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.desktop-display-panel > div { display: grid; gap: 3px; min-width: 0; }
+.desktop-display-panel strong, .desktop-display-panel small, .desktop-display-panel li { overflow-wrap: anywhere; }
+.desktop-display-panel ul { margin: 2px 0 0; padding-left: 20px; }
+.desktop-display-panel p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 13px; }
+.desktop-display-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.desktop-viewer-status {
+  justify-content: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font: 600 12px/1.4 var(--font-mono);
+}
+
+@media (max-width: 500px) {
+  .desktop-viewer-page { gap: 10px; }
+  .desktop-viewer-header { align-items: flex-start; }
+  .desktop-viewer-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .desktop-viewer-toolbar button, .desktop-viewer-toolbar .button { width: 100%; min-width: 0; margin: 0; white-space: normal; }
+  .desktop-viewer-toolbar .danger { grid-column: 1 / -1; }
+  .desktop-viewer-status { display: grid; }
+  .desktop-display-panel { grid-template-columns: minmax(0, 1fr); }
+  .desktop-display-panel p { grid-column: auto; }
+}
+
 * {
   box-sizing: border-box;
 }

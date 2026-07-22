@@ -179,6 +179,19 @@ func (s *Server) authorizeRealtimeTopics(ctx context.Context, auth authContext, 
 	}
 	for _, topic := range topics {
 		switch {
+		case strings.HasPrefix(topic, "desktop.session:"):
+			sessionID := strings.TrimSpace(strings.TrimPrefix(topic, "desktop.session:"))
+			if !validDesktopResourceID(sessionID) {
+				return nil, errors.New("unsupported realtime topic")
+			}
+			session, err := s.store.GetDesktopSessionForUser(ctx, sessionID, auth.User.ID)
+			if err != nil {
+				return nil, errors.New("desktop session topic is not owned by this user")
+			}
+			if _, err := s.store.GetHomeMembership(ctx, session.HomeID, auth.User.ID); err != nil {
+				return nil, errors.New("desktop session topic is not owned by this user")
+			}
+			authorized = append(authorized, topic)
 		case strings.HasPrefix(topic, shellSessionTopicPrefix):
 			if err := resolveHome(); err != nil {
 				return nil, err
@@ -397,6 +410,16 @@ func (s *Server) handleAgentEvent(ctx context.Context, homeID string, envelope p
 	event, err := protocol.DecodePayload[protocol.AgentEvent](envelope)
 	if err != nil {
 		s.logger.Warn("bad agent event payload", "home_id", homeID, "error", err)
+		return
+	}
+	if strings.HasPrefix(event.Event, "desktop.") {
+		if envelope.HomeID != "" && envelope.HomeID != homeID {
+			s.logger.Warn("desktop agent event rejected for wrong home", "home_id", homeID, "agent_id", envelope.AgentID)
+			return
+		}
+		if err := s.handleDesktopAgentEvent(ctx, homeID, envelope.AgentID, event.Event, event.Body); err != nil {
+			s.logger.Warn("desktop agent event rejected", "home_id", homeID, "agent_id", envelope.AgentID, "event", event.Event, "error", err)
+		}
 		return
 	}
 

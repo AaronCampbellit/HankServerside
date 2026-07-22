@@ -106,3 +106,33 @@ groups:
         annotations:
           summary: Hank cloud runtime heartbeat is missing or stale
           runbook: docs/runbooks/single-host-compose.md
+      - alert: HankDesktopJoinAuthFailures
+        expr: increase(hank_desktop_join_total{outcome=~"failed|replayed"}[10m]) > 10
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: Remote Desktop join authentication failures increased, runbook: docs/remote-desktop/v1-operations.md }
+      - alert: HankDesktopReconnectFailures
+        expr: sum(rate(hank_desktop_reconnect_total{outcome="failed"}[15m])) / clamp_min(sum(rate(hank_desktop_reconnect_total[15m])), 0.001) > 0.25
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: Remote Desktop reconnect failure ratio is high, runbook: docs/remote-desktop/v1-operations.md }
+      - alert: HankDesktopRelayBackpressure
+        expr: increase(hank_desktop_relay_backpressure_total[10m]) > 5 or increase(hank_desktop_terminated_total{reason="slow_consumer"}[10m]) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: Remote Desktop relay consumers are falling behind, runbook: docs/remote-desktop/v1-operations.md }
+      - alert: HankDesktopCapacityNearLimit
+        expr: sum(hank_desktop_sessions{state=~"offered|joining|active|reconnecting"}) >= 28
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: Remote Desktop sessions are near process capacity, runbook: docs/remote-desktop/v1-operations.md }
+      - alert: HankDesktopReadinessLost
+        expr: hank_desktop_readiness_reported == 1 and on (platform, check) hank_desktop_readiness == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: Remote Desktop endpoint readiness was lost, runbook: docs/remote-desktop/v1-operations.md }
+      - alert: HankDesktopAbnormalTermination
+        expr: increase(hank_desktop_terminated_total{reason!~"user_ended|agent_ended|local_ended"}[15m]) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: Remote Desktop abnormal terminations increased, runbook: docs/remote-desktop/v1-operations.md }

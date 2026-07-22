@@ -93,20 +93,23 @@ type QueryTelemetryRow struct {
 }
 
 type LifecyclePruneSummary struct {
-	AppSessionsDeleted          int64
-	AgentTokensDeleted          int64
-	HomeInvitationsDeleted      int64
-	AppWebSocketTicketsDeleted  int64
-	FileTransfersExpired        int64
-	FileTransfersDeleted        int64
-	RateLimitEventsDeleted      int64
-	RelayRequestsDeleted        int64
-	AppConnectionsDeleted       int64
-	AgentConnectionsDeleted     int64
-	AuditEventsDeleted          int64
-	LoginBackoffDeleted         int64
-	AssistantAttachmentsDeleted int64
-	NoteAttachmentRowsDeleted   int64
+	AppSessionsDeleted            int64
+	AgentTokensDeleted            int64
+	HomeInvitationsDeleted        int64
+	AppWebSocketTicketsDeleted    int64
+	FileTransfersExpired          int64
+	FileTransfersDeleted          int64
+	RateLimitEventsDeleted        int64
+	RelayRequestsDeleted          int64
+	AppConnectionsDeleted         int64
+	AgentConnectionsDeleted       int64
+	AuditEventsDeleted            int64
+	LoginBackoffDeleted           int64
+	AssistantAttachmentsDeleted   int64
+	NoteAttachmentRowsDeleted     int64
+	DesktopJoinCredentialsDeleted int64
+	DesktopSessionEventsDeleted   int64
+	DesktopSessionsDeleted        int64
 }
 
 func (s LifecyclePruneSummary) Empty() bool {
@@ -123,7 +126,10 @@ func (s LifecyclePruneSummary) Empty() bool {
 		s.AuditEventsDeleted == 0 &&
 		s.LoginBackoffDeleted == 0 &&
 		s.AssistantAttachmentsDeleted == 0 &&
-		s.NoteAttachmentRowsDeleted == 0
+		s.NoteAttachmentRowsDeleted == 0 &&
+		s.DesktopJoinCredentialsDeleted == 0 &&
+		s.DesktopSessionEventsDeleted == 0 &&
+		s.DesktopSessionsDeleted == 0
 }
 
 func (s *Store) UpsertCloudRuntime(ctx context.Context, runtimeID string, version string) error {
@@ -647,12 +653,26 @@ func (s *Store) PruneLifecycleWithSummary(ctx context.Context, now time.Time, re
 		{"login_backoff", `DELETE FROM login_backoff WHERE updated_at < ? AND (blocked_until IS NULL OR blocked_until < ?)`, []any{cutoff, now}},
 		{"assistant_attachments", `DELETE FROM assistant_attachments WHERE status IN ('expired', 'staged') AND updated_at < ?`, []any{cutoff}},
 		{"note_attachments", `DELETE FROM note_attachments WHERE deleted_at < ?`, []any{cutoff}},
+		{"desktop_join_credentials", `DELETE FROM desktop_join_credentials
+			WHERE (consumed_at IS NOT NULL AND consumed_at < ?)
+				OR (revoked_at IS NOT NULL AND revoked_at < ?)
+				OR expires_at < ?`, []any{now.Add(-24 * time.Hour), now.Add(-24 * time.Hour), now.Add(-24 * time.Hour)}},
+		{"desktop_session_events", `DELETE FROM desktop_session_events WHERE occurred_at < ?`, []any{now.Add(-180 * 24 * time.Hour)}},
+		{"desktop_sessions", `DELETE FROM desktop_sessions AS session
+			WHERE state IN ('denied','failed','expired','terminated') AND terminated_at < ?
+				AND NOT EXISTS (SELECT 1 FROM desktop_join_credentials AS credential WHERE credential.session_id = session.id)
+				AND NOT EXISTS (SELECT 1 FROM desktop_session_events AS event WHERE event.session_id = session.id)`, []any{now.Add(-365 * 24 * time.Hour)}},
 	}
+	tx, err := s.beginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return LifecyclePruneSummary{}, err
+	}
+	defer tx.Rollback()
 	var summary LifecyclePruneSummary
 	for _, statement := range statements {
-		result, err := s.exec(ctx, statement.sql, statement.args...)
+		result, err := tx.ExecContext(ctx, statement.sql, statement.args...)
 		if err != nil {
-			return summary, err
+			return LifecyclePruneSummary{}, err
 		}
 		affected, _ := result.RowsAffected()
 		switch statement.name {
@@ -684,7 +704,16 @@ func (s *Store) PruneLifecycleWithSummary(ctx context.Context, now time.Time, re
 			summary.AssistantAttachmentsDeleted = affected
 		case "note_attachments":
 			summary.NoteAttachmentRowsDeleted = affected
+		case "desktop_join_credentials":
+			summary.DesktopJoinCredentialsDeleted = affected
+		case "desktop_session_events":
+			summary.DesktopSessionEventsDeleted = affected
+		case "desktop_sessions":
+			summary.DesktopSessionsDeleted = affected
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return LifecyclePruneSummary{}, mapDesktopStoreError(err)
 	}
 	return summary, nil
 }

@@ -396,10 +396,6 @@ export function HomeAssistantPage() {
     return ready.states.filter((entity) => searchableText(entity).includes(query)).slice(0, 80);
   }, [ready]);
 
-  useEffect(() => {
-    setVisibleEntityLimit(24);
-  }, [ready?.query]);
-
   if (state.status === "loading") {
     return (
       <section className="dashboard-page home-assistant-page" aria-labelledby="route-title">
@@ -536,7 +532,10 @@ export function HomeAssistantPage() {
               placeholder="Search entities"
               type="search"
               value={state.query}
-              onChange={(event) => setReady({ query: event.target.value })}
+              onChange={(event) => {
+                setVisibleEntityLimit(24);
+                setReady({ query: event.target.value });
+              }}
             />
             </label>
           </form>

@@ -17,6 +17,7 @@ import { FileServerPage } from "./dashboard/FileServerPage";
 import { HankAIPage } from "./dashboard/HankAIPage";
 import { HomeAssistantPage } from "./dashboard/HomeAssistantPage";
 import { ProfileNotesPage } from "./dashboard/ProfileNotesPage";
+import { DesktopViewerPage } from "./desktop/DesktopViewerPage";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { AppsSettings } from "./settings/AppsSettings";
 import { AttachmentsSettings } from "./settings/AttachmentsSettings";
@@ -72,7 +73,8 @@ function appendMountedRoutePath(paths: string[], path: string): string[] {
 }
 
 // Resolve the page element for a route path (settings pages included).
-function pageForRoute(route: RouteDefinition): ReactNode {
+function pageForRoute(route: RouteDefinition, bootstrap?: BootstrapState | null): ReactNode {
+	if (/^\/dashboard\/agents\/[^/]+\/desktop$/.test(route.path)) return <DesktopViewerPage />;
   switch (route.path) {
     case "/dashboard": return <DashboardHome />;
     case "/dashboard/hank": return <HankAIPage />;
@@ -92,7 +94,7 @@ function pageForRoute(route: RouteDefinition): ReactNode {
     case "/dashboard/settings/join-home": return <JoinHomeSettings />;
     case "/dashboard/settings/logs": return <LogsSettings />;
     case "/dashboard/settings/quick-links": return <QuickLinksSettings />;
-    case "/dashboard/settings/recovery": return <RecoverySettings />;
+    case "/dashboard/settings/recovery": return <RecoverySettings homeID={bootstrap?.home?.id} userID={bootstrap?.user.id} />;
     default: return <RouteStub route={route} />;
   }
 }
@@ -180,7 +182,7 @@ export function App() {
     const cachedRoute = routeForPath(path);
     const isSettingsRoot = cachedRoute.path === "/dashboard/settings";
     const resolvedRoute = isSettingsRoot && bootstrap ? routeForPath(settingsLandingPath(isAdmin)) : cachedRoute;
-    const page = isSettingsRoot && !bootstrap ? <SettingsLoadingPage /> : pageForRoute(resolvedRoute);
+    const page = isSettingsRoot && !bootstrap ? <SettingsLoadingPage /> : pageForRoute(resolvedRoute, bootstrap);
     return cachedRoute.path.startsWith("/dashboard/settings") ? (
       <SettingsLayout currentPath={cachedRoute.path} isAdmin={isAdmin} onPrefetch={prefetchRoute}>
         {page}
