@@ -1,0 +1,11 @@
+{"schema":1,"mode":"contract_only","requirement":"physical_console","package":"./internal/cloud","test":"TestDesktopAgentScopeRequiresOwningHomeAgentSessionAndEpoch","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"concurrent_local_remote_input","package":"./internal/protocol","test":"TestDesktopControlAndDisplaySelectionRequireCurrentLeaseAndGeneration","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"view_only","package":"./internal/protocol","test":"TestDesktopPermissionSetRejectsInvalidCombinations","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"clipboard_both_directions","package":"./internal/protocol","test":"TestDesktopClipboardAndSpecialKeyBounds","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"fresh_key_reconnect","package":"./internal/cloud","test":"TestDesktopServiceReconnectClampsHardExpiryAndChecksOwner","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"local_indicator_and_termination","package":"./internal/cloud","test":"TestDesktopTerminalAgentAcknowledgementsAreIdempotentAfterAuthoritativeClose","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"three_termination_actors","package":"./internal/cloud","test":"TestDesktopSyntheticTerminationActorsCloseBothSockets","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"relay_opacity","package":"./internal/cloud","test":"TestDesktopRelayForwardsOpaqueBinaryWithoutRetention","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"content_free_audit","package":"./internal/cloud","test":"TestDesktopAuditNeverIncludesSensitivePayloads","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"windows_elevated_uac","package":"./internal/protocol","test":"TestDesktopHandshakeReadyAndLifecycleValidation","status":"pass","native_evidence":false}
+{"schema":1,"mode":"contract_only","requirement":"macos_permission_loss_recovery","package":"./internal/protocol","test":"TestDesktopHandshakeReadyAndLifecycleValidation","status":"pass","native_evidence":false}
