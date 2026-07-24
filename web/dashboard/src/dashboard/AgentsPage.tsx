@@ -318,7 +318,7 @@ function AgentDetail({
         </div>
       </div>
 
-      {isAdmin && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? <DesktopTrustSettings homeID={homeID} userID={userID} agentID={agent.agent_id} agentName={agentDisplayName(agent)} /> : null}
+      {isAdmin ? <DesktopTrustSettings homeID={homeID} userID={userID} agentID={agent.agent_id} agentName={agentDisplayName(agent)} /> : null}
 
       {isAdmin && agentHasCapability(agent, "shell.session.open") ? <ShellConsole agent={agent} /> : null}
     </section>
