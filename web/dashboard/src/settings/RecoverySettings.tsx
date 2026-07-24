@@ -5,7 +5,6 @@ import {
   type RecoveryBundle,
   type RecoveryPreview,
 } from "../api/recovery";
-import { DesktopTrustSettings } from "../desktop/trust/DesktopTrustSettings";
 
 type State = {
   bundleFile: File | null;
@@ -41,7 +40,7 @@ function downloadJSON(filename: string, payload: unknown) {
   URL.revokeObjectURL(url);
 }
 
-export function RecoverySettings({ homeID = "", userID = "" }: { homeID?: string; userID?: string }) {
+export function RecoverySettings() {
   const [state, setState] = useState<State>({
     bundleFile: null,
     bundle: null,
@@ -162,7 +161,6 @@ export function RecoverySettings({ homeID = "", userID = "" }: { homeID?: string
           )) : <p className="empty-state">Missing tokens and passwords will appear here after preview.</p>}
         </div>
       </section>
-      <DesktopTrustSettings homeID={homeID} userID={userID} />
     </section>
   );
 }

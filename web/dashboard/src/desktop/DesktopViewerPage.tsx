@@ -209,7 +209,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   }
 
   if (!access) return <section className="desktop-viewer-page"><p className="loading-state" role="status">Loading Remote Desktop…</p></section>;
-  if (!access.allowed) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">{access.reason || "Admin access and an online desktop-capable agent are required."}</p></section>;
+  if (!access.allowed) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">{access.reason || "Admin access and an online desktop-capable agent are required."}</p><section className="desktop-setup-callout"><h2>Before you can connect</h2><ol><li>Return to <a href="/dashboard/agents">Agents</a> and open this device.</li><li>Use its Remote Desktop setup section to approve this browser and the device.</li><li>Complete any local permission prompts, then open Remote Desktop again once its checklist shows Ready.</li></ol></section></section>;
   if (unsupported) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">Secure H.264 playback is not supported by this browser.</p></section>;
 
   const status = state === "joining" ? "Joining encrypted session…" : state === "authorizing" ? "Authorizing…" : state === "active" ? "Connected" : state === "reconnecting" ? "Reconnecting…" : reason || "Ready to connect";

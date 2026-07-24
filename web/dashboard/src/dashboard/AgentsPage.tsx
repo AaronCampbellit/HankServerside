@@ -16,8 +16,9 @@ import { terminalStore } from "../api/terminalStore";
 import { bootstrapClient } from "../api/bootstrap";
 import { homeClient, type AgentToken, type CreatedAgentToken } from "../api/home";
 import { useConfirmDialog, useToast } from "../ui/primitives";
-import { DesktopReadinessCard } from "../desktop/DesktopReadinessCard";
+import { DesktopReadinessCard, desktopReadinessComplete } from "../desktop/DesktopReadinessCard";
 import {desktopAuditClient,type DesktopAgentReadiness} from "../api/desktopAudit";
+import { DesktopTrustSettings } from "../desktop/trust/DesktopTrustSettings";
 
 type PageState =
   | { status: "loading" }
@@ -26,6 +27,8 @@ type PageState =
   | {
       status: "ready";
       isAdmin: boolean;
+      homeID: string;
+      userID: string;
       agents: HomeAgentEntry[];
       tokens: AgentToken[];
       alerts: AgentAlert[];
@@ -207,11 +210,15 @@ function ShellConsole({ agent }: { agent: HomeAgentEntry }) {
 function AgentDetail({
   agent,
   isAdmin,
+  homeID,
+  userID,
   onBack,
   onAction,
 }: {
   agent: HomeAgentEntry;
   isAdmin: boolean;
+  homeID: string;
+  userID: string;
   onBack: () => void;
   onAction: (kind: "lock" | "restart" | "wake", agent: HomeAgentEntry) => void;
 }) {
@@ -219,6 +226,7 @@ function AgentDetail({
   const [desktopReadiness,setDesktopReadiness]=useState<DesktopAgentReadiness|null>(null);
   useEffect(()=>{let live=true;desktopAuditClient.readiness(agent.agent_id).then(value=>{if(live)setDesktopReadiness(value)}).catch(()=>{if(live)setDesktopReadiness(null)});return()=>{live=false}},[agent.agent_id]);
   const metrics = agent.metrics;
+  const desktopReady = desktopReadinessComplete(desktopReadiness);
   const ram = percentOf(metrics?.memory_used_bytes, metrics?.memory_total_bytes);
   const disk = percentOf(metrics?.disk_used_bytes, metrics?.disk_total_bytes);
 
@@ -288,9 +296,10 @@ function AgentDetail({
           <h3>Actions</h3>
           {isAdmin ? (
             <div className="agent-actions">
-			  {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? (
-				<a className="button" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
-			  ) : null}
+              {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? (
+                desktopReady ? <a className="button" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
+                  : <a className="button secondary" href="#remote-desktop-settings">Finish Remote Desktop setup</a>
+              ) : null}
               {agentHasCapability(agent, "host.lock") ? (
                 <button type="button" className="secondary" disabled={!online} onClick={() => onAction("lock", agent)}>Lock screen</button>
               ) : null}
@@ -305,8 +314,11 @@ function AgentDetail({
           {!agentHasCapability(agent, "shell.session.open") ? (
             <p className="agent-hint">Remote shell is disabled on this device. Enable shell commands in that agent's settings to allow live terminals.</p>
           ) : null}
+          {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") && !desktopReady ? <p className="agent-hint">Remote Desktop stays unavailable until every setup check at left is ready.</p> : null}
         </div>
       </div>
+
+      {isAdmin && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? <DesktopTrustSettings homeID={homeID} userID={userID} agentID={agent.agent_id} agentName={agentDisplayName(agent)} /> : null}
 
       {isAdmin && agentHasCapability(agent, "shell.session.open") ? <ShellConsole agent={agent} /> : null}
     </section>
@@ -429,7 +441,7 @@ export function AgentsPage() {
         const agents = await agentsClient.listAgents();
         const tokens = isAdmin ? await homeClient.listAgentTokens().then((payload) => payload.tokens).catch(() => []) : [];
         if (!active) return;
-        setState({ status: "ready", isAdmin, agents, tokens, alerts: [] });
+        setState({ status: "ready", isAdmin, homeID: bootstrap.home?.id ?? "", userID: bootstrap.user.id, agents, tokens, alerts: [] });
         await agentsClient.subscribeHealth();
       } catch (error) {
         if (!active) return;
@@ -585,7 +597,7 @@ export function AgentsPage() {
       ) : null}
 
       {selected ? (
-        <AgentDetail agent={selected} isAdmin={state.isAdmin} onBack={() => setSelectedID(null)} onAction={(kind, agent) => void performAction(kind, agent)} />
+        <AgentDetail agent={selected} isAdmin={state.isAdmin} homeID={state.homeID} userID={state.userID} onBack={() => setSelectedID(null)} onAction={(kind, agent) => void performAction(kind, agent)} />
       ) : state.agents.length ? (
         <div className="agent-grid">
           {state.agents.map((agent) => (

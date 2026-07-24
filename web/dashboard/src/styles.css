@@ -6866,6 +6866,25 @@ button.secondary:disabled {
   font-size: 0.76rem;
   color: var(--faint);
 }
+.desktop-readiness-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.desktop-readiness-heading h3 { margin-bottom: 4px; }
+.desktop-readiness-heading p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+.desktop-setup-list { display: grid; gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.desktop-setup-list li { position: relative; display: grid; gap: 2px; padding-left: 28px; color: var(--muted); font-size: 0.8rem; }
+.desktop-setup-list li::before { content: "!"; position: absolute; left: 0; top: 1px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--warn-soft); color: var(--warn); font-weight: 800; }
+.desktop-setup-list li[data-ready="true"]::before { content: "✓"; background: var(--success-soft); color: var(--success); }
+.desktop-setup-list strong { color: var(--ink); }
+.desktop-setup-list a { color: var(--brand); font-weight: 700; }
+.desktop-setup-callout { max-width: 760px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.desktop-setup-callout h2 { margin: 0 0 8px; font-size: 1.1rem; }
+.desktop-setup-callout ol { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.desktop-trust-walkthrough { margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-strong); }
+.desktop-trust-walkthrough h3 { margin: 0 0 10px; }
+.desktop-trust-walkthrough ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.desktop-trust-walkthrough li { display: grid; gap: 2px; padding-left: 26px; position: relative; color: var(--muted); font-size: 0.82rem; }
+.desktop-trust-walkthrough li::before { content: "→"; position: absolute; left: 0; color: var(--brand); font-weight: 800; }
+.desktop-trust-walkthrough li[data-ready="true"]::before { content: "✓"; color: var(--success); }
+.desktop-trust-walkthrough strong { color: var(--ink); }
 
 .agent-shell {
   padding: 16px;

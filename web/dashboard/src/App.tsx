@@ -94,7 +94,7 @@ function pageForRoute(route: RouteDefinition, bootstrap?: BootstrapState | null)
     case "/dashboard/settings/join-home": return <JoinHomeSettings />;
     case "/dashboard/settings/logs": return <LogsSettings />;
     case "/dashboard/settings/quick-links": return <QuickLinksSettings />;
-    case "/dashboard/settings/recovery": return <RecoverySettings homeID={bootstrap?.home?.id} userID={bootstrap?.user.id} />;
+    case "/dashboard/settings/recovery": return <RecoverySettings />;
     default: return <RouteStub route={route} />;
   }
 }

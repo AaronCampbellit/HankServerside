@@ -13,7 +13,7 @@ describe("DesktopTrustSettings", () => {
     await new IndexedDBDesktopIdentityStore().clearForTests();
   });
 
-  it("shows metadata-only identities, password separation, and exact reset confirmation", async () => {
+  it("shows device approvals and keeps the last-resort reset confirmation exact", async () => {
     const client = {
       snapshot: vi.fn().mockResolvedValue({
         configured: true,
@@ -26,11 +26,11 @@ describe("DesktopTrustSettings", () => {
     };
     render(<DesktopTrustSettings client={client as never} homeID="home" userID="user" />);
     expect(await screen.findByText("endpoint-fp")).toBeInTheDocument();
-    expect(screen.getByText(/Password reset does not recover/)).toBeInTheDocument();
+    expect(screen.getByText(/Set up secure access for this device/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Reset confirmation"), { target: { value: "wrong" } });
-    expect(screen.getByRole("button", { name: "Reset desktop trust" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove all Remote Desktop approvals" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Reset confirmation"), { target: { value: "reset desktop trust" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Reset desktop trust" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove all Remote Desktop approvals" })).toBeEnabled());
   });
 
   it("signs and submits a reviewed browser approval with the approved local identity", async () => {
@@ -71,9 +71,9 @@ describe("DesktopTrustSettings", () => {
     render(<DesktopTrustSettings client={client as never} homeID="home" userID="user" />);
     await screen.findByText("approved-fp");
     fireEvent.change(screen.getByLabelText("Desktop approval request"), { target: { value: JSON.stringify(approvalRequest) } });
-    fireEvent.click(screen.getByRole("button", { name: "Review approval request" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check this request" }));
     await screen.findByText("browser-requested");
-    fireEvent.click(screen.getByRole("button", { name: "Compare fingerprint and approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve after comparing fingerprint" }));
 
     await waitFor(() => expect(client.approveOperator).toHaveBeenCalledOnce());
     expect(client.approveOperator).toHaveBeenCalledWith(expect.objectContaining({
@@ -83,7 +83,7 @@ describe("DesktopTrustSettings", () => {
     }));
   });
 
-  it("allows re-enrollment when the server identity exists but this browser lost its private key", async () => {
+  it("routes a browser with a lost private key through re-enrollment instead of self-approval", async () => {
     localStorage.setItem("hank-desktop-device-id", "browser-key-lost");
     const client = {
       snapshot: vi.fn().mockResolvedValue({
@@ -104,6 +104,13 @@ describe("DesktopTrustSettings", () => {
     render(<DesktopTrustSettings client={client as never} homeID="home" userID="user" />);
 
     await screen.findByText("stale-fingerprint");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Create this browser approval request" })).toBeEnabled());
+    const createRequest = screen.getByRole("button", { name: "Create an approval request for this browser" });
+    await waitFor(() => expect(createRequest).toBeEnabled());
+    fireEvent.click(createRequest);
+    await waitFor(() => expect(screen.getByLabelText("Desktop approval request")).not.toHaveValue(""));
+    fireEvent.click(screen.getByRole("button", { name: "Check this request" }));
+
+    expect(await screen.findByText(/cannot approve requests because its secure key is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve after comparing fingerprint" })).toBeDisabled();
   });
 });
