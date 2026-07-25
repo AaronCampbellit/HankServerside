@@ -28,7 +28,7 @@ export interface DesktopViewerDependencies {
   create(agentID: string, deviceID: string, permissions: string[]): Promise<DesktopSessionAuthorization>;
   reconnect(sessionID: string): Promise<DesktopSessionAuthorization>;
   connect(session: DesktopSessionAuthorization, access: AccessResult, callbacks: DesktopSocketCallbacks): Promise<DesktopConnection>;
-  terminate(sessionID: string): Promise<unknown>;
+  terminate(sessionID: string, keepalive?: boolean): Promise<unknown>;
 }
 
 const textEncoder = new TextEncoder(), textDecoder = new TextDecoder();
@@ -59,7 +59,20 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       return current.mode === "fit" ? fittedContentRect(bounds, current.width, current.height) : (canvasRef.current?.getBoundingClientRect() ?? bounds);
     }, requestFrame: callback => requestAnimationFrame(callback), cancelFrame: handle => cancelAnimationFrame(handle) });
     let live = true; deps.loadAccess().then(value => { if (live) setAccess(value); }).catch(error => { if (live) setAccess({ allowed: false, deviceID: "", agentName: agentID, reason: error instanceof Error ? error.message : "Viewer unavailable" }); });
-    return () => { live = false; mountedRef.current = false; inputRef.current?.dispose(); clipboardRef.current?.reset(); const closing = connectionRef.current?.close("viewer_unmounted"); if (closing) void closing.catch(() => undefined); decoderRef.current?.close(); };
+    const terminateOnExit = () => {
+      const current = sessionRef.current;
+      if (!current) return;
+      sessionRef.current = null;
+      void Promise.resolve(deps.terminate(current.session_id, true)).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", terminateOnExit);
+    return () => {
+      live = false; mountedRef.current = false; window.removeEventListener("pagehide", terminateOnExit);
+      terminateOnExit();
+      inputRef.current?.dispose(); clipboardRef.current?.reset();
+      const closing = connectionRef.current?.close("viewer_unmounted"); if (closing) void closing.catch(() => undefined);
+      decoderRef.current?.close();
+    };
   }, [agentID, deps]);
   useEffect(() => {
     inputRef.current?.update({ active: state === "active" && !readiness?.blocksInput, control, reconnecting: state === "reconnecting" || reconnecting.current, visible: document.visibilityState !== "hidden", displayID: displayState.selectedID ?? "", generation: displayState.generation });
@@ -304,7 +317,7 @@ function defaultDependencies(agentID: string): DesktopViewerDependencies {
         trustRootPublicKeySPKI: access.trustRootPublicKeySPKI, trustRootGeneration: access.trustRootGeneration }));
       await socket.start(session); return socket;
     },
-    terminate: sessionID => desktopClient.terminate(sessionID),
+    terminate: (sessionID, keepalive) => desktopClient.terminate(sessionID, keepalive),
   };
 }
 

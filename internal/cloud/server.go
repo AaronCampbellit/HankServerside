@@ -296,6 +296,11 @@ func (s *Server) StartRuntime(ctx context.Context, version string) error {
 	} else if expired > 0 {
 		s.logger.Info("expired stale relay requests on startup", "runtime_id", s.runtimeID, "count", expired)
 	}
+	if expired, err := s.store.ExpireDesktopSessions(ctx, time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to expire desktop sessions on startup", "runtime_id", s.runtimeID, "error", err)
+	} else if expired > 0 {
+		s.logger.Info("expired stale desktop sessions on startup", "runtime_id", s.runtimeID, "count", expired)
+	}
 	if err := s.store.MarkInterruptedFileOperationJobs(ctx, time.Now().UTC()); err != nil {
 		s.logger.Warn("failed to mark interrupted file operation jobs", "runtime_id", s.runtimeID, "error", err)
 	}
@@ -315,6 +320,11 @@ func (s *Server) StartRuntime(ctx context.Context, version string) error {
 			case <-ticker.C:
 				if err := s.store.HeartbeatCloudRuntime(context.Background(), s.runtimeID); err != nil {
 					s.logger.Warn("failed to heartbeat cloud runtime", "runtime_id", s.runtimeID, "error", err)
+				}
+				if expired, err := s.store.ExpireDesktopSessions(context.Background(), time.Now().UTC()); err != nil {
+					s.logger.Warn("failed to expire desktop sessions", "runtime_id", s.runtimeID, "error", err)
+				} else if expired > 0 {
+					s.logger.Info("expired desktop sessions", "runtime_id", s.runtimeID, "count", expired)
 				}
 			}
 		}

@@ -146,13 +146,17 @@ func (s *Server) desktopAgentReadiness(ctx context.Context, home domain.Home, ag
 		applyDesktopReadinessEvent(checks, seen, event.EventType, metadata)
 	}
 	liveSessions, _ := s.store.ListLiveDesktopSessionIDs(ctx, home.ID, "", agentID)
+	activeSessionID := ""
+	if len(liveSessions) > 0 {
+		activeSessionID = liveSessions[0]
+	}
 	capabilities := []string{}
 	online := false
 	if live != nil {
 		capabilities = nonNilSlice(live.Capabilities)
 		online = true
 	}
-	return map[string]any{"agent_id": agentID, "online": online, "platform": platform, "trusted": trusted, "checks": checks, "capabilities": capabilities, "active_session": len(liveSessions) > 0, "reported_at": reportedAt}
+	return map[string]any{"agent_id": agentID, "online": online, "platform": platform, "trusted": trusted, "checks": checks, "capabilities": capabilities, "active_session": len(liveSessions) > 0, "active_session_id": activeSessionID, "reported_at": reportedAt}
 }
 
 func normalizeDesktopPlatform(value string) string {

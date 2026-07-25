@@ -22,7 +22,9 @@ export class DesktopClient {
   }
   get(sessionID: string): Promise<DesktopSessionAuthorization> { return this.api.request(`/v1/desktop-sessions/${encodeURIComponent(sessionID)}`); }
   reconnect(sessionID: string): Promise<DesktopSessionAuthorization> { return this.api.request(`/v1/desktop-sessions/${encodeURIComponent(sessionID)}/reconnect`, { method: "POST" }); }
-  terminate(sessionID: string): Promise<DesktopSessionAuthorization> { return this.api.request(`/v1/desktop-sessions/${encodeURIComponent(sessionID)}/terminate`, { method: "POST" }); }
+  terminate(sessionID: string, keepalive = false): Promise<DesktopSessionAuthorization> {
+    return this.api.request(`/v1/desktop-sessions/${encodeURIComponent(sessionID)}/terminate`, { method: "POST", ...(keepalive ? { keepalive: true } : {}) });
+  }
   trust(): Promise<DesktopTrustSnapshot> { return this.api.request("/v1/home/desktop-trust"); }
 }
 

@@ -11,6 +11,21 @@ const message = (type: DesktopMessageType, value: unknown): DesktopInnerMessage 
 describe("DesktopViewerPage", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+  it("terminates with a keepalive request when the viewer page is left", async () => {
+    const terminate = vi.fn().mockResolvedValue({});
+    render(<DesktopViewerPage agentID="agent_exit" dependencies={{
+      loadAccess: async () => ({ allowed: true, deviceID: "device_exit", agentName: "Mac" }), supported: () => true,
+      create: vi.fn().mockResolvedValue({ session_id: "desk_exit", agent_id: "agent_exit", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_exit" }),
+      reconnect: vi.fn(), connect: vi.fn(async (_session, _access, callbacks) => { callbacks.onState("active"); return { close: vi.fn(), send: vi.fn(), reconnect: vi.fn() }; }), terminate,
+    }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start secure session" }));
+    await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Connected"));
+
+    fireEvent(window, new PageTransitionEvent("pagehide"));
+
+    await vi.waitFor(() => expect(terminate).toHaveBeenCalledWith("desk_exit", true));
+  });
+
   it("labels native mode, exposes keyboard controls, and ends immediately", async () => {
     const create = vi.fn().mockResolvedValue({ session_id: "desk_1", agent_id: "agent_1", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_1", permissions: ["desktop.view", "desktop.control", "desktop.clipboard.read", "desktop.clipboard.write"] });
     const terminate = vi.fn().mockResolvedValue({});

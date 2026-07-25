@@ -18,6 +18,7 @@ import { homeClient, type AgentToken, type CreatedAgentToken } from "../api/home
 import { useConfirmDialog, useToast } from "../ui/primitives";
 import { DesktopReadinessCard, desktopReadinessComplete } from "../desktop/DesktopReadinessCard";
 import {desktopAuditClient,type DesktopAgentReadiness} from "../api/desktopAudit";
+import { desktopClient } from "../api/desktop";
 import { DesktopTrustSettings } from "../desktop/trust/DesktopTrustSettings";
 
 type PageState =
@@ -226,7 +227,20 @@ function AgentDetail({
 }) {
   const online = agentIsOnline(agent);
   const [desktopReadiness,setDesktopReadiness]=useState<DesktopAgentReadiness|null>(null);
+  const [endingDesktopSession,setEndingDesktopSession]=useState(false);
+  const { confirm } = useConfirmDialog();
+  const { showToast } = useToast();
+  const refreshDesktopReadiness=useCallback(async()=>{const value=await desktopAuditClient.readiness(agent.agent_id);setDesktopReadiness(value);return value},[agent.agent_id]);
   useEffect(()=>{let live=true;desktopAuditClient.readiness(agent.agent_id).then(value=>{if(live)setDesktopReadiness(value)}).catch(()=>{if(live)setDesktopReadiness(null)});return()=>{live=false}},[agent.agent_id]);
+  async function endActiveDesktopSession(){
+    const sessionID=desktopReadiness?.active_session_id;
+    if(!sessionID||endingDesktopSession)return;
+    if(!await confirm({title:"End Remote Desktop session?",message:"This disconnects the current Remote Desktop viewer and releases this device for a new session.",confirmLabel:"End session",tone:"danger"}))return;
+    setEndingDesktopSession(true);
+    try{await desktopClient.terminate(sessionID);await refreshDesktopReadiness();showToast("Remote Desktop session ended.","neutral")}
+    catch(error){showToast(errorMessage(error),"error")}
+    finally{setEndingDesktopSession(false)}
+  }
   const metrics = agent.metrics;
   const desktopReady = desktopReadinessComplete(desktopReadiness);
   const ram = percentOf(metrics?.memory_used_bytes, metrics?.memory_total_bytes);
@@ -302,6 +316,7 @@ function AgentDetail({
                 desktopReady ? <a className="primary-action" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
                   : <a className="button secondary" href="#remote-desktop-settings">Finish Remote Desktop setup</a>
               ) : null}
+              {desktopReadiness?.active_session_id ? <button type="button" className="danger" disabled={endingDesktopSession} onClick={()=>void endActiveDesktopSession()}>{endingDesktopSession?"Ending session…":"End active Remote Desktop session"}</button>:null}
               {agentHasCapability(agent, "host.lock") ? (
                 <button type="button" className="secondary" disabled={!online} onClick={() => onAction("lock", agent)}>Lock screen</button>
               ) : null}
