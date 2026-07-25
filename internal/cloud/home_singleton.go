@@ -325,6 +325,36 @@ func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home do
 		writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 		return true
 	}
+	if len(parts) == 2 && parts[0] == "agents" && r.Method == http.MethodDelete {
+		if membership.Role != domain.HomeRoleAdmin {
+			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+			return true
+		}
+		agentID := strings.TrimSpace(parts[1])
+		if agentID == "" || len(agentID) > 128 {
+			http.NotFound(w, r)
+			return true
+		}
+		liveSessions, err := s.store.ListLiveDesktopSessionIDs(r.Context(), home.ID, "", agentID)
+		if err != nil {
+			writeDesktopStoreError(w, err)
+			return true
+		}
+		if err := s.store.DeleteAgentForHome(r.Context(), home.ID, agentID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return true
+			}
+			writeDesktopStoreError(w, err)
+			return true
+		}
+		s.revokeDesktopRelays(liveSessions, "agent_removed")
+		s.router.DisconnectAgent(home.ID, agentID, "agent removed by administrator")
+		s.metrics.SetOnlineAgents(s.router.AgentCount())
+		s.audit(r.Context(), "agent.removed", auditSeverityCritical, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "agent", agentID, nil)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return true
+	}
 
 	if len(parts) == 1 && parts[0] == "agent" && r.Method == http.MethodGet {
 		agent, err := s.store.GetAgentByHomeID(r.Context(), home.ID)

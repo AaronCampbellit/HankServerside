@@ -189,6 +189,32 @@ func (r *Router) UnregisterAgent(homeID string, agentID string, connectionID str
 	}
 }
 
+// DisconnectAgent removes a currently connected agent from routing and closes
+// its websocket. Callers must first revoke its credentials so it cannot simply
+// reconnect after the close.
+func (r *Router) DisconnectAgent(homeID string, agentID string, reason string) bool {
+	r.mu.Lock()
+	agents := r.agentsByHomeID[homeID]
+	connection := agents[agentID]
+	if connection == nil {
+		r.mu.Unlock()
+		return false
+	}
+	delete(agents, agentID)
+	if len(agents) == 0 {
+		delete(r.agentsByHomeID, homeID)
+	}
+	if r.primaryAgentByHomeID[homeID] == agentID {
+		delete(r.primaryAgentByHomeID, homeID)
+	}
+	r.mu.Unlock()
+
+	if connection.peer != nil {
+		_ = connection.peer.Close(4001, reason)
+	}
+	return true
+}
+
 // GetAgent returns the home's primary agent — the pre-multi-agent behavior
 // every untargeted command and relay path still relies on.
 func (r *Router) GetAgent(homeID string) (*agentConnection, bool) {

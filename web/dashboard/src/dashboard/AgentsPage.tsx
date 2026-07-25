@@ -214,6 +214,7 @@ function AgentDetail({
   userID,
   onBack,
   onAction,
+  onRemove,
 }: {
   agent: HomeAgentEntry;
   isAdmin: boolean;
@@ -221,6 +222,7 @@ function AgentDetail({
   userID: string;
   onBack: () => void;
   onAction: (kind: "lock" | "restart" | "wake", agent: HomeAgentEntry) => void;
+  onRemove: (agent: HomeAgentEntry) => void;
 }) {
   const online = agentIsOnline(agent);
   const [desktopReadiness,setDesktopReadiness]=useState<DesktopAgentReadiness|null>(null);
@@ -307,6 +309,7 @@ function AgentDetail({
                 <button type="button" className="secondary" disabled={!online} onClick={() => onAction("wake", agent)}>Wake device…</button>
               ) : null}
               <button type="button" className="danger" disabled={!online} onClick={() => onAction("restart", agent)}>Restart agent</button>
+              <button type="button" className="danger" onClick={() => onRemove(agent)}>Remove device</button>
             </div>
           ) : (
             <p className="empty-state">Device actions require an admin account.</p>
@@ -518,6 +521,26 @@ export function AgentsPage() {
     }
   }
 
+  async function removeAgent(agent: HomeAgentEntry) {
+    const ok = await confirm({
+      title: `Remove ${agentDisplayName(agent)}?`,
+      message: "This permanently removes the agent, its enrollment credentials, Remote Desktop identity, and stored device record. The device must sign in again to reconnect.",
+      confirmLabel: "Remove device",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await homeClient.removeAgent(agent.agent_id);
+      setSelectedID(null);
+      await refresh();
+      const tokens = await homeClient.listAgentTokens().then((payload) => payload.tokens).catch(() => []);
+      setState((current) => (current.status === "ready" ? { ...current, tokens } : current));
+      showToast(`${agentDisplayName(agent)} removed`);
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    }
+  }
+
   async function revokeToken(token: AgentToken) {
     const ok = await confirm({
       title: `Revoke ${token.agent_id}?`,
@@ -597,7 +620,7 @@ export function AgentsPage() {
       ) : null}
 
       {selected ? (
-        <AgentDetail agent={selected} isAdmin={state.isAdmin} homeID={state.homeID} userID={state.userID} onBack={() => setSelectedID(null)} onAction={(kind, agent) => void performAction(kind, agent)} />
+        <AgentDetail agent={selected} isAdmin={state.isAdmin} homeID={state.homeID} userID={state.userID} onBack={() => setSelectedID(null)} onAction={(kind, agent) => void performAction(kind, agent)} onRemove={(agent) => void removeAgent(agent)} />
       ) : state.agents.length ? (
         <div className="agent-grid">
           {state.agents.map((agent) => (

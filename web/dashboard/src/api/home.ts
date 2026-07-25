@@ -101,6 +101,10 @@ export class HomeClient {
       method: "DELETE",
     });
   }
+
+  removeAgent(agentID: string) {
+    return this.api.request<{ ok: true }>(`/v1/home/agents/${encodeURIComponent(agentID)}`, { method: "DELETE" });
+  }
 }
 
 export const homeClient = new HomeClient();

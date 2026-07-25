@@ -22,3 +22,7 @@ func (p *wsPeer) Write(ctx context.Context, payload any) error {
 	defer p.writeMu.Unlock()
 	return wsjson.Write(ctx, p.conn, payload)
 }
+
+func (p *wsPeer) Close(status websocket.StatusCode, reason string) error {
+	return p.conn.Close(status, reason)
+}

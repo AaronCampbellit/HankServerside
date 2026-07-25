@@ -1823,6 +1823,53 @@ func TestDeleteAgentTokenCanPurgeDisabledSetupFile(t *testing.T) {
 	}
 }
 
+func TestAdminCanPermanentlyRemoveAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_remove_agent", Email: "remove-agent@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	home := domain.Home{ID: "home_remove_agent", UserID: user.ID, Name: "Removal Home", CreatedAt: now, UpdatedAt: now}
+	agent := domain.Agent{ID: "agent_remove_me", HomeID: home.ID, Name: "Old Mac", Status: domain.AgentStatusOffline, AgentType: AgentTypeWorker, CreatedAt: now, UpdatedAt: now}
+	sessionToken := "remove-agent-session-token"
+	agentToken := "remove-agent-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateHome(ctx, home))
+	must(t, db.UpsertAgent(ctx, agent))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_remove_agent", UserID: user.ID, TokenHash: hashToken(sessionToken), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	must(t, db.CreateAgentToken(ctx, domain.AgentToken{ID: "agtok_remove_agent", HomeID: home.ID, AgentID: agent.ID, TokenHash: hashToken(agentToken), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, time.Second, slog.New(slog.NewTextHandler(ioDiscard{}, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	var payload struct {
+		OK bool `json:"ok"`
+	}
+	requestJSON(t, testServer, sessionToken, http.MethodDelete, "/v1/home/agents/agent_remove_me", nil, &payload)
+	if !payload.OK {
+		t.Fatal("remove agent response ok = false")
+	}
+	if _, err := db.GetAgentByID(ctx, agent.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetAgentByID after removal error = %v, want ErrNotFound", err)
+	}
+	if _, err := db.ValidateAgentToken(ctx, hashToken(agentToken)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ValidateAgentToken after removal error = %v, want ErrNotFound", err)
+	}
+
+	var agents struct {
+		Agents []domain.Agent `json:"agents"`
+	}
+	requestJSON(t, testServer, sessionToken, http.MethodGet, "/v1/home/agents", nil, &agents)
+	if len(agents.Agents) != 0 {
+		t.Fatalf("agents after removal = %#v, want empty", agents.Agents)
+	}
+}
+
 func TestHomeAgentRestartEndpointRoutesSystemRestart(t *testing.T) {
 	t.Parallel()
 

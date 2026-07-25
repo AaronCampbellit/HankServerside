@@ -541,6 +541,36 @@ func (s *Store) SetAgentStatus(ctx context.Context, agentID string, status strin
 	return err
 }
 
+// DeleteAgentForHome permanently removes an agent and all credentials that
+// could authenticate it. Desktop records and live connection records use
+// foreign-key cascades; audit history retains its event but loses the agent
+// reference through ON DELETE SET NULL.
+func (s *Store) DeleteAgentForHome(ctx context.Context, homeID, agentID string) error {
+	tx, err := s.beginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// agent_tokens predates the cascading agent foreign key, so delete it
+	// explicitly before removing the authoritative agent row.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_tokens WHERE home_id = ? AND agent_id = ?`, homeID, agentID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM agents WHERE home_id = ? AND id = ?`, homeID, agentID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CreateAgentToken(ctx context.Context, token domain.AgentToken) error {
 	_, err := s.exec(
 		ctx,
