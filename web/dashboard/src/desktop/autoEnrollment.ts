@@ -1,4 +1,5 @@
 import { encodeBase64URL, exactBuffer } from "./base64url";
+import { p256P1363ToDER } from "./crypto";
 import { IndexedDBDesktopIdentityStore } from "./identityStore";
 import { desktopTrustClient, type DesktopAutoEnrollment } from "../api/desktopTrust";
 
@@ -28,11 +29,19 @@ async function enrollBrowserDesktopIdentity(homeID: string, userID: string, sess
   }
   const challenge = await desktopTrustClient.autoChallenge(deviceID);
   const transcript = enrollmentTranscript(homeID, userID, sessionID, "browser_operator", challenge.challenge_id, challenge.challenge, deviceID, spki);
-  const signature = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keyPair.privateKey, exactBuffer(transcript)));
+  // WebCrypto returns fixed-width IEEE P1363 signatures; the Hank API uses
+  // the canonical ASN.1 DER representation shared by the native agents.
+  const signature = await signBrowserEnrollment(keyPair.privateKey, transcript);
   const enrollment = await desktopTrustClient.autoEnroll({ challenge_id: challenge.challenge_id, challenge: challenge.challenge, installation_id: deviceID,
     device_id: deviceID, public_key_spki: encodeBase64URL(spki), signature: encodeBase64URL(signature) });
   window.dispatchEvent(new Event("hank-desktop-auto-enrolled"));
   return enrollment;
+}
+
+export async function signBrowserEnrollment(privateKey: CryptoKey, transcript: Uint8Array): Promise<Uint8Array> {
+  // WebCrypto returns fixed-width IEEE P1363 signatures; the Hank API uses
+  // the canonical ASN.1 DER representation shared by the native agents.
+  return p256P1363ToDER(new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privateKey, exactBuffer(transcript))));
 }
 
 function enrollmentTranscript(homeID: string, userID: string, sessionID: string, purpose: string, challengeID: string, challenge: string, installationID: string, spki: Uint8Array): Uint8Array {
