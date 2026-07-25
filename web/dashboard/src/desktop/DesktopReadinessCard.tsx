@@ -4,7 +4,7 @@ const readinessChecks = ["service", "daemon", "host", "indicator", "capture", "c
 
 const checkCopy: Record<(typeof readinessChecks)[number], { label: string; blocked: string }> = {
   service: { label: "Remote Desktop service", blocked: "Install or start the Hank Remote Desktop service on this device." },
-  daemon: { label: "Background helper", blocked: "Start the Hank desktop helper, then wait for the device to report again." },
+  daemon: { label: "Background session service", blocked: "Start HankAgent in this Mac user session, then wait for the device to report again." },
   host: { label: "Interactive desktop host", blocked: "Sign in locally on the device and make sure the Hank desktop host is running." },
   indicator: { label: "Local access indicator", blocked: "Allow the Hank Remote Desktop indicator to run locally; sessions stay blocked without it." },
   capture: { label: "Screen sharing", blocked: "Allow screen recording locally. On macOS, grant Hank Screen Recording permission in System Settings." },
