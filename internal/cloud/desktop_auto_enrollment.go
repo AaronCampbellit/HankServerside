@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -171,6 +172,9 @@ func (s *Server) installServerDesktopIdentity(r *http.Request, home domain.Home,
 		existing, err = s.store.GetActiveDesktopEndpointIdentity(r.Context(), home.ID, signed.AgentID, time.Now().UTC())
 	}
 	if err == nil {
+		if sameDesktopIdentityEnrollment(existing, signed) {
+			return existing, nil
+		}
 		sessions, replaceErr := s.store.ReplaceDesktopIdentity(r.Context(), existing.ID, signed, time.Now().UTC(), "identity_refreshed")
 		if replaceErr != nil {
 			return domain.DesktopIdentity{}, replaceErr
@@ -193,6 +197,20 @@ func (s *Server) installServerDesktopIdentity(r *http.Request, home domain.Home,
 	}
 	s.auditDesktopIdentity(r, auth, home.ID, event, signed, "server_managed")
 	return signed, nil
+}
+
+func sameDesktopIdentityEnrollment(existing, candidate domain.DesktopIdentity) bool {
+	return existing.IdentityType == domain.DesktopIdentityOperatorDevice &&
+		candidate.IdentityType == domain.DesktopIdentityOperatorDevice &&
+		existing.HomeID == candidate.HomeID &&
+		existing.IdentityType == candidate.IdentityType &&
+		existing.UserID == candidate.UserID &&
+		existing.DeviceID == candidate.DeviceID &&
+		existing.AgentID == candidate.AgentID &&
+		existing.AuthSessionID == candidate.AuthSessionID &&
+		existing.TrustRootGeneration == candidate.TrustRootGeneration &&
+		existing.Fingerprint == candidate.Fingerprint &&
+		bytes.Equal(existing.PublicKeySPKI, candidate.PublicKeySPKI)
 }
 
 func (s *Server) getActiveDesktopIdentity(ctx context.Context, homeID string, identity domain.DesktopIdentity) (domain.DesktopIdentity, error) {

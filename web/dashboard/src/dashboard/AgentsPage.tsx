@@ -299,7 +299,7 @@ function AgentDetail({
           {isAdmin ? (
             <div className="agent-actions">
               {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? (
-                desktopReady ? <a className="button" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
+                desktopReady ? <a className="primary-action" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
                   : <a className="button secondary" href="#remote-desktop-settings">Finish Remote Desktop setup</a>
               ) : null}
               {agentHasCapability(agent, "host.lock") ? (

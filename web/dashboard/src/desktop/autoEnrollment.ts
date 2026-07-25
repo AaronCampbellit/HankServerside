@@ -5,12 +5,20 @@ import { desktopTrustClient, type DesktopAutoEnrollment } from "../api/desktopTr
 
 const deviceIDKey = "hank-desktop-device-id";
 const enrollmentInFlight = new Map<string, Promise<DesktopAutoEnrollment>>();
+const completedEnrollments = new Map<string, DesktopAutoEnrollment>();
 
 export function ensureBrowserDesktopIdentity(homeID: string, userID: string, sessionID: string): Promise<DesktopAutoEnrollment> {
   const scope = `${homeID}:${userID}:${sessionID}`;
+  const completed = completedEnrollments.get(scope);
+  if (completed) return Promise.resolve(completed);
   const existing = enrollmentInFlight.get(scope);
   if (existing) return existing;
-  const operation = enrollBrowserDesktopIdentity(homeID, userID, sessionID).finally(() => enrollmentInFlight.delete(scope));
+  const operation = enrollBrowserDesktopIdentity(homeID, userID, sessionID)
+    .then(enrollment => {
+      completedEnrollments.set(scope, enrollment);
+      return enrollment;
+    })
+    .finally(() => enrollmentInFlight.delete(scope));
   enrollmentInFlight.set(scope, operation);
   return operation;
 }
