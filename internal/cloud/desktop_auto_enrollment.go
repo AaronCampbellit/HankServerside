@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
@@ -158,6 +159,14 @@ func (s *Server) installServerDesktopIdentity(r *http.Request, home domain.Home,
 		s.revokeDesktopRelays(sessions, "identity_refreshed")
 	} else if errors.Is(err, store.ErrNotFound) {
 		if err := s.store.CreateDesktopIdentity(r.Context(), signed); err != nil {
+			// Browser bootstrap and the viewer can both ask for enrollment while
+			// the page is loading. A concurrent request with the same protected
+			// key is already the identity we need; it is not a trust conflict.
+			if errors.Is(err, store.ErrConflict) {
+				if current, lookupErr := s.getActiveDesktopIdentity(r.Context(), home.ID, signed); lookupErr == nil && current.Fingerprint == signed.Fingerprint {
+					return current, nil
+				}
+			}
 			return domain.DesktopIdentity{}, err
 		}
 	} else {
@@ -165,6 +174,13 @@ func (s *Server) installServerDesktopIdentity(r *http.Request, home domain.Home,
 	}
 	s.auditDesktopIdentity(r, auth, home.ID, event, signed, "server_managed")
 	return signed, nil
+}
+
+func (s *Server) getActiveDesktopIdentity(ctx context.Context, homeID string, identity domain.DesktopIdentity) (domain.DesktopIdentity, error) {
+	if identity.IdentityType == domain.DesktopIdentityOperatorDevice {
+		return s.store.GetActiveDesktopOperatorIdentity(ctx, homeID, identity.UserID, identity.DeviceID, time.Now().UTC())
+	}
+	return s.store.GetActiveDesktopEndpointIdentity(ctx, homeID, identity.AgentID, time.Now().UTC())
 }
 
 func (s *Server) handleDesktopBrowserAutoEnrollment(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {

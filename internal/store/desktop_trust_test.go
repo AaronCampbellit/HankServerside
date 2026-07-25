@@ -73,6 +73,29 @@ func TestDesktopTrustLifecycleIsHomeScopedAndResetRevokesIdentities(t *testing.T
 	}
 }
 
+func TestEnsureServerManagedDesktopTrustIsIdempotentAfterLegacyMigration(t *testing.T) {
+	db := openTestStore(t)
+	defer db.Close()
+	if err := db.ConfigureSecretEncryption("desktop-auto-enrollment-test-key"); err != nil {
+		t.Fatalf("ConfigureSecretEncryption: %v", err)
+	}
+	ctx := context.Background()
+	home, user, _ := seedDesktopOwnerAgent(t, db, "server-managed")
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := db.BootstrapDesktopTrust(ctx, testDesktopTrustRoot(home.ID, 1, now), testDesktopOperator(home.ID, user.ID, "legacy-browser", 1, now)); err != nil {
+		t.Fatalf("BootstrapDesktopTrust: %v", err)
+	}
+
+	first, firstKey, migrated, err := db.EnsureServerManagedDesktopTrust(ctx, home.ID, now.Add(time.Second))
+	if err != nil || !migrated || first.AuthorityMode != "server_managed" || first.Generation != 2 || firstKey == nil {
+		t.Fatalf("first server-managed authority = %#v migrated=%v key=%v err=%v", first, migrated, firstKey != nil, err)
+	}
+	second, secondKey, migrated, err := db.EnsureServerManagedDesktopTrust(ctx, home.ID, now.Add(2*time.Second))
+	if err != nil || migrated || second.AuthorityMode != "server_managed" || second.Generation != first.Generation || second.Fingerprint != first.Fingerprint || secondKey == nil {
+		t.Fatalf("second server-managed authority = %#v migrated=%v key=%v err=%v", second, migrated, secondKey != nil, err)
+	}
+}
+
 func TestDesktopTrustRecoveryChallengeIsSingleUse(t *testing.T) {
 	db := openTestStore(t)
 	defer db.Close()

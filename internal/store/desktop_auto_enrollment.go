@@ -98,6 +98,25 @@ func (s *Store) EnsureServerManagedDesktopTrust(ctx context.Context, homeID stri
 		_, err = tx.ExecContext(ctx, `INSERT INTO desktop_trust_roots
 			(home_id, generation, algorithm, public_key_spki, fingerprint, recovery_envelope, created_at, authority_mode, encrypted_private_key)
 			VALUES (?, ?, ?, ?, ?, NULL, ?, 'server_managed', ?)`, homeID, generation, domain.DesktopTrustAlgorithm, spki, desktopcrypto.FingerprintSPKI(spki), now, encrypted)
+	} else if err == nil && mode == "server_managed" {
+		// Another browser or Mac may have completed the migration after the
+		// optimistic read above. Do not rotate its new authority again.
+		if err := tx.Commit(); err != nil {
+			return domain.DesktopTrustRoot{}, nil, false, mapDesktopStoreError(err)
+		}
+		root, err := s.GetDesktopTrustRoot(ctx, homeID)
+		if err != nil {
+			return domain.DesktopTrustRoot{}, nil, false, err
+		}
+		encoded, err := s.decryptSecret(root.EncryptedPrivateKey)
+		if err != nil {
+			return domain.DesktopTrustRoot{}, nil, false, err
+		}
+		storedKey, err := x509.ParseECPrivateKey([]byte(encoded))
+		if err != nil || storedKey.Curve != elliptic.P256() {
+			return domain.DesktopTrustRoot{}, nil, false, errors.New("stored desktop authority key is invalid")
+		}
+		return root, storedKey, false, nil
 	} else if err == nil {
 		generation++
 		// Switching authority deliberately terminates only Desktop sessions and

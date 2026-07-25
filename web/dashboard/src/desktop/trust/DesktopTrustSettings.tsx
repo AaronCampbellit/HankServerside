@@ -13,6 +13,11 @@ export function DesktopTrustSettings({ client = desktopTrustClient, homeID = "",
   const reload = () => client.snapshot().then(setSnapshot).catch(error => setMessage(error instanceof Error ? error.message : "Desktop trust unavailable"));
   useEffect(() => { void reload(); }, []);
   useEffect(() => {
+    const onAutoEnrollment = () => void reload();
+    window.addEventListener("hank-desktop-auto-enrolled", onAutoEnrollment);
+    return () => window.removeEventListener("hank-desktop-auto-enrolled", onAutoEnrollment);
+  }, []);
+  useEffect(() => {
     if (!agentID || !snapshot?.configured) { setPending(null); return; }
     let active = true;
     const loadPending = async () => {
