@@ -118,7 +118,7 @@ func (s *Server) handleHomeDesktopTrust(w http.ResponseWriter, r *http.Request, 
 		return true
 	}
 	if r.Method == http.MethodGet && len(parts) == 1 {
-		s.handleDesktopTrustGet(w, r, home)
+		s.handleDesktopTrustGet(w, r, home, auth)
 		return true
 	}
 	if len(parts) == 3 && parts[1] == "operator-devices" && parts[2] == "auto-challenge" && r.Method == http.MethodPost {
@@ -212,7 +212,7 @@ func (s *Server) handleDesktopPendingEnrollmentGet(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{"pending": true, "request": request, "fingerprint": value.Fingerprint, "expires_at": value.ExpiresAt})
 }
 
-func (s *Server) handleDesktopTrustGet(w http.ResponseWriter, r *http.Request, home domain.Home) {
+func (s *Server) handleDesktopTrustGet(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext) {
 	root, err := s.store.GetDesktopTrustRoot(r.Context(), home.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSON(w, http.StatusOK, map[string]any{"configured": false, "identities": []any{}})
@@ -221,6 +221,18 @@ func (s *Server) handleDesktopTrustGet(w http.ResponseWriter, r *http.Request, h
 	if err != nil {
 		http.Error(w, "desktop trust unavailable", http.StatusInternalServerError)
 		return
+	}
+	// Browser sign-in is the explicit approval for Remote Desktop. Older
+	// client-managed roots may be left orphaned after a browser is replaced;
+	// migrate them before rendering the dashboard rather than reviving the
+	// obsolete manual recovery ceremony.
+	if root.AuthorityMode != "server_managed" {
+		var migrateErr error
+		root, _, _, migrateErr = s.ensureServerDesktopAuthority(r, home, auth)
+		if migrateErr != nil {
+			writeDesktopStoreError(w, migrateErr)
+			return
+		}
 	}
 	identities, err := s.store.ListDesktopIdentities(r.Context(), home.ID)
 	if err != nil {
