@@ -250,6 +250,43 @@ func (s *Server) handleHomeSetupStatus(w http.ResponseWriter, r *http.Request, h
 }
 
 func (s *Server) handleHomeAgent(w http.ResponseWriter, r *http.Request, home domain.Home, auth authContext, membership domain.HomeMembership, parts []string) bool {
+	if len(parts) == 3 && parts[0] == "agent" && parts[1] == "auto-enrollment" && parts[2] == "challenge" && r.Method == http.MethodPost {
+		s.handleDesktopAutoChallenge(w, r, home, auth, "mac_agent")
+		return true
+	}
+	if len(parts) == 2 && parts[0] == "agent" && parts[1] == "auto-enrollment" && r.Method == http.MethodPost {
+		s.handleMacAutoEnrollment(w, r, home, auth, membership)
+		return true
+	}
+	if len(parts) == 2 && parts[0] == "agent" && parts[1] == "enrollment-policy" {
+		if r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, map[string]any{"policy": home.AgentEnrollmentPolicy})
+			return true
+		}
+		if r.Method == http.MethodPut {
+			if membership.Role != domain.HomeRoleAdmin {
+				http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
+				return true
+			}
+			var body struct {
+				Policy string `json:"policy"`
+			}
+			if err := parseJSON(w, r, &body); err != nil {
+				http.Error(w, "invalid agent enrollment policy", http.StatusBadRequest)
+				return true
+			}
+			updated, err := s.store.UpdateAgentEnrollmentPolicy(r.Context(), home.ID, strings.TrimSpace(body.Policy))
+			if err != nil {
+				http.Error(w, "invalid agent enrollment policy", http.StatusBadRequest)
+				return true
+			}
+			s.audit(r.Context(), "agent.enrollment_policy.updated", auditSeverityCritical, auth.User.ID, "", home.ID, requestIDFromContext(r.Context()), "home", home.ID, map[string]any{"policy": updated.AgentEnrollmentPolicy})
+			writeJSON(w, http.StatusOK, map[string]any{"policy": updated.AgentEnrollmentPolicy})
+			return true
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return true
+	}
 	if len(parts) == 1 && parts[0] == "agents" && r.Method == http.MethodGet {
 		stored, err := s.store.ListAgentsByHome(r.Context(), home.ID)
 		if err != nil {

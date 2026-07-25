@@ -10,14 +10,16 @@ const (
 )
 
 type DesktopTrustRoot struct {
-	HomeID           string
-	Generation       int
-	Algorithm        string
-	PublicKeySPKI    []byte
-	Fingerprint      string
-	RecoveryEnvelope []byte
-	CreatedAt        time.Time
-	RotatedAt        *time.Time
+	HomeID              string
+	Generation          int
+	Algorithm           string
+	PublicKeySPKI       []byte
+	Fingerprint         string
+	RecoveryEnvelope    []byte
+	CreatedAt           time.Time
+	RotatedAt           *time.Time
+	AuthorityMode       string
+	EncryptedPrivateKey string
 }
 
 type DesktopIdentity struct {
@@ -36,6 +38,7 @@ type DesktopIdentity struct {
 	ExpiresAt           time.Time
 	RevokedAt           *time.Time
 	RevocationReason    string
+	AuthSessionID       string
 }
 
 // DesktopPendingEnrollment holds public endpoint enrollment material awaiting
@@ -47,6 +50,21 @@ type DesktopPendingEnrollment struct {
 	Fingerprint string
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
+}
+
+// DesktopEnrollmentChallenge is a single-use proof-of-possession challenge.
+// Only its hash is persisted; the raw challenge never reaches durable storage.
+type DesktopEnrollmentChallenge struct {
+	ID             string
+	HomeID         string
+	UserID         string
+	SessionID      string
+	Purpose        string
+	InstallationID string
+	ChallengeHash  []byte
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
+	CreatedAt      time.Time
 }
 
 type DesktopSession struct {

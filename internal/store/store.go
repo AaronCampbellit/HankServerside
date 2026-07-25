@@ -319,17 +319,17 @@ func (s *Store) CreateHome(ctx context.Context, home domain.Home) error {
 }
 
 func (s *Store) GetHomeByID(ctx context.Context, id string) (domain.Home, error) {
-	row := s.queryRow(ctx, `SELECT id, user_id, name, created_at, updated_at FROM homes WHERE id = ?`, id)
+	row := s.queryRow(ctx, `SELECT id, user_id, name, agent_enrollment_policy, created_at, updated_at FROM homes WHERE id = ?`, id)
 	return scanHome(row)
 }
 
 func (s *Store) GetSingletonHome(ctx context.Context) (domain.Home, error) {
-	row := s.queryRow(ctx, `SELECT id, user_id, name, created_at, updated_at FROM homes ORDER BY created_at ASC LIMIT 1`)
+	row := s.queryRow(ctx, `SELECT id, user_id, name, agent_enrollment_policy, created_at, updated_at FROM homes ORDER BY created_at ASC LIMIT 1`)
 	return scanHome(row)
 }
 
 func (s *Store) GetSingletonHomeForUser(ctx context.Context, userID string) (domain.Home, error) {
-	row := s.queryRow(ctx, `SELECT h.id, h.user_id, h.name, h.created_at, h.updated_at
+	row := s.queryRow(ctx, `SELECT h.id, h.user_id, h.name, h.agent_enrollment_policy, h.created_at, h.updated_at
 		FROM homes h
 		JOIN home_memberships hm ON hm.home_id = h.id
 		WHERE hm.user_id = ?
@@ -367,7 +367,7 @@ func (s *Store) BootstrapSingletonHome(ctx context.Context, user domain.User, na
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.QueryContext(ctx, `SELECT id, user_id, name, created_at, updated_at FROM homes ORDER BY created_at ASC LIMIT 2`)
+	rows, err := tx.QueryContext(ctx, `SELECT id, user_id, name, agent_enrollment_policy, created_at, updated_at FROM homes ORDER BY created_at ASC LIMIT 2`)
 	if err != nil {
 		return domain.Home{}, false, err
 	}
@@ -376,7 +376,7 @@ func (s *Store) BootstrapSingletonHome(ctx context.Context, user domain.User, na
 	var homes []domain.Home
 	for rows.Next() {
 		var home domain.Home
-		if err := rows.Scan(&home.ID, &home.UserID, &home.Name, &home.CreatedAt, &home.UpdatedAt); err != nil {
+		if err := rows.Scan(&home.ID, &home.UserID, &home.Name, &home.AgentEnrollmentPolicy, &home.CreatedAt, &home.UpdatedAt); err != nil {
 			return domain.Home{}, false, err
 		}
 		homes = append(homes, home)
@@ -447,16 +447,36 @@ func (s *Store) RenameSingletonHome(ctx context.Context, homeID string, name str
 	return s.GetHomeByID(ctx, homeID)
 }
 
+func (s *Store) UpdateAgentEnrollmentPolicy(ctx context.Context, homeID, policy string) (domain.Home, error) {
+	if policy != "admins_only" && policy != "all_users" {
+		return domain.Home{}, errors.New("invalid agent enrollment policy")
+	}
+	result, err := s.exec(ctx, `UPDATE homes SET agent_enrollment_policy = ?, updated_at = ? WHERE id = ?`, policy, time.Now().UTC(), homeID)
+	if err != nil {
+		return domain.Home{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return domain.Home{}, err
+	}
+	if count == 0 {
+		return domain.Home{}, ErrNotFound
+	}
+	return s.GetHomeByID(ctx, homeID)
+}
+
 func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 	_, err := s.exec(
 		ctx,
-		`INSERT INTO agents (id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, COALESCE(NULLIF(?, ''), 'primary'), ?, ?, ?)
+		`INSERT INTO agents (id, home_id, name, status, agent_type, installation_id, enrolled_by_user_id, last_seen_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, COALESCE(NULLIF(?, ''), 'primary'), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		 home_id = excluded.home_id,
 		 name = excluded.name,
 		 status = excluded.status,
 		 agent_type = CASE WHEN ? = '' THEN agents.agent_type ELSE excluded.agent_type END,
+		 installation_id = COALESCE(excluded.installation_id, agents.installation_id),
+		 enrolled_by_user_id = COALESCE(excluded.enrolled_by_user_id, agents.enrolled_by_user_id),
 		 last_seen_at = excluded.last_seen_at,
 		 updated_at = excluded.updated_at`,
 		agent.ID,
@@ -464,6 +484,8 @@ func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 		agent.Name,
 		agent.Status,
 		agent.AgentType,
+		agent.InstallationID,
+		agent.EnrolledByUserID,
 		agent.LastSeenAt,
 		agent.CreatedAt,
 		agent.UpdatedAt,
@@ -473,18 +495,24 @@ func (s *Store) UpsertAgent(ctx context.Context, agent domain.Agent) error {
 }
 
 func (s *Store) GetAgentByID(ctx context.Context, agentID string) (domain.Agent, error) {
-	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at FROM agents WHERE id = ?`, agentID)
+	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, installation_id, enrolled_by_user_id, last_seen_at, created_at, updated_at FROM agents WHERE id = ?`, agentID)
+	return scanAgent(row)
+}
+
+func (s *Store) GetAgentByInstallationID(ctx context.Context, homeID, installationID string) (domain.Agent, error) {
+	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, installation_id, enrolled_by_user_id, last_seen_at, created_at, updated_at
+		FROM agents WHERE home_id = ? AND installation_id = ?`, homeID, installationID)
 	return scanAgent(row)
 }
 
 func (s *Store) GetAgentByHomeID(ctx context.Context, homeID string) (domain.Agent, error) {
-	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ?
+	row := s.queryRow(ctx, `SELECT id, home_id, name, status, agent_type, installation_id, enrolled_by_user_id, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ?
 		 ORDER BY CASE WHEN agent_type = '' OR agent_type = 'primary' THEN 0 ELSE 1 END, created_at ASC LIMIT 1`, homeID)
 	return scanAgent(row)
 }
 
 func (s *Store) ListAgentsByHome(ctx context.Context, homeID string) ([]domain.Agent, error) {
-	rows, err := s.query(ctx, `SELECT id, home_id, name, status, agent_type, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ?
+	rows, err := s.query(ctx, `SELECT id, home_id, name, status, agent_type, installation_id, enrolled_by_user_id, last_seen_at, created_at, updated_at FROM agents WHERE home_id = ?
 		 ORDER BY CASE WHEN agent_type = '' OR agent_type = 'primary' THEN 0 ELSE 1 END, created_at ASC`, homeID)
 	if err != nil {
 		return nil, err
@@ -549,6 +577,11 @@ func (s *Store) RevokeAgentTokenForHome(ctx context.Context, homeID string, toke
 	return nil
 }
 
+func (s *Store) RevokeAgentTokensForAgent(ctx context.Context, homeID, agentID string, revokedAt time.Time) error {
+	_, err := s.exec(ctx, `UPDATE agent_tokens SET revoked_at = ? WHERE home_id = ? AND agent_id = ? AND revoked_at IS NULL`, revokedAt, homeID, agentID)
+	return err
+}
+
 func (s *Store) DeleteAgentTokenForHome(ctx context.Context, homeID string, tokenID string) error {
 	result, err := s.exec(ctx, `DELETE FROM agent_tokens WHERE id = ? AND home_id = ?`, tokenID, homeID)
 	if err != nil {
@@ -594,8 +627,8 @@ func (s *Store) ValidateAgentToken(ctx context.Context, tokenHash string) (Agent
 		ctx,
 		`SELECT
 			at.id, at.home_id, at.agent_id, at.token_hash, at.revoked_at, at.expires_at, at.created_at,
-			a.id, a.home_id, a.name, a.status, a.agent_type, a.last_seen_at, a.created_at, a.updated_at,
-			h.id, h.user_id, h.name, h.created_at, h.updated_at
+			a.id, a.home_id, a.name, a.status, a.agent_type, a.installation_id, a.enrolled_by_user_id, a.last_seen_at, a.created_at, a.updated_at,
+			h.id, h.user_id, h.name, h.agent_enrollment_policy, h.created_at, h.updated_at
 		FROM agent_tokens at
 		JOIN agents a ON a.id = at.agent_id
 		JOIN homes h ON h.id = at.home_id
@@ -699,7 +732,7 @@ func scanUser(scanner interface{ Scan(dest ...any) error }) (domain.User, error)
 
 func scanHome(scanner interface{ Scan(dest ...any) error }) (domain.Home, error) {
 	var home domain.Home
-	err := scanner.Scan(&home.ID, &home.UserID, &home.Name, &home.CreatedAt, &home.UpdatedAt)
+	err := scanner.Scan(&home.ID, &home.UserID, &home.Name, &home.AgentEnrollmentPolicy, &home.CreatedAt, &home.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Home{}, ErrNotFound
 	}
@@ -709,7 +742,8 @@ func scanHome(scanner interface{ Scan(dest ...any) error }) (domain.Home, error)
 func scanAgent(scanner interface{ Scan(dest ...any) error }) (domain.Agent, error) {
 	var agent domain.Agent
 	var lastSeen sql.NullTime
-	err := scanner.Scan(&agent.ID, &agent.HomeID, &agent.Name, &agent.Status, &agent.AgentType, &lastSeen, &agent.CreatedAt, &agent.UpdatedAt)
+	var installationID, enrolledByUserID sql.NullString
+	err := scanner.Scan(&agent.ID, &agent.HomeID, &agent.Name, &agent.Status, &agent.AgentType, &installationID, &enrolledByUserID, &lastSeen, &agent.CreatedAt, &agent.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Agent{}, ErrNotFound
 	}
@@ -719,6 +753,8 @@ func scanAgent(scanner interface{ Scan(dest ...any) error }) (domain.Agent, erro
 	if lastSeen.Valid {
 		agent.LastSeenAt = &lastSeen.Time
 	}
+	agent.InstallationID = installationID.String
+	agent.EnrolledByUserID = enrolledByUserID.String
 	return agent, nil
 }
 
@@ -743,6 +779,7 @@ func scanAgentTokenRecord(scanner interface{ Scan(dest ...any) error }) (AgentTo
 	var tokenRevokedAt sql.NullTime
 	var tokenExpiresAt sql.NullTime
 	var agentLastSeenAt sql.NullTime
+	var installationID, enrolledByUserID sql.NullString
 
 	err := scanner.Scan(
 		&record.Token.ID,
@@ -757,12 +794,15 @@ func scanAgentTokenRecord(scanner interface{ Scan(dest ...any) error }) (AgentTo
 		&record.Agent.Name,
 		&record.Agent.Status,
 		&record.Agent.AgentType,
+		&installationID,
+		&enrolledByUserID,
 		&agentLastSeenAt,
 		&record.Agent.CreatedAt,
 		&record.Agent.UpdatedAt,
 		&record.Home.ID,
 		&record.Home.UserID,
 		&record.Home.Name,
+		&record.Home.AgentEnrollmentPolicy,
 		&record.Home.CreatedAt,
 		&record.Home.UpdatedAt,
 	)
@@ -781,6 +821,8 @@ func scanAgentTokenRecord(scanner interface{ Scan(dest ...any) error }) (AgentTo
 	if agentLastSeenAt.Valid {
 		record.Agent.LastSeenAt = &agentLastSeenAt.Time
 	}
+	record.Agent.InstallationID = installationID.String
+	record.Agent.EnrolledByUserID = enrolledByUserID.String
 	return record, nil
 }
 

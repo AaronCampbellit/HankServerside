@@ -15,6 +15,7 @@ type State =
       status: "ready";
       home: Home;
       homeName: string;
+      enrollmentPolicy: "admins_only" | "all_users";
       agentPayload: AgentPayload;
       tokens: AgentToken[];
       tokenForm: { agentID: string; name: string; expiresInSeconds: string };
@@ -72,6 +73,7 @@ export function HomeSettings() {
         status: "ready",
         home,
         homeName: home.name,
+        enrollmentPolicy: home.agent_enrollment_policy === "all_users" ? "all_users" : "admins_only",
         agentPayload,
         tokens: tokenPayload.tokens || [],
         tokenForm: {
@@ -143,6 +145,11 @@ export function HomeSettings() {
     } catch (error) {
       setReady({ message: errorMessage(error) });
     }
+  }
+
+  async function saveEnrollmentPolicy(policy: "admins_only" | "all_users") {
+    try { const result = await homeClient.setEnrollmentPolicy(policy); setReady({ enrollmentPolicy: result.policy, message: "Mac enrollment policy updated." }); }
+    catch (error) { setReady({ message: errorMessage(error) }); }
   }
 
   async function createSetupFile(event: FormEvent<HTMLFormElement>) {
@@ -242,6 +249,12 @@ export function HomeSettings() {
             Restart connector
           </button>
         </div>
+      </section>
+
+      <section className="settings-panel" aria-label="Mac enrollment policy">
+        <h2>Mac agent enrollment</h2>
+        <p className="meta-line">Signing in to HankAgent automatically connects that Mac. Remote Desktop remains administrator-only.</p>
+        <label><span>Who can connect a Mac</span><select value={readyState.enrollmentPolicy} onChange={(event) => void saveEnrollmentPolicy(event.target.value as "admins_only" | "all_users")}><option value="admins_only">Administrators only</option><option value="all_users">All home users</option></select></label>
       </section>
 
       <section className="settings-panel" aria-label="Setup file">

@@ -121,6 +121,14 @@ func (s *Server) handleHomeDesktopTrust(w http.ResponseWriter, r *http.Request, 
 		s.handleDesktopTrustGet(w, r, home)
 		return true
 	}
+	if len(parts) == 3 && parts[1] == "operator-devices" && parts[2] == "auto-challenge" && r.Method == http.MethodPost {
+		s.handleDesktopAutoChallenge(w, r, home, auth, "browser_operator")
+		return true
+	}
+	if len(parts) == 3 && parts[1] == "operator-devices" && parts[2] == "auto-enroll" && r.Method == http.MethodPost {
+		s.handleDesktopBrowserAutoEnrollment(w, r, home, auth)
+		return true
+	}
 	if len(parts) == 3 && parts[1] == "pending-endpoints" && parts[2] != "" {
 		if r.Method == http.MethodGet {
 			s.handleDesktopPendingEnrollmentGet(w, r, home, parts[2])
@@ -229,7 +237,7 @@ func (s *Server) handleDesktopTrustGet(w http.ResponseWriter, r *http.Request, h
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"configured": true,
-		"root":       map[string]any{"generation": root.Generation, "algorithm": root.Algorithm, "fingerprint": root.Fingerprint, "public_key_spki": base64.RawURLEncoding.EncodeToString(root.PublicKeySPKI), "recovery_envelope": base64.RawURLEncoding.EncodeToString(root.RecoveryEnvelope), "created_at": root.CreatedAt, "rotated_at": root.RotatedAt},
+		"root":       map[string]any{"generation": root.Generation, "algorithm": root.Algorithm, "authority_mode": root.AuthorityMode, "fingerprint": root.Fingerprint, "public_key_spki": base64.RawURLEncoding.EncodeToString(root.PublicKeySPKI), "recovery_envelope": base64.RawURLEncoding.EncodeToString(root.RecoveryEnvelope), "created_at": root.CreatedAt, "rotated_at": root.RotatedAt},
 		"identities": items,
 	})
 }

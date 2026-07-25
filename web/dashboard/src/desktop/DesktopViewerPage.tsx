@@ -12,6 +12,7 @@ import type { DesktopHealthSample, DesktopQualityName } from "./qualityControlle
 import { acceptAccessUnit, applyCodecConfiguration, applyDisplayInventory, initialDisplayState, type DisplayState } from "./displayStore";
 import { buildAVCDecoderConfigurationRecord, splitAnnexBNALUnits } from "./fmp4";
 import { IndexedDBDesktopIdentityStore } from "./identityStore";
+import { ensureBrowserDesktopIdentity } from "./autoEnrollment";
 import { DesktopMessageType, type CodecConfigPayload, type DesktopInnerMessage, type DisplayInventoryPayload, type StatisticsPayload } from "./protocol";
 import { DesktopInputController, fittedContentRect } from "./inputController";
 import { DesktopClipboardController } from "./clipboardController";
@@ -276,7 +277,9 @@ function defaultDependencies(agentID: string): DesktopViewerDependencies {
   return {
     supported: () => desktopPlaybackSupported(),
     loadAccess: async () => {
-      const [bootstrap, agents, trust] = await Promise.all([bootstrapClient.load(), agentsClient.listAgents(), desktopClient.trust()]); const agent = agents.find(value => value.agent_id === agentID);
+      const bootstrap = await bootstrapClient.load();
+      if (bootstrap.permissions?.is_admin && bootstrap.home?.id && bootstrap.user.id && bootstrap.session.id) await ensureBrowserDesktopIdentity(bootstrap.home.id, bootstrap.user.id, bootstrap.session.id);
+      const [agents, trust] = await Promise.all([agentsClient.listAgents(), desktopClient.trust()]); const agent = agents.find(value => value.agent_id === agentID);
       const identityStore = new IndexedDBDesktopIdentityStore();
       if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("desktop-acceptance-enroll") === "1") {
         const response = await fetch("/__hank/desktop-acceptance-identity", { cache: "no-store" });

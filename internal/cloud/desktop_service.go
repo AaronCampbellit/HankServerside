@@ -52,6 +52,7 @@ type desktopCreateInput struct {
 	AgentID             string
 	OperatorUserID      string
 	OperatorDeviceID    string
+	OperatorSessionID   string
 	SourceIPHash        string
 	SourceUserAgentHash string
 	Permissions         []protocol.DesktopPermission
@@ -114,6 +115,9 @@ func (service *desktopService) Create(ctx context.Context, input desktopCreateIn
 	}
 	if err != nil {
 		return desktopCreateResult{}, err
+	}
+	if operator.AuthSessionID != "" && operator.AuthSessionID != input.OperatorSessionID {
+		return desktopCreateResult{}, errDesktopIdentityUntrusted
 	}
 	if operator.HomeID != input.HomeID || operator.UserID != input.OperatorUserID ||
 		operator.DeviceID != input.OperatorDeviceID || operator.IdentityType != domain.DesktopIdentityOperatorDevice {

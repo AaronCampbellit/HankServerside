@@ -5,6 +5,7 @@ export type Home = {
   id: string;
   user_id: string;
   name: string;
+  agent_enrollment_policy?: "admins_only" | "all_users";
   created_at: string;
   updated_at: string;
 };
@@ -66,6 +67,9 @@ export class HomeClient {
   renameHome(name: string) {
     return this.api.request<Home>("/v1/home", { method: "PUT", body: { name } });
   }
+
+  enrollmentPolicy() { return this.api.request<{ policy: "admins_only" | "all_users" }>("/v1/home/agent/enrollment-policy"); }
+  setEnrollmentPolicy(policy: "admins_only" | "all_users") { return this.api.request<{ policy: "admins_only" | "all_users" }>("/v1/home/agent/enrollment-policy", { method: "PUT", body: { policy } }); }
 
   async getAgent(): Promise<AgentPayload> {
     const payload = await this.api.request<Partial<AgentPayload>>("/v1/home/agent");

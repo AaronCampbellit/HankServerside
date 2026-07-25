@@ -84,6 +84,13 @@ export function DesktopTrustSettings({ client = desktopTrustClient, homeID = "",
   const approvalSubject=approval?.request.device_id||approval?.request.agent_id||"", changed=Boolean(approval&&snapshot?.identities.some(value=>!value.revoked_at&&value.identity_type===approval.request.identity_type&&(value.device_id===approvalSubject||value.agent_id===approvalSubject)&&value.fingerprint!==approval.fingerprint));
   const currentDeviceID=localStorage.getItem("hank-desktop-device-id")||"", currentDeviceRegistered=Boolean(snapshot?.identities.some(value=>value.identity_type==="operator_device"&&value.device_id===currentDeviceID&&!value.revoked_at)), currentDeviceApproved=localSignerAvailable===true&&currentDeviceRegistered;
   const visibleIdentities = snapshot?.identities.filter(identity => identity.identity_type === "operator_device" || !agentID || identity.agent_id === agentID) ?? [];
+  if (snapshot?.root?.authority_mode === "server_managed") return <section id="remote-desktop-settings" className="settings-panel" aria-label="Remote Desktop setup">
+    <div className="panel-heading"><h2>Remote Desktop</h2><span className="status-pill">Automatic</span></div>
+    <p>Hank authorizes this browser and enrolled Macs automatically after sign-in. Private device keys remain on the browser and Mac.</p>
+    {message && <p className="notice-state">{message}</p>}
+    <div className="card-list">{visibleIdentities.map(identity => <article className="dashboard-tile" key={identity.identity_id}><span>{identity.identity_type === "endpoint" ? "Enrolled Mac" : "This browser"}</span><strong>{identity.identity_type === "endpoint" ? agentName : "Ready for Remote Desktop"}</strong><small>{identity.identity_type === "endpoint" ? "This Mac is connected through its device identity." : "This browser is authorized for the current Hank session."}</small>{!identity.revoked_at && <details><summary>Security details</summary><code>{identity.fingerprint}</code><button type="button" onClick={()=>void revoke(identity)}>Revoke device</button></details>}</article>)}</div>
+    <p className="meta-line">Revoking a device ends any active Remote Desktop session. Signing in again creates a fresh browser authorization.</p>
+  </section>;
   return <section id="remote-desktop-settings" className="settings-panel" aria-label="Remote Desktop setup">
     <div className="panel-heading"><h2>Remote Desktop setup</h2><span className="status-pill">{snapshot?.configured ? "In progress" : "Not started"}</span></div>
     <p>Set up secure access for {agentName}. This is separate from your Hank password.</p>{message && <p className="notice-state">{message}</p>}

@@ -48,11 +48,12 @@ type User struct {
 }
 
 type Home struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	UserID                string    `json:"user_id"`
+	Name                  string    `json:"name"`
+	AgentEnrollmentPolicy string    `json:"agent_enrollment_policy,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type HomeMembership struct {
@@ -83,14 +84,16 @@ type HomeInvitation struct {
 }
 
 type Agent struct {
-	ID         string     `json:"id"`
-	HomeID     string     `json:"home_id"`
-	Name       string     `json:"name"`
-	Status     string     `json:"status"`
-	AgentType  string     `json:"agent_type,omitempty"`
-	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID               string     `json:"id"`
+	HomeID           string     `json:"home_id"`
+	Name             string     `json:"name"`
+	Status           string     `json:"status"`
+	AgentType        string     `json:"agent_type,omitempty"`
+	InstallationID   string     `json:"installation_id,omitempty"`
+	EnrolledByUserID string     `json:"enrolled_by_user_id,omitempty"`
+	LastSeenAt       *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type AgentToken struct {

@@ -15,7 +15,7 @@ import (
 
 const desktopIdentityColumns = `id, home_id, identity_type, user_id, device_id, agent_id,
 	public_key_spki, certificate, fingerprint, to_json(capabilities)::text, trust_root_generation,
-	created_at, expires_at, revoked_at, revocation_reason`
+	created_at, expires_at, revoked_at, revocation_reason, auth_session_id`
 
 func (s *Store) UpsertDesktopPendingEnrollment(ctx context.Context, value domain.DesktopPendingEnrollment) error {
 	if value.HomeID == "" || value.AgentID == "" || len(value.RequestJSON) == 0 || value.Fingerprint == "" || value.CreatedAt.IsZero() || !value.ExpiresAt.After(value.CreatedAt) {
@@ -80,7 +80,7 @@ func (s *Store) BootstrapDesktopTrust(ctx context.Context, root domain.DesktopTr
 
 func (s *Store) GetDesktopTrustRoot(ctx context.Context, homeID string) (domain.DesktopTrustRoot, error) {
 	row := s.queryRow(ctx, `SELECT home_id, generation, algorithm, public_key_spki, fingerprint,
-			recovery_envelope, created_at, rotated_at
+			recovery_envelope, created_at, rotated_at, authority_mode, encrypted_private_key
 		FROM desktop_trust_roots
 		WHERE home_id = ?`, homeID)
 	var root domain.DesktopTrustRoot
@@ -93,6 +93,8 @@ func (s *Store) GetDesktopTrustRoot(ctx context.Context, homeID string) (domain.
 		&root.RecoveryEnvelope,
 		&root.CreatedAt,
 		&root.RotatedAt,
+		&root.AuthorityMode,
+		&root.EncryptedPrivateKey,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.DesktopTrustRoot{}, ErrNotFound
@@ -111,8 +113,8 @@ func (s *Store) CreateDesktopIdentity(ctx context.Context, identity domain.Deskt
 	_, err := s.exec(ctx, `INSERT INTO desktop_identities (
 			id, home_id, identity_type, user_id, device_id, agent_id,
 			public_key_spki, certificate, fingerprint, capabilities, trust_root_generation,
-			created_at, expires_at, revoked_at, revocation_reason
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, desktopIdentityArgs(identity)...)
+			created_at, expires_at, revoked_at, revocation_reason, auth_session_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, desktopIdentityArgs(identity)...)
 	return mapDesktopStoreError(err)
 }
 
@@ -454,12 +456,13 @@ func desktopIdentityArgs(identity domain.DesktopIdentity) []any {
 		identity.ExpiresAt,
 		identity.RevokedAt,
 		nilIfEmptyString(identity.RevocationReason),
+		nilIfEmptyString(identity.AuthSessionID),
 	}
 }
 
 func scanDesktopIdentity(scanner interface{ Scan(dest ...any) error }) (domain.DesktopIdentity, error) {
 	var identity domain.DesktopIdentity
-	var userID, deviceID, agentID, revocationReason sql.NullString
+	var userID, deviceID, agentID, revocationReason, authSessionID sql.NullString
 	var capabilitiesJSON string
 	err := scanner.Scan(
 		&identity.ID,
@@ -477,6 +480,7 @@ func scanDesktopIdentity(scanner interface{ Scan(dest ...any) error }) (domain.D
 		&identity.ExpiresAt,
 		&identity.RevokedAt,
 		&revocationReason,
+		&authSessionID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.DesktopIdentity{}, ErrNotFound
@@ -491,13 +495,17 @@ func scanDesktopIdentity(scanner interface{ Scan(dest ...any) error }) (domain.D
 	identity.DeviceID = deviceID.String
 	identity.AgentID = agentID.String
 	identity.RevocationReason = revocationReason.String
+	identity.AuthSessionID = authSessionID.String
 	return identity, nil
 }
 
 func validateDesktopTrustRoot(root domain.DesktopTrustRoot) error {
 	if strings.TrimSpace(root.HomeID) == "" || root.Generation <= 0 ||
 		root.Algorithm != domain.DesktopTrustAlgorithm || len(root.PublicKeySPKI) == 0 ||
-		strings.TrimSpace(root.Fingerprint) == "" || len(root.RecoveryEnvelope) == 0 || root.CreatedAt.IsZero() {
+		strings.TrimSpace(root.Fingerprint) == "" || root.CreatedAt.IsZero() ||
+		(root.AuthorityMode != "" && root.AuthorityMode != "client_managed" && root.AuthorityMode != "server_managed") ||
+		(root.AuthorityMode == "server_managed" && strings.TrimSpace(root.EncryptedPrivateKey) == "") ||
+		(root.AuthorityMode != "server_managed" && len(root.RecoveryEnvelope) == 0) {
 		return errors.New("invalid desktop trust root")
 	}
 	return nil

@@ -11,7 +11,7 @@ export interface DesktopSessionAuthorization {
 
 export interface DesktopTrustSnapshot {
   configured: boolean;
-  root?: { generation: number; algorithm: string; fingerprint: string; public_key_spki: string; recovery_envelope?: string };
+  root?: { generation: number; algorithm: string; authority_mode?: "client_managed" | "server_managed" | string; fingerprint: string; public_key_spki: string; recovery_envelope?: string };
   identities: Array<{ identity_id: string; identity_type: string; user_id: string; device_id: string; agent_id: string; fingerprint: string; capabilities: string[]; created_at?: string; expires_at?: string; revoked_at?: string | null }>;
 }
 

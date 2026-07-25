@@ -18,6 +18,7 @@ import { HankAIPage } from "./dashboard/HankAIPage";
 import { HomeAssistantPage } from "./dashboard/HomeAssistantPage";
 import { ProfileNotesPage } from "./dashboard/ProfileNotesPage";
 import { DesktopViewerPage } from "./desktop/DesktopViewerPage";
+import { ensureBrowserDesktopIdentity } from "./desktop/autoEnrollment";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { AppsSettings } from "./settings/AppsSettings";
 import { AttachmentsSettings } from "./settings/AttachmentsSettings";
@@ -136,6 +137,11 @@ export function App() {
       alive = false;
     };
   }, [bootstrap, route.publicRoute]);
+
+  useEffect(() => {
+    if (!bootstrap?.permissions.is_admin || !bootstrap.home?.id || !bootstrap.user.id || !bootstrap.session.id) return;
+    void ensureBrowserDesktopIdentity(bootstrap.home.id, bootstrap.user.id, bootstrap.session.id).catch(() => undefined);
+  }, [bootstrap?.home?.id, bootstrap?.permissions.is_admin, bootstrap?.session.id, bootstrap?.user.id]);
 
   useEffect(() => {
     if (route.publicRoute) {

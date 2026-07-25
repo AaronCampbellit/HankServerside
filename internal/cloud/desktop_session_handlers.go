@@ -61,7 +61,7 @@ func (s *Server) handleAgentResourceRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	result, err := s.desktop.Create(r.Context(), desktopCreateInput{
-		HomeID: home.ID, AgentID: parts[0], OperatorUserID: auth.User.ID, OperatorDeviceID: strings.TrimSpace(body.OperatorDeviceID),
+		HomeID: home.ID, AgentID: parts[0], OperatorUserID: auth.User.ID, OperatorDeviceID: strings.TrimSpace(body.OperatorDeviceID), OperatorSessionID: auth.Session.ID,
 		SourceIPHash: stableAuditTarget(clientIP(r)), SourceUserAgentHash: stableAuditTarget(r.UserAgent()), Permissions: body.Permissions,
 	})
 	if err != nil {
