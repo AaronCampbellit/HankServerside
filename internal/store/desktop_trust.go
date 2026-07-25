@@ -84,21 +84,25 @@ func (s *Store) GetDesktopTrustRoot(ctx context.Context, homeID string) (domain.
 		FROM desktop_trust_roots
 		WHERE home_id = ?`, homeID)
 	var root domain.DesktopTrustRoot
+	var recoveryEnvelope sql.Null[[]byte]
+	var encryptedPrivateKey sql.NullString
 	err := row.Scan(
 		&root.HomeID,
 		&root.Generation,
 		&root.Algorithm,
 		&root.PublicKeySPKI,
 		&root.Fingerprint,
-		&root.RecoveryEnvelope,
+		&recoveryEnvelope,
 		&root.CreatedAt,
 		&root.RotatedAt,
 		&root.AuthorityMode,
-		&root.EncryptedPrivateKey,
+		&encryptedPrivateKey,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.DesktopTrustRoot{}, ErrNotFound
 	}
+	root.RecoveryEnvelope = recoveryEnvelope.V
+	root.EncryptedPrivateKey = encryptedPrivateKey.String
 	return root, err
 }
 
