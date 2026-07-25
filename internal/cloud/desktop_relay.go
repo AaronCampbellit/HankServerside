@@ -351,10 +351,20 @@ func (relay *inProcessDesktopRelay) sessionForJoinLocked(claim desktopRelayJoinC
 		relay.sessions[claim.SessionID] = session
 		go relay.expireJoin(session)
 		go relay.expireHard(session)
-	} else if session.claim.KeyEpoch != claim.KeyEpoch || session.claim.HomeID != claim.HomeID || session.claim.AgentID != claim.AgentID || session.claim.Reconnect != claim.Reconnect || !session.claim.ReconnectExpiresAt.Equal(claim.ReconnectExpiresAt) || !session.claim.HardExpiresAt.Equal(claim.HardExpiresAt) {
+	} else if session.claim.KeyEpoch != claim.KeyEpoch || session.claim.HomeID != claim.HomeID || session.claim.AgentID != claim.AgentID || session.claim.Reconnect != claim.Reconnect || !desktopRelayTimestampEqual(session.claim.ReconnectExpiresAt, claim.ReconnectExpiresAt) || !desktopRelayTimestampEqual(session.claim.HardExpiresAt, claim.HardExpiresAt) {
 		return nil, errDesktopRelayClaimMismatch
 	}
 	return session, nil
+}
+
+// PostgreSQL stores timestamptz values with microsecond precision. Initial
+// relay capacity is reserved before the session is persisted, so compare the
+// later database-backed claim at that same precision.
+func desktopRelayTimestampEqual(left, right time.Time) bool {
+	if left.IsZero() || right.IsZero() {
+		return left.IsZero() && right.IsZero()
+	}
+	return left.UnixMicro() == right.UnixMicro()
 }
 
 func (relay *inProcessDesktopRelay) Join(ctx context.Context, claim desktopRelayJoinClaim, endpoint desktopRelayEndpoint) error {

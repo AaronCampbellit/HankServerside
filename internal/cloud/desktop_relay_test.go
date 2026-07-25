@@ -34,6 +34,28 @@ func TestDesktopRelayJoinClaimBindsSessionSideEpochAndAgent(t *testing.T) {
 	}
 }
 
+func TestDesktopRelayReservationAcceptsPostgresTimestampPrecision(t *testing.T) {
+	limits := defaultDesktopRelayLimits()
+	limits.JoinTimeout = time.Hour
+	relay := newInProcessDesktopRelay(limits, nil)
+	hardExpiresAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second).Add(405123789 * time.Nanosecond)
+	claim := desktopRelayJoinClaim{
+		SessionID: "desk_precision", HomeID: "home_precision", Side: desktopRelayBrowser,
+		KeyEpoch: 1, AgentID: "agent_precision", HardExpiresAt: hardExpiresAt,
+	}
+	if err := relay.Reserve(claim); err != nil {
+		t.Fatalf("reserve original claim: %v", err)
+	}
+	databaseClaim := claim
+	databaseClaim.Side = desktopRelayAgent
+	databaseClaim.HardExpiresAt = hardExpiresAt.Truncate(time.Microsecond)
+	if err := relay.Reserve(databaseClaim); err != nil {
+		t.Fatalf("reserve database-backed claim: %v", err)
+	}
+	relay.CancelReservation(databaseClaim)
+	relay.CancelReservation(claim)
+}
+
 func TestDesktopRelayProductionLimitsAreBounded(t *testing.T) {
 	limits := defaultDesktopRelayLimits()
 	if err := limits.Validate(); err != nil {

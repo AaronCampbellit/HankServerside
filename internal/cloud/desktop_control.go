@@ -96,6 +96,9 @@ func (s *Server) handleDesktopAgentEvent(ctx context.Context, homeID, agentID, e
 		SessionID: sessionID, EventType: eventName, ActorType: "agent", ActorID: agentID,
 		OccurredAt: time.Now().UTC(), Severity: "info", ReasonCode: reason, MetadataJSON: string(metadataJSON),
 	}
+	if eventName == protocol.EventDesktopSessionError && s.logger != nil {
+		s.logger.Warn("desktop agent session error", "session_id", sessionID, "agent_id", agentID, "key_epoch", epoch, "reason_code", reason, "diagnostic_code", sanitized["code"])
+	}
 	if isIdempotentLateDesktopTerminalEvent(session.State, eventName) {
 		if s.desktopRelay != nil {
 			s.desktopRelay.Revoke(sessionID, desktopTerminalRelayReason(eventName, reason))
