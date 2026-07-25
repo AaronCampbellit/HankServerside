@@ -104,7 +104,7 @@ describe("DesktopTrustSettings", () => {
     render(<DesktopTrustSettings client={client as never} homeID="home" userID="user" />);
 
     await screen.findByText("stale-fingerprint");
-    const createRequest = screen.getByRole("button", { name: "Create an approval request for this browser" });
+    const createRequest = screen.getByRole("button", { name: "Create an approval request for another browser" });
     await waitFor(() => expect(createRequest).toBeEnabled());
     fireEvent.click(createRequest);
     await waitFor(() => expect(screen.getByLabelText("Desktop approval request")).not.toHaveValue(""));

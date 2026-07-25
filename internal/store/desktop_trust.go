@@ -17,6 +17,37 @@ const desktopIdentityColumns = `id, home_id, identity_type, user_id, device_id, 
 	public_key_spki, certificate, fingerprint, to_json(capabilities)::text, trust_root_generation,
 	created_at, expires_at, revoked_at, revocation_reason`
 
+func (s *Store) UpsertDesktopPendingEnrollment(ctx context.Context, value domain.DesktopPendingEnrollment) error {
+	if value.HomeID == "" || value.AgentID == "" || len(value.RequestJSON) == 0 || value.Fingerprint == "" || value.CreatedAt.IsZero() || !value.ExpiresAt.After(value.CreatedAt) {
+		return errors.New("invalid desktop pending enrollment")
+	}
+	_, err := s.exec(ctx, `INSERT INTO desktop_pending_enrollments (home_id, agent_id, request_json, fingerprint, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (home_id, agent_id) DO UPDATE SET request_json=EXCLUDED.request_json, fingerprint=EXCLUDED.fingerprint, created_at=EXCLUDED.created_at, expires_at=EXCLUDED.expires_at`, value.HomeID, value.AgentID, value.RequestJSON, value.Fingerprint, value.CreatedAt, value.ExpiresAt)
+	return mapDesktopStoreError(err)
+}
+
+func (s *Store) GetDesktopPendingEnrollment(ctx context.Context, homeID, agentID string, now time.Time) (domain.DesktopPendingEnrollment, error) {
+	row := s.queryRow(ctx, `SELECT home_id, agent_id, request_json, fingerprint, created_at, expires_at FROM desktop_pending_enrollments WHERE home_id=? AND agent_id=? AND expires_at>?`, homeID, agentID, now)
+	var value domain.DesktopPendingEnrollment
+	err := row.Scan(&value.HomeID, &value.AgentID, &value.RequestJSON, &value.Fingerprint, &value.CreatedAt, &value.ExpiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.DesktopPendingEnrollment{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (s *Store) DeleteDesktopPendingEnrollment(ctx context.Context, homeID, agentID string) error {
+	_, err := s.exec(ctx, `DELETE FROM desktop_pending_enrollments WHERE home_id=? AND agent_id=?`, homeID, agentID)
+	return mapDesktopStoreError(err)
+}
+
+func (s *Store) DeleteDesktopPendingEnrollmentsForHome(ctx context.Context, homeID string) error {
+	if strings.TrimSpace(homeID) == "" {
+		return errors.New("invalid desktop pending enrollment home")
+	}
+	_, err := s.exec(ctx, `DELETE FROM desktop_pending_enrollments WHERE home_id=?`, homeID)
+	return mapDesktopStoreError(err)
+}
+
 func (s *Store) BootstrapDesktopTrust(ctx context.Context, root domain.DesktopTrustRoot, firstOperator domain.DesktopIdentity) error {
 	if err := validateDesktopTrustRoot(root); err != nil {
 		return err
@@ -362,6 +393,9 @@ func (s *Store) replaceDesktopTrust(ctx context.Context, root domain.DesktopTrus
 		WHERE credential.session_id = session.id AND session.home_id = ?
 			AND credential.consumed_at IS NULL AND credential.revoked_at IS NULL`, changedAt, root.HomeID); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM desktop_pending_enrollments WHERE home_id = ?`, root.HomeID); err != nil {
+		return mapDesktopStoreError(err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE desktop_trust_roots
 		SET generation = ?, algorithm = ?, public_key_spki = ?, fingerprint = ?,

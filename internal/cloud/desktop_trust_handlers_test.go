@@ -159,6 +159,39 @@ func TestDesktopTrustKeyValidationRejectsWrongCurve(t *testing.T) {
 	}
 }
 
+func TestDesktopPendingEnrollmentValidationKeepsOnlyPublicEndpointMaterial(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spki, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := desktopEndpointApprovalRequest{
+		IdentityType: domain.DesktopIdentityEndpoint, IdentityID: "dep_pending", AgentID: "agent_0001",
+		PublicKeySPKI: base64.RawURLEncoding.EncodeToString(spki), Capabilities: []string{"desktop.view", "desktop.control"},
+		CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), Platform: "macos",
+	}
+	stored, err := validateDesktopPendingEnrollmentRequest(request, "agent_0001", now)
+	if err != nil || string(stored) != string(spki) {
+		t.Fatalf("valid pending enrollment rejected: key=%x err=%v", stored, err)
+	}
+	request.AgentID = "agent_other"
+	if _, err := validateDesktopPendingEnrollmentRequest(request, "agent_0001", now); err == nil {
+		t.Fatal("cross-agent pending enrollment accepted")
+	}
+	request.AgentID, request.ExpiresAt = "agent_0001", now.Add(-time.Second)
+	if _, err := validateDesktopPendingEnrollmentRequest(request, "agent_0001", now); err == nil {
+		t.Fatal("expired pending enrollment accepted")
+	}
+	request.ExpiresAt, request.CreatedAt = now.Add(time.Hour), now.Add(-6*time.Minute)
+	if _, err := validateDesktopPendingEnrollmentRequest(request, "agent_0001", now); err == nil {
+		t.Fatal("stale pending enrollment accepted")
+	}
+}
+
 func TestDesktopTrustValidationRejectsMalformedOversizedAndUnsafeValues(t *testing.T) {
 	if _, _, err := decodeDesktopP256SPKI("not-base64url!"); err == nil {
 		t.Fatal("invalid base64url accepted")

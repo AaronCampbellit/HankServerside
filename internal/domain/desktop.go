@@ -38,6 +38,17 @@ type DesktopIdentity struct {
 	RevocationReason    string
 }
 
+// DesktopPendingEnrollment holds public endpoint enrollment material awaiting
+// an administrator's local signature. It never contains private key material.
+type DesktopPendingEnrollment struct {
+	HomeID      string
+	AgentID     string
+	RequestJSON []byte
+	Fingerprint string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}
+
 type DesktopSession struct {
 	ID                       string
 	HomeID                   string

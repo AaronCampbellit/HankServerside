@@ -13,6 +13,7 @@ All HTTP calls require an authenticated Hank session and current singleton-home 
 - `POST /v1/home/desktop-trust/operator-devices/{deviceID}/revoke` revokes an operator identity.
 - `POST /v1/home/desktop-trust/endpoints/{agentID}/approve` approves an endpoint identity.
 - `POST /v1/home/desktop-trust/endpoints/{agentID}/revoke` revokes an endpoint identity.
+- `POST /v1/home/desktop-trust/pending-endpoints/{agentID}` records the public endpoint enrollment request from the authenticated local HankAgent session; `GET` returns its public fingerprint and request while it remains unexpired. Both routes require a home administrator and browser CSRF protection.
 - `POST /v1/home/desktop-trust/recovery` issues a five-minute, single-use challenge when `challenge` and `root_signature` are absent, then completes root-authorized operator recovery when both are supplied.
 - `POST /v1/home/desktop-trust/rotate` advances the root exactly one generation after old-root proof.
 - `POST /v1/home/desktop-trust/reset` cryptographically resets trust, revoking all prior identities and live sessions.

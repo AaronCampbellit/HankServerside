@@ -37,6 +37,10 @@ func TestDesktopTrustLifecycleIsHomeScopedAndResetRevokesIdentities(t *testing.T
 	if err := db.CreateDesktopIdentity(ctx, endpoint); err != nil {
 		t.Fatalf("CreateDesktopIdentity endpoint: %v", err)
 	}
+	pending := domain.DesktopPendingEnrollment{HomeID: homeA.ID, AgentID: agentA.ID, RequestJSON: []byte(`{"identity_id":"dep_pending"}`), Fingerprint: "fp-pending", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if err := db.UpsertDesktopPendingEnrollment(ctx, pending); err != nil {
+		t.Fatalf("UpsertDesktopPendingEnrollment: %v", err)
+	}
 	if _, err := db.GetActiveDesktopEndpointIdentity(ctx, homeB.ID, agentA.ID, now); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-home identity = %v, want ErrNotFound", err)
 	}
@@ -55,6 +59,9 @@ func TestDesktopTrustLifecycleIsHomeScopedAndResetRevokesIdentities(t *testing.T
 	}
 	if _, err := db.GetActiveDesktopOperatorIdentity(ctx, homeA.ID, userA.ID, "device-a-2", resetAt.Add(time.Minute)); err != nil {
 		t.Fatalf("replacement operator missing: %v", err)
+	}
+	if _, err := db.GetDesktopPendingEnrollment(ctx, homeA.ID, agentA.ID, resetAt.Add(time.Minute)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("pending enrollment survived reset: %v", err)
 	}
 
 	storedRoot, err := db.GetDesktopTrustRoot(ctx, homeA.ID)

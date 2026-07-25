@@ -55,11 +55,15 @@ type desktopTrustBootstrapRequest struct {
 }
 
 type desktopEndpointApprovalRequest struct {
+	IdentityType  string    `json:"identity_type"`
 	IdentityID    string    `json:"identity_id"`
+	AgentID       string    `json:"agent_id"`
 	PublicKeySPKI string    `json:"public_key_spki"`
 	Certificate   string    `json:"certificate"`
 	Capabilities  []string  `json:"capabilities"`
+	CreatedAt     time.Time `json:"created_at"`
 	ExpiresAt     time.Time `json:"expires_at"`
+	Platform      string    `json:"platform"`
 	Confirmation  string    `json:"confirmation"`
 }
 
@@ -117,6 +121,16 @@ func (s *Server) handleHomeDesktopTrust(w http.ResponseWriter, r *http.Request, 
 		s.handleDesktopTrustGet(w, r, home)
 		return true
 	}
+	if len(parts) == 3 && parts[1] == "pending-endpoints" && parts[2] != "" {
+		if r.Method == http.MethodGet {
+			s.handleDesktopPendingEnrollmentGet(w, r, home, parts[2])
+			return true
+		}
+		if r.Method == http.MethodPost {
+			s.handleDesktopPendingEnrollmentPut(w, r, home, parts[2])
+			return true
+		}
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return true
@@ -141,6 +155,53 @@ func (s *Server) handleHomeDesktopTrust(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 	}
 	return true
+}
+
+func (s *Server) handleDesktopPendingEnrollmentPut(w http.ResponseWriter, r *http.Request, home domain.Home, agentID string) {
+	var body desktopEndpointApprovalRequest
+	if err := parseJSON(w, r, &body); err != nil {
+		http.Error(w, "invalid desktop enrollment", http.StatusBadRequest)
+		return
+	}
+	agent, err := s.store.GetAgentByID(r.Context(), agentID)
+	if err != nil || agent.HomeID != home.ID {
+		http.NotFound(w, r)
+		return
+	}
+	key, err := validateDesktopPendingEnrollmentRequest(body, agentID, time.Now().UTC())
+	if err != nil {
+		http.Error(w, "invalid desktop enrollment", http.StatusBadRequest)
+		return
+	}
+	// Pending enrollment requests are public identity metadata. Never retain a
+	// certificate, confirmation text, or arbitrary caller-supplied fields here.
+	body.Certificate, body.Confirmation = "", ""
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		http.Error(w, "invalid desktop enrollment", http.StatusBadRequest)
+		return
+	}
+	fingerprint := desktopcrypto.FingerprintSPKI(key)
+	if err := s.store.UpsertDesktopPendingEnrollment(r.Context(), domain.DesktopPendingEnrollment{HomeID: home.ID, AgentID: agentID, RequestJSON: encoded, Fingerprint: fingerprint, CreatedAt: body.CreatedAt.UTC(), ExpiresAt: body.ExpiresAt.UTC()}); err != nil {
+		writeDesktopStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"agent_id": agentID, "fingerprint": fingerprint, "expires_at": body.ExpiresAt.UTC()})
+}
+
+func (s *Server) handleDesktopPendingEnrollmentGet(w http.ResponseWriter, r *http.Request, home domain.Home, agentID string) {
+	value, err := s.store.GetDesktopPendingEnrollment(r.Context(), home.ID, agentID, time.Now().UTC())
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]any{"pending": false})
+		return
+	}
+	if err != nil {
+		writeDesktopStoreError(w, err)
+		return
+	}
+	var request any
+	_ = json.Unmarshal(value.RequestJSON, &request)
+	writeJSON(w, http.StatusOK, map[string]any{"pending": true, "request": request, "fingerprint": value.Fingerprint, "expires_at": value.ExpiresAt})
 }
 
 func (s *Server) handleDesktopTrustGet(w http.ResponseWriter, r *http.Request, home domain.Home) {
@@ -336,6 +397,7 @@ func (s *Server) handleDesktopEndpointAction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.auditDesktopIdentity(r, auth, home.ID, "desktop.identity.approved", certificate.Identity, "approved")
+	_ = s.store.DeleteDesktopPendingEnrollment(r.Context(), home.ID, agentID)
 	writeJSON(w, http.StatusCreated, desktopIdentityPublicSnapshot(certificate.Identity))
 }
 
@@ -535,6 +597,19 @@ func validateDesktopOperatorRequest(request desktopOperatorDeviceRequest, homeID
 
 func validateDesktopEndpointRequest(request desktopEndpointApprovalRequest, homeID, agentID string, generation int, now time.Time) (validatedDesktopCertificate, error) {
 	return validateDesktopCertificate(request.IdentityID, domain.DesktopIdentityEndpoint, homeID, "", "", agentID, request.PublicKeySPKI, request.Certificate, request.Capabilities, request.ExpiresAt, generation, now, false)
+}
+
+func validateDesktopPendingEnrollmentRequest(request desktopEndpointApprovalRequest, agentID string, now time.Time) ([]byte, error) {
+	if request.IdentityType != domain.DesktopIdentityEndpoint || request.AgentID != agentID || strings.TrimSpace(request.IdentityID) == "" ||
+		len(request.IdentityID) > 128 || strings.TrimSpace(request.Platform) != "macos" || request.CreatedAt.IsZero() || request.ExpiresAt.IsZero() ||
+		request.CreatedAt.Before(now.Add(-5*time.Minute)) || request.CreatedAt.After(now.Add(5*time.Minute)) || !request.ExpiresAt.After(now) || request.ExpiresAt.Sub(request.CreatedAt) > 2*365*24*time.Hour {
+		return nil, errors.New("invalid desktop pending enrollment scope")
+	}
+	_, spki, err := decodeDesktopP256SPKI(request.PublicKeySPKI)
+	if err != nil || validateDesktopCapabilities(domain.DesktopIdentityEndpoint, request.Capabilities, false) != nil {
+		return nil, errors.New("invalid desktop pending enrollment identity")
+	}
+	return spki, nil
 }
 
 func validateDesktopCertificate(identityID, identityType, homeID, userID, deviceID, agentID, encodedSPKI, encodedEnvelope string, capabilities []string, expiresAt time.Time, generation int, now time.Time, requireAll bool) (validatedDesktopCertificate, error) {
