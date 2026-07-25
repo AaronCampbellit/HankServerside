@@ -64,7 +64,14 @@ func (s *Server) handleDesktopAutoChallenge(w http.ResponseWriter, r *http.Reque
 		writeDesktopStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"challenge_id": challenge.ID, "challenge": raw, "session_id": auth.Session.ID, "expires_at": challenge.ExpiresAt})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"challenge_id": challenge.ID,
+		"challenge":    raw,
+		"session_id":   auth.Session.ID,
+		"home_id":      home.ID,
+		"user_id":      auth.User.ID,
+		"expires_at":   challenge.ExpiresAt,
+	})
 }
 
 func (s *Server) validateDesktopAutoEnrollment(r *http.Request, home domain.Home, auth authContext, purpose string, proof desktopAutoEnrollmentProof) ([]byte, error) {
