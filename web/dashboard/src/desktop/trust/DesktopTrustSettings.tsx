@@ -14,8 +14,16 @@ export function DesktopTrustSettings({ client = desktopTrustClient, homeID = "",
   useEffect(() => { void reload(); }, []);
   useEffect(() => {
     const onAutoEnrollment = () => void reload();
+    const onAutoEnrollmentFailure = (event: Event) => {
+      const detail = event instanceof CustomEvent && typeof event.detail === "string" ? event.detail : "desktop_browser_enrollment_failed";
+      setMessage(`Automatic browser enrollment failed: ${detail}`);
+    };
     window.addEventListener("hank-desktop-auto-enrolled", onAutoEnrollment);
-    return () => window.removeEventListener("hank-desktop-auto-enrolled", onAutoEnrollment);
+    window.addEventListener("hank-desktop-auto-enrollment-failed", onAutoEnrollmentFailure);
+    return () => {
+      window.removeEventListener("hank-desktop-auto-enrolled", onAutoEnrollment);
+      window.removeEventListener("hank-desktop-auto-enrollment-failed", onAutoEnrollmentFailure);
+    };
   }, []);
   useEffect(() => {
     if (!agentID || !snapshot?.configured) { setPending(null); return; }

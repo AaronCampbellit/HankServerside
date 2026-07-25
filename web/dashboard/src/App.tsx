@@ -140,7 +140,10 @@ export function App() {
 
   useEffect(() => {
     if (!bootstrap?.permissions.is_admin || !bootstrap.home?.id || !bootstrap.user.id || !bootstrap.session.id) return;
-    void ensureBrowserDesktopIdentity(bootstrap.home.id, bootstrap.user.id, bootstrap.session.id).catch(() => undefined);
+    void ensureBrowserDesktopIdentity(bootstrap.home.id, bootstrap.user.id, bootstrap.session.id).catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : "desktop_browser_enrollment_failed";
+      window.dispatchEvent(new CustomEvent("hank-desktop-auto-enrollment-failed", { detail }));
+    });
   }, [bootstrap?.home?.id, bootstrap?.permissions.is_admin, bootstrap?.session.id, bootstrap?.user.id]);
 
   useEffect(() => {
