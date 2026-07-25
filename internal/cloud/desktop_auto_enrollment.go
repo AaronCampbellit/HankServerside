@@ -87,6 +87,9 @@ func (s *Server) validateDesktopAutoEnrollment(r *http.Request, home domain.Home
 		return nil, err
 	}
 	encoded := desktopAutoEnrollmentTranscript(home.ID, auth.User.ID, auth.Session.ID, purpose, proof.ChallengeID, proof.Challenge, proof.InstallationID, spki)
+	if purpose == "mac_agent" {
+		encoded = desktopMacAutoEnrollmentTranscript(proof.ChallengeID, proof.Challenge, proof.InstallationID, spki)
+	}
 	if desktopcrypto.VerifyP256Signature(key, encoded, signature) != nil {
 		return nil, errors.New("device enrollment signature is invalid")
 	}
@@ -99,6 +102,15 @@ func (s *Server) validateDesktopAutoEnrollment(r *http.Request, home domain.Home
 
 func desktopAutoEnrollmentTranscript(homeID, userID, sessionID, purpose, challengeID, challenge, installationID string, spki []byte) []byte {
 	values := []string{"Hank Desktop Device Enrollment v1", homeID, userID, sessionID, purpose, challengeID, challenge, installationID, base64.RawURLEncoding.EncodeToString(spki)}
+	return []byte(strings.Join(values, "\n"))
+}
+
+// Mac endpoint enrollment signs only its opaque one-time challenge context.
+// The server still binds that challenge to the authenticated home, user, and
+// session when it is created and consumed. This avoids requiring the native
+// app to reconstruct account scope from independently refreshed UI state.
+func desktopMacAutoEnrollmentTranscript(challengeID, challenge, installationID string, spki []byte) []byte {
+	values := []string{"Hank Mac Desktop Device Enrollment v1", challengeID, challenge, installationID, base64.RawURLEncoding.EncodeToString(spki)}
 	return []byte(strings.Join(values, "\n"))
 }
 
