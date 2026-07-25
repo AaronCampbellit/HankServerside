@@ -112,6 +112,7 @@ func (s *Server) handleDesktopDataWebSocket(w http.ResponseWriter, r *http.Reque
 		if s.metrics != nil {
 			s.metrics.IncDesktopJoin(string(side), "failed")
 		}
+		s.logger.Warn("desktop relay admission rejected", "session_id", sessionID, "side", side, "reason", desktopRelayAdmissionReason(err))
 		http.Error(w, "desktop relay capacity unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -141,6 +142,21 @@ func (s *Server) handleDesktopDataWebSocket(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "desktop session closed")
+}
+
+func desktopRelayAdmissionReason(err error) string {
+	switch {
+	case errors.Is(err, errDesktopRelayLimit):
+		return "capacity"
+	case errors.Is(err, errDesktopRelayDuplicateSide):
+		return "duplicate_side"
+	case errors.Is(err, errDesktopRelayClaimMismatch):
+		return "claim_mismatch"
+	case errors.Is(err, errDesktopRelayNotReady):
+		return "unavailable"
+	default:
+		return "rejected"
+	}
 }
 
 func desktopRelayUnauthorized(w http.ResponseWriter) {
