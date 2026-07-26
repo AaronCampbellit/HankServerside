@@ -28,6 +28,15 @@ type Cloud struct {
 	MCPEnabled            bool
 	MCPPublicBaseURL      string
 	MCPDocsDir            string
+	Entra                 Entra
+}
+
+type Entra struct {
+	Enabled       bool
+	TenantID      string
+	ClientID      string
+	ClientSecret  string
+	PublicBaseURL string
 }
 
 type AssistantAI struct {
@@ -157,6 +166,16 @@ func LoadCloud() (Cloud, error) {
 	if secretKey == "" && !allowPlaintextSecrets {
 		return Cloud{}, fmt.Errorf("HANK_REMOTE_SECRET_ENCRYPTION_KEY is required unless HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true is explicitly set for local development")
 	}
+	entra := Entra{
+		Enabled:       boolEnvOrDefault("HANK_REMOTE_ENTRA_ENABLED", false),
+		TenantID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_ENTRA_TENANT_ID")),
+		ClientID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_ENTRA_CLIENT_ID")),
+		ClientSecret:  strings.TrimSpace(os.Getenv("HANK_REMOTE_ENTRA_CLIENT_SECRET")),
+		PublicBaseURL: strings.TrimRight(envOrDefault("HANK_REMOTE_PUBLIC_BASE_URL", ""), "/"),
+	}
+	if entra.Enabled && (entra.TenantID == "" || entra.ClientID == "" || entra.ClientSecret == "" || entra.PublicBaseURL == "") {
+		return Cloud{}, fmt.Errorf("HANK_REMOTE_ENTRA_TENANT_ID, HANK_REMOTE_ENTRA_CLIENT_ID, HANK_REMOTE_ENTRA_CLIENT_SECRET, and HANK_REMOTE_PUBLIC_BASE_URL are required when HANK_REMOTE_ENTRA_ENABLED=true")
+	}
 
 	return Cloud{
 		Addr:                  envOrDefault("HANK_REMOTE_CLOUD_ADDR", ":8080"),
@@ -175,6 +194,7 @@ func LoadCloud() (Cloud, error) {
 		MCPEnabled:            boolEnvOrDefault("HANK_REMOTE_MCP_ENABLED", false),
 		MCPPublicBaseURL:      strings.TrimRight(envOrDefault("HANK_REMOTE_PUBLIC_BASE_URL", ""), "/"),
 		MCPDocsDir:            envOrDefault("HANK_REMOTE_MCP_DOCS_DIR", envOrDefault("HANK_REMOTE_PROJECT_DOCS_DIR", ".")),
+		Entra:                 entra,
 		APNS: APNS{
 			TeamID:      strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_TEAM_ID")),
 			KeyID:       strings.TrimSpace(os.Getenv("HANK_REMOTE_APNS_KEY_ID")),

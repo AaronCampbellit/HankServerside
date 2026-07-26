@@ -9,6 +9,8 @@ The cloud service now also serves a React/Vite management dashboard at `/` and `
 - cloud HTTP auth and home management:
   - `POST /v1/auth/register`
   - `POST /v1/auth/login`
+  - `POST /v1/auth/entra/start`
+  - `GET /v1/auth/entra/callback`
   - `POST /v1/auth/logout`
   - `POST /v1/auth/change-password`
   - `POST /v1/auth/invitations/preview`
@@ -387,6 +389,7 @@ pbpaste | ssh <server-user>@<server-host> 'cd /srv/hank-remote/HankServerside &&
 - file upload and download now use resumable HTTP streaming endpoints coordinated by the cloud over the agent WebSocket; retries can reopen the same transfer with an `offset` query parameter
 - Home Assistant, file, and notes access stay on the home agent; the cloud never needs those local credentials
 - agent and app auth are separate
+  - optional Entra browser SSO does not change agent-token authentication on `/ws/agent`
 - the cloud and agent run on the same machine under one Compose stack, but the agent starts only after a token exists
 - the dashboard issues tokens and generates the `.env.agent` file content; deployment changes are applied by editing `.env.agent` and refreshing the `agent` profile
 - file access can use the Docker-managed `hank_agent_files` volume, one or more direct SMB shares, or host folders (directories on the home connector itself), all configured in dashboard Settings; SMB env storage uses `HANK_REMOTE_SMB_SHARES_JSON` and host folders use `HANK_REMOTE_AGENT_FILES_ROOTS_JSON`

@@ -187,6 +187,7 @@ func (s *Store) CreateUserAndAcceptHomeInvitation(ctx context.Context, invitatio
 	if user.UpdatedAt.IsZero() {
 		user.UpdatedAt = now
 	}
+	user.PasswordLoginEnabled = true
 	tx, err := s.beginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -194,11 +195,12 @@ func (s *Store) CreateUserAndAcceptHomeInvitation(ctx context.Context, invitatio
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (
-			id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.ID,
 		user.Email,
 		user.PasswordHash,
+		user.PasswordLoginEnabled,
 		user.PasswordChangeRequired,
 		user.PasswordChangedAt,
 		user.PasswordResetAt,
@@ -232,6 +234,92 @@ func (s *Store) CreateUserAndAcceptHomeInvitation(ctx context.Context, invitatio
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) CreateExternalIdentity(ctx context.Context, identity domain.ExternalIdentity) error {
+	_, err := s.exec(ctx, `INSERT INTO external_identities (id, user_id, provider, tenant_id, subject_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, identity.ID, identity.UserID, identity.Provider, identity.TenantID, identity.SubjectID, identity.CreatedAt, identity.UpdatedAt)
+	return err
+}
+
+func (s *Store) GetUserByExternalIdentity(ctx context.Context, provider, tenantID, subjectID string) (domain.User, error) {
+	row := s.queryRow(ctx, `SELECT u.id, u.email, u.password_hash, u.password_login_enabled, u.password_change_required, u.password_changed_at, u.password_reset_at, u.password_reset_by, u.created_at, u.updated_at
+		FROM external_identities e JOIN users u ON u.id = e.user_id WHERE e.provider = ? AND e.tenant_id = ? AND e.subject_id = ?`, provider, tenantID, subjectID)
+	return scanUser(row)
+}
+
+// CreateSSOUserAndAcceptHomeInvitation creates an SSO-only user, links the
+// immutable provider identity, and consumes the invitation as one transaction.
+func (s *Store) CreateSSOUserAndAcceptHomeInvitation(ctx context.Context, invitationID string, user domain.User, identity domain.ExternalIdentity, role string) error {
+	tx, err := s.beginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at)
+		VALUES (?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`, user.ID, user.Email, user.PasswordHash, user.PasswordChangeRequired, user.PasswordChangedAt, user.PasswordResetAt, user.PasswordResetBy, user.CreatedAt, user.UpdatedAt); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO external_identities (id, user_id, provider, tenant_id, subject_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, identity.ID, identity.UserID, identity.Provider, identity.TenantID, identity.SubjectID, identity.CreatedAt, identity.UpdatedAt); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE home_invitations SET accepted_at = ? WHERE id = ? AND accepted_at IS NULL`, time.Now().UTC(), invitationID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO home_memberships (home_id, user_id, role, created_at, updated_at)
+		SELECT home_id, ?, ?, ?, ? FROM home_invitations WHERE id = ?`, user.ID, role, user.CreatedAt, user.UpdatedAt, invitationID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CreateSSOUserAndBootstrapSingletonHome atomically creates the first SSO-only
+// owner and Home. Serializable isolation makes concurrent first setup retryable
+// instead of leaving an unscoped identity behind.
+func (s *Store) CreateSSOUserAndBootstrapSingletonHome(ctx context.Context, user domain.User, identity domain.ExternalIdentity, name string) (domain.Home, error) {
+	tx, err := s.beginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return domain.Home{}, err
+	}
+	defer tx.Rollback()
+	var homes int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM homes`).Scan(&homes); err != nil {
+		return domain.Home{}, err
+	}
+	if homes != 0 {
+		return domain.Home{}, ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at)
+		VALUES (?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`, user.ID, user.Email, user.PasswordHash, user.PasswordChangeRequired, user.PasswordChangedAt, user.PasswordResetAt, user.PasswordResetBy, user.CreatedAt, user.UpdatedAt); err != nil {
+		return domain.Home{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO external_identities (id, user_id, provider, tenant_id, subject_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, identity.ID, identity.UserID, identity.Provider, identity.TenantID, identity.SubjectID, identity.CreatedAt, identity.UpdatedAt); err != nil {
+		return domain.Home{}, err
+	}
+	home := domain.Home{ID: newSingletonHomeID(), UserID: user.ID, Name: name, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO homes (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, home.ID, home.UserID, home.Name, home.CreatedAt, home.UpdatedAt); err != nil {
+		return domain.Home{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO home_memberships (home_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, home.ID, user.ID, domain.HomeRoleAdmin, user.CreatedAt, user.UpdatedAt); err != nil {
+		return domain.Home{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO home_permissions (home_id, homeassistant_enabled, files_enabled, notes_enabled, updated_at, updated_by) VALUES (?, TRUE, TRUE, TRUE, ?, ?)`, home.ID, user.UpdatedAt, user.ID); err != nil {
+		return domain.Home{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Home{}, err
+	}
+	return home, nil
 }
 
 func (s *Store) GetHomePermissions(ctx context.Context, homeID string) (domain.HomePermissions, error) {

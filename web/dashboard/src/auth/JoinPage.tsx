@@ -49,6 +49,17 @@ export function JoinPage() {
     }
   }
 
+  async function signInWithMicrosoft() {
+    setBusy(true);
+    setMessage("");
+    try {
+      window.location.assign((await authClient.startEntra(token.trim())).authorization_url);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Microsoft sign-in is unavailable.");
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="auth-card" aria-labelledby="join-title">
       <p className="eyebrow">Hank Remote</p>
@@ -70,6 +81,7 @@ export function JoinPage() {
           <input autoComplete="new-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
         <button disabled={busy} type="submit">Join home</button>
+		<button disabled={busy || !token.trim()} className="secondary" type="button" onClick={() => void signInWithMicrosoft()}>Join with Microsoft</button>
       </form>
     </section>
   );

@@ -196,14 +196,18 @@ func (s *Store) migrate(ctx context.Context) error {
 }
 
 func (s *Store) CreateUser(ctx context.Context, user domain.User) error {
+	// Existing callers create password-capable users. SSO-only users are created
+	// through the explicit identity path and disabled after their insert.
+	user.PasswordLoginEnabled = true
 	_, err := s.exec(
 		ctx,
 		`INSERT INTO users (
-			id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.ID,
 		user.Email,
 		user.PasswordHash,
+		user.PasswordLoginEnabled,
 		user.PasswordChangeRequired,
 		user.PasswordChangedAt,
 		user.PasswordResetAt,
@@ -218,12 +222,12 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User) error {
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE email = ?`, email)
+	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE email = ?`, email)
 	return scanUser(row)
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE id = ?`, id)
 	return scanUser(row)
 }
 
@@ -236,7 +240,7 @@ func (s *Store) UpdateUserPassword(ctx context.Context, userID string, passwordH
 	defer tx.Rollback()
 
 	result, err := tx.ExecContext(ctx, `UPDATE users
-		SET password_hash = ?,
+		SET password_hash = ?, password_login_enabled = TRUE,
 			password_change_required = ?,
 			password_changed_at = CASE WHEN ? THEN password_changed_at ELSE ? END,
 			password_reset_at = CASE WHEN ? THEN ? ELSE password_reset_at END,
@@ -282,6 +286,11 @@ func (s *Store) UpdateUserPassword(ctx context.Context, userID string, passwordH
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *Store) DisablePasswordLogin(ctx context.Context, userID string) error {
+	_, err := s.exec(ctx, `UPDATE users SET password_login_enabled = FALSE, updated_at = ? WHERE id = ?`, time.Now().UTC(), userID)
+	return err
 }
 
 func (s *Store) CreateHome(ctx context.Context, home domain.Home) error {
@@ -747,6 +756,7 @@ func scanUser(scanner interface{ Scan(dest ...any) error }) (domain.User, error)
 		&user.ID,
 		&user.Email,
 		&user.PasswordHash,
+		&user.PasswordLoginEnabled,
 		&user.PasswordChangeRequired,
 		&user.PasswordChangedAt,
 		&user.PasswordResetAt,

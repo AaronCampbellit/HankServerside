@@ -7,6 +7,36 @@ import {
   type CreatedAgentToken,
   type Home,
 } from "../api/home";
+import { authClient } from "../api/auth";
+
+function EntraSSOSettingsPanel() {
+  const [settings, setSettings] = useState({ enabled: false, tenant_id: "", client_id: "", client_secret: "", public_base_url: "", client_secret_set: false, managed_by_environment: false });
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void authClient.entraSettings().then((value) => setSettings((current) => ({ ...current, ...value, client_secret: "" }))).catch((error) => setMessage(errorMessage(error))); }, []);
+  async function save(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setMessage("");
+    try {
+      const value = await authClient.saveEntraSettings(settings);
+      setSettings((current) => ({ ...current, ...value, client_secret: "" }));
+      setMessage(value.enabled ? "Microsoft Entra SSO is enabled." : "Microsoft Entra SSO is disabled.");
+    } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+  }
+  return <section className="settings-panel" aria-label="Microsoft Entra sign-in">
+    <h2>Microsoft Entra sign-in</h2>
+    <p className="meta-line">Configure Hank’s single-tenant Microsoft Entra web app. The client secret is encrypted on the server and is never shown again.</p>
+    {settings.managed_by_environment ? <p className="notice-state">Entra is currently supplied by environment configuration. Saving here moves this setting into Hank’s encrypted database.</p> : null}
+    {message ? <p role="alert" className="notice-state">{message}</p> : null}
+    <form className="quick-link-form" onSubmit={(event) => void save(event)}>
+      <label><span>Tenant ID</span><input value={settings.tenant_id} onChange={(event) => setSettings({ ...settings, tenant_id: event.target.value })} /></label>
+      <label><span>Application (client) ID</span><input value={settings.client_id} onChange={(event) => setSettings({ ...settings, client_id: event.target.value })} /></label>
+      <label><span>Client secret {settings.client_secret_set ? "(set)" : ""}</span><input autoComplete="off" type="password" placeholder={settings.client_secret_set ? "Leave blank to keep current secret" : "Required when enabling"} value={settings.client_secret} onChange={(event) => setSettings({ ...settings, client_secret: event.target.value })} /></label>
+      <label><span>Public Hank URL</span><input type="url" placeholder="https://hank.example.com" value={settings.public_base_url} onChange={(event) => setSettings({ ...settings, public_base_url: event.target.value })} /></label>
+      <label><span>Enable Microsoft Entra SSO</span><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /></label>
+      <div className="form-actions"><button disabled={busy} type="submit">{busy ? "Saving…" : "Save Entra settings"}</button><button disabled={busy || !settings.enabled} className="secondary" type="button" onClick={() => void authClient.startEntraLink().then(({ authorization_url }) => window.location.assign(authorization_url)).catch((error) => setMessage(errorMessage(error)))}>Connect Microsoft account</button></div>
+    </form>
+  </section>;
+}
 
 type State =
   | { status: "loading" }
@@ -192,6 +222,8 @@ export function HomeSettings() {
       </header>
 
       {readyState.message ? <p className="notice-state">{readyState.message}</p> : null}
+
+      <EntraSSOSettingsPanel />
 
       <section className="settings-panel" aria-label="Home name">
         <h2>Home Name</h2>

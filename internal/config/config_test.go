@@ -99,6 +99,20 @@ func TestLoadCloudParsesChatGPTOAuthConfig(t *testing.T) {
 	}
 }
 
+func TestLoadCloudRequiresCompleteEntraConfig(t *testing.T) {
+	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
+	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "test-secret-encryption-key")
+	t.Setenv("HANK_REMOTE_ENTRA_ENABLED", "true")
+	t.Setenv("HANK_REMOTE_ENTRA_TENANT_ID", "tenant")
+	t.Setenv("HANK_REMOTE_ENTRA_CLIENT_ID", "client")
+	t.Setenv("HANK_REMOTE_ENTRA_CLIENT_SECRET", "")
+	t.Setenv("HANK_REMOTE_PUBLIC_BASE_URL", "https://hank.example")
+
+	if _, err := LoadCloud(); err == nil || !strings.Contains(err.Error(), "HANK_REMOTE_ENTRA_CLIENT_SECRET") {
+		t.Fatalf("LoadCloud error = %v, want Entra configuration validation", err)
+	}
+}
+
 func TestLoadCloudRejectsInvalidDuration(t *testing.T) {
 	t.Setenv("HANK_REMOTE_DB_OPS_INTENT_SECRET", "test-db-ops-intent-secret")
 	t.Setenv("HANK_REMOTE_SECRET_ENCRYPTION_KEY", "test-secret-encryption-key")

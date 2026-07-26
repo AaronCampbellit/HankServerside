@@ -147,6 +147,9 @@ func (s *Server) handleHomeSubroutes(w http.ResponseWriter, r *http.Request) {
 	if s.handleHomeNotifications(w, r, home, auth, membership, parts) {
 		return
 	}
+	if s.handleHomeEntraSettings(w, r, home, auth, membership, parts) {
+		return
+	}
 	if s.handleHomeSearch(w, r, home, auth, membership, parts) {
 		return
 	}

@@ -97,6 +97,16 @@ HANK_REMOTE_MAINTENANCE_INTERVAL_SECONDS=3600
 HANK_REMOTE_MAINTENANCE_RETENTION_DAYS=30
 HANK_REMOTE_SECRET_ENCRYPTION_KEY=replace-with-stable-random-secret-encryption-key
 
+# Optional first-boot fallback for Microsoft Entra browser SSO. Configure a
+# single-tenant Web app with https://your-host/v1/auth/entra/callback and
+# require Entra assignment. After a Home exists, admins can configure or rotate
+# this in Settings > Home & Connector; the GUI stores the secret encrypted.
+HANK_REMOTE_ENTRA_ENABLED=false
+HANK_REMOTE_ENTRA_TENANT_ID=
+HANK_REMOTE_ENTRA_CLIENT_ID=
+HANK_REMOTE_ENTRA_CLIENT_SECRET=
+HANK_REMOTE_PUBLIC_BASE_URL=https://your-host
+
 HANK_REMOTE_AI_PROVIDER=auto
 HANK_REMOTE_OLLAMA_BASE_URL=http://ollama:11434
 HANK_REMOTE_OLLAMA_CHAT_MODEL=llama3.1
@@ -148,6 +158,10 @@ Set `HANK_REMOTE_DB_OPS_DOCKER_GID` to the numeric group owner of `/var/run/dock
 `HANK_REMOTE_MAINTENANCE_INTERVAL_SECONDS` controls how often cloud lifecycle cleanup runs. `HANK_REMOTE_MAINTENANCE_RETENTION_DAYS` controls the shared retention cutoff for expired operational rows, old transfer history, login backoff rows, selected assistant attachment metadata, deleted note attachment rows, and safe stale note attachment files.
 
 Keep `HANK_REMOTE_SECRET_ENCRYPTION_KEY` stable after first use. Hank Remote requires it for normal cloud startup and uses it to encrypt stored OAuth tokens, APNs device tokens, and profile secret vault data at rest. If this key is lost, already encrypted application secrets cannot be read and must be re-linked or re-entered. The only supported no-key mode is an explicit local-development opt-out with `HANK_REMOTE_ALLOW_PLAINTEXT_SECRETS=true`; do not use that setting for shared or production-like installs.
+
+When Entra SSO is enabled, Hank validates browser identity tokens by immutable tenant and object IDs. The client secret remains only in `.env.cloud`; Hank stores no Entra access or refresh tokens. Existing Hank passwords and agent setup tokens remain valid. Entra does not authenticate `/ws/agent`: agents continue to use `Authorization: Bearer <agent-token>` and `X-Hank-Agent-ID` unchanged.
+
+Settings > Home & Connector lets a Home administrator enable or disable Entra, set the tenant ID, application client ID, public Hank URL, and rotate the client secret. The secret is write-only in the dashboard and encrypted using `HANK_REMOTE_SECRET_ENCRYPTION_KEY`. A saved GUI configuration overrides the environment fallback on later cloud restarts.
 
 After adding the key to an older deployment that may have previously stored plaintext secrets, run:
 

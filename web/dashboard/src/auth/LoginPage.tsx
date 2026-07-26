@@ -43,6 +43,17 @@ export function LoginPage() {
     }
   }
 
+  async function signInWithMicrosoft() {
+    setBusy("login");
+    setMessage("");
+    try {
+      window.location.assign((await authClient.startEntra()).authorization_url);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Microsoft sign-in is unavailable.");
+      setBusy(null);
+    }
+  }
+
   return (
     <section className="auth-card" aria-labelledby="auth-title">
       <p className="eyebrow">Hank Remote</p>
@@ -64,6 +75,7 @@ export function LoginPage() {
             Create account
           </button>
         </div>
+		<button disabled={busy !== null} className="secondary" type="button" onClick={() => void signInWithMicrosoft()}>Continue with Microsoft</button>
       </form>
     </section>
   );

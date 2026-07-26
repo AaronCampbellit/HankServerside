@@ -77,7 +77,26 @@ func main() {
 		logger.Warn("plaintext secret storage is explicitly enabled; set HANK_REMOTE_SECRET_ENCRYPTION_KEY before production use")
 	}
 
+	entraConfig := cloud.EntraConfig{
+		Enabled: cfg.Entra.Enabled, TenantID: cfg.Entra.TenantID, ClientID: cfg.Entra.ClientID,
+		ClientSecret: cfg.Entra.ClientSecret, PublicBaseURL: cfg.Entra.PublicBaseURL,
+	}
+	if home, err := db.GetSingletonHome(ctx); err == nil {
+		if settings, err := db.GetEntraSSOSettings(ctx, home.ID); err == nil {
+			entraConfig = cloud.EntraConfig{Enabled: settings.Enabled, TenantID: settings.TenantID, ClientID: settings.ClientID, ClientSecret: settings.ClientSecret, PublicBaseURL: settings.PublicBaseURL}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			logger.Error("failed to load Entra SSO settings", "error", err)
+			os.Exit(1)
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		logger.Error("failed to load home for Entra SSO settings", "error", err)
+		os.Exit(1)
+	}
 	server := cloud.NewServer(cfg.Addr, db, cfg.SessionTTL, cfg.RequestTimeout, logger)
+	if err := server.ConfigureEntra(ctx, entraConfig); err != nil {
+		logger.Error("failed to configure Entra SSO", "error", err)
+		os.Exit(1)
+	}
 	server.ConfigureSecretStorageStatus(cfg.SecretKey != "", cfg.AllowPlaintextSecrets)
 	server.ConfigureMetricsScrapeToken(cfg.MetricsScrapeToken)
 	server.ConfigureAPNS(cloud.APNSConfig{

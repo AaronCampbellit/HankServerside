@@ -18,6 +18,9 @@ export type MeResponse = {
   user?: AuthUser;
 };
 
+export type EntraStartResponse = { authorization_url: string };
+export type EntraSettings = { enabled: boolean; tenant_id: string; client_id: string; public_base_url: string; client_secret_set: boolean; managed_by_environment?: boolean; updated_at?: string };
+
 export class AuthClient {
   constructor(private readonly transport: ApiTransport = apiClient) {}
 
@@ -64,6 +67,22 @@ export class AuthClient {
 
   me(): Promise<MeResponse> {
     return this.transport.request<MeResponse>("/v1/me");
+  }
+
+  startEntra(invitationToken = ""): Promise<EntraStartResponse> {
+    return this.transport.request<EntraStartResponse>("/v1/auth/entra/start", { method: "POST", body: { invitation_token: invitationToken } });
+  }
+
+  startEntraLink(): Promise<EntraStartResponse> {
+    return this.transport.request<EntraStartResponse>("/v1/auth/entra/link/start", { method: "POST" });
+  }
+
+  entraSettings(): Promise<EntraSettings> {
+    return this.transport.request<EntraSettings>("/v1/home/entra-sso");
+  }
+
+  saveEntraSettings(value: Omit<EntraSettings, "client_secret_set" | "managed_by_environment" | "updated_at"> & { client_secret: string }): Promise<EntraSettings> {
+    return this.transport.request<EntraSettings>("/v1/home/entra-sso", { method: "PUT", body: value });
   }
 }
 

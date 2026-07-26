@@ -39,12 +39,34 @@ type User struct {
 	ID                     string     `json:"id"`
 	Email                  string     `json:"email"`
 	PasswordHash           string     `json:"-"`
+	PasswordLoginEnabled   bool       `json:"password_login_enabled"`
 	PasswordChangeRequired bool       `json:"password_change_required"`
 	PasswordChangedAt      *time.Time `json:"password_changed_at,omitempty"`
 	PasswordResetAt        *time.Time `json:"password_reset_at,omitempty"`
 	PasswordResetBy        string     `json:"password_reset_by,omitempty"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+type ExternalIdentity struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Provider  string    `json:"provider"`
+	TenantID  string    `json:"tenant_id"`
+	SubjectID string    `json:"subject_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type EntraSSOSettings struct {
+	HomeID        string    `json:"home_id"`
+	Enabled       bool      `json:"enabled"`
+	TenantID      string    `json:"tenant_id"`
+	ClientID      string    `json:"client_id"`
+	ClientSecret  string    `json:"-"`
+	PublicBaseURL string    `json:"public_base_url"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	UpdatedBy     string    `json:"updated_by"`
 }
 
 type Home struct {

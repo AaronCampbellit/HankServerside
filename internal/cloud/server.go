@@ -83,6 +83,7 @@ type Server struct {
 	mcpPublicBaseURL           string
 	mcpDocsDir                 string
 	mcpDocs                    *mcpDocsIndex
+	entra                      *entraService
 }
 
 type authContext struct {
@@ -182,6 +183,9 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/auth/register", server.handleAuthRegister)
 	mux.HandleFunc("/v1/auth/login", server.handleAuthLogin)
 	mux.HandleFunc("/v1/auth/logout", server.handleAuthLogout)
+	mux.HandleFunc("/v1/auth/entra/start", server.handleEntraStart)
+	mux.HandleFunc("/v1/auth/entra/link/start", server.handleEntraLinkStart)
+	mux.HandleFunc("/v1/auth/entra/callback", server.handleEntraCallback)
 	mux.HandleFunc("/v1/auth/change-password", server.handleAuthChangePassword)
 	mux.HandleFunc("/v1/auth/invitations/preview", server.handleAuthInvitationPreview)
 	mux.HandleFunc("/v1/auth/invitations/signup", server.handleAuthInvitationSignup)
@@ -650,7 +654,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
+	if !user.PasswordLoginEnabled || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)) != nil {
 		_ = s.store.RecordLoginFailure(r.Context(), body.Email)
 		s.loginBackoff.RecordFailure(body.Email)
 		s.audit(r.Context(), "login.failed", auditSeverityWarning, user.ID, "", s.auditHomeIDForUser(r.Context(), user.ID), requestIDFromContext(r.Context()), "user", user.ID, map[string]any{"reason": "bad_password"})
@@ -2315,6 +2319,7 @@ func sanitizeUser(user domain.User) map[string]any {
 		"id":                       user.ID,
 		"email":                    user.Email,
 		"password_change_required": user.PasswordChangeRequired,
+		"password_login_enabled":   user.PasswordLoginEnabled,
 		"password_changed_at":      user.PasswordChangedAt,
 		"password_reset_at":        user.PasswordResetAt,
 		"created_at":               user.CreatedAt,
