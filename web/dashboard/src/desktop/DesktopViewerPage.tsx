@@ -50,7 +50,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   const [displayState, setDisplayState] = useState<DisplayState>(() => initialDisplayState()), [switchingDisplay, setSwitchingDisplay] = useState(false);
   const [statistics, setStatistics] = useState<NativeStatistics | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null), canvasRef = useRef<HTMLCanvasElement | null>(null), videoRef = useRef<HTMLVideoElement | null>(null);
-  const connectionRef = useRef<DesktopConnection | null>(null), decoderRef = useRef<DesktopDecoder | null>(null), sessionRef = useRef<DesktopSessionAuthorization | null>(null), frameIndex = useRef(0), reconnecting = useRef(false), startingRef = useRef(false), mountedRef = useRef(true);
+  const connectionRef = useRef<DesktopConnection | null>(null), decoderRef = useRef<DesktopDecoder | null>(null), sessionRef = useRef<DesktopSessionAuthorization | null>(null), frameIndex = useRef(0), reconnecting = useRef(false), startingRef = useRef(false), endingRef = useRef(false), mountedRef = useRef(true);
   const displayRef = useRef(displayState), messageQueue = useRef(Promise.resolve());
   const videoBlockedRef = useRef(false);
   const inputRef = useRef<DesktopInputController | null>(null), clipboardRef = useRef<DesktopClipboardController | null>(null), pendingDisplayRef = useRef<string | null>(null);
@@ -92,13 +92,14 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       });
     },
     onState: (next, detail) => {
+      if (next === "reconnecting" && endingRef.current) return;
       setState(next); setReason(detail || "");
       if (next === "reconnecting" && sessionRef.current && !reconnecting.current) void reconnectSession(sessionRef.current.session_id);
     },
   };
 
   async function start() {
-    if (!access?.allowed || unsupported || startingRef.current || sessionRef.current) return;
+    if (!access?.allowed || unsupported || startingRef.current || endingRef.current || sessionRef.current) return;
     startingRef.current = true;
     setState("authorizing"); setReason("");
     try {
@@ -123,28 +124,37 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
     }
   }
   async function reconnectSession(sessionID: string) {
+    if (endingRef.current) return;
     reconnecting.current = true; setSwitchingDisplay(true);
     try {
-      const authorization = await deps.reconnect(sessionID); setSession(authorization); sessionRef.current = authorization; frameIndex.current = 0; decoderRef.current?.reset();
+      const authorization = await deps.reconnect(sessionID);
+      if (endingRef.current || sessionRef.current?.session_id !== sessionID) return;
+      setSession(authorization); sessionRef.current = authorization; frameIndex.current = 0; decoderRef.current?.reset();
       const invalidated = { ...displayRef.current, generation: 0, minimumGeneration: Math.max(displayRef.current.minimumGeneration, displayRef.current.generation + 1), codec: undefined, width: 0, height: 0 };
       displayRef.current = invalidated; setDisplayState(invalidated);
       await connectionRef.current?.reconnect(authorization);
     }
-    catch (error) { setState("error"); setReason(error instanceof Error ? error.message : "Reconnect failed"); }
+    catch (error) {
+      if (!endingRef.current) { setState("error"); setReason(error instanceof Error ? error.message : "Reconnect failed"); }
+    }
     finally { reconnecting.current = false; }
   }
   async function end() {
+    if (endingRef.current) return;
+    endingRef.current = true;
     inputRef.current?.blur(); clipboardRef.current?.reset(); pendingDisplayRef.current = null; setFocused(false); setControl(false); setClipboardReady(false); setPendingDisplayID(null);
     const current = sessionRef.current; setState("ending"); setReason("");
     try {
       if (current) await deps.terminate(current.session_id);
     } catch (error) {
+      endingRef.current = false;
       setState("error"); setReason(error instanceof Error ? error.message : "Session cleanup failed. Retry End Session.");
       return;
     }
     try { await connectionRef.current?.close("operator_ended"); } catch { /* termination remains immediate */ }
     setSession(null); sessionRef.current = null; startingRef.current = false; connectionRef.current = null; decoderRef.current?.close(); decoderRef.current = null;
     setState("ended"); setReason("Session ended"); setSwitchingDisplay(false); setStatistics(null);
+    endingRef.current = false;
   }
   async function fullscreen() { await viewerRef.current?.requestFullscreen?.(); }
   async function sendJSON(type: DesktopMessageType, value: unknown) { await connectionRef.current?.send({ version: 1, flags: 0, type, payload: textEncoder.encode(JSON.stringify(value)), unknownOptional: false }); }

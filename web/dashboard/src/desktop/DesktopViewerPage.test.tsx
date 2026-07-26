@@ -48,6 +48,22 @@ describe("DesktopViewerPage", () => {
     expect(screen.getByRole("button", { name: "Enter fullscreen" })).toBeEnabled();
   });
 
+  it("does not reconnect when the relay closes during an explicit end", async () => {
+    let callbacks: DesktopSocketCallbacks | undefined;
+    const reconnect = vi.fn();
+    const terminate = vi.fn(async () => { callbacks?.onState("reconnecting", "user_ended"); });
+    render(<DesktopViewerPage agentID="agent_1" dependencies={{
+      loadAccess: async () => ({ allowed: true, deviceID: "device_1", agentName: "Mac" }), supported: () => true,
+      create: vi.fn().mockResolvedValue({ session_id: "desk_1", agent_id: "agent_1", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_1" }),
+      reconnect, connect: vi.fn(async (_session, _access, value: DesktopSocketCallbacks) => { callbacks = value; value.onState("active"); return { close: vi.fn(), send: vi.fn(), reconnect: vi.fn() }; }), terminate,
+    }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start secure session" }));
+    await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Connected"));
+    fireEvent.click(screen.getByRole("button", { name: "End Session" }));
+    await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Session ended"));
+    expect(reconnect).not.toHaveBeenCalled();
+  });
+
   it("admits only one start while session creation is in flight", async () => {
     let finishCreate: ((value: { session_id: string; agent_id: string; state: string; key_epoch: number; websocket_path: string }) => void) | undefined;
     const create = vi.fn(() => new Promise<{ session_id: string; agent_id: string; state: string; key_epoch: number; websocket_path: string }>(resolve => { finishCreate = resolve; }));
