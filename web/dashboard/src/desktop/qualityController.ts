@@ -20,7 +20,7 @@ export class DesktopQualityController {
   }
   setMaximum(name: DesktopQualityName, atMS: number): DesktopQualityDecision | null {
     this.maximum = desktopQualityLevels.findIndex(level => level.name === name);
-    if (this.current <= this.maximum) return null;
+    if (this.current === this.maximum) return null;
     this.current = this.maximum; this.unhealthy = 0; this.lastDowngradeMS = atMS; this.healthySinceMS = null; return this.decision();
   }
   observe(sample: DesktopHealthSample): DesktopQualityDecision | null {

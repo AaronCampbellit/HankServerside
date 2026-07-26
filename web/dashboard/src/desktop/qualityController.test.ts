@@ -14,7 +14,7 @@ describe("DesktopQualityController", () => {
     ]);
   });
 
-  it("applies deterministic downgrade and healthy hysteresis with a manual cap", () => {
+  it("applies manual quality immediately and keeps deterministic adaptive fallback", () => {
     const controller = new DesktopQualityController();
     expect(controller.reset()).toMatchObject({ level: "balanced", forceKeyframe: true, generation: 1 });
     expect(controller.observe(unhealthy(1_000))).toBeNull();
@@ -22,9 +22,9 @@ describe("DesktopQualityController", () => {
     expect(controller.observe(unhealthy(8_000))).toBeNull();
     expect(controller.observe(healthy(10_000))).toBeNull();
     expect(controller.observe(healthy(30_000))).toMatchObject({ level: "balanced", generation: 3 });
-    expect(controller.setMaximum("high", 31_000)).toBeNull();
-    expect(controller.observe(healthy(51_000))).toMatchObject({ level: "high", generation: 4, forceKeyframe: true });
-    expect(controller.observe(healthy(71_000))).toBeNull();
+    expect(controller.setMaximum("high", 31_000)).toMatchObject({ level: "high", generation: 4, forceKeyframe: true });
+    expect(controller.observe(unhealthy(32_000))).toBeNull();
+    expect(controller.observe(unhealthy(36_000))).toMatchObject({ level: "balanced", generation: 5, forceKeyframe: true });
   });
 
   it("reacts to interactive-latency backlog before the old multi-second limits", () => {

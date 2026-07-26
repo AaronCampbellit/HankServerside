@@ -2,7 +2,7 @@ import type { DesktopSessionAuthorization } from "../api/desktop";
 import { DesktopFrameKind, DesktopMessageType, decodeDesktopDataFrame, decodeDesktopInnerMessage, encodeDesktopDataFrame, encodeDesktopInnerMessage, type DesktopInnerMessage } from "./protocol";
 import { DesktopQualityController, type DesktopHealthSample, type DesktopQualityName } from "./qualityController";
 
-export type DesktopViewerState = "idle"|"authorizing"|"joining"|"active"|"reconnecting"|"ended"|"error";
+export type DesktopViewerState = "idle"|"authorizing"|"joining"|"active"|"reconnecting"|"ending"|"ended"|"error";
 export interface DesktopSocketCallbacks { onMessage(message: DesktopInnerMessage): void; onState(state: DesktopViewerState, reason?: string): void }
 interface RecordLayerLike { decrypt(record: Uint8Array): Promise<Uint8Array>; encrypt(plaintext: Uint8Array): Promise<Uint8Array> }
 export interface DesktopHandshakeDriver { browserHandshakeFrame(session: DesktopSessionAuthorization): Promise<Uint8Array>; completeAgentHandshake(payload: Uint8Array): Promise<RecordLayerLike> }

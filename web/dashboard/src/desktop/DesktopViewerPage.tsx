@@ -131,10 +131,16 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   }
   async function end() {
     inputRef.current?.blur(); clipboardRef.current?.reset(); pendingDisplayRef.current = null; setFocused(false); setControl(false); setClipboardReady(false); setPendingDisplayID(null);
-    const current = sessionRef.current; setSession(null); sessionRef.current = null; setState("ended"); setReason("Session ended");
-    if (current) await deps.terminate(current.session_id).catch(() => undefined);
+    const current = sessionRef.current; setState("ending"); setReason("");
+    try {
+      if (current) await deps.terminate(current.session_id);
+    } catch (error) {
+      setState("error"); setReason(error instanceof Error ? error.message : "Session cleanup failed. Retry End Session.");
+      return;
+    }
     try { await connectionRef.current?.close("operator_ended"); } catch { /* termination remains immediate */ }
-    connectionRef.current = null; decoderRef.current?.close(); decoderRef.current = null; setSwitchingDisplay(false); setStatistics(null);
+    setSession(null); sessionRef.current = null; connectionRef.current = null; decoderRef.current?.close(); decoderRef.current = null;
+    setState("ended"); setReason("Session ended"); setSwitchingDisplay(false); setStatistics(null);
   }
   async function fullscreen() { await viewerRef.current?.requestFullscreen?.(); }
   async function sendJSON(type: DesktopMessageType, value: unknown) { await connectionRef.current?.send({ version: 1, flags: 0, type, payload: textEncoder.encode(JSON.stringify(value)), unknownOptional: false }); }
@@ -231,7 +237,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   if (!access.allowed) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">{access.reason || "Admin access and an online desktop-capable agent are required."}</p><section className="desktop-setup-callout"><h2>Before you can connect</h2><ol><li>Return to <a href="/dashboard/agents">Agents</a> and open this device.</li><li>Use its Remote Desktop setup section to approve this browser and the device.</li><li>Complete any local permission prompts, then open Remote Desktop again once its checklist shows Ready.</li></ol></section></section>;
   if (unsupported) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">Secure H.264 playback is not supported by this browser.</p></section>;
 
-  const status = state === "joining" ? "Joining encrypted session…" : state === "authorizing" ? "Authorizing…" : state === "active" ? "Connected" : state === "reconnecting" ? "Reconnecting…" : reason || "Ready to connect";
+  const status = state === "joining" ? "Joining encrypted session…" : state === "authorizing" ? "Authorizing…" : state === "active" ? "Connected" : state === "reconnecting" ? "Reconnecting…" : state === "ending" ? "Ending session…" : reason || "Ready to connect";
   const selectedDisplay = displayState.inventory.find(display => display.id === displayState.selectedID);
   const remoteControlsDisabled = state !== "active" || reconnecting.current || Boolean(readiness?.blocksInput);
   const appliedWidth = statistics?.applied_width ?? displayState.width, appliedHeight = statistics?.applied_height ?? displayState.height;
@@ -251,7 +257,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
           : state !== "active" || switchingDisplay ? <div className="desktop-viewer-overlay"><strong>{state === "active" ? "Switching display…" : status}</strong><span>End-to-end encrypted · desktop.v1</span></div> : null}
       </div>
       <div className="desktop-viewer-toolbar" role="toolbar" aria-label="Remote desktop controls">
-        <button type="button" onClick={() => void start()} disabled={state === "authorizing" || state === "joining" || state === "active" || state === "reconnecting"}>Start secure session</button>
+        <button type="button" onClick={() => void start()} disabled={state === "authorizing" || state === "joining" || state === "active" || state === "reconnecting" || state === "ending"}>Start secure session</button>
         <button type="button" className="secondary" aria-pressed={displayState.mode === "fit"} disabled={remoteControlsDisabled} onClick={() => setScaleMode("fit")}>Fit</button>
         <button type="button" className="secondary" aria-pressed={displayState.mode === "actual"} disabled={remoteControlsDisabled} onClick={() => setScaleMode("actual")}>Actual Size</button>
         <button type="button" className="secondary" aria-pressed={control} disabled={remoteControlsDisabled || !(session?.permissions ?? requestedDesktopPermissions).includes("desktop.control")} onClick={toggleControl}>{control ? "Disable Control" : "Enable Control"}</button>
@@ -259,7 +265,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
         <button type="button" className="secondary" disabled={remoteControlsDisabled || !control || !focused || !(session?.permissions ?? requestedDesktopPermissions).includes("desktop.control") || !(session?.permissions ?? requestedDesktopPermissions).includes("desktop.clipboard.write")} onClick={() => void clipboardRef.current?.pasteToRemote()}>Paste To Remote</button>
         <button type="button" className="secondary" disabled={remoteControlsDisabled} onClick={() => runInBackground(cycleQuality())}>Quality: {quality}</button>
         <button type="button" className="secondary" disabled={state === "reconnecting"} onClick={() => void fullscreen()}>Enter fullscreen</button>
-        <button type="button" className="danger" disabled={!session} onClick={() => void end()}>End Session</button>
+        <button type="button" className="danger" disabled={!session || state === "ending"} onClick={() => void end()}>End Session</button>
       </div>
       <section className="desktop-display-panel" aria-label="Remote display inventory">
         <div><span className="desktop-display-label">Current display</span><strong>{selectedDisplay?.name ?? "Waiting for endpoint"}</strong>{selectedDisplay ? <small>{selectedDisplay.width}×{selectedDisplay.height} · {selectedDisplay.primary ? "Primary" : "Secondary"}</small> : null}</div>

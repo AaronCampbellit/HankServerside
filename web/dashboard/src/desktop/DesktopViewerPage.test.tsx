@@ -26,9 +26,10 @@ describe("DesktopViewerPage", () => {
     await vi.waitFor(() => expect(terminate).not.toHaveBeenCalled());
   });
 
-  it("labels native mode, exposes keyboard controls, and ends immediately", async () => {
+  it("waits for authoritative termination before allowing another session", async () => {
     const create = vi.fn().mockResolvedValue({ session_id: "desk_1", agent_id: "agent_1", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_1", permissions: ["desktop.view", "desktop.control", "desktop.clipboard.read", "desktop.clipboard.write"] });
-    const terminate = vi.fn().mockResolvedValue({});
+    let finishTermination: (() => void) | undefined;
+    const terminate = vi.fn(() => new Promise<void>(resolve => { finishTermination = resolve; }));
     const close = vi.fn().mockResolvedValue(undefined), send = vi.fn().mockResolvedValue(undefined), connect = vi.fn(async (_session, _access, callbacks) => { callbacks.onState("active"); return { close, send, reconnect: vi.fn() }; });
     render(<DesktopViewerPage agentID="agent_1" dependencies={{ loadAccess: async () => ({ allowed: true, deviceID: "device_1", agentName: "Mac" }), supported: () => true, create, reconnect: vi.fn(), connect, terminate }} />);
     expect(await screen.findByText("Native console viewing")).toBeVisible();
@@ -36,6 +37,11 @@ describe("DesktopViewerPage", () => {
     await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Connected"));
     fireEvent.click(screen.getByRole("button", { name: "End Session" }));
     await vi.waitFor(() => expect(terminate).toHaveBeenCalledWith("desk_1"));
+    expect(screen.getByRole("status")).toHaveTextContent("Ending session…");
+    expect(screen.getByRole("button", { name: "Start secure session" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "End Session" })).toBeDisabled();
+    expect(close).not.toHaveBeenCalled();
+    finishTermination?.();
     await vi.waitFor(() => expect(close).toHaveBeenCalledWith("operator_ended"));
     expect(terminate.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
     await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Session ended"));
