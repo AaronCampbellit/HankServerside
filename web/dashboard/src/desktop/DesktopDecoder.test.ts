@@ -51,12 +51,20 @@ describe("DesktopDecoder", () => {
   });
 
   it("drops stale delta frames when WebCodecs falls behind and resumes at a keyframe", async () => {
-    const native = { decodeQueueSize: 3, configure: vi.fn(), decode: vi.fn(), close: vi.fn(), reset: vi.fn() };
+    let configured = false;
+    const native = {
+      decodeQueueSize: 3,
+      configure: vi.fn(() => { configured = true; }),
+      decode: vi.fn(() => { if (!configured) throw new Error("Cannot call decode on an unconfigured codec."); }),
+      close: vi.fn(),
+      reset: vi.fn(() => { configured = false; }),
+    };
     const decoder = new DesktopDecoder({ webCodecs: { isConfigSupported: vi.fn().mockResolvedValue({ supported: true }), create: () => native } });
     await decoder.configure({ codec: "avc1.42c01f", width: 640, height: 360, description: new Uint8Array([1]), generation: 1 });
     expect(decoder.decode(new Uint8Array([0,0,0,1,0x41]), { timestamp: 1, duration: 33_333, keyframe: false, generation: 1 })).toBe(false);
     expect(decoder.decode(new Uint8Array([0,0,0,1,0x65]), { timestamp: 2, duration: 33_333, keyframe: true, generation: 1 })).toBe(true);
     expect(native.reset).toHaveBeenCalled();
+    expect(native.configure).toHaveBeenCalledTimes(2);
     expect(native.decode).toHaveBeenCalledTimes(1);
   });
 });

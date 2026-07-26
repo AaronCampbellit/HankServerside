@@ -11,6 +11,7 @@ export function desktopPlaybackSupported(scope: { VideoDecoder?: unknown; MediaS
 
 export class DesktopDecoder {
   private decoder: DecoderLike | null = null;
+  private webCodecsConfig: unknown | null = null;
   private mse: DesktopMSEAdapter | null = null;
   private generation = 0;
   private displayID = "";
@@ -48,6 +49,7 @@ export class DesktopDecoder {
     const config = { codec: value.codec, codedWidth: value.width, codedHeight: value.height, description: value.description.slice().buffer, optimizeForLatency: true };
     if (!(await webCodecs.isConfigSupported(config)).supported) throw new Error("desktop_codec_unsupported");
     this.decoder?.close(); this.decoder = webCodecs.create(frame => this.draw(frame)); this.decoder.configure(config);
+    this.webCodecsConfig = config;
   }
 
   decode(accessUnit: Uint8Array, metadata: DesktopAccessUnitMetadata): boolean {
@@ -58,6 +60,8 @@ export class DesktopDecoder {
     if (this.awaitingKeyframe) {
       if (!metadata.keyframe) { this.droppedFrames++; return false; }
       this.decoder.reset();
+      if (!this.webCodecsConfig) throw new Error("desktop_decoder_not_configured");
+      this.decoder.configure(this.webCodecsConfig);
       this.enqueuedAt.clear();
       this.awaitingKeyframe = false;
     }
@@ -82,7 +86,7 @@ export class DesktopDecoder {
     if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
   }
   close(): void {
-    this.decoder?.close(); this.decoder = null; this.mse?.close(); this.mse = null; this.generation = 0; this.displayID = "";
+    this.decoder?.close(); this.decoder = null; this.webCodecsConfig = null; this.mse?.close(); this.mse = null; this.generation = 0; this.displayID = "";
     this.decodedFrames = 0; this.droppedFrames = 0; this.awaitingKeyframe = false; this.enqueuedAt.clear();
     this.renderLatencyTotalMS = 0; this.renderLatencyMaxMS = 0; this.renderLatencySamples = 0;
   }
