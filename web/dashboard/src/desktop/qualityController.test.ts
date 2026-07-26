@@ -26,4 +26,12 @@ describe("DesktopQualityController", () => {
     expect(controller.observe(healthy(51_000))).toMatchObject({ level: "high", generation: 4, forceKeyframe: true });
     expect(controller.observe(healthy(71_000))).toBeNull();
   });
+
+  it("reacts to interactive-latency backlog before the old multi-second limits", () => {
+    const controller = new DesktopQualityController();
+    controller.reset();
+    const queued = { ...healthy(1_000), decoderQueue: 3, senderQueueBytes: 513 << 10 };
+    expect(controller.observe(queued)).toBeNull();
+    expect(controller.observe({ ...queued, atMS: 6_000 })).toMatchObject({ level: "low" });
+  });
 });

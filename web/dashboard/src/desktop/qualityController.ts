@@ -25,7 +25,7 @@ export class DesktopQualityController {
   }
   observe(sample: DesktopHealthSample): DesktopQualityDecision | null {
     const total = sample.decodedFrames + sample.droppedFrames;
-    const unhealthy = sample.rttMS >= 300 || sample.decoderQueue >= 6 || sample.senderQueueBytes > (16 << 20) || sample.relayBackpressureCount > 0 || (total > 0 && sample.droppedFrames / total >= .1);
+    const unhealthy = sample.rttMS >= 180 || sample.decoderQueue >= 3 || sample.senderQueueBytes > (512 << 10) || sample.relayBackpressureCount > 0 || (total > 0 && sample.droppedFrames / total >= .05);
     if (unhealthy) {
       this.healthySinceMS = null; this.unhealthy++;
       if (this.unhealthy >= 2 && this.current > 0 && sample.atMS - this.lastDowngradeMS >= 5_000) {

@@ -33,7 +33,11 @@ export interface DesktopViewerDependencies {
 
 const textEncoder = new TextEncoder(), textDecoder = new TextDecoder();
 const requestedDesktopPermissions = ["desktop.view", "desktop.control", "desktop.clipboard.read", "desktop.clipboard.write"];
-type NativeStatistics = StatisticsPayload & { fps?: number; bitrate_bps?: number; dropped_frames?: number; applied_width?: number; applied_height?: number; applied_quality?: string; sender_queue_bytes?: number; relay_backpressure_count?: number };
+type NativeStatistics = StatisticsPayload & {
+  fps?: number; bitrate_bps?: number; dropped_frames?: number; applied_width?: number; applied_height?: number; applied_quality?: string;
+  sender_queue_bytes?: number; relay_backpressure_count?: number; capture_to_send_ms?: number; capture_to_send_max_ms?: number;
+  render_latency_ms?: number; render_latency_max_ms?: number; playback_mode?: "webcodecs" | "mse" | "none";
+};
 
 export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }: { agentID?: string; dependencies?: DesktopViewerDependencies }) {
   const deps = useMemo(() => dependencies ?? defaultDependencies(agentID), [agentID, dependencies]);
@@ -59,16 +63,11 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       return current.mode === "fit" ? fittedContentRect(bounds, current.width, current.height) : (canvasRef.current?.getBoundingClientRect() ?? bounds);
     }, requestFrame: callback => requestAnimationFrame(callback), cancelFrame: handle => cancelAnimationFrame(handle) });
     let live = true; deps.loadAccess().then(value => { if (live) setAccess(value); }).catch(error => { if (live) setAccess({ allowed: false, deviceID: "", agentName: agentID, reason: error instanceof Error ? error.message : "Viewer unavailable" }); });
-    const terminateOnExit = () => {
-      const current = sessionRef.current;
-      if (!current) return;
-      sessionRef.current = null;
-      void Promise.resolve(deps.terminate(current.session_id, true)).catch(() => undefined);
-    };
-    window.addEventListener("pagehide", terminateOnExit);
     return () => {
-      live = false; mountedRef.current = false; window.removeEventListener("pagehide", terminateOnExit);
-      terminateOnExit();
+      live = false; mountedRef.current = false;
+      // A pagehide can be emitted while a browser temporarily freezes or
+      // restores this route. Let the relay reconnect/expire normally; only
+      // the explicit End Session action should terminate the server session.
       inputRef.current?.dispose(); clipboardRef.current?.reset();
       const closing = connectionRef.current?.close("viewer_unmounted"); if (closing) void closing.catch(() => undefined);
       decoderRef.current?.close();
@@ -78,6 +77,9 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
     inputRef.current?.update({ active: state === "active" && !readiness?.blocksInput, control, reconnecting: state === "reconnecting" || reconnecting.current, visible: document.visibilityState !== "hidden", displayID: displayState.selectedID ?? "", generation: displayState.generation });
     if (state !== "active") { setFocused(false); setControlPending(false); setClipboardReady(false); clipboardRef.current?.reset(); }
   }, [state, control, displayState.selectedID, displayState.generation, readiness?.blocksInput]);
+  useEffect(() => {
+    if (state === "active" && control && !readiness?.blocksInput) viewerRef.current?.focus({ preventScroll: true });
+  }, [state, control, readiness?.blocksInput]);
   useEffect(() => { clipboardRef.current?.updateControl({ active: state === "active", enabled: control, focused }); }, [state, control, focused]);
   useEffect(() => { const hidden = () => { const visible = document.visibilityState !== "hidden"; inputRef.current?.update({ visible }); if (!visible) setFocused(false); }; document.addEventListener("visibilitychange", hidden); return () => document.removeEventListener("visibilitychange", hidden); }, []);
 
@@ -193,8 +195,10 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       const accepted = decoderRef.current?.decode(message.payload, { timestamp: metadata.timestamp_us, duration: metadata.duration_us, keyframe, generation: metadata.generation });
       if (accepted && keyframe) setSwitchingDisplay(false);
     } else if (message.type === DesktopMessageType.Statistics) {
-      const value = JSON.parse(textDecoder.decode(message.payload)) as NativeStatistics, decoder = decoderRef.current?.healthSnapshot() ?? { decoderQueue: 0, decodedFrames: value.frames ?? 0, droppedFrames: 0 };
-      setStatistics(value);
+      const value = JSON.parse(textDecoder.decode(message.payload)) as NativeStatistics, decoder = decoderRef.current?.healthSnapshot() ??
+        { decoderQueue: 0, decodedFrames: value.frames ?? 0, droppedFrames: 0, renderLatencyMS: 0, renderLatencyMaxMS: 0, playbackMode: "none" as const };
+      setStatistics({ ...value, render_latency_ms: decoder.renderLatencyMS, render_latency_max_ms: decoder.renderLatencyMaxMS,
+        playback_mode: decoder.playbackMode });
       const sample: DesktopHealthSample = { atMS: Date.now(), rttMS: value.rtt_ms ?? 0, decoderQueue: decoder.decoderQueue,
         decodedFrames: decoder.decodedFrames, droppedFrames: decoder.droppedFrames + (value.dropped_frames ?? 0), senderQueueBytes: value.sender_queue_bytes ?? 0,
         relayBackpressureCount: value.relay_backpressure_count ?? 0 };
@@ -215,8 +219,9 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       if (overlay?.blocksVideo) { videoBlockedRef.current = true; clearRenderedFrame(); }
       if (overlay?.blocksInput) { inputRef.current?.blur(); setFocused(false); setControlPending(false); }
     } else if (message.type === DesktopMessageType.ControlMode) {
-      const value = JSON.parse(textDecoder.decode(message.payload)) as { enabled?: boolean; focus_lease?: number; applied?: boolean };
-      const lease = value.focus_lease ?? inputRef.current?.focusLease ?? 0;
+      const value = JSON.parse(textDecoder.decode(message.payload)) as { enabled?: boolean; focus_lease?: number | string; applied?: boolean };
+      const reportedLease = typeof value.focus_lease === "string" ? Number(value.focus_lease) : value.focus_lease;
+      const lease = typeof reportedLease === "number" && Number.isSafeInteger(reportedLease) ? reportedLease : inputRef.current?.focusLease ?? 0;
       if (value.applied === true && value.enabled && inputRef.current?.confirmFocus(lease, true)) { setFocused(true); setControlPending(false); }
       else if (value.applied === false || !value.enabled) { inputRef.current?.confirmFocus(lease, false); inputRef.current?.blur(); setFocused(false); setControlPending(false); }
     } else if (message.type === DesktopMessageType.Terminate) { await end(); }
@@ -263,7 +268,10 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       </section>
       {specialKeysForPlatform(access.platform ?? "unknown").length ? <section className="desktop-special-keys" aria-label="Special keys">{specialKeysForPlatform(access.platform ?? "unknown").map(key => <button key={key.name} type="button" className="secondary" disabled={remoteControlsDisabled || !control || !focused || key.disabled} title={key.reason} onClick={() => sendJSONInBackground(DesktopMessageType.SpecialKey, { name: key.name })}>{key.label}</button>)}</section> : null}
       <div className="desktop-viewer-status" role="status" aria-live="polite">
-        <span>{status}</span><span>{!control ? "View only" : focused ? "Control enabled" : controlPending ? "Enabling control…" : "Click display to control"}</span><span>{statistics ? `Latency ${statistics.rtt_ms} ms` : "Latency —"}</span>
+        <span>{status}</span><span>{!control ? "View only" : focused ? "Control enabled" : controlPending ? "Enabling control…" : "Click display to control"}</span><span>{statistics ? `Network ${statistics.rtt_ms} ms RTT` : "Network —"}</span>
+        <span>{statistics?.capture_to_send_ms === undefined ? "Capture —" : `Capture ${statistics.capture_to_send_ms.toFixed(0)} ms`}</span>
+        <span>{statistics?.render_latency_ms === undefined ? "Render —" : `Render ${statistics.render_latency_ms.toFixed(0)} ms`}</span>
+        <span>{statistics?.playback_mode ? `Playback ${statistics.playback_mode === "webcodecs" ? "WebCodecs" : statistics.playback_mode.toUpperCase()}` : "Playback —"}</span>
         <span>{statistics?.fps === undefined ? "FPS —" : `${statistics.fps.toFixed(1)} fps`}</span>
         <span>{statistics?.bitrate_bps === undefined ? "Bitrate —" : `${formatMbps(statistics.bitrate_bps)} Mbps`}</span>
         <span>{statistics?.dropped_frames === undefined ? "Dropped —" : `${statistics.dropped_frames} dropped`}</span>

@@ -16,6 +16,11 @@ export class DesktopDecoder {
   private displayID = "";
   private decodedFrames = 0;
   private droppedFrames = 0;
+  private awaitingKeyframe = false;
+  private enqueuedAt = new Map<number, number>();
+  private renderLatencyTotalMS = 0;
+  private renderLatencyMaxMS = 0;
+  private renderLatencySamples = 0;
   constructor(private readonly dependencies: DecoderDependencies = {}, private readonly targets: DesktopDecoderTargets = {}) {}
 
   async configure(value: DesktopDecoderConfiguration): Promise<void> {
@@ -40,7 +45,7 @@ export class DesktopDecoder {
     }
     if (this.targets.canvas) this.targets.canvas.hidden = false;
     if (this.targets.video) this.targets.video.hidden = true;
-    const config = { codec: value.codec, codedWidth: value.width, codedHeight: value.height, description: value.description.slice().buffer };
+    const config = { codec: value.codec, codedWidth: value.width, codedHeight: value.height, description: value.description.slice().buffer, optimizeForLatency: true };
     if (!(await webCodecs.isConfigSupported(config)).supported) throw new Error("desktop_codec_unsupported");
     this.decoder?.close(); this.decoder = webCodecs.create(frame => this.draw(frame)); this.decoder.configure(config);
   }
@@ -49,15 +54,25 @@ export class DesktopDecoder {
     if (metadata.generation !== undefined && this.generation > 0 && metadata.generation !== this.generation) { this.droppedFrames++; return false; }
     if (this.mse) { this.mse.decode(accessUnit, metadata); this.decodedFrames++; return true; }
     if (!this.decoder) throw new Error("desktop_decoder_not_configured");
+    if ((this.decoder.decodeQueueSize ?? 0) >= 3) this.awaitingKeyframe = true;
+    if (this.awaitingKeyframe) {
+      if (!metadata.keyframe) { this.droppedFrames++; return false; }
+      this.decoder.reset();
+      this.enqueuedAt.clear();
+      this.awaitingKeyframe = false;
+    }
     const Chunk = (globalThis as unknown as { EncodedVideoChunk?: new (value: unknown) => unknown }).EncodedVideoChunk;
     const value = { type: metadata.keyframe ? "key" : "delta", timestamp: metadata.timestamp, duration: metadata.duration, data: annexBAccessUnitToAVCC(accessUnit) };
+    this.enqueuedAt.set(metadata.timestamp, nowMS());
     this.decoder.decode(Chunk ? new Chunk(value) : value);
     return true;
   }
-  healthSnapshot(): { decoderQueue: number; decodedFrames: number; droppedFrames: number } {
-    return { decoderQueue: Math.max(0, this.decoder?.decodeQueueSize ?? 0), decodedFrames: this.decodedFrames, droppedFrames: this.droppedFrames };
+  healthSnapshot(): { decoderQueue: number; decodedFrames: number; droppedFrames: number; renderLatencyMS: number; renderLatencyMaxMS: number; playbackMode: "webcodecs" | "mse" | "none" } {
+    return { decoderQueue: Math.max(0, this.decoder?.decodeQueueSize ?? 0), decodedFrames: this.decodedFrames, droppedFrames: this.droppedFrames,
+      renderLatencyMS: this.renderLatencySamples > 0 ? this.renderLatencyTotalMS / this.renderLatencySamples : 0,
+      renderLatencyMaxMS: this.renderLatencyMaxMS, playbackMode: this.decoder ? "webcodecs" : this.mse ? "mse" : "none" };
   }
-  reset(): void { this.decoder?.reset(); this.mse?.reset(); }
+  reset(): void { this.decoder?.reset(); this.mse?.reset(); this.awaitingKeyframe = false; this.enqueuedAt.clear(); }
   clearRenderedFrame(): void {
     this.decoder?.reset(); this.decoder?.close(); this.decoder = null;
     this.mse?.close(); this.mse = null;
@@ -66,15 +81,29 @@ export class DesktopDecoder {
     const video = this.targets.video;
     if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
   }
-  close(): void { this.decoder?.close(); this.decoder = null; this.mse?.close(); this.mse = null; this.generation = 0; this.displayID = ""; this.decodedFrames = 0; this.droppedFrames = 0; }
+  close(): void {
+    this.decoder?.close(); this.decoder = null; this.mse?.close(); this.mse = null; this.generation = 0; this.displayID = "";
+    this.decodedFrames = 0; this.droppedFrames = 0; this.awaitingKeyframe = false; this.enqueuedAt.clear();
+    this.renderLatencyTotalMS = 0; this.renderLatencyMaxMS = 0; this.renderLatencySamples = 0;
+  }
   private draw(frame: unknown): void {
     this.decodedFrames++;
-    const value = frame as { displayWidth?: number; displayHeight?: number; close?: () => void };
+    const value = frame as { displayWidth?: number; displayHeight?: number; timestamp?: number; close?: () => void };
+    if (typeof value.timestamp === "number") {
+      const started = this.enqueuedAt.get(value.timestamp);
+      if (started !== undefined) {
+        const latency = Math.max(0, nowMS() - started);
+        this.enqueuedAt.delete(value.timestamp);
+        this.renderLatencyTotalMS += latency; this.renderLatencyMaxMS = Math.max(this.renderLatencyMaxMS, latency); this.renderLatencySamples++;
+      }
+    }
     const canvas = this.targets.canvas, context = canvas?.getContext("2d");
     if (canvas && context) { canvas.width = value.displayWidth || canvas.width; canvas.height = value.displayHeight || canvas.height; context.drawImage(frame as CanvasImageSource, 0, 0, canvas.width, canvas.height); }
     value.close?.();
   }
 }
+
+function nowMS(): number { return globalThis.performance?.now?.() ?? Date.now(); }
 
 function browserWebCodecs(): DecoderDependencies["webCodecs"] | undefined {
   const Decoder = (globalThis as unknown as { VideoDecoder?: { new(value: unknown): DecoderLike; isConfigSupported(value: unknown): Promise<{ supported?: boolean }> } }).VideoDecoder;

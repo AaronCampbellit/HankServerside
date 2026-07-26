@@ -35,14 +35,14 @@ type desktopRelayLimits struct {
 
 func defaultDesktopRelayLimits() desktopRelayLimits {
 	return desktopRelayLimits{JoinTimeout: 60 * time.Second, ReconnectTimeout: 90 * time.Second, IdleTimeout: 30 * time.Second, MaxDuration: 8 * time.Hour,
-		SlowConsumerGrace: 10 * time.Second, MaxFrameBytes: protocol.DesktopMaxEncryptedFramePayload + 12, MaxBytesPerSecond: 50 << 20, MaxQueueBytes: 16 << 20,
+		SlowConsumerGrace: 4 * time.Second, MaxFrameBytes: protocol.DesktopMaxEncryptedFramePayload + 12, MaxBytesPerSecond: 50 << 20, MaxQueueBytes: 512 << 10,
 		MaxSessions: 32, MaxSessionsPerHome: 4, MaxSessionsPerAgent: 1}
 }
 
 func (limits desktopRelayLimits) Validate() error {
 	if limits.JoinTimeout <= 0 || limits.ReconnectTimeout <= 0 || limits.ReconnectTimeout > 90*time.Second || limits.IdleTimeout <= 0 || limits.MaxDuration <= 0 || limits.MaxDuration > 8*time.Hour || limits.SlowConsumerGrace <= 0 || limits.SlowConsumerGrace > 10*time.Second ||
 		limits.MaxFrameBytes <= 0 || limits.MaxFrameBytes > protocol.DesktopMaxEncryptedFramePayload+12 || limits.MaxBytesPerSecond <= 0 || limits.MaxBytesPerSecond > 50<<20 ||
-		limits.MaxQueueBytes < limits.MaxFrameBytes || limits.MaxQueueBytes > 16<<20 || limits.MaxSessions <= 0 || limits.MaxSessions > 32 ||
+		limits.MaxQueueBytes <= 0 || limits.MaxQueueBytes > 16<<20 || limits.MaxSessions <= 0 || limits.MaxSessions > 32 ||
 		limits.MaxSessionsPerHome <= 0 || limits.MaxSessionsPerHome > 4 || limits.MaxSessionsPerAgent <= 0 || limits.MaxSessionsPerAgent > 1 {
 		return errors.New("desktop relay limits exceed the production boundary")
 	}
@@ -200,7 +200,11 @@ func (pipe *desktopRelayPipe) enqueue(ctx context.Context, payload []byte, limit
 	backpressured := false
 	for {
 		pipe.mu.Lock()
-		if pipe.queuedBytes+int64(len(payload)) <= limit {
+		// A single valid frame may be larger than the interactive queue budget
+		// (for example, a clipboard payload). Admit it only when the pipe is
+		// empty; subsequent frames wait so ordinary video cannot build a
+		// multi-second FIFO backlog behind it.
+		if pipe.queuedBytes == 0 || pipe.queuedBytes+int64(len(payload)) <= limit {
 			copyOfPayload := append([]byte(nil), payload...)
 			pipe.frames = append(pipe.frames, copyOfPayload)
 			pipe.queuedBytes += int64(len(copyOfPayload))

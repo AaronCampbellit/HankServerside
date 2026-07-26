@@ -61,8 +61,19 @@ func TestDesktopRelayProductionLimitsAreBounded(t *testing.T) {
 	if err := limits.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if limits.JoinTimeout != 60*time.Second || limits.ReconnectTimeout != 90*time.Second || limits.IdleTimeout != 30*time.Second || limits.MaxDuration != 8*time.Hour || limits.MaxFrameBytes != protocol.DesktopMaxEncryptedFramePayload+12 || limits.MaxBytesPerSecond != 50<<20 || limits.MaxQueueBytes != 16<<20 || limits.SlowConsumerGrace != 10*time.Second || limits.MaxSessions != 32 || limits.MaxSessionsPerHome != 4 || limits.MaxSessionsPerAgent != 1 {
+	if limits.JoinTimeout != 60*time.Second || limits.ReconnectTimeout != 90*time.Second || limits.IdleTimeout != 30*time.Second || limits.MaxDuration != 8*time.Hour || limits.MaxFrameBytes != protocol.DesktopMaxEncryptedFramePayload+12 || limits.MaxBytesPerSecond != 50<<20 || limits.MaxQueueBytes != 512<<10 || limits.SlowConsumerGrace != 4*time.Second || limits.MaxSessions != 32 || limits.MaxSessionsPerHome != 4 || limits.MaxSessionsPerAgent != 1 {
 		t.Fatalf("unexpected limits: %#v", limits)
+	}
+}
+
+func TestDesktopRelayPipeAdmitsOneValidFrameLargerThanLatencyBudget(t *testing.T) {
+	pipe := newDesktopRelayPipe()
+	payload := []byte("oversized-but-valid")
+	if err := pipe.enqueue(context.Background(), payload, 8, time.Second, func() {}); err != nil {
+		t.Fatalf("enqueue oversized frame: %v", err)
+	}
+	if got := pipe.bytes(); got != int64(len(payload)) {
+		t.Fatalf("queued bytes = %d, want %d", got, len(payload))
 	}
 }
 

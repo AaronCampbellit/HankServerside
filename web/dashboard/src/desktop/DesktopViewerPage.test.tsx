@@ -11,7 +11,7 @@ const message = (type: DesktopMessageType, value: unknown): DesktopInnerMessage 
 describe("DesktopViewerPage", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it("terminates with a keepalive request when the viewer page is left", async () => {
+  it("keeps the session recoverable when the viewer page is hidden", async () => {
     const terminate = vi.fn().mockResolvedValue({});
     render(<DesktopViewerPage agentID="agent_exit" dependencies={{
       loadAccess: async () => ({ allowed: true, deviceID: "device_exit", agentName: "Mac" }), supported: () => true,
@@ -23,7 +23,7 @@ describe("DesktopViewerPage", () => {
 
     fireEvent(window, new PageTransitionEvent("pagehide"));
 
-    await vi.waitFor(() => expect(terminate).toHaveBeenCalledWith("desk_exit", true));
+    await vi.waitFor(() => expect(terminate).not.toHaveBeenCalled());
   });
 
   it("labels native mode, exposes keyboard controls, and ends immediately", async () => {
@@ -60,7 +60,7 @@ describe("DesktopViewerPage", () => {
         { id: "display-2", name: "Second Display", x: 1920, y: 0, width: 1280, height: 720, scale: 1, primary: false, rotation: 0 },
       ] }));
       callbacks!.onMessage(message(DesktopMessageType.CodecConfig, { codec: "avc1.42E01E", generation: 1, display_id: "display-1", width: 1920, height: 1080, description_base64url: "AQ" }));
-      callbacks!.onMessage(message(DesktopMessageType.Statistics, { frames: 40, rtt_ms: 12, fps: 29.8, bitrate_bps: 5_200_000, dropped_frames: 2, sender_queue_bytes: 2048, relay_backpressure_count: 1, applied_width: 1920, applied_height: 1080, applied_quality: "high" }));
+      callbacks!.onMessage(message(DesktopMessageType.Statistics, { frames: 40, rtt_ms: 12, fps: 29.8, bitrate_bps: 5_200_000, dropped_frames: 2, sender_queue_bytes: 2048, relay_backpressure_count: 1, capture_to_send_ms: 18.4, applied_width: 1920, applied_height: 1080, applied_quality: "high" }));
     });
     expect(await screen.findByText("Main Display")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Second Display · 1280×720" }));
@@ -74,6 +74,8 @@ describe("DesktopViewerPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("29.8 fps");
     expect(screen.getByRole("status")).toHaveTextContent("5.2 Mbps");
     expect(screen.getByRole("status")).toHaveTextContent("2 dropped");
+    expect(screen.getByRole("status")).toHaveTextContent("Network 12 ms RTT");
+    expect(screen.getByRole("status")).toHaveTextContent("Capture 18 ms");
     expect(screen.getByRole("status")).toHaveTextContent("Applied: high 1920×1080");
     expect(screen.getByRole("status")).toHaveTextContent("Requested: balanced");
     expect(reportHealth).toHaveBeenCalledWith(expect.objectContaining({ rttMS: 12, droppedFrames: 2, senderQueueBytes: 2048, relayBackpressureCount: 1 }));
@@ -96,12 +98,11 @@ describe("DesktopViewerPage", () => {
     await act(async () => callbacks!.onMessage(message(DesktopMessageType.CodecConfig, { codec: "avc1.42E01E", generation: 1, display_id: "display-1", width: 100, height: 50, description_base64url: "AQ" })));
     expect(screen.getByRole("status")).toHaveTextContent("View only");
     expect(screen.getByRole("button", { name: "Paste To Remote" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Enable Control" })); expect(screen.getByRole("status")).toHaveTextContent("Click display to control");
+    fireEvent.click(screen.getByRole("button", { name: "Enable Control" })); expect(screen.getByRole("status")).toHaveTextContent("Enabling control…");
     expect(screen.getByRole("button", { name: "Paste To Remote" })).toBeDisabled();
-    fireEvent.focus(screen.getByLabelText("Remote display for Mac")); expect(screen.getByRole("status")).toHaveTextContent("Enabling control…");
     const request = send.mock.calls.map(([value]) => value as DesktopInnerMessage).find(value => value.type === DesktopMessageType.ControlMode);
     const lease = (JSON.parse(new TextDecoder().decode(request?.payload)) as { focus_lease: number }).focus_lease;
-    await act(async () => callbacks!.onMessage(message(DesktopMessageType.ControlMode, { enabled: true, focus_lease: lease, applied: true })));
+    await act(async () => callbacks!.onMessage(message(DesktopMessageType.ControlMode, { enabled: true, focus_lease: String(lease), applied: true })));
     expect(screen.getByRole("status")).toHaveTextContent("Control enabled");
     expect(screen.getByRole("button", { name: "Paste To Remote" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Command+Space" })).toBeEnabled();
