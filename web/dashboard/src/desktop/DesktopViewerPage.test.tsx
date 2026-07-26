@@ -48,6 +48,22 @@ describe("DesktopViewerPage", () => {
     expect(screen.getByRole("button", { name: "Enter fullscreen" })).toBeEnabled();
   });
 
+  it("admits only one start while session creation is in flight", async () => {
+    let finishCreate: ((value: { session_id: string; agent_id: string; state: string; key_epoch: number; websocket_path: string }) => void) | undefined;
+    const create = vi.fn(() => new Promise<{ session_id: string; agent_id: string; state: string; key_epoch: number; websocket_path: string }>(resolve => { finishCreate = resolve; }));
+    const connect = vi.fn(async (_session, _access, callbacks: DesktopSocketCallbacks) => { callbacks.onState("active"); return { close: vi.fn(), send: vi.fn(), reconnect: vi.fn() }; });
+    render(<DesktopViewerPage agentID="agent_1" dependencies={{
+      loadAccess: async () => ({ allowed: true, deviceID: "device_1", agentName: "Mac" }), supported: () => true,
+      create, reconnect: vi.fn(), connect, terminate: vi.fn(),
+    }} />);
+    const start = await screen.findByRole("button", { name: "Start secure session" });
+    fireEvent.click(start);
+    fireEvent.click(start);
+    expect(create).toHaveBeenCalledTimes(1);
+    finishCreate?.({ session_id: "desk_1", agent_id: "agent_1", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_1" });
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps monitor selection pending until a new endpoint generation arrives", async () => {
     vi.spyOn(DesktopDecoder.prototype, "configure").mockResolvedValue(undefined);
     let callbacks: DesktopSocketCallbacks | undefined;

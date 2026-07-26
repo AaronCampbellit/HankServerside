@@ -50,7 +50,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   const [displayState, setDisplayState] = useState<DisplayState>(() => initialDisplayState()), [switchingDisplay, setSwitchingDisplay] = useState(false);
   const [statistics, setStatistics] = useState<NativeStatistics | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null), canvasRef = useRef<HTMLCanvasElement | null>(null), videoRef = useRef<HTMLVideoElement | null>(null);
-  const connectionRef = useRef<DesktopConnection | null>(null), decoderRef = useRef<DesktopDecoder | null>(null), sessionRef = useRef<DesktopSessionAuthorization | null>(null), frameIndex = useRef(0), reconnecting = useRef(false), mountedRef = useRef(true);
+  const connectionRef = useRef<DesktopConnection | null>(null), decoderRef = useRef<DesktopDecoder | null>(null), sessionRef = useRef<DesktopSessionAuthorization | null>(null), frameIndex = useRef(0), reconnecting = useRef(false), startingRef = useRef(false), mountedRef = useRef(true);
   const displayRef = useRef(displayState), messageQueue = useRef(Promise.resolve());
   const videoBlockedRef = useRef(false);
   const inputRef = useRef<DesktopInputController | null>(null), clipboardRef = useRef<DesktopClipboardController | null>(null), pendingDisplayRef = useRef<string | null>(null);
@@ -98,7 +98,8 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   };
 
   async function start() {
-    if (!access?.allowed || unsupported) return;
+    if (!access?.allowed || unsupported || startingRef.current || sessionRef.current) return;
+    startingRef.current = true;
     setState("authorizing"); setReason("");
     try {
       const created = await deps.create(agentID, access.deviceID, requestedDesktopPermissions);
@@ -116,7 +117,10 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
         displayRef.current = configured; setDisplayState(configured);
         void playSyntheticPreview(decoderRef.current, configured.generation, syntheticDisplay.id, () => setSwitchingDisplay(false)).catch(error => { setState("error"); setReason(error instanceof Error ? error.message : "Synthetic playback failed"); });
       }
-    } catch (error) { setState("error"); setReason(error instanceof Error ? error.message : "Session authorization failed"); }
+    } catch (error) {
+      if (!sessionRef.current) startingRef.current = false;
+      setState("error"); setReason(error instanceof Error ? error.message : "Session authorization failed");
+    }
   }
   async function reconnectSession(sessionID: string) {
     reconnecting.current = true; setSwitchingDisplay(true);
@@ -139,7 +143,7 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       return;
     }
     try { await connectionRef.current?.close("operator_ended"); } catch { /* termination remains immediate */ }
-    setSession(null); sessionRef.current = null; connectionRef.current = null; decoderRef.current?.close(); decoderRef.current = null;
+    setSession(null); sessionRef.current = null; startingRef.current = false; connectionRef.current = null; decoderRef.current?.close(); decoderRef.current = null;
     setState("ended"); setReason("Session ended"); setSwitchingDisplay(false); setStatistics(null);
   }
   async function fullscreen() { await viewerRef.current?.requestFullscreen?.(); }
