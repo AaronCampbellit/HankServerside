@@ -178,6 +178,15 @@ func TestDesktopPendingEnrollmentValidationKeepsOnlyPublicEndpointMaterial(t *te
 	if err != nil || string(stored) != string(spki) {
 		t.Fatalf("valid pending enrollment rejected: key=%x err=%v", stored, err)
 	}
+	request.Platform = "windows"
+	if stored, err = validateDesktopPendingEnrollmentRequest(request, "agent_0001", now); err != nil || string(stored) != string(spki) {
+		t.Fatalf("valid Windows pending enrollment rejected: key=%x err=%v", stored, err)
+	}
+	request.Platform = "linux"
+	if _, err := validateDesktopPendingEnrollmentRequest(request, "agent_0001", now); err == nil {
+		t.Fatal("unsupported pending enrollment platform accepted")
+	}
+	request.Platform = "macos"
 	request.AgentID = "agent_other"
 	if _, err := validateDesktopPendingEnrollmentRequest(request, "agent_0001", now); err == nil {
 		t.Fatal("cross-agent pending enrollment accepted")

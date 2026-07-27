@@ -620,8 +620,9 @@ func validateDesktopEndpointRequest(request desktopEndpointApprovalRequest, home
 }
 
 func validateDesktopPendingEnrollmentRequest(request desktopEndpointApprovalRequest, agentID string, now time.Time) ([]byte, error) {
+	platform := strings.TrimSpace(request.Platform)
 	if request.IdentityType != domain.DesktopIdentityEndpoint || request.AgentID != agentID || strings.TrimSpace(request.IdentityID) == "" ||
-		len(request.IdentityID) > 128 || strings.TrimSpace(request.Platform) != "macos" || request.CreatedAt.IsZero() || request.ExpiresAt.IsZero() ||
+		len(request.IdentityID) > 128 || (platform != "macos" && platform != "windows") || request.CreatedAt.IsZero() || request.ExpiresAt.IsZero() ||
 		request.CreatedAt.Before(now.Add(-5*time.Minute)) || request.CreatedAt.After(now.Add(5*time.Minute)) || !request.ExpiresAt.After(now) || request.ExpiresAt.Sub(request.CreatedAt) > 2*365*24*time.Hour {
 		return nil, errors.New("invalid desktop pending enrollment scope")
 	}
