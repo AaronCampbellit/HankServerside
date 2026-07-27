@@ -165,6 +165,62 @@ func (s *Server) handleHomeDesktopTrust(w http.ResponseWriter, r *http.Request, 
 	return true
 }
 
+func (s *Server) handleAgentDesktopEnrollment(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.Header.Get("X-Hank-Agent-ID"))
+	token, err := bearerToken(r.Header.Get("Authorization"))
+	if agentID == "" || err != nil {
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return
+	}
+	record, err := s.store.ValidateAgentToken(r.Context(), hashToken(token))
+	if err != nil || record.Agent.ID != agentID {
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.handleDesktopPendingEnrollmentPut(w, r, record.Home, agentID)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	root, err := s.store.GetDesktopTrustRoot(r.Context(), record.Home.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false, "identities": []any{}})
+		return
+	}
+	if err != nil {
+		http.Error(w, "desktop trust unavailable", http.StatusInternalServerError)
+		return
+	}
+	if root.AuthorityMode != "server_managed" {
+		http.Error(w, "desktop trust requires administrator migration", http.StatusConflict)
+		return
+	}
+	identities := []any{}
+	identity, identityErr := s.store.GetActiveDesktopEndpointIdentity(r.Context(), record.Home.ID, agentID, time.Now().UTC())
+	if identityErr == nil && identity.TrustRootGeneration == root.Generation {
+		identities = append(identities, desktopIdentityPublicSnapshot(identity))
+	} else if identityErr != nil && !errors.Is(identityErr, store.ErrNotFound) {
+		http.Error(w, "desktop trust unavailable", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"root": map[string]any{
+			"generation":      root.Generation,
+			"algorithm":       root.Algorithm,
+			"authority_mode":  root.AuthorityMode,
+			"fingerprint":     root.Fingerprint,
+			"public_key_spki": base64.RawURLEncoding.EncodeToString(root.PublicKeySPKI),
+			"created_at":      root.CreatedAt,
+			"rotated_at":      root.RotatedAt,
+		},
+		"identities": identities,
+	})
+}
+
 func (s *Server) handleDesktopPendingEnrollmentPut(w http.ResponseWriter, r *http.Request, home domain.Home, agentID string) {
 	var body desktopEndpointApprovalRequest
 	if err := parseJSON(w, r, &body); err != nil {

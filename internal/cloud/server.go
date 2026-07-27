@@ -215,6 +215,7 @@ func NewServer(addr string, db *store.Store, sessionTTL time.Duration, requestTi
 	mux.HandleFunc("/v1/home", server.handleHome)
 	mux.HandleFunc("/v1/home/invitations/accept", server.handleHomeInvitationAccept)
 	mux.HandleFunc("/v1/home/", server.handleHomeSubroutes)
+	mux.HandleFunc("/v1/agent/desktop-enrollment", server.handleAgentDesktopEnrollment)
 	mux.HandleFunc("/v1/agents/", server.handleAgentResourceRoutes)
 	mux.HandleFunc("/v1/desktop-sessions/", server.handleDesktopSessionRoutes)
 	mux.HandleFunc("/v1/file-transfers/", server.handleFileTransfer)
