@@ -442,7 +442,7 @@ func (s *Server) handleDesktopEndpointAction(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "desktop endpoint approval is invalid", http.StatusBadRequest)
 			return
 		}
-		spki, err := validateDesktopPendingEnrollmentRequest(request, agentID, time.Now().UTC())
+		spki, err := validateDesktopPendingEnrollmentRequest(request, agentID, pending.CreatedAt.UTC())
 		if err != nil {
 			http.Error(w, "desktop endpoint approval is invalid", http.StatusBadRequest)
 			return
