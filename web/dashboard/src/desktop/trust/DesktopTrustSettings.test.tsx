@@ -13,6 +13,24 @@ describe("DesktopTrustSettings", () => {
     await new IndexedDBDesktopIdentityStore().clearForTests();
   });
 
+  it("approves a pending Windows endpoint with server-managed trust", async () => {
+    const client = {
+      snapshot: vi.fn().mockResolvedValue({
+        configured: true,
+        root: { generation: 3, fingerprint: "root-fp", algorithm: "P-256", public_key_spki: "spki", authority_mode: "server_managed" },
+        identities: [],
+      }),
+      pendingEndpoint: vi.fn().mockResolvedValue({ pending: true, fingerprint: "windows-endpoint-fingerprint", request: {} }),
+      approveManagedEndpoint: vi.fn().mockResolvedValue({}),
+    };
+    render(<DesktopTrustSettings client={client as never} homeID="home" userID="user" agentID="win-win11vm" agentName="WIN11VM" />);
+
+    expect(await screen.findByText("windows-endpoint-fingerprint")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve WIN11VM" }));
+
+    await waitFor(() => expect(client.approveManagedEndpoint).toHaveBeenCalledWith("win-win11vm", false));
+  });
+
   it("shows device approvals and keeps the last-resort reset confirmation exact", async () => {
     const client = {
       snapshot: vi.fn().mockResolvedValue({

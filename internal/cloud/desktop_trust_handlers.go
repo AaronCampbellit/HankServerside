@@ -427,6 +427,57 @@ func (s *Server) handleDesktopEndpointAction(w http.ResponseWriter, r *http.Requ
 		writeDesktopStoreError(w, err)
 		return
 	}
+	if root.AuthorityMode == "server_managed" {
+		if body.Confirmation != "approve pending desktop identity" && body.Confirmation != "replace changed desktop identity" {
+			http.Error(w, "invalid desktop endpoint approval confirmation", http.StatusBadRequest)
+			return
+		}
+		pending, err := s.store.GetDesktopPendingEnrollment(r.Context(), home.ID, agentID, time.Now().UTC())
+		if err != nil {
+			writeDesktopStoreError(w, err)
+			return
+		}
+		var request desktopEndpointApprovalRequest
+		if json.Unmarshal(pending.RequestJSON, &request) != nil {
+			http.Error(w, "desktop endpoint approval is invalid", http.StatusBadRequest)
+			return
+		}
+		spki, err := validateDesktopPendingEnrollmentRequest(request, agentID, time.Now().UTC())
+		if err != nil {
+			http.Error(w, "desktop endpoint approval is invalid", http.StatusBadRequest)
+			return
+		}
+		storedAgent, err := s.store.GetAgentByID(r.Context(), agentID)
+		if err != nil || storedAgent.HomeID != home.ID {
+			http.Error(w, "desktop endpoint does not belong to home", http.StatusBadRequest)
+			return
+		}
+		existing, existingErr := s.store.GetActiveDesktopEndpointIdentity(r.Context(), home.ID, agentID, time.Now().UTC())
+		if existingErr == nil && existing.Fingerprint != desktopcrypto.FingerprintSPKI(spki) && body.Confirmation != "replace changed desktop identity" {
+			http.Error(w, "changed desktop endpoint requires explicit replacement confirmation", http.StatusConflict)
+			return
+		}
+		if existingErr != nil && !errors.Is(existingErr, store.ErrNotFound) {
+			writeDesktopStoreError(w, existingErr)
+			return
+		}
+		root, key, _, err := s.ensureServerDesktopAuthority(r, home, auth)
+		if err != nil {
+			writeDesktopStoreError(w, err)
+			return
+		}
+		identity, err := s.installServerDesktopIdentity(r, home, auth, root, key, domain.DesktopIdentity{
+			ID: request.IdentityID, HomeID: home.ID, IdentityType: domain.DesktopIdentityEndpoint, AgentID: agentID,
+			PublicKeySPKI: spki, Capabilities: append([]string(nil), request.Capabilities...), CreatedAt: request.CreatedAt.UTC(), ExpiresAt: request.ExpiresAt.UTC(),
+		}, "desktop.identity.approved")
+		if err != nil {
+			writeDesktopStoreError(w, err)
+			return
+		}
+		_ = s.store.DeleteDesktopPendingEnrollment(r.Context(), home.ID, agentID)
+		writeJSON(w, http.StatusCreated, desktopIdentityPublicSnapshot(identity))
+		return
+	}
 	certificate, err := validateDesktopEndpointRequest(body, home.ID, agentID, root.Generation, time.Now().UTC())
 	if err != nil {
 		http.Error(w, "desktop endpoint approval is invalid", http.StatusBadRequest)

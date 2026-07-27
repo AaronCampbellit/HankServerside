@@ -11,6 +11,7 @@ export class DesktopTrustClient {
   bootstrap(body: Record<string, unknown>): Promise<unknown> { return this.api.request("/v1/home/desktop-trust/operator-devices", { method: "POST", body: { ...body, confirmation: "create desktop trust" } }); }
   approveOperator(body: DesktopIdentityRequest): Promise<unknown> { return this.api.request("/v1/home/desktop-trust/operator-devices", { method: "POST", body: { ...body } }); }
   approveEndpoint(agentID: string, body: Record<string, unknown>): Promise<unknown> { return this.api.request(`/v1/home/desktop-trust/endpoints/${encodeURIComponent(agentID)}/approve`, { method: "POST", body }); }
+  approveManagedEndpoint(agentID: string, replacing = false): Promise<unknown> { return this.api.request(`/v1/home/desktop-trust/endpoints/${encodeURIComponent(agentID)}/approve`, { method: "POST", body: { confirmation: replacing ? "replace changed desktop identity" : "approve pending desktop identity" } }); }
   pendingEndpoint(agentID: string): Promise<DesktopPendingEnrollment> { return this.api.request(`/v1/home/desktop-trust/pending-endpoints/${encodeURIComponent(agentID)}`); }
   autoChallenge(installationID: string): Promise<DesktopEnrollmentChallenge> { return this.api.request("/v1/home/desktop-trust/operator-devices/auto-challenge", { method: "POST", body: { installation_id: installationID } }); }
   autoEnroll(body: Record<string, unknown>): Promise<DesktopAutoEnrollment> { return this.api.request("/v1/home/desktop-trust/operator-devices/auto-enroll", { method: "POST", body }); }
