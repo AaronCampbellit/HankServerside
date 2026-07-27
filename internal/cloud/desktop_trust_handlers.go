@@ -268,6 +268,11 @@ func (s *Server) handleDesktopPendingEnrollmentGet(w http.ResponseWriter, r *htt
 		writeDesktopStoreError(w, err)
 		return
 	}
+	if existing, existingErr := s.store.GetActiveDesktopEndpointIdentity(r.Context(), home.ID, agentID, time.Now().UTC()); existingErr == nil && existing.Fingerprint == value.Fingerprint {
+		_ = s.store.DeleteDesktopPendingEnrollment(r.Context(), home.ID, agentID)
+		writeJSON(w, http.StatusOK, map[string]any{"pending": false, "already_approved": true, "fingerprint": value.Fingerprint})
+		return
+	}
 	var request any
 	_ = json.Unmarshal(value.RequestJSON, &request)
 	writeJSON(w, http.StatusOK, map[string]any{"pending": true, "request": request, "fingerprint": value.Fingerprint, "expires_at": value.ExpiresAt})

@@ -69,7 +69,6 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
       // restores this route. Let the relay reconnect/expire normally; only
       // the explicit End Session action should terminate the server session.
       inputRef.current?.dispose(); clipboardRef.current?.reset();
-      const closing = connectionRef.current?.close("viewer_unmounted"); if (closing) void closing.catch(() => undefined);
       decoderRef.current?.close();
     };
   }, [agentID, deps]);

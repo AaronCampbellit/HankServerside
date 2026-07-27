@@ -26,6 +26,22 @@ describe("DesktopViewerPage", () => {
     await vi.waitFor(() => expect(terminate).not.toHaveBeenCalled());
   });
 
+  it("leaves an active relay recoverable when the viewer lifecycle is cleaned up", async () => {
+    const close = vi.fn().mockResolvedValue(undefined), terminate = vi.fn().mockResolvedValue({});
+    const view = render(<DesktopViewerPage agentID="agent_cleanup" dependencies={{
+      loadAccess: async () => ({ allowed: true, deviceID: "device_cleanup", agentName: "Windows PC" }), supported: () => true,
+      create: vi.fn().mockResolvedValue({ session_id: "desk_cleanup", agent_id: "agent_cleanup", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_cleanup" }),
+      reconnect: vi.fn(), connect: vi.fn(async (_session, _access, callbacks) => { callbacks.onState("active"); return { close, send: vi.fn(), reconnect: vi.fn() }; }), terminate,
+    }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start secure session" }));
+    await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Connected"));
+
+    view.unmount();
+
+    expect(close).not.toHaveBeenCalled();
+    expect(terminate).not.toHaveBeenCalled();
+  });
+
   it("waits for authoritative termination before allowing another session", async () => {
     const create = vi.fn().mockResolvedValue({ session_id: "desk_1", agent_id: "agent_1", state: "offered", key_epoch: 1, websocket_path: "/ws/desktop/browser/desk_1", permissions: ["desktop.view", "desktop.control", "desktop.clipboard.read", "desktop.clipboard.write"] });
     let finishTermination: (() => void) | undefined;
