@@ -179,7 +179,11 @@ func applyDesktopReadinessEvent(checks map[string]string, seen map[string]bool, 
 	switch eventName {
 	case protocol.EventDesktopSessionReady:
 		for _, check := range []string{"service", "daemon", "host", "indicator", "capture", "control"} {
-			set(check, metadata[check])
+			value := metadata[check]
+			if check == "capture" && value == "synthetic" {
+				value = "ready"
+			}
+			set(check, value)
 		}
 		if value := metadata["capture_backend"]; value != "" {
 			set("capture", map[bool]string{true: "ready", false: "unavailable"}[value != "unavailable"])

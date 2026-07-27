@@ -79,4 +79,9 @@ func TestDesktopReadinessUsesReportedEndpointStateWithoutCapabilityInference(t *
 	if normalizeDesktopPlatform("Windows 11") != "windows" || normalizeDesktopPlatform("Darwin") != "macos" || normalizeDesktopPlatform("linux") != "unknown" {
 		t.Fatal("platform normalization is not bounded")
 	}
+	synthetic := map[string]string{}
+	applyDesktopReadinessEvent(synthetic, map[string]bool{}, "desktop.session.ready", map[string]string{"capture": "synthetic"})
+	if synthetic["capture"] != "ready" {
+		t.Fatalf("synthetic capture is available and should be ready: %#v", synthetic)
+	}
 }

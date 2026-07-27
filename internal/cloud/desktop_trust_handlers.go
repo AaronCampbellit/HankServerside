@@ -246,6 +246,11 @@ func (s *Server) handleDesktopPendingEnrollmentPut(w http.ResponseWriter, r *htt
 		return
 	}
 	fingerprint := desktopcrypto.FingerprintSPKI(key)
+	if existing, existingErr := s.store.GetActiveDesktopEndpointIdentity(r.Context(), home.ID, agentID, time.Now().UTC()); existingErr == nil && existing.Fingerprint == fingerprint {
+		_ = s.store.DeleteDesktopPendingEnrollment(r.Context(), home.ID, agentID)
+		writeJSON(w, http.StatusOK, map[string]any{"pending": false, "already_approved": true, "fingerprint": fingerprint})
+		return
+	}
 	if err := s.store.UpsertDesktopPendingEnrollment(r.Context(), domain.DesktopPendingEnrollment{HomeID: home.ID, AgentID: agentID, RequestJSON: encoded, Fingerprint: fingerprint, CreatedAt: body.CreatedAt.UTC(), ExpiresAt: body.ExpiresAt.UTC()}); err != nil {
 		writeDesktopStoreError(w, err)
 		return
