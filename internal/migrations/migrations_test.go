@@ -87,6 +87,42 @@ func TestRequiredPostgresExtensionsAreCreatedByMigrations(t *testing.T) {
 	}
 }
 
+func TestNoteNotebookIntegrityMigrationDefinesDatabaseRules(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+
+	var body strings.Builder
+	for _, migration := range migrations {
+		if migration.Version != 26 {
+			continue
+		}
+		for _, statement := range migration.Statements {
+			body.WriteString(statement)
+			body.WriteByte('\n')
+		}
+	}
+	text := body.String()
+	if text == "" {
+		t.Fatal("migration 26 missing")
+	}
+	for _, required := range []string{
+		"user_notes_owner_parent_fkey",
+		"FOREIGN KEY (owner_user_id, parent_id)",
+		"validate_user_note_parent",
+		"protect_user_note_notebook_parent",
+		"page_type <> 'notebook'",
+		"deleted_at IS NOT NULL",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("migration 26 missing %q in:\n%s", required, text)
+		}
+	}
+}
+
 func TestAgentTypeMigrationEnforcesOnePrimaryPerHome(t *testing.T) {
 	t.Parallel()
 

@@ -47,6 +47,17 @@ function referencedAttachments(description: string, attachments: NoteAttachment[
   return attachments.filter((attachment) => description.includes(`hank-note-attachment://${attachment.id}`));
 }
 
+function attachmentIDForSelectedImage(editor: HTMLDivElement): string | undefined {
+  const selection = window.getSelection?.();
+  if (!selection || !selection.rangeCount) return undefined;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return undefined;
+  const images = Array.from(range.cloneContents().querySelectorAll<HTMLImageElement>("img[data-markdown-target]"));
+  if (images.length !== 1) return undefined;
+  const match = /^hank-note-attachment:\/\/([^?#]+)/i.exec(images[0].dataset.markdownTarget || "");
+  return match?.[1];
+}
+
 export function KanbanCardModal(props: KanbanCardModalProps) {
   const {
     card, title, description, columnID, columns, attachments, uploading, deleting, uploadError,
@@ -58,6 +69,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
   const lastRenderedDescriptionRef = useRef("");
   const richCommandPendingRef = useRef(false);
   const [editingDescription, setEditingDescription] = useState(false);
+  const [clipboardImages, setClipboardImages] = useState<Map<string, File>>(new Map());
   const cardAttachments = referencedAttachments(description, attachments);
   const currentColumn = columns.find((column) => column.id === columnID);
 
@@ -75,6 +87,32 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
       lastRenderedDescriptionRef.current = description;
     }
     editor.focus();
+  }, [attachments, description, editingDescription]);
+
+  useEffect(() => {
+    if (!editingDescription) {
+      setClipboardImages(new Map());
+      return;
+    }
+    let cancelled = false;
+    const imageAttachments = referencedAttachments(description, attachments)
+      .filter((attachment) => attachment.content_type.startsWith("image/"));
+    void Promise.all(imageAttachments.map(async (attachment) => {
+      try {
+        const response = await fetch(attachment.download_url, { credentials: "same-origin" });
+        if (!response.ok) return undefined;
+        const blob = await response.blob();
+        if (!blob.type.startsWith("image/")) return undefined;
+        return [attachment.id, new File([blob], attachment.filename, { type: blob.type })] as const;
+      } catch {
+        return undefined;
+      }
+    })).then((entries) => {
+      if (!cancelled) setClipboardImages(new Map(entries.filter((entry): entry is readonly [string, File] => Boolean(entry))));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [attachments, description, editingDescription]);
 
   function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -235,6 +273,16 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
     });
   }
 
+  function handleDescriptionCopy(event: ClipboardEvent<HTMLDivElement>) {
+    const editor = descriptionRef.current;
+    if (!editor) return;
+    const attachmentID = attachmentIDForSelectedImage(editor);
+    const image = attachmentID ? clipboardImages.get(attachmentID) : undefined;
+    if (!image || !event.clipboardData.items?.add) return;
+    event.clipboardData.items.add(image);
+    event.preventDefault();
+  }
+
   return (
     <div className="kanban-card-modal-backdrop" data-testid="kanban-card-modal-backdrop" onMouseDown={handleBackdropMouseDown}>
       <article
@@ -249,7 +297,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
         <header className="kanban-card-modal-header">
           <label className="kanban-detail-title">
             <span>Task in {currentColumn?.title || "board"}</span>
-            <textarea autoFocus aria-label="Task title" rows={1} value={title} onChange={(event) => onTitleChange(event.target.value)} />
+            <textarea autoFocus aria-label="Task title" rows={1} value={title} placeholder="Untitled task" onChange={(event) => onTitleChange(event.target.value)} />
           </label>
           <button type="button" aria-label="Close task details" onClick={onClose}><ModalIcon name="close" /></button>
         </header>
@@ -319,6 +367,7 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
                 }}
                 onKeyDown={handleDescriptionKeyDown}
                 onPaste={handleDescriptionPaste}
+                onCopy={handleDescriptionCopy}
               />
             ) : (
               <div

@@ -17,6 +17,13 @@ describe("dashboard stylesheet", () => {
     expect(styles).toContain("--side-nav-width: 204px");
   });
 
+  it("shrinks the desktop shell column when navigation is collapsed", () => {
+    const designSourceShell = styles.slice(styles.indexOf("/* Design-source home dashboard shell */"));
+    expect(designSourceShell).toContain(`@media (min-width: 761px) {
+  .app-shell[data-nav-collapsed="true"] {
+    grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr);`);
+  });
+
   it("uses the full desktop workspace without an outer page card", () => {
     const routeCanvases = ruleBodies(".app-main > .route-cache-panel > .dashboard-page:not(.home-dashboard)");
     const notesWorkspace = lastRuleBody(".notes-guide-layout");
@@ -80,7 +87,9 @@ describe("dashboard stylesheet", () => {
   });
 
   it("anchors Kanban column tools at the trailing edge of each header", () => {
-    expect(lastRuleBody(".kanban-column-actions")).toContain("margin-left: auto");
+    expect(lastRuleBody(".kanban-column-head")).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(lastRuleBody(".kanban-column-actions")).toContain("grid-column: 2");
+    expect(lastRuleBody(".kanban-column-summary")).toContain("min-width: 0");
   });
 
   it("keeps Kanban body and bold weights consistent between cards and the editor", () => {

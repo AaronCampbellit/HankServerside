@@ -102,6 +102,24 @@ describe("KanbanEditor", () => {
     expect(latest?.columns?.find((column) => column.id === "inbox")?.role).toBe("");
   });
 
+  it("keeps column metadata compact while reserving the header edge for tools", () => {
+    const initial = workBoard();
+    initial.intake_column_id = "inbox";
+    initial.columns![0].role = "planning";
+    Harness({ initial });
+
+    const heading = screen.getByRole("heading", { name: "Inbox" });
+    const summary = heading.closest(".kanban-column-summary");
+    if (!(summary instanceof HTMLElement)) throw new Error("column summary is missing");
+    expect(within(summary).getByText("Intake")).toBeInTheDocument();
+    expect(within(summary).getByText("Planning")).toBeInTheDocument();
+    expect(within(summary).getByText("1")).toBeInTheDocument();
+
+    const actions = screen.getByRole("button", { name: "Column options for Inbox" }).closest(".kanban-column-actions");
+    expect(actions).not.toBeNull();
+    expect(actions?.parentElement).toHaveClass("kanban-column-head");
+  });
+
   it("dismisses an open column menu when the user presses outside it", () => {
     Harness({});
     const trigger = screen.getByRole("button", { name: "Column options for In progress" });
@@ -178,6 +196,21 @@ describe("KanbanEditor", () => {
     fireEvent.change(screen.getByLabelText("Search cards"), { target: { value: "invoice" } });
     expect(screen.getByRole("button", { name: "Open task Prepare invoice" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open task Review brief" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a cleared task title empty until the user enters its replacement", () => {
+    Harness({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Open task Review brief" }));
+    const title = screen.getByLabelText("Task title");
+    fireEvent.change(title, { target: { value: "" } });
+
+    expect(title).toHaveValue("");
+    expect(title).toHaveAttribute("placeholder", "Untitled task");
+
+    fireEvent.change(title, { target: { value: "Confirm warranty" } });
+    expect(title).toHaveValue("Confirm warranty");
+    expect(screen.getByRole("button", { name: "Open task Confirm warranty" })).toBeInTheDocument();
   });
 
   it("places the add task action beside the column controls", () => {

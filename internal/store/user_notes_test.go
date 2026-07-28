@@ -32,6 +32,22 @@ func TestUserNotesStoreFullMetadataAndPostgresNotify(t *testing.T) {
 	if err := db.CreateUser(ctx, user); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
+	parent := domain.UserNote{
+		ID:            "note_meta_parent",
+		NoteID:        "parent.md",
+		OwnerUserID:   user.ID,
+		Title:         "Parent",
+		BodyFormat:    "markdown",
+		PageType:      "notebook",
+		Revision:      "rev-parent",
+		CRDTStateJSON: "{}",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		UpdatedBy:     user.ID,
+	}
+	if err := db.UpsertUserNote(ctx, parent); err != nil {
+		t.Fatalf("UpsertUserNote parent: %v", err)
+	}
 
 	note := domain.UserNote{
 		ID:            "note_meta",
@@ -90,6 +106,118 @@ func TestUserNotesStoreFullMetadataAndPostgresNotify(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for note notification")
 	}
+}
+
+func TestUserNotesStoreEnforcesNotebookHierarchy(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db, err := OpenMigrating(ctx, testutil.PostgreSQLTestURL(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	owner := domain.User{ID: "usr_notes_hierarchy", Email: "notes-hierarchy@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	other := domain.User{ID: "usr_notes_hierarchy_other", Email: "notes-hierarchy-other@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateUser(ctx, owner); err != nil {
+		t.Fatalf("CreateUser owner: %v", err)
+	}
+	if err := db.CreateUser(ctx, other); err != nil {
+		t.Fatalf("CreateUser other: %v", err)
+	}
+
+	newNote := func(id, noteID, ownerID, pageType, parentID string) domain.UserNote {
+		return domain.UserNote{
+			ID:            id,
+			NoteID:        noteID,
+			OwnerUserID:   ownerID,
+			ParentID:      parentID,
+			Title:         noteID,
+			BodyFormat:    "markdown",
+			PageType:      pageType,
+			Revision:      "rev-" + id,
+			CRDTStateJSON: "{}",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+			UpdatedBy:     ownerID,
+		}
+	}
+	mustSave := func(note domain.UserNote) {
+		t.Helper()
+		if err := db.UpsertUserNote(ctx, note); err != nil {
+			t.Fatalf("UpsertUserNote %s: %v", note.NoteID, err)
+		}
+	}
+
+	notebook := newNote("note_hierarchy_notebook", "projects", owner.ID, "notebook", "")
+	plain := newNote("note_hierarchy_plain", "plain.md", owner.ID, "text", "")
+	otherNotebook := newNote("note_hierarchy_other_notebook", "other-notebook", other.ID, "notebook", "")
+	deletedNotebook := newNote("note_hierarchy_deleted_notebook", "deleted-notebook", owner.ID, "notebook", "")
+	deletedNotebook.DeletedAt = &now
+	mustSave(notebook)
+	mustSave(plain)
+	mustSave(otherNotebook)
+	mustSave(deletedNotebook)
+
+	child := newNote("note_hierarchy_child", "child.md", owner.ID, "text", notebook.NoteID)
+	mustSave(child)
+	fetched, err := db.GetProfileNote(ctx, owner.ID, child.NoteID)
+	if err != nil {
+		t.Fatalf("GetProfileNote child: %v", err)
+	}
+	if fetched.ParentID != notebook.NoteID {
+		t.Fatalf("child parent_id = %q, want %q", fetched.ParentID, notebook.NoteID)
+	}
+
+	loose := newNote("note_hierarchy_loose", "loose.md", owner.ID, "text", "")
+	mustSave(loose)
+	fetched, err = db.GetProfileNote(ctx, owner.ID, loose.NoteID)
+	if err != nil {
+		t.Fatalf("GetProfileNote loose: %v", err)
+	}
+	if fetched.ParentID != "" {
+		t.Fatalf("loose parent_id = %q, want empty", fetched.ParentID)
+	}
+
+	for _, test := range []struct {
+		name     string
+		id       string
+		noteID   string
+		parentID string
+	}{
+		{name: "missing parent", id: "note_hierarchy_missing", noteID: "missing-child.md", parentID: "missing"},
+		{name: "cross-owner parent", id: "note_hierarchy_cross_owner", noteID: "cross-owner-child.md", parentID: otherNotebook.NoteID},
+		{name: "non-notebook parent", id: "note_hierarchy_plain_parent", noteID: "plain-child.md", parentID: plain.NoteID},
+		{name: "deleted notebook parent", id: "note_hierarchy_deleted_parent", noteID: "deleted-child.md", parentID: deletedNotebook.NoteID},
+		{name: "self parent", id: "note_hierarchy_self", noteID: "self.md", parentID: "self.md"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			note := newNote(test.id, test.noteID, owner.ID, "text", test.parentID)
+			if err := db.UpsertUserNote(ctx, note); err == nil {
+				t.Fatalf("UpsertUserNote parent_id %q succeeded, want database integrity error", test.parentID)
+			}
+		})
+	}
+
+	deletedNotebook = notebook
+	deletedNotebook.DeletedAt = &now
+	if err := db.UpsertUserNote(ctx, deletedNotebook); err == nil {
+		t.Fatal("soft-deleting notebook with active child succeeded, want database integrity error")
+	}
+
+	convertedNotebook := notebook
+	convertedNotebook.PageType = "text"
+	if err := db.UpsertUserNote(ctx, convertedNotebook); err == nil {
+		t.Fatal("converting notebook with active child succeeded, want database integrity error")
+	}
+
+	child.ParentID = ""
+	mustSave(child)
+	mustSave(convertedNotebook)
 }
 
 func TestSaveUserNoteUsesCanonicalBodyMarkdownOnly(t *testing.T) {

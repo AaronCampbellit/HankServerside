@@ -12,6 +12,10 @@
   white-space: nowrap;
 }
 
+.kanban-column-summary .kanban-workflow-badge {
+  flex: 0 0 auto;
+}
+
 .kanban-default-board {
   white-space: nowrap;
 }

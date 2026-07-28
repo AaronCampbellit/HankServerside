@@ -64,7 +64,7 @@ function normalizeBoard(board: KanbanBoard): KanbanBoard {
       cards: ordered(column.cards).map((card, cardIndex) => ({
         ...card,
         id: card.id || uniqueID("card"),
-        text: card.text || card.title || "Untitled task",
+        text: typeof card.text === "string" ? card.text : card.title || "",
         sort_order: cardIndex,
       })),
     })),
@@ -118,18 +118,19 @@ export function boardToMarkdown(title: string, board: KanbanBoard): string {
 }
 
 function cardTitleAndDescription(card: KanbanCard): { title: string; description: string } {
-  const lines = String(card.text || card.title || "").split(/\r?\n/);
-  const titleIndex = lines.findIndex((line) => line.trim());
-  if (titleIndex < 0) return { title: "Untitled task", description: "" };
+  const lines = String(card.text ?? card.title ?? "").split(/\r?\n/);
   return {
-    title: lines[titleIndex],
-    description: lines.slice(titleIndex + 1).join("\n"),
+    title: lines[0] || "",
+    description: lines.slice(1).join("\n"),
   };
 }
 
 function cardText(title: string, description: string): string {
-  const safeTitle = title.trim() ? title : "Untitled task";
-  return description.length ? `${safeTitle}\n${description}` : safeTitle;
+  return description.length ? `${title}\n${description}` : title;
+}
+
+function displayCardTitle(title: string): string {
+  return title.trim() || "Untitled task";
 }
 
 function CardDescription({ value, attachments }: { value: string; attachments: NoteAttachment[] }) {
@@ -504,23 +505,25 @@ export function KanbanEditor({
                   : dropCard(event, column.id || "", cards.length)}
               >
                 <header className="kanban-column-head">
-                  {editingColumnID === column.id ? (
-                    <input
-                      autoFocus
-                      aria-label="Column title"
-                      value={column.title || ""}
-                      onChange={(event) => updateColumn(column.id || "", (item) => ({ ...item, title: event.target.value }))}
-                      onBlur={() => setEditingColumnID("")}
-                      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter" || event.key === "Escape") setEditingColumnID(""); }}
-                    />
-                  ) : (
-                    <button className="kanban-column-title" type="button" onClick={() => setEditingColumnID(column.id || "")} title="Rename column">
-                      <h2 id={`kanban-column-${column.id}`}>{column.title}</h2>
-                    </button>
-                  )}
-                  {normalized.intake_column_id === column.id ? <span className="kanban-workflow-badge">Intake</span> : null}
-                  {column.role ? <span className="kanban-workflow-badge">{kanbanRoleLabels[column.role] || column.role}</span> : null}
-                  <span className="kanban-count">{cards.length}</span>
+                  <div className="kanban-column-summary">
+                    {editingColumnID === column.id ? (
+                      <input
+                        autoFocus
+                        aria-label="Column title"
+                        value={column.title || ""}
+                        onChange={(event) => updateColumn(column.id || "", (item) => ({ ...item, title: event.target.value }))}
+                        onBlur={() => setEditingColumnID("")}
+                        onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter" || event.key === "Escape") setEditingColumnID(""); }}
+                      />
+                    ) : (
+                      <button className="kanban-column-title" type="button" onClick={() => setEditingColumnID(column.id || "")} title="Rename column">
+                        <h2 id={`kanban-column-${column.id}`}>{column.title}</h2>
+                      </button>
+                    )}
+                    {normalized.intake_column_id === column.id ? <span className="kanban-workflow-badge">Intake</span> : null}
+                    {column.role ? <span className="kanban-workflow-badge">{kanbanRoleLabels[column.role] || column.role}</span> : null}
+                    <span className="kanban-count">{cards.length}</span>
+                  </div>
                   <div className="kanban-column-actions">
                     <button
                       className="kanban-column-grip"
@@ -583,6 +586,7 @@ export function KanbanEditor({
                 <div className="kanban-card-stack">
                   {visibleCards.map((card) => {
                     const parts = cardTitleAndDescription(card);
+                    const displayTitle = displayCardTitle(parts.title);
                     const cardIndex = cards.findIndex((item) => item.id === card.id);
                     return (
                       <article
@@ -605,17 +609,17 @@ export function KanbanEditor({
                           }}
                           className="kanban-card-open"
                           type="button"
-                          aria-label={`Open task ${parts.title}`}
+                          aria-label={`Open task ${displayTitle}`}
                           onClick={() => openCard({ columnID: column.id || "", cardID: card.id || "" })}
                         >
                           <span className="kanban-card-grip" aria-hidden="true"><SmallIcon name="grip" /></span>
-                          <strong>{parts.title}</strong>
+                          <strong>{displayTitle}</strong>
                           <CardDescription value={parts.description} attachments={attachments} />
                           {card.due_date ? <time dateTime={card.due_date}>{new Date(`${card.due_date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time> : null}
                         </button>
                         <div className="kanban-card-move">
-                          <button type="button" aria-label={`Move ${parts.title} left`} disabled={columnIndex === 0} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex - 1]?.id || "", Number.MAX_SAFE_INTEGER, false)}><SmallIcon name="left" /></button>
-                          <button type="button" aria-label={`Move ${parts.title} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex + 1]?.id || "", Number.MAX_SAFE_INTEGER, false)}><SmallIcon name="right" /></button>
+                          <button type="button" aria-label={`Move ${displayTitle} left`} disabled={columnIndex === 0} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex - 1]?.id || "", Number.MAX_SAFE_INTEGER, false)}><SmallIcon name="left" /></button>
+                          <button type="button" aria-label={`Move ${displayTitle} right`} disabled={columnIndex === columns.length - 1} onClick={() => moveCard({ columnID: column.id || "", cardID: card.id || "" }, columns[columnIndex + 1]?.id || "", Number.MAX_SAFE_INTEGER, false)}><SmallIcon name="right" /></button>
                         </div>
                       </article>
                     );

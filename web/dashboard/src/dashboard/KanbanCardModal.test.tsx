@@ -1,4 +1,4 @@
-import { cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KanbanCardModal, type KanbanCardModalProps } from "./KanbanCardModal";
 
@@ -141,6 +141,40 @@ describe("KanbanCardModal", () => {
     const editor = screen.getByLabelText("Description");
     expect(within(editor).getByRole("img", { name: "capture.png" })).toHaveAttribute("src", attachment.download_url);
     expect(editor).not.toHaveTextContent(attachment.markdown_reference);
+  });
+
+  it("copies a selected screenshot as its PNG file instead of its fallback text", async () => {
+    const attachment = {
+      id: "natt-1",
+      filename: "capture.png",
+      content_type: "image/png",
+      download_url: "/v1/me/notes/work/attachments/natt-1",
+      markdown_reference: "![capture.png](hank-note-attachment://natt-1)",
+    };
+    const originalFetch = globalThis.fetch;
+    const fetchImage = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["png-bytes"], { type: "image/png" }) });
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: fetchImage });
+    try {
+      render(<KanbanCardModal {...modalProps({ description: attachment.markdown_reference, attachments: [attachment] })} />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+      const editor = screen.getByLabelText("Description");
+      await waitFor(() => expect(fetchImage).toHaveBeenCalled());
+      const image = within(editor).getByRole("img", { name: "capture.png" });
+      const range = document.createRange();
+      range.selectNode(image);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const add = vi.fn();
+      const copied = createEvent.copy(editor, { bubbles: true, cancelable: true, clipboardData: { items: { add }, setData: vi.fn() } });
+
+      fireEvent(editor, copied);
+
+      expect(copied.defaultPrevented).toBe(true);
+      expect(add).toHaveBeenCalledWith(expect.objectContaining({ name: "capture.png", type: "image/png" }));
+    } finally {
+      Object.defineProperty(globalThis, "fetch", { configurable: true, value: originalFetch });
+    }
   });
 
   it("renders markdown formatting while the description is being edited", () => {
