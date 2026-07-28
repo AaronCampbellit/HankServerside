@@ -164,7 +164,7 @@ func mcpToolDefs() []mcpToolDef {
 			}), Scopes: []string{domain.NotesAPIScopeRead}, Annotations: mcpReadOnlyAnnotations,
 		},
 		{
-			Name: "get_kanban_card", Description: "Read one Kanban card by exact card_id from an exact board_id or the configured default board, including Markdown details and workflow context.",
+			Name: "get_kanban_card", Description: "Read one Kanban card by exact card_id from an exact board_id or the configured default board, including full Markdown details, workflow context, and metadata plus authenticated download URLs for screenshots or files referenced by that card.",
 			InputSchema: mcpObjectSchema(map[string]any{
 				"board_id": mcpStr("Optional exact board ID; defaults to the configured default board."),
 				"card_id":  mcpStr("Exact card ID returned by a Kanban read tool."),

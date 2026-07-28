@@ -124,6 +124,50 @@ func TestMCPKanbanGetCardReturnsDetailsAndColumns(t *testing.T) {
 	}
 }
 
+func TestMCPKanbanGetCardIncludesReferencedAttachmentMetadata(t *testing.T) {
+	ctx, service, notes, db, userID := setupMCPKanbanService(t)
+	board := testMCPKanbanBoard()
+	board.Columns[0].Cards[0].Text = "Research offline sync\nSee [the brief](https://example.com/brief) and ![wireframe](hank-note-attachment://natt-wireframe)"
+	saveMCPKanbanBoard(t, ctx, notes, userID, "work", "Work", false, board)
+	if _, err := db.SaveUserProfileSettings(ctx, userID, nil, json.RawMessage(`{"kanban_default_board_id":"work"}`)); err != nil {
+		t.Fatal(err)
+	}
+	note, err := db.GetProfileNote(ctx, userID, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 17, 14, 30, 0, 0, time.UTC)
+	if err := db.CreateNoteAttachment(ctx, domain.NoteAttachment{
+		ID: "natt-wireframe", NoteID: note.ID, OwnerUserID: userID,
+		Filename: "wireframe.png", ContentType: "image/png", SizeBytes: 42,
+		ChecksumSHA256: "checksum", StorageKey: "work/natt-wireframe.png", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateNoteAttachment(ctx, domain.NoteAttachment{
+		ID: "natt-unrelated", NoteID: note.ID, OwnerUserID: userID,
+		Filename: "unrelated.png", ContentType: "image/png", SizeBytes: 12,
+		ChecksumSHA256: "checksum", StorageKey: "work/natt-unrelated.png", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	card, err := service.GetCard(ctx, userID, "", "research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(card.DetailsMarkdown, "https://example.com/brief") {
+		t.Fatalf("details did not preserve link: %q", card.DetailsMarkdown)
+	}
+	if len(card.Attachments) != 1 {
+		t.Fatalf("attachments = %#v, want only the referenced attachment", card.Attachments)
+	}
+	attachment := card.Attachments[0]
+	if attachment.ID != "natt-wireframe" || attachment.Filename != "wireframe.png" || attachment.DownloadURL != "/v1/me/notes/work/attachments/natt-wireframe" {
+		t.Fatalf("attachment = %#v", attachment)
+	}
+}
+
 func TestMCPKanbanReadValidationAndNoDefault(t *testing.T) {
 	ctx, service, notes, _, userID := setupMCPKanbanService(t)
 	saveMCPKanbanBoard(t, ctx, notes, userID, "work", "Work", false, testMCPKanbanBoard())

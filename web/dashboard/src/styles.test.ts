@@ -75,6 +75,14 @@ describe("dashboard stylesheet", () => {
     expect(ruleBodies(".kanban-column.is-column-drop-target").at(0)).toContain("outline:");
   });
 
+  it("keeps Kanban preview screenshots contained before description editing", () => {
+    expect(lastRuleBody(".kanban-description-preview .kanban-rich-image")).toContain("max-height: 320px");
+  });
+
+  it("anchors Kanban column tools at the trailing edge of each header", () => {
+    expect(lastRuleBody(".kanban-column-actions")).toContain("margin-left: auto");
+  });
+
   it("keeps Kanban body and bold weights consistent between cards and the editor", () => {
     expect(lastRuleBody(".kanban-card-open")).toContain("font: 500");
     expect(lastRuleBody(".kanban-description-preview")).toContain("font: 500");

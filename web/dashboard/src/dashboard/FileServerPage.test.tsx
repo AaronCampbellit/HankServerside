@@ -180,6 +180,22 @@ describe("FileServerPage", () => {
     await waitFor(() => expect(screen.queryByLabelText("File preview")).not.toBeInTheDocument());
   });
 
+  it("renders Markdown files in the preview pane", async () => {
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({
+      path: "/Docs",
+      items: [{ path: "/Docs/readme.md", name: "readme.md", size: 120 }],
+    });
+
+    renderPage();
+
+    const preview = await screen.findByLabelText("File preview");
+    expect(within(preview).getByTitle("Preview readme.md")).toHaveAttribute(
+      "src",
+      "/v1/home/files/preview?source_id=hankdemo&path=%2FDocs%2Freadme.md",
+    );
+  });
+
   it("loads live SMB shares and sends the selected source id", async () => {
     mockDemoShares();
     fileServerClient.list.mockResolvedValue({

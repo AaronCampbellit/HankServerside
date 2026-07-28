@@ -4193,6 +4193,13 @@ button.secondary:disabled {
   justify-items: center;
   gap: 10px;
   padding: 14px 8px;
+  overflow-y: auto;
+}
+
+.notes-rail-divider {
+  width: 26px;
+  height: 1px;
+  background: var(--line);
 }
 
 .notes-rail-head {
@@ -4868,6 +4875,11 @@ button.secondary:disabled {
   gap: 2px;
 }
 
+.kanban-column-actions {
+  margin-left: auto;
+  justify-self: end;
+}
+
 .kanban-column-actions button,
 .kanban-card-move button,
 .kanban-details header > button {
@@ -5049,7 +5061,7 @@ button.secondary:disabled {
 }
 
 .kanban-description-preview .kanban-rich-image {
-  max-height: none;
+  max-height: 320px;
   margin: 8px 0 2px;
   border-radius: 8px;
   object-fit: contain;

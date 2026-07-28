@@ -2333,6 +2333,14 @@ func TestFilePreviewStreamsInlineRangeOverHTTP(t *testing.T) {
 	}
 }
 
+func TestPreviewContentTypeRecognizesMarkdown(t *testing.T) {
+	for _, path := range []string{"readme.md", "docs/guide.markdown"} {
+		if got := previewContentType(path); got != "text/markdown; charset=utf-8" {
+			t.Fatalf("previewContentType(%q) = %q, want Markdown", path, got)
+		}
+	}
+}
+
 func TestFileUploadTransferStreamsOverHTTP(t *testing.T) {
 	t.Parallel()
 

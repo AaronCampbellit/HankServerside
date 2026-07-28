@@ -81,7 +81,9 @@ visible board choices instead of guessing.
 Read tools expose stable board, column, and card IDs. Writes require those exact IDs and never
 select a card from a human-readable title. `list_kanban_cards` hides columns with the Complete role
 by default, supports text/tag/due-date filters, returns at most 100 cards, and never exposes raw
-`board_json`. `create_kanban_card` should be called only after the user explicitly asks to capture
+`board_json`. `get_kanban_card` returns the complete Markdown description (including ordinary
+links) plus metadata and authenticated download URLs for only the attachment references used by
+that card. `create_kanban_card` should be called only after the user explicitly asks to capture
 a task. MCP cannot delete cards or create, delete, rename, or reorder boards and columns.
 
 Card writes patch the loaded board through the existing Notes revision check. A save conflict is

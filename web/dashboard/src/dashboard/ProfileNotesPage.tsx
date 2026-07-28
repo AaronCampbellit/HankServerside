@@ -1139,6 +1139,17 @@ export function ProfileNotesPage() {
             <button className="icon-button" type="button" aria-label="Expand notes rail" title="Expand notes rail" onClick={() => setReady({ railOpen: true })}><Icon name="panel" /></button>
             <button className="icon-button" type="button" aria-label="New notebook" title="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" /></button>
             <button className="icon-button" type="button" aria-label="New note" title="New note" onClick={newNote}><Icon name="plus" /></button>
+            {visibleNotebookItems.map((note) => {
+              const id = noteID(note);
+              const title = noteTitle(note);
+              return <button className={id === state.selectedID ? "icon-button active" : "icon-button"} key={id} type="button" aria-label={`Open notebook ${title}`} title={title} onClick={() => void selectNote(id)}><Icon name="book" /></button>;
+            })}
+            {visibleNotebookItems.length && visibleNotes.length ? <span className="notes-rail-divider" aria-hidden="true" /> : null}
+            {visibleNotes.map((note) => {
+              const id = noteID(note);
+              const title = noteTitle(note);
+              return <button className={id === state.selectedID ? "icon-button active" : "icon-button"} key={id} type="button" aria-label={`Open note ${title}`} title={title} onClick={() => void selectNote(id)}><Icon name={noteIconName(note)} /></button>;
+            })}
           </aside>
         )}
 

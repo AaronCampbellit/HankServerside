@@ -181,6 +181,7 @@ export function KanbanEditor({
   const suppressOpenRef = useRef(false);
   const dragReleaseTimerRef = useRef<number | null>(null);
   const cardButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const columnRefs = useRef(new Map<string, HTMLElement>());
 
   const selectedColumn = selected ? columns.find((column) => column.id === selected.columnID) : undefined;
   const selectedCard = selectedColumn?.cards?.find((card) => card.id === selected?.cardID);
@@ -194,6 +195,22 @@ export function KanbanEditor({
   useEffect(() => () => {
     if (dragReleaseTimerRef.current !== null) window.clearTimeout(dragReleaseTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!columnMenuID) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!columnRefs.current.get(columnMenuID)?.contains(event.target as Node)) setColumnMenuID("");
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setColumnMenuID("");
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [columnMenuID]);
 
   function commit(next: KanbanBoard) {
     const normalizedNext = normalizeBoard({ ...boardRef.current, ...next });
@@ -462,6 +479,11 @@ export function KanbanEditor({
               <section
                 className={`kanban-column${dropTarget === column.id ? " is-drop-target" : ""}${draggingColumnID === column.id ? " is-column-dragging" : ""}${columnDropTargetID === column.id ? " is-column-drop-target" : ""}`}
                 key={column.id}
+                ref={(node) => {
+                  const columnID = column.id || "";
+                  if (node) columnRefs.current.set(columnID, node);
+                  else columnRefs.current.delete(columnID);
+                }}
                 aria-labelledby={`kanban-column-${column.id}`}
                 onDragOver={(event) => {
                   event.preventDefault();

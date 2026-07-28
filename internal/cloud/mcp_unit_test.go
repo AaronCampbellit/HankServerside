@@ -241,6 +241,10 @@ func (s staticMCPKanbanStore) GetUserProfileSettings(context.Context, string) (d
 	return s.settings, nil
 }
 
+func (staticMCPKanbanStore) ListNoteAttachments(context.Context, string) ([]domain.NoteAttachment, error) {
+	return nil, nil
+}
+
 type staticMCPKanbanNotes struct{ fetched protocol.NotesFetchResponse }
 
 func (s *staticMCPKanbanNotes) FetchProfile(context.Context, string, string) (protocol.NotesFetchResponse, error) {

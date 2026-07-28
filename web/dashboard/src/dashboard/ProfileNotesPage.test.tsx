@@ -372,6 +372,35 @@ describe("ProfileNotesPage", () => {
     expect(profileNotesClient.fetchNote).toHaveBeenCalledWith("roof");
   });
 
+  it("keeps notebooks and notes reachable from the collapsed rail", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "house", title: "House Notebook", preview: "1 page", page_type: "notebook" },
+        { note_id: "roof", title: "Roof Warranty", preview: "Expires 2027", page_type: "text", parent_id: "house" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "house" ? "House Notebook" : "Roof Warranty",
+      body_markdown: id === "house" ? "" : "# Roof Warranty\nExpires in 2027.",
+      revision: "1",
+      page_type: id === "house" ? "notebook" : "text",
+      parent_id: id === "roof" ? "house" : "",
+    }));
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Collapse notes rail" }));
+
+    expect(screen.getByRole("button", { name: "Open notebook House Notebook" })).toBeInTheDocument();
+    const note = screen.getByRole("button", { name: "Open note Roof Warranty" });
+    expect(note).toBeInTheDocument();
+    fireEvent.click(note);
+
+    expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Note body")).toHaveTextContent("Roof Warranty");
+  });
+
   it("shows a notebook section and notebook controls even when no notebooks exist", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [

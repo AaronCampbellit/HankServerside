@@ -1691,6 +1691,8 @@ func previewContentType(path string) string {
 		return "application/pdf"
 	case ".htm", ".html":
 		return "text/html; charset=utf-8"
+	case ".md", ".markdown":
+		return "text/markdown; charset=utf-8"
 	case ".json":
 		return "application/json"
 	case ".xml":

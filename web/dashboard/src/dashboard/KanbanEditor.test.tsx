@@ -102,6 +102,32 @@ describe("KanbanEditor", () => {
     expect(latest?.columns?.find((column) => column.id === "inbox")?.role).toBe("");
   });
 
+  it("dismisses an open column menu when the user presses outside it", () => {
+    Harness({});
+    const trigger = screen.getByRole("button", { name: "Column options for In progress" });
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: "Set In progress as intake" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole("button", { name: "Set In progress as intake" })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("dismisses an open column menu when the user presses Escape", () => {
+    Harness({});
+    const trigger = screen.getByRole("button", { name: "Column options for In progress" });
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: "Set In progress as intake" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("button", { name: "Set In progress as intake" })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("clears intake metadata when its column is deleted", async () => {
     const initial: KanbanBoard = {
       intake_column_id: "ideas",

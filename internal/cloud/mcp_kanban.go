@@ -31,6 +31,7 @@ var kanbanRoles = map[string]bool{
 type mcpKanbanStore interface {
 	ListProfileNotes(context.Context, string, bool) ([]domain.UserNote, error)
 	GetUserProfileSettings(context.Context, string) (domain.UserProfileSettings, error)
+	ListNoteAttachments(context.Context, string) ([]domain.NoteAttachment, error)
 }
 
 type mcpKanbanNotes interface {
@@ -70,21 +71,22 @@ type mcpKanbanBoardSummary struct {
 }
 
 type mcpKanbanCardResult struct {
-	BoardID         string                   `json:"board_id"`
-	BoardTitle      string                   `json:"board_title"`
-	BoardRevision   string                   `json:"board_revision"`
-	ColumnID        string                   `json:"column_id"`
-	ColumnTitle     string                   `json:"column_title"`
-	ColumnRole      string                   `json:"column_role,omitempty"`
-	CardID          string                   `json:"card_id"`
-	Title           string                   `json:"title"`
-	DetailsMarkdown string                   `json:"details_markdown"`
-	DueDate         string                   `json:"due_date,omitempty"`
-	Tags            []string                 `json:"tags"`
-	Color           string                   `json:"color,omitempty"`
-	CreatedAt       time.Time                `json:"created_at,omitempty"`
-	UpdatedAt       time.Time                `json:"updated_at,omitempty"`
-	Columns         []mcpKanbanColumnSummary `json:"columns,omitempty"`
+	BoardID         string                    `json:"board_id"`
+	BoardTitle      string                    `json:"board_title"`
+	BoardRevision   string                    `json:"board_revision"`
+	ColumnID        string                    `json:"column_id"`
+	ColumnTitle     string                    `json:"column_title"`
+	ColumnRole      string                    `json:"column_role,omitempty"`
+	CardID          string                    `json:"card_id"`
+	Title           string                    `json:"title"`
+	DetailsMarkdown string                    `json:"details_markdown"`
+	DueDate         string                    `json:"due_date,omitempty"`
+	Tags            []string                  `json:"tags"`
+	Color           string                    `json:"color,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at,omitempty"`
+	UpdatedAt       time.Time                 `json:"updated_at,omitempty"`
+	Columns         []mcpKanbanColumnSummary  `json:"columns,omitempty"`
+	Attachments     []protocol.NoteAttachment `json:"attachments,omitempty"`
 }
 
 type mcpKanbanListCardsArgs struct {
@@ -248,7 +250,13 @@ func (s *mcpKanbanService) GetCard(ctx context.Context, userID string, boardID s
 	if !ok {
 		return mcpKanbanCardResult{}, store.ErrNotFound
 	}
-	return kanbanCardResult(record, column, card, true), nil
+	result := kanbanCardResult(record, column, card, true)
+	attachments, err := s.referencedCardAttachments(ctx, record, card)
+	if err != nil {
+		return mcpKanbanCardResult{}, err
+	}
+	result.Attachments = attachments
+	return result, nil
 }
 
 func (s *mcpKanbanService) CreateCard(ctx context.Context, userID string, args mcpKanbanCreateArgs) (mcpKanbanCardResult, error) {
@@ -814,4 +822,22 @@ func kanbanCardResult(record mcpKanbanBoardRecord, column protocol.KanbanColumn,
 		result.Columns = kanbanColumnSummaries(record.Fetch.Board)
 	}
 	return result
+}
+
+func (s *mcpKanbanService) referencedCardAttachments(ctx context.Context, record mcpKanbanBoardRecord, card protocol.KanbanCard) ([]protocol.NoteAttachment, error) {
+	attachments, err := s.store.ListNoteAttachments(ctx, record.Note.ID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]protocol.NoteAttachment, 0)
+	for _, attachment := range attachments {
+		pattern, err := noteAttachmentReferencePattern(attachment.ID)
+		if err != nil {
+			return nil, err
+		}
+		if pattern.MatchString(card.Text) {
+			result = append(result, noteAttachmentToProtocol(attachment, record.Note, "profile"))
+		}
+	}
+	return result, nil
 }

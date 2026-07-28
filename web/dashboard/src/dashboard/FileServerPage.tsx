@@ -178,6 +178,10 @@ function isPDFFile(item: FileMeta): boolean {
   return fileName(item).toLowerCase().endsWith(".pdf");
 }
 
+function isMarkdownFile(item: FileMeta): boolean {
+  return [".md", ".markdown"].some((extension) => fileName(item).toLowerCase().endsWith(extension));
+}
+
 function parentPath(path: string): string {
   const parts = path.split("/").filter(Boolean);
   parts.pop();
@@ -787,7 +791,7 @@ export function FileServerPage() {
                 <video src={previewURL(previewItem, commandSourceID, commandAgentID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
               ) : isAudioFile(previewItem) ? (
                 <audio src={previewURL(previewItem, commandSourceID, commandAgentID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
-              ) : isPDFFile(previewItem) ? (
+              ) : isPDFFile(previewItem) || isMarkdownFile(previewItem) ? (
                 <iframe src={previewURL(previewItem, commandSourceID, commandAgentID)} title={`Preview ${fileName(previewItem)}`} />
               ) : (
                 <span style={{ color: fileIconTone(previewItem) }}><Icon name={fileIcon(previewItem)} /></span>
