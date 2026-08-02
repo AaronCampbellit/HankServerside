@@ -39,7 +39,15 @@ type NativeStatistics = StatisticsPayload & {
   render_latency_ms?: number; render_latency_max_ms?: number; playback_mode?: "webcodecs" | "mse" | "none";
 };
 
-export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }: { agentID?: string; dependencies?: DesktopViewerDependencies }) {
+export function DesktopViewerPage({
+  agentID = agentIDFromPath(),
+  dependencies,
+  embedded = false,
+}: {
+  agentID?: string;
+  dependencies?: DesktopViewerDependencies;
+  embedded?: boolean;
+}) {
   const deps = useMemo(() => dependencies ?? defaultDependencies(agentID), [agentID, dependencies]);
   const [access, setAccess] = useState<AccessResult | null>(null), [state, setState] = useState<DesktopViewerState>("idle");
   const [reason, setReason] = useState(""), [session, setSession] = useState<DesktopSessionAuthorization | null>(null);
@@ -246,9 +254,10 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
     } else if (message.type === DesktopMessageType.Terminate) { await end(); }
   }
 
-  if (!access) return <section className="desktop-viewer-page"><p className="loading-state" role="status">Loading Remote Desktop…</p></section>;
-  if (!access.allowed) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">{access.reason || "Admin access and an online desktop-capable agent are required."}</p><section className="desktop-setup-callout"><h2>Before you can connect</h2><ol><li>Return to <a href="/dashboard/agents">Agents</a> and open this device.</li><li>Use its Remote Desktop setup section to approve this browser and the device.</li><li>Complete any local permission prompts, then open Remote Desktop again once its checklist shows Ready.</li></ol></section></section>;
-  if (unsupported) return <section className="desktop-viewer-page"><h1>Remote Desktop</h1><p role="alert" className="error-state">Secure H.264 playback is not supported by this browser.</p></section>;
+  const pageClass = `desktop-viewer-page${embedded ? " desktop-viewer-embedded" : ""}`;
+  if (!access) return <section className={pageClass}><p className="loading-state" role="status">Loading Remote Desktop…</p></section>;
+  if (!access.allowed) return <section className={pageClass}>{embedded ? null : <h1>Remote Desktop</h1>}<p role="alert" className="error-state">{access.reason || "Admin access and an online desktop-capable agent are required."}</p><section className="desktop-setup-callout"><h2>Before you can connect</h2><ol><li>Return to <a href="/dashboard/agents">Agents</a> and open this device.</li><li>Use its Remote Desktop setup section to approve this browser and the device.</li><li>Complete any local permission prompts, then open Remote Desktop again once its checklist shows Ready.</li></ol></section></section>;
+  if (unsupported) return <section className={pageClass}>{embedded ? null : <h1>Remote Desktop</h1>}<p role="alert" className="error-state">Secure H.264 playback is not supported by this browser.</p></section>;
 
   const status = state === "joining" ? "Joining encrypted session…" : state === "authorizing" ? "Authorizing…" : state === "active" ? "Connected" : state === "reconnecting" ? "Reconnecting…" : state === "ending" ? "Ending session…" : reason || "Ready to connect";
   const selectedDisplay = displayState.inventory.find(display => display.id === displayState.selectedID);
@@ -256,8 +265,8 @@ export function DesktopViewerPage({ agentID = agentIDFromPath(), dependencies }:
   const appliedWidth = statistics?.applied_width ?? displayState.width, appliedHeight = statistics?.applied_height ?? displayState.height;
   const appliedQuality = statistics?.applied_quality ?? "—";
   return (
-    <section className="desktop-viewer-page" aria-labelledby="desktop-viewer-title" data-session-id={session?.session_id}>
-      <header className="desktop-viewer-header"><div><p className="eyebrow">Hank Remote</p><h1 id="desktop-viewer-title">{access.agentName}</h1></div><span className="desktop-native-badge">{session?.session_id === "desk_preview" ? "Synthetic development source" : "Native console viewing"}</span></header>
+    <section className={pageClass} aria-label={embedded ? `Remote Desktop for ${access.agentName}` : undefined} aria-labelledby={embedded ? undefined : "desktop-viewer-title"} data-session-id={session?.session_id}>
+      <header className="desktop-viewer-header"><div><p className="eyebrow">{embedded ? "Remote Desktop" : "Hank Remote"}</p>{embedded ? null : <h1 id="desktop-viewer-title">{access.agentName}</h1>}</div><span className="desktop-native-badge">{session?.session_id === "desk_preview" ? "Synthetic development source" : "Native console viewing"}</span></header>
       <div className="desktop-viewer-stage" data-scale={displayState.mode} data-control-focused={focused} ref={viewerRef} tabIndex={0} aria-label={`Remote display for ${access.agentName}`}
         onClick={focusControl} onFocus={focusControl} onBlur={blurControl}
         onKeyDown={event => inputRef.current?.key(event.nativeEvent)} onKeyUp={event => inputRef.current?.key(event.nativeEvent)}

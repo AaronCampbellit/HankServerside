@@ -17,7 +17,6 @@ import { FileServerPage } from "./dashboard/FileServerPage";
 import { HankAIPage } from "./dashboard/HankAIPage";
 import { HomeAssistantPage } from "./dashboard/HomeAssistantPage";
 import { ProfileNotesPage } from "./dashboard/ProfileNotesPage";
-import { DesktopViewerPage } from "./desktop/DesktopViewerPage";
 import { ensureBrowserDesktopIdentity } from "./desktop/autoEnrollment";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { AppsSettings } from "./settings/AppsSettings";
@@ -30,7 +29,7 @@ import { LogsSettings } from "./settings/LogsSettings";
 import { PeopleSettings } from "./settings/PeopleSettings";
 import { QuickLinksSettings } from "./settings/QuickLinksSettings";
 import { RecoverySettings } from "./settings/RecoverySettings";
-import { routeForPath, type RouteDefinition } from "./router";
+import { agentWorkspaceForPath, routeCachePath, routeForPath, type RouteDefinition } from "./router";
 
 function RouteStub({ route }: { route: RouteDefinition }) {
   return (
@@ -66,7 +65,12 @@ function currentPathname(): string {
 
 function initialMountedRoutePaths(): string[] {
   const route = routeForPath(currentPathname());
-  return route.publicRoute ? [] : [route.path];
+  return route.publicRoute ? [] : [routeCachePath(route)];
+}
+
+function initialMountedRouteTargets(): Record<string, string> {
+  const route = routeForPath(currentPathname());
+  return route.publicRoute ? {} : { [routeCachePath(route)]: route.path };
 }
 
 function appendMountedRoutePath(paths: string[], path: string): string[] {
@@ -75,7 +79,8 @@ function appendMountedRoutePath(paths: string[], path: string): string[] {
 
 // Resolve the page element for a route path (settings pages included).
 function pageForRoute(route: RouteDefinition, bootstrap?: BootstrapState | null): ReactNode {
-	if (/^\/dashboard\/agents\/[^/]+\/desktop$/.test(route.path)) return <DesktopViewerPage />;
+  const workspace = agentWorkspaceForPath(route.path);
+  if (workspace) return <AgentsPage initialAgentID={workspace.agentID} initialTab={workspace.tab} />;
   switch (route.path) {
     case "/dashboard": return <DashboardHome />;
     case "/dashboard/hank": return <HankAIPage />;
@@ -104,6 +109,7 @@ export function App() {
   const [pathname, setPathname] = useState(currentPathname);
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
   const [mountedRoutePaths, setMountedRoutePaths] = useState<string[]>(initialMountedRoutePaths);
+  const [mountedRouteTargets, setMountedRouteTargets] = useState<Record<string, string>>(initialMountedRouteTargets);
   const route = routeForPath(pathname);
 
   useEffect(() => {
@@ -149,9 +155,12 @@ export function App() {
   useEffect(() => {
     if (route.publicRoute) {
       setMountedRoutePaths([]);
+      setMountedRouteTargets({});
       return;
     }
-    setMountedRoutePaths((paths) => appendMountedRoutePath(paths, route.path));
+    const cachePath = routeCachePath(route);
+    setMountedRoutePaths((paths) => appendMountedRoutePath(paths, cachePath));
+    setMountedRouteTargets((targets) => targets[cachePath] === route.path ? targets : { ...targets, [cachePath]: route.path });
   }, [route.path, route.publicRoute]);
 
   function navigateTo(href: string) {
@@ -173,7 +182,7 @@ export function App() {
     }
     const targetRoute = routeForPath(url.pathname);
     if (targetRoute.publicRoute) return;
-    setMountedRoutePaths((paths) => appendMountedRoutePath(paths, targetRoute.path));
+    setMountedRoutePaths((paths) => appendMountedRoutePath(paths, routeCachePath(targetRoute)));
   }
 
   const isAdmin = Boolean(bootstrap?.permissions?.is_admin);
@@ -188,7 +197,8 @@ export function App() {
   }
 
   function renderCachedRoute(path: string) {
-    const cachedRoute = routeForPath(path);
+    const activeCachePath = routeCachePath(route);
+    const cachedRoute = path === activeCachePath ? route : routeForPath(mountedRouteTargets[path] ?? path);
     const isSettingsRoot = cachedRoute.path === "/dashboard/settings";
     const resolvedRoute = isSettingsRoot && bootstrap ? routeForPath(settingsLandingPath(isAdmin)) : cachedRoute;
     const page = isSettingsRoot && !bootstrap ? <SettingsLoadingPage /> : pageForRoute(resolvedRoute, bootstrap);
@@ -199,12 +209,13 @@ export function App() {
     ) : page;
   }
 
-  const visibleRoutePaths = route.publicRoute ? [] : appendMountedRoutePath(mountedRoutePaths, route.path);
+  const activeCachePath = routeCachePath(route);
+  const visibleRoutePaths = route.publicRoute ? [] : appendMountedRoutePath(mountedRoutePaths, activeCachePath);
   const cachedRouteContent = (
     <>
       {visibleRoutePaths.map((path) => {
         const page = renderCachedRoute(path);
-        const hidden = path !== route.path;
+        const hidden = path !== activeCachePath;
         return (
           <div aria-hidden={hidden ? "true" : undefined} className="route-cache-panel" hidden={hidden} key={path}>
             {page}

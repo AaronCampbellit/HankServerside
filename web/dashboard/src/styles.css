@@ -4462,7 +4462,8 @@ button.secondary:disabled {
   gap: 6px;
 }
 
-.notes-lock-indicator {
+.notes-lock-indicator,
+.notes-pin-indicator {
   width: 18px;
   height: 18px;
   display: inline-flex;
@@ -4470,6 +4471,10 @@ button.secondary:disabled {
   justify-content: center;
   flex: 0 0 auto;
   color: var(--warning);
+}
+
+.notes-pin-indicator {
+  color: var(--accent);
 }
 
 .notes-notebook-item.is-mcp-excluded,
@@ -6703,6 +6708,8 @@ button.secondary:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   cursor: pointer;
+  color: inherit;
+  text-decoration: none;
   transition: border-color 0.15s ease, transform 0.1s ease;
 }
 .agent-card:hover {
@@ -6821,8 +6828,8 @@ button.secondary:disabled {
   gap: 10px;
   flex: 1;
 }
-.agent-detail-title strong {
-  display: block;
+.agent-detail-title h1 {
+  margin: 0;
   font-size: 1.05rem;
 }
 .agent-detail-title span {
@@ -6867,9 +6874,51 @@ button.secondary:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
+.agent-info-card h2,
 .agent-info-card h3 {
   margin: 0 0 10px;
   font-size: 0.85rem;
+}
+.agent-workspace-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.agent-workspace-tabs a {
+  flex: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.agent-workspace-tabs a:hover {
+  color: var(--ink);
+  background: var(--surface-strong);
+}
+.agent-workspace-tabs a[aria-current="page"] {
+  color: var(--brand);
+  background: var(--acc-soft);
+  box-shadow: inset 0 0 0 1px var(--acc-line);
+}
+.agent-desktop-workspace,
+.agent-security-workspace {
+  display: grid;
+  gap: 16px;
+}
+.agent-desktop-workspace .desktop-viewer-embedded {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.agent-danger-zone {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
 }
 .agent-info-list {
   display: grid;

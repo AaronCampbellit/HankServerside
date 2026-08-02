@@ -25,6 +25,7 @@ type Editor = {
   revision: string;
   pageType: string;
   parentID: string;
+  pinned: boolean;
   mcpExcluded: boolean;
   board: KanbanBoard | null;
   attachments: NoteAttachment[];
@@ -62,6 +63,7 @@ const emptyEditor: Editor = {
   revision: "",
   pageType: "text",
   parentID: "",
+  pinned: false,
   mcpExcluded: false,
   board: null,
   attachments: [],
@@ -134,6 +136,7 @@ function editorFromNote(note: ProfileNote): Editor {
     revision: note.revision || "",
     pageType: note.page_type || "text",
     parentID: note.parent_id || "",
+    pinned: Boolean(note.pinned),
     mcpExcluded: Boolean(note.mcp_excluded),
     board: note.board || null,
     attachments: note.attachments || [],
@@ -149,6 +152,7 @@ function editorChanged(left: Editor, right: Editor): boolean {
     || left.revision !== right.revision
     || left.pageType !== right.pageType
     || left.parentID !== right.parentID
+    || left.pinned !== right.pinned
     || left.mcpExcluded !== right.mcpExcluded
     || JSON.stringify(left.board) !== JSON.stringify(right.board);
 }
@@ -303,6 +307,7 @@ function Icon({ name }: { name: string }) {
       {name === "note" ? <><path d="M7 4h10l2 2v14H7z" {...common} /><path d="M10 9h6M10 13h6M10 17h4" {...common} /></> : null}
       {name === "kanban" ? <><rect x="4" y="5" width="16" height="14" rx="2" {...common} /><path d="M9 5v14M15 5v14" {...common} /></> : null}
       {name === "book" ? <><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v15H7.5A2.5 2.5 0 0 0 5 20.5z" {...common} /><path d="M8 7h7M8 11h7" {...common} /></> : null}
+      {name === "pin" ? <><path d="m9 4 6 6M8 9l7 7M14 5l5 5-3 1-4 4-1 3-5-5 3-1 4-4zM8 16l-4 4" {...common} /></> : null}
       {name === "trash" ? <><path d="M5 7h14M9 7V5h6v2M8 10v8M12 10v8M16 10v8" {...common} /></> : null}
       {name === "undo" ? <><path d="M9 7 5 11l4 4" {...common} /><path d="M5 11h8a5 5 0 0 1 5 5v1" {...common} /></> : null}
       {name === "redo" ? <><path d="m15 7 4 4-4 4" {...common} /><path d="M19 11h-8a5 5 0 0 0-5 5v1" {...common} /></> : null}
@@ -438,7 +443,11 @@ export function ProfileNotesPage() {
     if (state.selectedNotebookID === ROOT_NOTEBOOK_FILTER) {
       primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
     } else if (state.selectedNotebookID) {
-      primary = state.notes.filter((note) => note.parent_id === state.selectedNotebookID);
+      const children = state.notes.filter((note) => note.parent_id === state.selectedNotebookID);
+      primary = [
+        ...children.filter((note) => note.pinned),
+        ...children.filter((note) => !note.pinned),
+      ];
     } else {
       primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
       const cutoff = Date.now() - RECENT_NOTE_WINDOW_MS;
@@ -598,6 +607,7 @@ export function ProfileNotesPage() {
         expected_revision: "",
         page_type: "notebook",
         parent_id: "",
+        pinned: false,
         mcp_excluded: false,
       });
       const savedID = response.note_id;
@@ -608,6 +618,7 @@ export function ProfileNotesPage() {
         revision: response.revision,
         updated_at: response.updated_at,
         page_type: "notebook",
+        pinned: false,
         mcp_excluded: false,
       };
       setReady({
@@ -838,6 +849,7 @@ export function ProfileNotesPage() {
         expected_revision: editor.revision,
         page_type: editor.pageType,
         parent_id: editor.parentID,
+        pinned: editor.pinned,
         mcp_excluded: editor.mcpExcluded,
         board: editor.pageType === "kanban" ? editor.board : undefined,
       });
@@ -854,6 +866,7 @@ export function ProfileNotesPage() {
           noteID: savedEditor.noteID,
           revision: savedEditor.revision,
           updatedAt: savedEditor.updatedAt,
+          pinned: savedEditor.pinned,
         };
         latestSavedEditorRef.current = savedEditor;
       }
@@ -862,7 +875,7 @@ export function ProfileNotesPage() {
         if (current.status !== "ready") return current;
         const matchesCurrentEditor = current.editor.instanceKey === editor.instanceKey;
         const nextEditor = matchesCurrentEditor
-          ? { ...current.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt }
+          ? { ...current.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt, pinned: savedEditor.pinned }
           : current.editor;
         return {
           ...current,
@@ -876,6 +889,7 @@ export function ProfileNotesPage() {
               updated_at: response.updated_at,
               page_type: editor.pageType,
               parent_id: editor.pageType === "notebook" ? "" : editor.parentID,
+              pinned: editor.pageType === "notebook" || !editor.parentID ? false : editor.pinned,
               mcp_excluded: editor.mcpExcluded,
             },
             ...current.notes.filter((note) => noteID(note) !== savedID && noteID(note) !== editor.noteID),
@@ -887,11 +901,11 @@ export function ProfileNotesPage() {
         };
       });
       pendingSaveRef.current = pendingSaveRef.current.map((pending) => pending.editor.instanceKey === editor.instanceKey
-        ? { ...pending, editor: { ...pending.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt } }
+        ? { ...pending, editor: { ...pending.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt, pinned: savedEditor.pinned } }
         : pending);
       queuedSave = pendingSaveRef.current.shift() || null;
       if (queuedSave && queuedSave.editor.instanceKey === editor.instanceKey) {
-        queuedSave = { ...queuedSave, editor: { ...queuedSave.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt } };
+        queuedSave = { ...queuedSave, editor: { ...queuedSave.editor, noteID: savedID, revision: savedEditor.revision, updatedAt: savedEditor.updatedAt, pinned: savedEditor.pinned } };
       }
       if (!background) showToast("Note saved.");
     } catch (error) {
@@ -1046,7 +1060,9 @@ export function ProfileNotesPage() {
         expected_revision: note.revision || "",
         page_type: note.page_type || "text",
         parent_id: readyState.moveDialogTargetID,
+        pinned: Boolean(readyState.moveDialogTargetID && note.pinned),
         mcp_excluded: Boolean(note.mcp_excluded),
+        board: note.page_type === "kanban" ? note.board || undefined : undefined,
       });
       const movedID = response.note_id || id;
       const movedTitle = note.title?.trim() || "Untitled";
@@ -1060,17 +1076,55 @@ export function ProfileNotesPage() {
             updated_at: response.updated_at || note.updated_at,
             page_type: note.page_type || "text",
             parent_id: readyState.moveDialogTargetID,
+            pinned: Boolean(readyState.moveDialogTargetID && note.pinned),
             mcp_excluded: Boolean(note.mcp_excluded),
           },
           ...readyState.notes.filter((summary) => noteID(summary) !== movedID),
         ]),
-        editor: readyState.editor.noteID === movedID ? { ...readyState.editor, parentID: readyState.moveDialogTargetID, revision: response.revision || readyState.editor.revision } : readyState.editor,
-        savedEditor: readyState.editor.noteID === movedID ? { ...readyState.savedEditor, parentID: readyState.moveDialogTargetID, revision: response.revision || readyState.savedEditor.revision } : readyState.savedEditor,
+        editor: readyState.editor.noteID === movedID ? { ...readyState.editor, parentID: readyState.moveDialogTargetID, pinned: Boolean(readyState.moveDialogTargetID && note.pinned), revision: response.revision || readyState.editor.revision } : readyState.editor,
+        savedEditor: readyState.editor.noteID === movedID ? { ...readyState.savedEditor, parentID: readyState.moveDialogTargetID, pinned: Boolean(readyState.moveDialogTargetID && note.pinned), revision: response.revision || readyState.savedEditor.revision } : readyState.savedEditor,
         moveDialogNoteID: "",
         moveDialogTargetID: "",
         message: "Note moved.",
       });
       showToast("Note moved.");
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    }
+  }
+
+  async function setNotePinned(summary: ProfileNoteSummary, pinned: boolean) {
+    const id = noteID(summary);
+    if (!id || !summary.parent_id || isNotebook(summary)) return;
+    if (readyState.editor.noteID === id) {
+      await saveNote({ ...readyState.editor, pinned }, true);
+      return;
+    }
+    try {
+      const note = await profileNotesClient.fetchNote(id);
+      const response = await profileNotesClient.saveNote({
+        note_id: id,
+        title: note.title?.trim() || "Untitled",
+        body_markdown: note.body_markdown || note.content || "",
+        expected_revision: note.revision || "",
+        page_type: note.page_type || "text",
+        parent_id: note.parent_id || "",
+        pinned,
+        mcp_excluded: Boolean(note.mcp_excluded),
+        board: note.page_type === "kanban" ? note.board || undefined : undefined,
+      });
+      setReady({
+        notes: sortNotes([
+          {
+            ...summary,
+            revision: response.revision || note.revision || summary.revision,
+            updated_at: response.updated_at || note.updated_at || summary.updated_at,
+            pinned,
+          },
+          ...readyState.notes.filter((current) => noteID(current) !== id),
+        ]),
+      });
+      showToast(pinned ? "Note pinned." : "Note unpinned.", "neutral");
     } catch (error) {
       showToast(errorMessage(error), "error");
     }
@@ -1092,12 +1146,13 @@ export function ProfileNotesPage() {
           >
             <span className="notes-guide-icon" aria-hidden="true"><Icon name={noteIconName(note)} /></span>
             <span className="notes-guide-copy">
-              <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
+              <strong>{title}{note.pinned ? <span className="notes-pin-indicator" aria-hidden="true"><Icon name="pin" /></span> : null}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
               <span>{note.preview || "No preview"}</span>
               <span className="notes-tag-row"><em className="notes-tag">{parentTitle || noteTag(note)}</em><small>{updatedLabel(note)}</small></span>
             </span>
           </button>
           <div className="notes-row-actions" aria-label={`Actions for ${title}`}>
+            {note.parent_id && !isNotebook(note) ? <button className="icon-button" type="button" aria-label={`${note.pinned ? "Unpin" : "Pin"} ${title}`} title={note.pinned ? "Unpin note" : "Pin note"} onClick={() => void setNotePinned(note, !note.pinned)}><Icon name="pin" /></button> : null}
             <button className="icon-button" type="button" aria-label={`Move ${title}`} title="Move note" onClick={() => openMoveDialog(note)}><Icon name="book" /></button>
             <button className="icon-button danger" type="button" aria-label={`Delete ${title}`} title="Delete note" onClick={() => void deleteNoteByID(id, title)}><Icon name="trash" /></button>
           </div>
@@ -1247,7 +1302,12 @@ export function ProfileNotesPage() {
                 disabled={state.editor.pageType === "notebook"}
                 value={state.editor.pageType === "notebook" ? "" : state.editor.parentID}
                 onChange={(event) => {
-                  const editor = { ...state.editor, parentID: event.target.value };
+                  const parentID = event.target.value;
+                  const editor = {
+                    ...state.editor,
+                    parentID,
+                    pinned: Boolean(parentID && state.editor.pinned),
+                  };
                   updateEditor(editor, false);
                   void saveNote(editor, true);
                 }}
@@ -1267,6 +1327,14 @@ export function ProfileNotesPage() {
           <div className="notes-toolbar" aria-label="Editor tools">
             <button className="icon-button danger" disabled={!state.editor.noteID} type="button" aria-label="Delete note" title="Delete note" onClick={() => void deleteNote()}><Icon name="trash" /></button>
             <span className="notes-toolbar-separator" aria-hidden="true" />
+            {state.editor.parentID && state.editor.pageType !== "notebook" ? (
+              <ToolbarButton
+                label={state.editor.pinned ? "Unpin note" : "Pin note"}
+                icon="pin"
+                pressed={state.editor.pinned}
+                onClick={() => void saveNote({ ...state.editor, pinned: !state.editor.pinned }, true)}
+              />
+            ) : null}
             <ToolbarButton
               label={state.editor.mcpExcluded ? "Include in MCP" : "Exclude from MCP"}
               icon={state.editor.mcpExcluded ? "unlock" : "lock"}
@@ -1436,7 +1504,11 @@ function NotebookEditor({
   onOpenNote: (id: string) => void;
   onNewNote: (parentID: string) => void;
 }) {
-  const childNotes = notes.filter((note) => note.parent_id && note.parent_id === parentID && noteID(note));
+  const notebookChildren = notes.filter((note) => note.parent_id && note.parent_id === parentID && noteID(note));
+  const childNotes = [
+    ...notebookChildren.filter((note) => note.pinned),
+    ...notebookChildren.filter((note) => !note.pinned),
+  ];
   return (
     <div className="notebook-surface" aria-label="Notebook pages">
       <header className="notebook-hero">
@@ -1471,7 +1543,11 @@ function NotebookEditor({
                 type="button"
               >
                 <span className="note-kind" aria-hidden="true"><Icon name="note" /></span>
-                <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
+                <strong>
+                  {title}
+                  {note.pinned ? <span className="notes-pin-indicator" aria-hidden="true"><Icon name="pin" /></span> : null}
+                  {excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}
+                </strong>
                 <span>{note.preview || "No preview"}</span>
               </button>
             );

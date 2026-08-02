@@ -524,6 +524,12 @@ func applyCollaborationOperation(state collabState, userID string, operation pro
 				return state, err
 			}
 			state.SortOrder = value
+		case "pinned":
+			var value bool
+			if err := json.Unmarshal(operation.Value, &value); err != nil {
+				return state, err
+			}
+			state.Pinned = value
 		case "content":
 			var value string
 			if err := json.Unmarshal(operation.Value, &value); err != nil {

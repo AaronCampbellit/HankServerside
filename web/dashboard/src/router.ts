@@ -12,6 +12,13 @@ export type NavItem = {
   adminOnly?: boolean;
 };
 
+export type AgentWorkspaceTab = "overview" | "desktop" | "terminal" | "security";
+
+export type AgentWorkspaceRoute = {
+  agentID: string;
+  tab: AgentWorkspaceTab;
+};
+
 export const appRoutes: RouteDefinition[] = [
   { path: "/", heading: "Sign in to Hank", publicRoute: true },
   { path: "/join", heading: "Join Home", publicRoute: true },
@@ -39,11 +46,39 @@ export const appRoutes: RouteDefinition[] = [
 
 const routeByPath = new Map(appRoutes.map((route) => [route.path, route]));
 
+export function agentWorkspaceForPath(pathname: string): AgentWorkspaceRoute | null {
+  const match = pathname.match(/^\/dashboard\/agents\/([^/]+)(?:\/(desktop|terminal|security))?$/);
+  if (!match) return null;
+  try {
+    return {
+      agentID: decodeURIComponent(match[1]),
+      tab: (match[2] as AgentWorkspaceTab | undefined) ?? "overview",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function routeForPath(pathname: string): RouteDefinition {
-	if (/^\/dashboard\/agents\/[^/]+\/desktop$/.test(pathname)) {
-		return { path: pathname, heading: "Remote Desktop", adminOnly: true };
-	}
+  const workspace = agentWorkspaceForPath(pathname);
+  if (workspace) {
+    const headings: Record<AgentWorkspaceTab, string> = {
+      overview: "Device Overview",
+      desktop: "Remote Desktop",
+      terminal: "Device Terminal",
+      security: "Device Security",
+    };
+    return {
+      path: pathname,
+      heading: headings[workspace.tab],
+      adminOnly: workspace.tab !== "overview",
+    };
+  }
   return routeByPath.get(pathname) ?? { path: pathname, heading: "Not Found" };
+}
+
+export function routeCachePath(route: RouteDefinition): string {
+  return agentWorkspaceForPath(route.path) ? "/dashboard/agents" : route.path;
 }
 
 export function navItemsForRoutes(routes: RouteDefinition[] = appRoutes): NavItem[] {

@@ -20,6 +20,8 @@ import { DesktopReadinessCard, desktopReadinessComplete } from "../desktop/Deskt
 import {desktopAuditClient,type DesktopAgentReadiness} from "../api/desktopAudit";
 import { desktopClient } from "../api/desktop";
 import { DesktopTrustSettings } from "../desktop/trust/DesktopTrustSettings";
+import { DesktopViewerPage } from "../desktop/DesktopViewerPage";
+import type { AgentWorkspaceTab } from "../router";
 
 type PageState =
   | { status: "loading" }
@@ -107,10 +109,10 @@ function MetricRow({ metrics }: { metrics: AgentMetrics | undefined }) {
   );
 }
 
-function AgentCard({ agent, onOpen }: { agent: HomeAgentEntry; onOpen: () => void }) {
+function AgentCard({ agent }: { agent: HomeAgentEntry }) {
   const online = agentIsOnline(agent);
   return (
-    <button type="button" className="agent-card" onClick={onOpen}>
+    <a className="agent-card" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}`}>
       <div className="agent-card-top">
         <span className={`agent-avatar ${agentIsPrimary(agent) ? "is-primary" : "is-worker"}`} aria-hidden="true">
           {agentIsPrimary(agent) ? "⌂" : "▤"}
@@ -128,7 +130,7 @@ function AgentCard({ agent, onOpen }: { agent: HomeAgentEntry; onOpen: () => voi
       ) : (
         <span className="agent-tile-idle">last seen {relativeTime(agent.last_seen_at)}</span>
       )}
-    </button>
+    </a>
   );
 }
 
@@ -210,52 +212,81 @@ function ShellConsole({ agent }: { agent: HomeAgentEntry }) {
 
 function AgentDetail({
   agent,
+  tab,
   isAdmin,
   homeID,
   userID,
-  onBack,
   onAction,
   onRemove,
 }: {
   agent: HomeAgentEntry;
+  tab: AgentWorkspaceTab;
   isAdmin: boolean;
   homeID: string;
   userID: string;
-  onBack: () => void;
   onAction: (kind: "lock" | "restart" | "wake", agent: HomeAgentEntry) => void;
   onRemove: (agent: HomeAgentEntry) => void;
 }) {
   const online = agentIsOnline(agent);
-  const [desktopReadiness,setDesktopReadiness]=useState<DesktopAgentReadiness|null>(null);
-  const [endingDesktopSession,setEndingDesktopSession]=useState(false);
+  const [desktopReadiness, setDesktopReadiness] = useState<DesktopAgentReadiness | null>(null);
+  const [endingDesktopSession, setEndingDesktopSession] = useState(false);
   const { confirm } = useConfirmDialog();
   const { showToast } = useToast();
-  const refreshDesktopReadiness=useCallback(async()=>{const value=await desktopAuditClient.readiness(agent.agent_id);setDesktopReadiness(value);return value},[agent.agent_id]);
-  useEffect(()=>{let live=true;desktopAuditClient.readiness(agent.agent_id).then(value=>{if(live)setDesktopReadiness(value)}).catch(()=>{if(live)setDesktopReadiness(null)});return()=>{live=false}},[agent.agent_id]);
-  async function endActiveDesktopSession(){
-    const sessionID=desktopReadiness?.active_session_id;
-    if(!sessionID||endingDesktopSession)return;
-    if(!await confirm({title:"End Remote Desktop session?",message:"This disconnects the current Remote Desktop viewer and releases this device for a new session.",confirmLabel:"End session",tone:"danger"}))return;
+  const refreshDesktopReadiness = useCallback(async () => {
+    const value = await desktopAuditClient.readiness(agent.agent_id);
+    setDesktopReadiness(value);
+    return value;
+  }, [agent.agent_id]);
+  useEffect(() => {
+    if (tab !== "desktop") return;
+    let live = true;
+    desktopAuditClient.readiness(agent.agent_id)
+      .then((value) => { if (live) setDesktopReadiness(value); })
+      .catch(() => { if (live) setDesktopReadiness(null); });
+    return () => { live = false; };
+  }, [agent.agent_id, tab]);
+  async function endActiveDesktopSession() {
+    const sessionID = desktopReadiness?.active_session_id;
+    if (!sessionID || endingDesktopSession) return;
+    if (!await confirm({
+      title: "End Remote Desktop session?",
+      message: "This disconnects the current Remote Desktop viewer and releases this device for a new session.",
+      confirmLabel: "End session",
+      tone: "danger",
+    })) return;
     setEndingDesktopSession(true);
-    try{await desktopClient.terminate(sessionID);await refreshDesktopReadiness();showToast("Remote Desktop session ended.","neutral")}
-    catch(error){showToast(errorMessage(error),"error")}
-    finally{setEndingDesktopSession(false)}
+    try {
+      await desktopClient.terminate(sessionID);
+      await refreshDesktopReadiness();
+      showToast("Remote Desktop session ended.", "neutral");
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    } finally {
+      setEndingDesktopSession(false);
+    }
   }
   const metrics = agent.metrics;
   const desktopReady = desktopReadinessComplete(desktopReadiness);
   const ram = percentOf(metrics?.memory_used_bytes, metrics?.memory_total_bytes);
   const disk = percentOf(metrics?.disk_used_bytes, metrics?.disk_total_bytes);
+  const basePath = `/dashboard/agents/${encodeURIComponent(agent.agent_id)}`;
+  const tabs: Array<{ id: AgentWorkspaceTab; label: string; href: string; adminOnly?: boolean }> = [
+    { id: "overview", label: "Overview", href: basePath },
+    { id: "desktop", label: "Remote Desktop", href: `${basePath}/desktop`, adminOnly: true },
+    { id: "terminal", label: "Terminal", href: `${basePath}/terminal`, adminOnly: true },
+    { id: "security", label: "Security", href: `${basePath}/security`, adminOnly: true },
+  ];
 
   return (
     <section className="agent-detail">
       <div className="agent-detail-head">
-        <button type="button" className="secondary agent-back" onClick={onBack}>← All devices</button>
+        <a className="button secondary agent-back" href="/dashboard/agents">← All devices</a>
         <div className="agent-detail-title">
           <span className={`agent-avatar ${agentIsPrimary(agent) ? "is-primary" : "is-worker"}`} aria-hidden="true">
             {agentIsPrimary(agent) ? "⌂" : "▤"}
           </span>
           <div>
-            <strong>{agentDisplayName(agent)}</strong>
+            <h1 id="route-title">{agentDisplayName(agent)}</h1>
             <span>{agent.metadata?.os_version || agentKindLabel(agent)}</span>
           </div>
         </div>
@@ -264,81 +295,91 @@ function AgentDetail({
         </span>
       </div>
 
-      <div className="agent-stat-grid">
-        {typeof metrics?.cpu_load_1m === "number" ? <MetricStat label="CPU load (1m)" value={metrics.cpu_load_1m.toFixed(2)} /> : null}
-        {ram !== null ? (
-          <MetricStat
-            label={`Memory (${formatBytes(metrics?.memory_used_bytes)} / ${formatBytes(metrics?.memory_total_bytes)})`}
-            value={`${ram}%`}
-            tone={ram >= 90 ? "warn" : undefined}
-          />
-        ) : null}
-        {disk !== null ? (
-          <MetricStat
-            label={`Disk (${formatBytes(metrics?.disk_used_bytes)} / ${formatBytes(metrics?.disk_total_bytes)})`}
-            value={`${disk}%`}
-            tone={disk >= 90 ? "bad" : undefined}
-          />
-        ) : null}
-        {typeof metrics?.battery_percent === "number" ? (
-          <MetricStat label={metrics.battery_charging ? "Battery (charging)" : "Battery"} value={`${metrics.battery_percent}%`} />
-        ) : null}
-        {typeof metrics?.uptime_seconds === "number" ? <MetricStat label="Uptime" value={formatUptime(metrics.uptime_seconds)} /> : null}
-      </div>
+      <nav className="agent-workspace-tabs" aria-label="Device workspace">
+        {tabs.filter((item) => isAdmin || !item.adminOnly).map((item) => (
+          <a key={item.id} href={item.href} aria-current={tab === item.id ? "page" : undefined}>{item.label}</a>
+        ))}
+      </nav>
 
-      <div className="agent-detail-columns">
-        <DesktopReadinessCard readiness={desktopReadiness} />
-        <div className="agent-info-card">
-          <h3>Details</h3>
-          <dl className="agent-info-list">
-            <div><dt>Agent ID</dt><dd>{agent.agent_id}</dd></div>
-            <div><dt>Type</dt><dd>{agentKindLabel(agent)}</dd></div>
-            <div><dt>Status</dt><dd>{online ? "Online" : "Offline"}</dd></div>
-            <div><dt>Last seen</dt><dd>{relativeTime(agent.last_seen_at)}</dd></div>
-            {agent.metadata?.hostname ? <div><dt>Hostname</dt><dd>{agent.metadata.hostname}</dd></div> : null}
-            {agent.metadata?.platform ? <div><dt>Platform</dt><dd>{agent.metadata.platform}</dd></div> : null}
-            {agent.metadata?.app_version ? <div><dt>Agent version</dt><dd>{agent.metadata.app_version}</dd></div> : null}
-          </dl>
-          {agent.capabilities && agent.capabilities.length ? (
-            <div className="agent-capabilities">
-              {agent.capabilities.map((capability) => (
-                <span className="agent-capability" key={capability}>{capability}</span>
-              ))}
+      {tab === "overview" ? (
+        <>
+          <div className="agent-stat-grid">
+            {typeof metrics?.cpu_load_1m === "number" ? <MetricStat label="CPU load (1m)" value={metrics.cpu_load_1m.toFixed(2)} /> : null}
+            {ram !== null ? <MetricStat label={`Memory (${formatBytes(metrics?.memory_used_bytes)} / ${formatBytes(metrics?.memory_total_bytes)})`} value={`${ram}%`} tone={ram >= 90 ? "warn" : undefined} /> : null}
+            {disk !== null ? <MetricStat label={`Disk (${formatBytes(metrics?.disk_used_bytes)} / ${formatBytes(metrics?.disk_total_bytes)})`} value={`${disk}%`} tone={disk >= 90 ? "bad" : undefined} /> : null}
+            {typeof metrics?.battery_percent === "number" ? <MetricStat label={metrics.battery_charging ? "Battery (charging)" : "Battery"} value={`${metrics.battery_percent}%`} /> : null}
+            {typeof metrics?.uptime_seconds === "number" ? <MetricStat label="Uptime" value={formatUptime(metrics.uptime_seconds)} /> : null}
+          </div>
+          <div className="agent-detail-columns">
+            <div className="agent-info-card">
+              <h2>Details</h2>
+              <dl className="agent-info-list">
+                <div><dt>Agent ID</dt><dd>{agent.agent_id}</dd></div>
+                <div><dt>Type</dt><dd>{agentKindLabel(agent)}</dd></div>
+                <div><dt>Status</dt><dd>{online ? "Online" : "Offline"}</dd></div>
+                <div><dt>Last seen</dt><dd>{relativeTime(agent.last_seen_at)}</dd></div>
+                {agent.metadata?.hostname ? <div><dt>Hostname</dt><dd>{agent.metadata.hostname}</dd></div> : null}
+                {agent.metadata?.platform ? <div><dt>Platform</dt><dd>{agent.metadata.platform}</dd></div> : null}
+                {agent.metadata?.app_version ? <div><dt>Agent version</dt><dd>{agent.metadata.app_version}</dd></div> : null}
+              </dl>
             </div>
-          ) : null}
-        </div>
+            <div className="agent-info-card">
+              <h2>Device actions</h2>
+              {isAdmin ? (
+                <div className="agent-actions">
+                  {agentHasCapability(agent, "host.lock") ? <button type="button" className="secondary" disabled={!online} onClick={() => onAction("lock", agent)}>Lock screen</button> : null}
+                  {agentHasCapability(agent, "wol.send") ? <button type="button" className="secondary" disabled={!online} onClick={() => onAction("wake", agent)}>Wake device…</button> : null}
+                  <button type="button" className="danger" disabled={!online} onClick={() => onAction("restart", agent)}>Restart agent</button>
+                </div>
+              ) : <p className="empty-state">Device actions require an admin account.</p>}
+            </div>
+          </div>
+        </>
+      ) : null}
 
-        <div className="agent-info-card">
-          <h3>Actions</h3>
-          {isAdmin ? (
+      {tab === "desktop" ? (
+        <div className="agent-desktop-workspace">
+          <div className="agent-detail-columns">
+            <DesktopReadinessCard readiness={desktopReadiness} />
+            <div className="agent-info-card">
+              <h2>Session</h2>
+              <p className="agent-hint">{desktopReady ? "This device is ready for an encrypted Remote Desktop session." : "Complete every readiness check before starting a session."}</p>
+              {desktopReadiness?.active_session_id ? (
+                <button type="button" className="danger" disabled={endingDesktopSession} onClick={() => void endActiveDesktopSession()}>
+                  {endingDesktopSession ? "Ending session…" : "End active Remote Desktop session"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {isAdmin ? <DesktopViewerPage embedded agentID={agent.agent_id} /> : <p className="empty-state">Remote Desktop requires an admin account.</p>}
+        </div>
+      ) : null}
+
+      {tab === "terminal" ? (
+        isAdmin && agentHasCapability(agent, "shell.session.open")
+          ? <ShellConsole agent={agent} />
+          : <p className="empty-state">Remote shell is disabled or unavailable for this account.</p>
+      ) : null}
+
+      {tab === "security" ? (
+        <div className="agent-security-workspace">
+          <div className="agent-info-card">
+            <h2>Capabilities</h2>
+            {agent.capabilities?.length ? (
+              <div className="agent-capabilities">
+                {agent.capabilities.map((capability) => <span className="agent-capability" key={capability}>{capability}</span>)}
+              </div>
+            ) : <p className="empty-state">This device has not reported any capabilities.</p>}
+          </div>
+          {isAdmin ? <DesktopTrustSettings homeID={homeID} userID={userID} agentID={agent.agent_id} agentName={agentDisplayName(agent)} /> : null}
+          {isAdmin ? <div className="agent-info-card agent-danger-zone">
+            <h2>Danger zone</h2>
             <div className="agent-actions">
-              {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") ? (
-                desktopReady ? <a className="primary-action" href={`/dashboard/agents/${encodeURIComponent(agent.agent_id)}/desktop`}>Open Remote Desktop</a>
-                  : <a className="button secondary" href="#remote-desktop-settings">Finish Remote Desktop setup</a>
-              ) : null}
-              {desktopReadiness?.active_session_id ? <button type="button" className="danger" disabled={endingDesktopSession} onClick={()=>void endActiveDesktopSession()}>{endingDesktopSession?"Ending session…":"End active Remote Desktop session"}</button>:null}
-              {agentHasCapability(agent, "host.lock") ? (
-                <button type="button" className="secondary" disabled={!online} onClick={() => onAction("lock", agent)}>Lock screen</button>
-              ) : null}
-              {agentHasCapability(agent, "wol.send") ? (
-                <button type="button" className="secondary" disabled={!online} onClick={() => onAction("wake", agent)}>Wake device…</button>
-              ) : null}
-              <button type="button" className="danger" disabled={!online} onClick={() => onAction("restart", agent)}>Restart agent</button>
               <button type="button" className="danger" onClick={() => onRemove(agent)}>Remove device</button>
             </div>
-          ) : (
-            <p className="empty-state">Device actions require an admin account.</p>
-          )}
-          {!agentHasCapability(agent, "shell.session.open") ? (
-            <p className="agent-hint">Remote shell is disabled on this device. Enable shell commands in that agent's settings to allow live terminals.</p>
-          ) : null}
-          {online && agentHasCapability(agent, "desktop.session.open") && agentHasCapability(agent, "desktop.view") && !desktopReady ? <p className="agent-hint">Remote Desktop stays unavailable until every setup check at left is ready.</p> : null}
+          </div> : null}
         </div>
-      </div>
-
-      {isAdmin ? <DesktopTrustSettings homeID={homeID} userID={userID} agentID={agent.agent_id} agentName={agentDisplayName(agent)} /> : null}
-
-      {isAdmin && agentHasCapability(agent, "shell.session.open") ? <ShellConsole agent={agent} /> : null}
+      ) : null}
     </section>
   );
 }
@@ -430,9 +471,14 @@ function TokenSection({
   );
 }
 
-export function AgentsPage() {
+export function AgentsPage({
+  initialAgentID = null,
+  initialTab = "overview",
+}: {
+  initialAgentID?: string | null;
+  initialTab?: AgentWorkspaceTab;
+}) {
   const [state, setState] = useState<PageState>({ status: "loading" });
-  const [selectedID, setSelectedID] = useState<string | null>(null);
   const { showToast } = useToast();
   const { confirm, prompt } = useConfirmDialog();
 
@@ -460,7 +506,9 @@ export function AgentsPage() {
         const tokens = isAdmin ? await homeClient.listAgentTokens().then((payload) => payload.tokens).catch(() => []) : [];
         if (!active) return;
         setState({ status: "ready", isAdmin, homeID: bootstrap.home?.id ?? "", userID: bootstrap.user.id, agents, tokens, alerts: [] });
-        await agentsClient.subscribeHealth();
+        void agentsClient.subscribeHealth().catch(() => {
+          // The periodic HTTP refresh keeps the workspace usable when live health is unavailable.
+        });
       } catch (error) {
         if (!active) return;
         if (error instanceof Error && /not found|404/i.test(error.message)) {
@@ -488,8 +536,8 @@ export function AgentsPage() {
 
   const ready = state.status === "ready" ? state : null;
   const selected = useMemo(
-    () => (ready && selectedID ? ready.agents.find((agent) => agent.agent_id === selectedID) ?? null : null),
-    [ready, selectedID],
+    () => (ready && initialAgentID ? ready.agents.find((agent) => agent.agent_id === initialAgentID) ?? null : null),
+    [initialAgentID, ready],
   );
 
   async function performAction(kind: "lock" | "restart" | "wake", agent: HomeAgentEntry) {
@@ -546,11 +594,12 @@ export function AgentsPage() {
     if (!ok) return;
     try {
       await homeClient.removeAgent(agent.agent_id);
-      setSelectedID(null);
       await refresh();
       const tokens = await homeClient.listAgentTokens().then((payload) => payload.tokens).catch(() => []);
       setState((current) => (current.status === "ready" ? { ...current, tokens } : current));
       showToast(`${agentDisplayName(agent)} removed`);
+      window.history.pushState({}, "", "/dashboard/agents");
+      window.dispatchEvent(new PopStateEvent("popstate"));
     } catch (error) {
       showToast(errorMessage(error), "error");
     }
@@ -608,7 +657,7 @@ export function AgentsPage() {
 
   return (
     <section className="dashboard-page agents-page" aria-labelledby="route-title">
-      <header className="dashboard-header">
+      {!selected ? <header className="dashboard-header">
         <div>
           <p className="eyebrow">Hank Remote</p>
           <h1 id="route-title">Agents</h1>
@@ -617,7 +666,7 @@ export function AgentsPage() {
         <div className="settings-actions">
           <button type="button" className="secondary" onClick={() => void refresh()}>Refresh</button>
         </div>
-      </header>
+      </header> : null}
 
       {state.alerts.length ? (
         <section className="agent-alerts" aria-label="Recent alerts">
@@ -635,18 +684,24 @@ export function AgentsPage() {
       ) : null}
 
       {selected ? (
-        <AgentDetail agent={selected} isAdmin={state.isAdmin} homeID={state.homeID} userID={state.userID} onBack={() => setSelectedID(null)} onAction={(kind, agent) => void performAction(kind, agent)} onRemove={(agent) => void removeAgent(agent)} />
+        <AgentDetail agent={selected} tab={state.isAdmin ? initialTab : "overview"} isAdmin={state.isAdmin} homeID={state.homeID} userID={state.userID} onAction={(kind, agent) => void performAction(kind, agent)} onRemove={(agent) => void removeAgent(agent)} />
+      ) : initialAgentID ? (
+        <section className="agent-panel">
+          <h2>Device not found</h2>
+          <p className="empty-state">This device is no longer registered or you no longer have access to it.</p>
+          <a className="button secondary" href="/dashboard/agents">Return to all devices</a>
+        </section>
       ) : state.agents.length ? (
         <div className="agent-grid">
           {state.agents.map((agent) => (
-            <AgentCard agent={agent} key={agent.agent_id} onOpen={() => setSelectedID(agent.agent_id)} />
+            <AgentCard agent={agent} key={agent.agent_id} />
           ))}
         </div>
       ) : (
         <p className="empty-state">No agents are registered yet. Create an enrollment token below to connect a device.</p>
       )}
 
-      {state.isAdmin && !selected ? (
+      {state.isAdmin && !initialAgentID ? (
         <TokenSection tokens={state.tokens} onCreate={createToken} onRevoke={(token) => void revokeToken(token)} />
       ) : null}
     </section>

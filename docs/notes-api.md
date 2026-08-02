@@ -145,7 +145,9 @@ Use this payload with `POST /v1/me/notes` and `PUT` note routes:
   "body_markdown": "# Project Plan\n\nInitial notes.",
   "body_format": "markdown",
   "expected_revision": "optional-current-revision",
-  "page_type": "text"
+  "page_type": "text",
+  "parent_id": "projects",
+  "pinned": true
 }
 ```
 
@@ -160,6 +162,7 @@ Fields:
 - `page_type`: `text`, `kanban`, or `notebook`; append is only supported for `text`.
 - `board`: kanban board payload when `page_type` is `kanban`.
 - `parent_id` and `sort_order`: optional hierarchy and ordering metadata. To place a note in a notebook, set `parent_id` to a note whose `page_type` is `notebook`. Send an empty `parent_id` to move it back out.
+- `pinned`: optional synced notebook pin. Only child notes can be pinned; root notes and notebooks are always stored as unpinned. Omission on update preserves the existing value for older clients. List and fetch responses return the current value.
 - `mcp_excluded`: optional MCP privacy marker. Omission on update preserves the existing value for older clients. MCP excludes marked notes and every child of a marked notebook; normal Notes APIs are unchanged.
 
 Successful saves return:

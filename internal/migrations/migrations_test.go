@@ -123,6 +123,42 @@ func TestNoteNotebookIntegrityMigrationDefinesDatabaseRules(t *testing.T) {
 	}
 }
 
+func TestNotePinningMigrationDefinesSyncedChildOnlyPins(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+
+	var body strings.Builder
+	for _, migration := range migrations {
+		if migration.Version != 27 {
+			continue
+		}
+		for _, statement := range migration.Statements {
+			body.WriteString(statement)
+			body.WriteByte('\n')
+		}
+	}
+	text := body.String()
+	if text == "" {
+		t.Fatal("migration 27 missing")
+	}
+	for _, required := range []string{
+		"pinned BOOLEAN NOT NULL DEFAULT FALSE",
+		"user_notes_pinned_child_check",
+		"NOT pinned",
+		"parent_id IS NOT NULL",
+		"page_type <> 'notebook'",
+		"idx_user_notes_owner_parent_pinned_updated",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("migration 27 missing %q in:\n%s", required, text)
+		}
+	}
+}
+
 func TestAgentTypeMigrationEnforcesOnePrimaryPerHome(t *testing.T) {
 	t.Parallel()
 

@@ -11,6 +11,20 @@ const message = (type: DesktopMessageType, value: unknown): DesktopInnerMessage 
 describe("DesktopViewerPage", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+  it("embeds in a device workspace without repeating the device heading", async () => {
+    render(<DesktopViewerPage embedded agentID="agent_1" dependencies={{
+      loadAccess: async () => ({ allowed: true, deviceID: "device_1", agentName: "Mac Studio" }),
+      supported: () => true,
+      create: vi.fn(),
+      reconnect: vi.fn(),
+      connect: vi.fn(),
+      terminate: vi.fn(),
+    }} />);
+
+    expect(await screen.findByText("Native console viewing")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Mac Studio", level: 1 })).not.toBeInTheDocument();
+  });
+
   it("keeps the session recoverable when the viewer page is hidden", async () => {
     const terminate = vi.fn().mockResolvedValue({});
     render(<DesktopViewerPage agentID="agent_exit" dependencies={{

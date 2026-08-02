@@ -50,6 +50,7 @@ type NoteSummary struct {
 	PageType    string    `json:"page_type,omitempty"`
 	ParentID    string    `json:"parent_id,omitempty"`
 	MCPExcluded bool      `json:"mcp_excluded"`
+	Pinned      bool      `json:"pinned"`
 	SortOrder   int       `json:"sort_order"`
 	BodyFormat  string    `json:"body_format,omitempty"`
 	OwnerUserID string    `json:"owner_user_id,omitempty"`
@@ -77,6 +78,7 @@ type NotesFetchResponse struct {
 	PageType     string           `json:"page_type,omitempty"`
 	ParentID     string           `json:"parent_id,omitempty"`
 	MCPExcluded  bool             `json:"mcp_excluded"`
+	Pinned       bool             `json:"pinned"`
 	SortOrder    int              `json:"sort_order"`
 	OwnerUserID  string           `json:"owner_user_id,omitempty"`
 	Shared       bool             `json:"shared,omitempty"`
@@ -120,6 +122,7 @@ type NotesSaveRequest struct {
 	PageType         string       `json:"page_type,omitempty"`
 	ParentID         *string      `json:"parent_id,omitempty"`
 	MCPExcluded      *bool        `json:"mcp_excluded,omitempty"`
+	Pinned           *bool        `json:"pinned,omitempty"`
 	SortOrder        *int         `json:"sort_order,omitempty"`
 	Board            *KanbanBoard `json:"board,omitempty"`
 }

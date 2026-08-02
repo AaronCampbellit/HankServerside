@@ -891,6 +891,7 @@ describe("App routes", () => {
         mcp_excluded: false,
         page_type: "text",
         parent_id: "",
+        pinned: false,
       },
     }));
 
@@ -913,6 +914,7 @@ describe("App routes", () => {
         mcp_excluded: false,
         page_type: "text",
         parent_id: "",
+        pinned: false,
       },
     }));
 

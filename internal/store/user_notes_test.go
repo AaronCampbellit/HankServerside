@@ -54,6 +54,7 @@ func TestUserNotesStoreFullMetadataAndPostgresNotify(t *testing.T) {
 		NoteID:        "child.md",
 		OwnerUserID:   user.ID,
 		ParentID:      "parent.md",
+		Pinned:        true,
 		SortOrder:     7,
 		Title:         "Child",
 		Content:       "# Child",
@@ -85,8 +86,8 @@ func TestUserNotesStoreFullMetadataAndPostgresNotify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProfileNote: %v", err)
 	}
-	if fetched.ParentID != "parent.md" || fetched.SortOrder != 7 || fetched.BodyMarkdown != "# Child" || fetched.BodyFormat != "markdown" {
-		t.Fatalf("metadata = parent:%q order:%d markdown:%q format:%q", fetched.ParentID, fetched.SortOrder, fetched.BodyMarkdown, fetched.BodyFormat)
+	if fetched.ParentID != "parent.md" || !fetched.Pinned || fetched.SortOrder != 7 || fetched.BodyMarkdown != "# Child" || fetched.BodyFormat != "markdown" {
+		t.Fatalf("metadata = parent:%q pinned:%t order:%d markdown:%q format:%q", fetched.ParentID, fetched.Pinned, fetched.SortOrder, fetched.BodyMarkdown, fetched.BodyFormat)
 	}
 
 	select {

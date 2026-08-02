@@ -40,6 +40,7 @@ type collabState struct {
 	Title         collabScalar          `json:"title"`
 	PageType      collabScalar          `json:"page_type"`
 	ParentID      collabScalar          `json:"parent_id"`
+	Pinned        bool                  `json:"pinned"`
 	SortOrder     int                   `json:"sort_order"`
 	Content       string                `json:"content"`
 	Board         *protocol.KanbanBoard `json:"board,omitempty"`
@@ -470,6 +471,7 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 		Title:         collabScalar{Value: title, Version: existing.CollabVersion + 1, UserID: actorUserID},
 		PageType:      collabScalar{Value: pageType, Version: existing.CollabVersion + 1, UserID: actorUserID},
 		ParentID:      collabScalar{Value: parentID, Version: existing.CollabVersion, UserID: actorUserID},
+		Pinned:        existing.Pinned,
 		SortOrder:     existing.SortOrder,
 		Content:       content,
 		Board:         board,
@@ -480,6 +482,12 @@ func (s *cloudNotesService) save(ctx context.Context, homeID string, actorUserID
 	}
 	if request.SortOrder != nil {
 		state.SortOrder = *request.SortOrder
+	}
+	if request.Pinned != nil {
+		state.Pinned = *request.Pinned
+	}
+	if parentID == "" || pageType == protocol.NotePageTypeNotebook {
+		state.Pinned = false
 	}
 	now := nowUTC()
 	updated, operationJSON, err := materializeNoteFromState(existing, state, actorUserID, now)
@@ -610,6 +618,7 @@ func noteSummary(note domain.UserNote) protocol.NoteSummary {
 		PageType:    note.PageType,
 		ParentID:    note.ParentID,
 		MCPExcluded: note.MCPExcluded,
+		Pinned:      note.Pinned,
 		SortOrder:   note.SortOrder,
 		BodyFormat:  noteBodyFormat(note),
 		OwnerUserID: note.OwnerUserID,
@@ -639,6 +648,7 @@ func noteFetch(note domain.UserNote) (protocol.NotesFetchResponse, error) {
 		PageType:     note.PageType,
 		ParentID:     note.ParentID,
 		MCPExcluded:  note.MCPExcluded,
+		Pinned:       note.Pinned,
 		SortOrder:    note.SortOrder,
 		OwnerUserID:  note.OwnerUserID,
 		Shared:       note.HomeID != "",
@@ -679,6 +689,7 @@ func appendRequestForNote(note domain.UserNote, request protocol.NotesAppendRequ
 		ExpectedRevision: request.ExpectedRevision,
 		PageType:         protocol.NotePageTypeText,
 		MCPExcluded:      boolPointer(note.MCPExcluded),
+		Pinned:           boolPointer(note.Pinned),
 	}, nil
 }
 
@@ -721,6 +732,9 @@ func decodeCollabState(note domain.UserNote) (collabState, error) {
 			if state.SortOrder == 0 {
 				state.SortOrder = note.SortOrder
 			}
+			if !state.Pinned {
+				state.Pinned = note.Pinned
+			}
 			if state.Board == nil && strings.TrimSpace(note.BoardJSON) != "" {
 				var board protocol.KanbanBoard
 				if err := json.Unmarshal([]byte(note.BoardJSON), &board); err == nil {
@@ -744,6 +758,7 @@ func decodeCollabState(note domain.UserNote) (collabState, error) {
 		Title:         collabScalar{Value: note.Title, Version: note.CollabVersion},
 		PageType:      collabScalar{Value: normalizePageType(note.PageType), Version: note.CollabVersion},
 		ParentID:      collabScalar{Value: note.ParentID, Version: note.CollabVersion},
+		Pinned:        note.Pinned,
 		SortOrder:     note.SortOrder,
 		Content:       noteBodyText(note),
 		Board:         board,
@@ -766,6 +781,9 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 		return domain.UserNote{}, "", err
 	}
 	content := state.Content
+	if strings.TrimSpace(state.ParentID.Value) == "" || pageType == protocol.NotePageTypeNotebook {
+		state.Pinned = false
+	}
 	if pageType == protocol.NotePageTypeNotebook {
 		content = ""
 	}
@@ -782,6 +800,7 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 		"board":      boardJSON,
 		"title":      strings.TrimSpace(state.Title.Value),
 		"parent_id":  strings.TrimSpace(state.ParentID.Value),
+		"pinned":     state.Pinned,
 		"sort_order": state.SortOrder,
 	})
 	if err != nil {
@@ -793,6 +812,7 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 		base.Title = titleFromNoteID(base.NoteID)
 	}
 	base.ParentID = strings.TrimSpace(state.ParentID.Value)
+	base.Pinned = state.Pinned
 	base.SortOrder = state.SortOrder
 	base.Content = content
 	base.BodyMarkdown = content
@@ -815,6 +835,7 @@ func materializeNoteFromState(base domain.UserNote, state collabState, updatedBy
 		"body_markdown": base.BodyMarkdown,
 		"page_type":     base.PageType,
 		"parent_id":     base.ParentID,
+		"pinned":        base.Pinned,
 		"sort_order":    base.SortOrder,
 		"board":         state.Board,
 	})

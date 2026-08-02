@@ -17,6 +17,7 @@ describe("ProfileNotesClient", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
     });
     await client.saveNote({
       note_id: "daily.md",
@@ -26,6 +27,7 @@ describe("ProfileNotesClient", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: true,
+      pinned: true,
     });
     await client.deleteNote("daily.md");
 
@@ -43,6 +45,7 @@ describe("ProfileNotesClient", () => {
         page_type: "text",
         parent_id: "",
         mcp_excluded: false,
+        pinned: false,
       },
     });
     expect(request).toHaveBeenNthCalledWith(4, "/v1/me/notes/daily.md", {
@@ -57,6 +60,7 @@ describe("ProfileNotesClient", () => {
         page_type: "text",
         parent_id: "",
         mcp_excluded: true,
+        pinned: true,
       },
     });
     expect(request).toHaveBeenNthCalledWith(5, "/v1/me/notes/daily.md", { method: "DELETE" });

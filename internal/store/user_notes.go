@@ -9,9 +9,9 @@ import (
 	"github.com/dropfile/hankremote/internal/domain"
 )
 
-const userNoteColumns = `id, note_id, owner_user_id, home_id, parent_id, mcp_excluded, sort_order, title, body_markdown, body_format, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by`
+const userNoteColumns = `id, note_id, owner_user_id, home_id, parent_id, mcp_excluded, pinned, sort_order, title, body_markdown, body_format, page_type, board_json, revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by`
 
-const userNoteColumnsWithUN = `un.id, un.note_id, un.owner_user_id, un.home_id, un.parent_id, un.mcp_excluded, un.sort_order, un.title, un.body_markdown, un.body_format, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by`
+const userNoteColumnsWithUN = `un.id, un.note_id, un.owner_user_id, un.home_id, un.parent_id, un.mcp_excluded, un.pinned, un.sort_order, un.title, un.body_markdown, un.body_format, un.page_type, un.board_json, un.revision, un.checksum, un.crdt_state_json, un.collab_version, un.deleted_at, un.created_at, un.updated_at, un.updated_by`
 
 func txRecordExists(ctx context.Context, tx *dbTx, query string, args ...any) (bool, error) {
 	row := tx.QueryRowContext(ctx, query, args...)
@@ -147,15 +147,16 @@ func (s *Store) GetOwnedHomeNote(ctx context.Context, homeID string, ownerUserID
 
 func (s *Store) UpsertUserNote(ctx context.Context, note domain.UserNote) error {
 	_, err := s.exec(ctx, `INSERT INTO user_notes (
-			id, note_id, owner_user_id, home_id, parent_id, mcp_excluded, sort_order, title, body_markdown, body_format, page_type, board_json,
+			id, note_id, owner_user_id, home_id, parent_id, mcp_excluded, pinned, sort_order, title, body_markdown, body_format, page_type, board_json,
 			revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			note_id = excluded.note_id,
 			owner_user_id = excluded.owner_user_id,
 			home_id = excluded.home_id,
 			parent_id = excluded.parent_id,
 			mcp_excluded = excluded.mcp_excluded,
+			pinned = excluded.pinned,
 			sort_order = excluded.sort_order,
 			title = excluded.title,
 			body_markdown = excluded.body_markdown,
@@ -175,6 +176,7 @@ func (s *Store) UpsertUserNote(ctx context.Context, note domain.UserNote) error 
 		nullableText(note.HomeID),
 		nullableText(note.ParentID),
 		note.MCPExcluded,
+		note.Pinned,
 		note.SortOrder,
 		note.Title,
 		noteBodyMarkdown(note),
@@ -205,15 +207,16 @@ func (s *Store) saveUserNoteWithOperations(ctx context.Context, note domain.User
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_notes (
-				id, note_id, owner_user_id, home_id, parent_id, mcp_excluded, sort_order, title, body_markdown, body_format, page_type, board_json,
+				id, note_id, owner_user_id, home_id, parent_id, mcp_excluded, pinned, sort_order, title, body_markdown, body_format, page_type, board_json,
 				revision, checksum, crdt_state_json, collab_version, deleted_at, created_at, updated_at, updated_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				note_id = excluded.note_id,
 				owner_user_id = excluded.owner_user_id,
 				home_id = excluded.home_id,
 				parent_id = excluded.parent_id,
 				mcp_excluded = excluded.mcp_excluded,
+				pinned = excluded.pinned,
 				sort_order = excluded.sort_order,
 				title = excluded.title,
 				body_markdown = excluded.body_markdown,
@@ -233,6 +236,7 @@ func (s *Store) saveUserNoteWithOperations(ctx context.Context, note domain.User
 		nullableText(note.HomeID),
 		nullableText(note.ParentID),
 		note.MCPExcluded,
+		note.Pinned,
 		note.SortOrder,
 		note.Title,
 		noteBodyMarkdown(note),
@@ -422,6 +426,7 @@ func scanUserNote(scanner interface{ Scan(dest ...any) error }) (domain.UserNote
 		&homeID,
 		&parentID,
 		&note.MCPExcluded,
+		&note.Pinned,
 		&note.SortOrder,
 		&note.Title,
 		&note.BodyMarkdown,

@@ -93,6 +93,67 @@ func TestProfileNotesKanbanWorkflowMetadataRoundTrips(t *testing.T) {
 	}
 }
 
+func TestProfileNotesNotebookPinningRoundTripsAndRejectsInvalidTargets(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := storeForTest(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{ID: "usr_note_pinning", Email: "note-pinning@example.com", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}
+	token := "note-pinning-token"
+	must(t, db.CreateUser(ctx, user))
+	must(t, db.CreateSession(ctx, domain.AppSession{ID: "sess_note_pinning", UserID: user.ID, TokenHash: hashToken(token), ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+
+	server := NewServer("127.0.0.1:0", db, time.Hour, 5*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	testServer := httptest.NewServer(server.http.Handler)
+	defer testServer.Close()
+
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id": "projects", "title": "Projects", "page_type": "notebook", "pinned": true,
+	}, nil)
+
+	parentID := "projects"
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id": "pinned.md", "title": "Pinned", "page_type": "text", "parent_id": parentID, "pinned": true,
+	}, nil)
+	requestJSON(t, testServer, token, http.MethodPost, "/v1/me/notes", map[string]any{
+		"note_id": "root.md", "title": "Root", "page_type": "text", "pinned": true,
+	}, nil)
+
+	var child protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/pinned.md", nil, &child)
+	if !child.Pinned {
+		t.Fatal("notebook child pinned = false, want true")
+	}
+
+	var notebook protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/projects", nil, &notebook)
+	if notebook.Pinned {
+		t.Fatal("notebook pinned = true, want false")
+	}
+
+	var root protocol.NotesFetchResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes/root.md", nil, &root)
+	if root.Pinned {
+		t.Fatal("root note pinned = true, want false")
+	}
+
+	var list protocol.NotesListResponse
+	requestJSON(t, testServer, token, http.MethodGet, "/v1/me/notes", nil, &list)
+	foundPinned := false
+	for _, note := range list.Notes {
+		if note.ID == "pinned.md" {
+			foundPinned = note.Pinned
+		}
+	}
+	if !foundPinned {
+		t.Fatal("profile notes list omitted pinned child state")
+	}
+}
+
 func TestExternalProfileNotesAPIReadSearchTagsAndAppend(t *testing.T) {
 	t.Parallel()
 

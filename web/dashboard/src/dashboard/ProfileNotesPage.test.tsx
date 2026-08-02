@@ -511,6 +511,90 @@ describe("ProfileNotesPage", () => {
     expect(screen.getByLabelText("Notebook")).toHaveValue("house");
   });
 
+  it("sorts pinned notebook notes first and synchronizes pin controls", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "house", title: "House Notebook", preview: "3 pages", page_type: "notebook", updated_at: "2026-07-31T09:00:00Z" },
+        { note_id: "alpha", title: "Alpha", preview: "First", page_type: "text", parent_id: "house", pinned: false, updated_at: "2026-07-31T12:00:00Z" },
+        { note_id: "pinned", title: "Pinned Guide", preview: "Important", page_type: "text", parent_id: "house", pinned: true, updated_at: "2026-07-31T10:00:00Z" },
+        { note_id: "beta", title: "Beta", preview: "Second", page_type: "text", parent_id: "house", pinned: false, updated_at: "2026-07-31T11:00:00Z" },
+        { note_id: "daily", title: "Daily", preview: "Root", page_type: "text", pinned: false, updated_at: "2026-07-31T08:00:00Z" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "alpha" ? "Alpha" : id === "beta" ? "Beta" : id === "pinned" ? "Pinned Guide" : id === "house" ? "House Notebook" : "Daily",
+      body_markdown: id === "house" ? "" : `Body for ${id}`,
+      revision: "1",
+      page_type: id === "house" ? "notebook" : "text",
+      parent_id: ["alpha", "beta", "pinned"].includes(id) ? "house" : "",
+      pinned: id === "pinned",
+      mcp_excluded: false,
+    }));
+    profileNotesClient.saveNote.mockResolvedValue({ note_id: "beta", revision: "2", updated_at: "2026-07-31T13:00:00Z" });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Pin note" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pin Daily" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
+    const notebookPages = await screen.findByLabelText("Notebook pages");
+    const notebookPageOrder = within(notebookPages).getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => ["Open Pinned Guide", "Open Alpha", "Open Beta"].includes(label || ""));
+    expect(notebookPageOrder).toEqual(["Open Pinned Guide", "Open Alpha", "Open Beta"]);
+    fireEvent.change(screen.getByLabelText("Notebook filter"), { target: { value: "house" } });
+
+    const noteCards = screen.getByLabelText("Note cards");
+    const noteOrder = within(noteCards).getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => ["Pinned Guide", "Alpha", "Beta"].includes(label || ""));
+    expect(noteOrder).toEqual(["Pinned Guide", "Alpha", "Beta"]);
+    expect(screen.getByRole("button", { name: "Unpin Pinned Guide" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin Beta" }));
+
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
+      note_id: "beta",
+      expected_revision: "1",
+      parent_id: "house",
+      pinned: true,
+    })));
+    const updatedOrder = within(noteCards).getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => ["Pinned Guide", "Alpha", "Beta"].includes(label || ""));
+    expect(updatedOrder).toEqual(["Beta", "Pinned Guide", "Alpha"]);
+    expect(screen.getByRole("button", { name: "Unpin Beta" })).toBeInTheDocument();
+  });
+
+  it("keeps notebook ordering unchanged when pinning fails", async () => {
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "house", title: "House Notebook", preview: "1 page", page_type: "notebook", updated_at: "2026-07-31T09:00:00Z" },
+        { note_id: "roof", title: "Roof Warranty", preview: "Expires 2027", page_type: "text", parent_id: "house", pinned: false, updated_at: "2026-07-31T10:00:00Z" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "house" ? "House Notebook" : "Roof Warranty",
+      body_markdown: id === "house" ? "" : "Expires in 2027",
+      revision: "1",
+      page_type: id === "house" ? "notebook" : "text",
+      parent_id: id === "roof" ? "house" : "",
+      pinned: false,
+      mcp_excluded: false,
+    }));
+    profileNotesClient.saveNote.mockRejectedValue(new Error("Pin save failed"));
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Notebook filter"), { target: { value: "house" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pin Roof Warranty" }));
+
+    expect(await screen.findByText("Pin save failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pin Roof Warranty" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Unpin Roof Warranty" })).not.toBeInTheDocument();
+  });
+
   it("lets people type into a text note and save the changed body", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
@@ -544,6 +628,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     });
   });
 
@@ -607,6 +693,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     });
   });
 
@@ -770,6 +858,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "house",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     }));
   });
 
@@ -802,6 +892,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "family",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     }));
   });
 
@@ -836,6 +928,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: true,
+      pinned: false,
+      board: undefined,
     }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Include in MCP" }));
@@ -848,6 +942,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     }));
   });
 
@@ -943,6 +1039,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "work",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     });
   });
 
@@ -981,6 +1079,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     });
     expect(screen.queryByText("Note saved.")).not.toBeInTheDocument();
   });
@@ -1018,6 +1118,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     }));
     expect(profileNotesClient.saveNote.mock.invocationCallOrder[0]).toBeLessThan(profileNotesClient.fetchNote.mock.invocationCallOrder[0]);
   });
@@ -1051,6 +1153,8 @@ describe("ProfileNotesPage", () => {
       page_type: "text",
       parent_id: "",
       mcp_excluded: false,
+      pinned: false,
+      board: undefined,
     });
   });
 

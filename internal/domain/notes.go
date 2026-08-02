@@ -9,6 +9,7 @@ type UserNote struct {
 	HomeID        string     `json:"home_id,omitempty"`
 	ParentID      string     `json:"parent_id,omitempty"`
 	MCPExcluded   bool       `json:"mcp_excluded"`
+	Pinned        bool       `json:"pinned"`
 	SortOrder     int        `json:"sort_order"`
 	Title         string     `json:"title"`
 	Content       string     `json:"content"`

@@ -10,6 +10,7 @@ export type ProfileNoteSummary = {
   updated_at?: string;
   page_type?: "text" | "kanban" | "notebook" | string;
   parent_id?: string;
+  pinned?: boolean;
   shared?: boolean;
   mcp_excluded?: boolean;
 };
@@ -69,6 +70,7 @@ export type SaveProfileNoteInput = {
   expected_revision: string;
   page_type: string;
   parent_id: string;
+  pinned?: boolean;
   mcp_excluded?: boolean;
   board?: KanbanBoard | null;
 };
@@ -105,6 +107,7 @@ export class ProfileNotesClient {
       expected_revision: input.expected_revision,
       page_type: input.page_type,
       parent_id: input.parent_id,
+      pinned: Boolean(input.pinned),
       mcp_excluded: Boolean(input.mcp_excluded),
     };
     if (input.page_type === "kanban") body.board = input.board || { columns: [] };
