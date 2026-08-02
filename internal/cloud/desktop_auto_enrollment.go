@@ -161,26 +161,45 @@ func signServerDesktopIdentity(key *ecdsa.PrivateKey, root domain.DesktopTrustRo
 }
 
 func (s *Server) installServerDesktopIdentity(r *http.Request, home domain.Home, auth authContext, root domain.DesktopTrustRoot, key *ecdsa.PrivateKey, identity domain.DesktopIdentity, event string) (domain.DesktopIdentity, error) {
-	signed, err := signServerDesktopIdentity(key, root, identity)
-	if err != nil {
-		return domain.DesktopIdentity{}, err
-	}
+	identity.Fingerprint = desktopcrypto.FingerprintSPKI(identity.PublicKeySPKI)
+	identity.TrustRootGeneration = root.Generation
 	var existing domain.DesktopIdentity
-	if signed.IdentityType == domain.DesktopIdentityOperatorDevice {
-		existing, err = s.store.GetActiveDesktopOperatorIdentity(r.Context(), home.ID, signed.UserID, signed.DeviceID, time.Now().UTC())
+	var err error
+	if identity.IdentityType == domain.DesktopIdentityOperatorDevice {
+		existing, err = s.store.GetCurrentDesktopOperatorIdentity(r.Context(), home.ID, identity.DeviceID)
 	} else {
-		existing, err = s.store.GetActiveDesktopEndpointIdentity(r.Context(), home.ID, signed.AgentID, time.Now().UTC())
+		existing, err = s.store.GetCurrentDesktopEndpointIdentity(r.Context(), home.ID, identity.AgentID)
 	}
 	if err == nil {
-		if sameDesktopIdentityEnrollment(existing, signed) {
+		if sameDesktopIdentityEnrollment(existing, identity) {
 			return existing, nil
 		}
-		sessions, replaceErr := s.store.ReplaceDesktopIdentity(r.Context(), existing.ID, signed, time.Now().UTC(), "identity_refreshed")
+		sameKey := existing.Fingerprint == identity.Fingerprint && bytes.Equal(existing.PublicKeySPKI, identity.PublicKeySPKI)
+		if sameKey {
+			identity.ID = existing.ID
+		}
+		signed, signErr := signServerDesktopIdentity(key, root, identity)
+		if signErr != nil {
+			return domain.DesktopIdentity{}, signErr
+		}
+		var sessions []string
+		var replaceErr error
+		if sameKey {
+			sessions, replaceErr = s.store.RefreshDesktopIdentity(r.Context(), existing.ID, signed, time.Now().UTC(), "identity_refreshed")
+		} else {
+			sessions, replaceErr = s.store.ReplaceDesktopIdentity(r.Context(), existing.ID, signed, time.Now().UTC(), "identity_refreshed")
+		}
 		if replaceErr != nil {
 			return domain.DesktopIdentity{}, replaceErr
 		}
 		s.revokeDesktopRelays(sessions, "identity_refreshed")
+		s.auditDesktopIdentity(r, auth, home.ID, event, signed, "server_managed")
+		return signed, nil
 	} else if errors.Is(err, store.ErrNotFound) {
+		signed, signErr := signServerDesktopIdentity(key, root, identity)
+		if signErr != nil {
+			return domain.DesktopIdentity{}, signErr
+		}
 		if err := s.store.CreateDesktopIdentity(r.Context(), signed); err != nil {
 			// Browser bootstrap and the viewer can both ask for enrollment while
 			// the page is loading. A concurrent request with the same protected
@@ -192,11 +211,11 @@ func (s *Server) installServerDesktopIdentity(r *http.Request, home domain.Home,
 			}
 			return domain.DesktopIdentity{}, err
 		}
+		s.auditDesktopIdentity(r, auth, home.ID, event, signed, "server_managed")
+		return signed, nil
 	} else {
 		return domain.DesktopIdentity{}, err
 	}
-	s.auditDesktopIdentity(r, auth, home.ID, event, signed, "server_managed")
-	return signed, nil
 }
 
 func sameDesktopIdentityEnrollment(existing, candidate domain.DesktopIdentity) bool {

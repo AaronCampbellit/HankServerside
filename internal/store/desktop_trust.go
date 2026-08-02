@@ -131,12 +131,30 @@ func (s *Store) GetActiveDesktopOperatorIdentity(ctx context.Context, homeID, us
 	return scanDesktopIdentity(row)
 }
 
+func (s *Store) GetCurrentDesktopOperatorIdentity(ctx context.Context, homeID, deviceID string) (domain.DesktopIdentity, error) {
+	row := s.queryRow(ctx, `SELECT `+desktopIdentityColumns+`
+		FROM desktop_identities
+		WHERE home_id = ? AND device_id = ?
+			AND identity_type = 'operator_device' AND revoked_at IS NULL`,
+		homeID, deviceID)
+	return scanDesktopIdentity(row)
+}
+
 func (s *Store) GetActiveDesktopEndpointIdentity(ctx context.Context, homeID, agentID string, now time.Time) (domain.DesktopIdentity, error) {
 	row := s.queryRow(ctx, `SELECT `+desktopIdentityColumns+`
 		FROM desktop_identities
 		WHERE home_id = ? AND agent_id = ?
 			AND identity_type = 'endpoint' AND revoked_at IS NULL AND expires_at > ?`,
 		homeID, agentID, now)
+	return scanDesktopIdentity(row)
+}
+
+func (s *Store) GetCurrentDesktopEndpointIdentity(ctx context.Context, homeID, agentID string) (domain.DesktopIdentity, error) {
+	row := s.queryRow(ctx, `SELECT `+desktopIdentityColumns+`
+		FROM desktop_identities
+		WHERE home_id = ? AND agent_id = ?
+			AND identity_type = 'endpoint' AND revoked_at IS NULL`,
+		homeID, agentID)
 	return scanDesktopIdentity(row)
 }
 
@@ -266,6 +284,42 @@ func (s *Store) ReplaceDesktopIdentity(ctx context.Context, previousID string, r
 		return nil, ErrNotFound
 	}
 	if err := insertDesktopIdentity(ctx, tx, replacement); err != nil {
+		return nil, mapDesktopStoreError(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, mapDesktopStoreError(err)
+	}
+	return sessionIDs, nil
+}
+
+func (s *Store) RefreshDesktopIdentity(ctx context.Context, previousID string, replacement domain.DesktopIdentity, changedAt time.Time, reason string) ([]string, error) {
+	if err := validateDesktopIdentity(replacement); err != nil {
+		return nil, err
+	}
+	if previousID == "" || replacement.ID != previousID || changedAt.IsZero() || reason == "" {
+		return nil, errors.New("invalid desktop identity refresh")
+	}
+	tx, err := s.beginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	sessionIDs, changed, err := revokeDesktopIdentityTx(ctx, tx, replacement.HomeID, previousID, reason, changedAt)
+	if err != nil {
+		return nil, err
+	}
+	if !changed {
+		return nil, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE desktop_identities SET
+			user_id = ?, device_id = ?, agent_id = ?, public_key_spki = ?, certificate = ?,
+			fingerprint = ?, capabilities = ?, trust_root_generation = ?, created_at = ?,
+			expires_at = ?, revoked_at = NULL, revocation_reason = NULL, auth_session_id = ?
+		WHERE home_id = ? AND id = ?`,
+		nilIfEmptyString(replacement.UserID), nilIfEmptyString(replacement.DeviceID), nilIfEmptyString(replacement.AgentID),
+		replacement.PublicKeySPKI, replacement.Certificate, replacement.Fingerprint, replacement.Capabilities,
+		replacement.TrustRootGeneration, replacement.CreatedAt, replacement.ExpiresAt, nilIfEmptyString(replacement.AuthSessionID),
+		replacement.HomeID, previousID); err != nil {
 		return nil, mapDesktopStoreError(err)
 	}
 	if err := tx.Commit(); err != nil {

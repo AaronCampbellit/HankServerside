@@ -155,6 +155,10 @@ func TestDesktopIdentityValidationAndTrustConflicts(t *testing.T) {
 	if _, err := db.GetActiveDesktopOperatorIdentity(ctx, home.ID, user.ID, operator.DeviceID, operator.ExpiresAt); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired identity lookup = %v, want ErrNotFound", err)
 	}
+	current, err := db.GetCurrentDesktopOperatorIdentity(ctx, home.ID, operator.DeviceID)
+	if err != nil || current.ID != operator.ID {
+		t.Fatalf("current expired identity = %#v, err=%v", current, err)
+	}
 	if err := db.ReplaceDesktopRecoveryEnvelope(ctx, home.ID, 2, []byte("replacement"), now.Add(time.Minute)); !errors.Is(err, ErrConflict) {
 		t.Fatalf("wrong-generation envelope replacement = %v, want ErrConflict", err)
 	}
