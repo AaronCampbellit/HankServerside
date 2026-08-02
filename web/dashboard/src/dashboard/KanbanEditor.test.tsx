@@ -198,6 +198,18 @@ describe("KanbanEditor", () => {
     expect(screen.queryByRole("button", { name: "Open task Review brief" })).not.toBeInTheDocument();
   });
 
+  it("adds a new task at the top of its column with normalized ordering", () => {
+    const { change } = Harness({});
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Add task to Inbox" })[0]);
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Newest task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+
+    const latestCards = change.mock.calls.at(-1)?.[0].columns?.find((column) => column.id === "inbox")?.cards;
+    expect(latestCards?.map((card) => card.text?.split("\n", 1)[0])).toEqual(["Newest task", "Review brief"]);
+    expect(latestCards?.map((card) => card.sort_order)).toEqual([0, 1]);
+  });
+
   it("keeps a cleared task title empty until the user enters its replacement", () => {
     Harness({});
 

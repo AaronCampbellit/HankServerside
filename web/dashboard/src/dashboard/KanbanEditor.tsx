@@ -243,7 +243,10 @@ export function KanbanEditor({
     const title = taskDraft.trim();
     if (!title) return;
     const card: KanbanCard = { id: uniqueID("card"), text: title, sort_order: 0 };
-    updateColumn(columnID, (column) => ({ ...column, cards: [...ordered(column.cards), card] }));
+    updateColumn(columnID, (column) => ({
+      ...column,
+      cards: [card, ...ordered(column.cards)].map((item, sortOrder) => ({ ...item, sort_order: sortOrder })),
+    }));
     setTaskDraft("");
     setAddingColumnID("");
   }
