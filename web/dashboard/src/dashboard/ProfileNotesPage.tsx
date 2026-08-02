@@ -73,6 +73,8 @@ const ROOT_NOTEBOOK_FILTER = "__root__";
 const NOTE_AUTOSAVE_DELAY_MS = 750;
 const NOTE_HISTORY_GROUP_DELAY_MS = 750;
 const NOTE_HISTORY_LIMIT = 50;
+const RECENT_NOTE_WINDOW_MS = 12 * 60 * 60 * 1000;
+const RECENT_NOTES_STORAGE_KEY = "hank.profile-notes.recently-opened";
 
 type HistoryActionKind = "typing" | "deletion" | "paste" | "formatting";
 
@@ -90,6 +92,25 @@ type PendingSave = {
   editor: Editor;
   background: boolean;
 };
+
+function loadRecentNoteVisits(now = Date.now()): Record<string, number> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(RECENT_NOTES_STORAGE_KEY) || "{}") as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(parsed).filter(([, visitedAt]) => (
+      typeof visitedAt === "number" && visitedAt <= now && now - visitedAt <= RECENT_NOTE_WINDOW_MS
+    ))) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function storeRecentNoteVisits(visits: Record<string, number>) {
+  try {
+    window.localStorage.setItem(RECENT_NOTES_STORAGE_KEY, JSON.stringify(visits));
+  } catch {
+    // Recent navigation is an enhancement; storage restrictions must not block Notes.
+  }
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Profile notes could not be loaded.";
@@ -303,6 +324,7 @@ export function ProfileNotesPage() {
   const [moreFormattingOpen, setMoreFormattingOpen] = useState(false);
   const [profileSettings, setProfileSettings] = useState<ProfileSettingsResponse>({ revision: 0, settings: {} });
   const [history, setHistory] = useState<HistoryState>({ past: [], future: [] });
+  const [recentNoteVisits, setRecentNoteVisits] = useState<Record<string, number>>(() => loadRecentNoteVisits());
   const bodyInputRef = useRef<HTMLDivElement>(null);
   const lastRenderedBodyRef = useRef("");
   const lastHistoryActionRef = useRef<{ action: HistoryActionKind; at: number } | null>(null);
@@ -329,7 +351,12 @@ export function ProfileNotesPage() {
     if (state.status !== "ready") return;
     latestEditorRef.current = state.editor;
     latestSavedEditorRef.current = state.savedEditor;
-    if (state.editor.pageType !== "text") return;
+    if (state.editor.pageType !== "text") {
+      // Non-text pages unmount the editable body. Reset the render cache so a
+      // later text-page mount is painted even when its Markdown is unchanged.
+      lastRenderedBodyRef.current = "";
+      return;
+    }
     const node = bodyInputRef.current;
     if (!node || lastRenderedBodyRef.current === state.editor.body) return;
     node.innerHTML = markdownToHTML(state.editor.body);
@@ -403,19 +430,28 @@ export function ProfileNotesPage() {
     }
   }
 
-  const visibleNotes = useMemo(() => {
-    if (state.status !== "ready") return [];
+  const navigationNotes = useMemo(() => {
+    if (state.status !== "ready") return { primary: [], recent: [] };
     const query = state.query.trim().toLowerCase();
-    let notes = state.notes;
+    let primary: ProfileNoteSummary[];
+    let recent: ProfileNoteSummary[] = [];
     if (state.selectedNotebookID === ROOT_NOTEBOOK_FILTER) {
-      notes = notes.filter((note) => !note.parent_id && !isNotebook(note));
+      primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
     } else if (state.selectedNotebookID) {
-      notes = notes.filter((note) => note.parent_id === state.selectedNotebookID);
+      primary = state.notes.filter((note) => note.parent_id === state.selectedNotebookID);
     } else {
-      notes = notes.filter((note) => !isNotebook(note));
+      primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
+      const cutoff = Date.now() - RECENT_NOTE_WINDOW_MS;
+      recent = state.notes
+        .filter((note) => Boolean(note.parent_id) && !isNotebook(note) && (recentNoteVisits[noteID(note)] || 0) >= cutoff)
+        .sort((left, right) => (recentNoteVisits[noteID(right)] || 0) - (recentNoteVisits[noteID(left)] || 0));
     }
-    return notes.filter((note) => noteMatchesQuery(note, state.notes, query));
-  }, [state]);
+    return {
+      primary: primary.filter((note) => noteMatchesQuery(note, state.notes, query)),
+      recent: recent.filter((note) => noteMatchesQuery(note, state.notes, query)),
+    };
+  }, [recentNoteVisits, state]);
+  const visibleNotes = [...navigationNotes.primary, ...navigationNotes.recent];
 
   if (state.status === "loading") {
     return (
@@ -489,10 +525,24 @@ export function ProfileNotesPage() {
     lastHistoryActionRef.current = null;
   }
 
+  function rememberRecentNote(note: ProfileNoteSummary) {
+    const id = noteID(note);
+    if (!id || isNotebook(note)) return;
+    const now = Date.now();
+    setRecentNoteVisits((current) => {
+      const cutoff = now - RECENT_NOTE_WINDOW_MS;
+      const next = Object.fromEntries(Object.entries(current).filter(([, visitedAt]) => visitedAt >= cutoff));
+      next[id] = now;
+      storeRecentNoteVisits(next);
+      return next;
+    });
+  }
+
   async function selectNote(id: string) {
     flushAutosave();
     try {
       const note = await profileNotesClient.fetchNote(id);
+      rememberRecentNote(note);
       resetHistory();
       const editor = editorFromNote(note);
       latestEditorRef.current = editor;
@@ -1026,6 +1076,36 @@ export function ProfileNotesPage() {
     }
   }
 
+  function renderNoteRows(notes: ProfileNoteSummary[]) {
+    return notes.map((note) => {
+      const id = noteID(note);
+      const title = noteTitle(note);
+      const parentTitle = notebookTitle(readyState.notes, note.parent_id);
+      const excluded = noteEffectiveMcpExcluded(note, readyState.notes);
+      return (
+        <div className="notes-guide-row" key={id} onMouseEnter={revealRowActions} onMouseLeave={hideRowActions}>
+          <button
+            aria-label={title}
+            className={`${id === readyState.selectedID ? "notes-guide-item active" : "notes-guide-item"}${excluded ? " is-mcp-excluded" : ""}`}
+            onClick={() => void selectNote(id)}
+            type="button"
+          >
+            <span className="notes-guide-icon" aria-hidden="true"><Icon name={noteIconName(note)} /></span>
+            <span className="notes-guide-copy">
+              <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
+              <span>{note.preview || "No preview"}</span>
+              <span className="notes-tag-row"><em className="notes-tag">{parentTitle || noteTag(note)}</em><small>{updatedLabel(note)}</small></span>
+            </span>
+          </button>
+          <div className="notes-row-actions" aria-label={`Actions for ${title}`}>
+            <button className="icon-button" type="button" aria-label={`Move ${title}`} title="Move note" onClick={() => openMoveDialog(note)}><Icon name="book" /></button>
+            <button className="icon-button danger" type="button" aria-label={`Delete ${title}`} title="Delete note" onClick={() => void deleteNoteByID(id, title)}><Icon name="trash" /></button>
+          </div>
+        </div>
+      );
+    });
+  }
+
   return (
     <section className="dashboard-page notes-guide-page" aria-labelledby="route-title">
       {state.message ? <p className="notice-state">{state.message}</p> : null}
@@ -1044,33 +1124,34 @@ export function ProfileNotesPage() {
               </div>
               <div className="notes-rail-actions">
                 <button className="icon-button" type="button" aria-label="Collapse notes rail" title="Collapse notes rail" onClick={() => setReady({ railOpen: false })}><Icon name="panel" /></button>
-                <button className="icon-button" type="button" aria-label="New notebook" title="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" /></button>
               </div>
             </header>
-            <button className="notes-new-note" type="button" aria-label="New note" onClick={newNote}><Icon name="plus" />New note</button>
+            <div className="notes-create-actions" role="group" aria-label="Create note or notebook">
+              <button className="notes-new-note" type="button" aria-label="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" />New notebook</button>
+              <button className="notes-new-note" type="button" aria-label="New note" onClick={newNote}><Icon name="plus" />New note</button>
+            </div>
             <label className="notes-search">
               <Icon name="search" />
               <span className="visually-hidden">Search notes</span>
               <input type="search" placeholder="Search notes" value={state.query} onChange={(event) => setReady({ query: event.target.value })} />
             </label>
-            <label className="notes-notebook-filter">
-              <span>Notebook filter</span>
-              <select
-                aria-label="Notebook filter"
-                value={state.selectedNotebookID}
-                onChange={(event) => setReady({ selectedNotebookID: event.target.value })}
-              >
-                <option value="">All Notes</option>
-                <option value={ROOT_NOTEBOOK_FILTER}>No Notebook</option>
-                {notebookItems.map((note) => (
-                  <option key={noteID(note)} value={noteID(note)}>{noteTitle(note)}</option>
-                ))}
-              </select>
-            </label>
             <section className="notes-notebooks-section" aria-labelledby="notebooks-heading">
               <div className="notes-section-head">
                 <h2 id="notebooks-heading">Notebooks</h2>
-                <span>{visibleNotebookItems.length}</span>
+                <label className="notes-notebook-filter">
+                  <span className="visually-hidden">Notebook filter</span>
+                  <select
+                    aria-label="Notebook filter"
+                    value={state.selectedNotebookID}
+                    onChange={(event) => setReady({ selectedNotebookID: event.target.value })}
+                  >
+                    <option value="">All Notes</option>
+                    <option value={ROOT_NOTEBOOK_FILTER}>No Notebook</option>
+                    {notebookItems.map((note) => (
+                      <option key={noteID(note)} value={noteID(note)}>{noteTitle(note)}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
               {visibleNotebookItems.length ? (
                 <div className="notes-notebook-list">
@@ -1100,39 +1181,30 @@ export function ProfileNotesPage() {
                 <p className="notes-notebook-empty">No notebooks yet.</p>
               )}
             </section>
-            {visibleNotes.length ? (
-              <div className="notes-guide-list" aria-label="Note cards">
-                {visibleNotes.map((note) => {
-                  const id = noteID(note);
-                  const title = noteTitle(note);
-                  const parentTitle = notebookTitle(state.notes, note.parent_id);
-                  const excluded = noteEffectiveMcpExcluded(note, state.notes);
-                  return (
-                    <div className="notes-guide-row" key={id} onMouseEnter={revealRowActions} onMouseLeave={hideRowActions}>
-                      <button
-                        aria-label={title}
-                        className={`${id === state.selectedID ? "notes-guide-item active" : "notes-guide-item"}${excluded ? " is-mcp-excluded" : ""}`}
-                        onClick={() => void selectNote(id)}
-                        type="button"
-                      >
-                        <span className="notes-guide-icon" aria-hidden="true"><Icon name={noteIconName(note)} /></span>
-                        <span className="notes-guide-copy">
-                          <strong>{title}{excluded ? <span className="notes-lock-indicator" aria-hidden="true"><Icon name="lock" /></span> : null}</strong>
-                          <span>{note.preview || "No preview"}</span>
-                          <span className="notes-tag-row"><em className="notes-tag">{parentTitle || noteTag(note)}</em><small>{updatedLabel(note)}</small></span>
-                        </span>
-                      </button>
-                      <div className="notes-row-actions" aria-label={`Actions for ${title}`}>
-                        <button className="icon-button" type="button" aria-label={`Move ${title}`} title="Move note" onClick={() => openMoveDialog(note)}><Icon name="book" /></button>
-                        <button className="icon-button danger" type="button" aria-label={`Delete ${title}`} title="Delete note" onClick={() => void deleteNoteByID(id, title)}><Icon name="trash" /></button>
-                      </div>
-                    </div>
-                  );
-                })}
+            <section className="notes-navigation-section" aria-labelledby="notes-navigation-heading">
+              <div className="notes-section-head">
+                <h2 id="notes-navigation-heading">{state.selectedNotebookID && state.selectedNotebookID !== ROOT_NOTEBOOK_FILTER ? notebookTitle(state.notes, state.selectedNotebookID) : "Notes"}</h2>
+                <span>{navigationNotes.primary.length}</span>
               </div>
-            ) : (
-              <p className="empty-state" aria-label="Note cards">No notes found.</p>
-            )}
+              {navigationNotes.primary.length ? (
+                <div className="notes-guide-list" aria-label="Note cards">
+                  {renderNoteRows(navigationNotes.primary)}
+                </div>
+              ) : (
+                <p className="empty-state" aria-label="Note cards">No notes found.</p>
+              )}
+            </section>
+            {navigationNotes.recent.length ? (
+              <section className="notes-navigation-section" aria-labelledby="recent-notes-heading">
+                <div className="notes-section-head">
+                  <h2 id="recent-notes-heading">Recently opened</h2>
+                  <span>{navigationNotes.recent.length}</span>
+                </div>
+                <div className="notes-guide-list" aria-label="Recently opened notes">
+                  {renderNoteRows(navigationNotes.recent)}
+                </div>
+              </section>
+            ) : null}
           </aside>
         ) : (
           <aside className="notes-rail-collapsed" aria-label="Notes rail">
@@ -1190,10 +1262,11 @@ export function ProfileNotesPage() {
               <span>{state.saving ? "Saving…" : state.editor.noteID && !editorChanged(state.editor, state.savedEditor) ? "Saved" : "Unsaved"}</span>
               <small>{selectedSummary ? updatedLabel(selectedSummary) : "Not saved"}</small>
             </button>
-            <button className="icon-button danger" disabled={!state.editor.noteID} type="button" aria-label="Delete note" title="Delete note" onClick={() => void deleteNote()}><Icon name="trash" /></button>
           </header>
 
           <div className="notes-toolbar" aria-label="Editor tools">
+            <button className="icon-button danger" disabled={!state.editor.noteID} type="button" aria-label="Delete note" title="Delete note" onClick={() => void deleteNote()}><Icon name="trash" /></button>
+            <span className="notes-toolbar-separator" aria-hidden="true" />
             <ToolbarButton
               label={state.editor.mcpExcluded ? "Include in MCP" : "Exclude from MCP"}
               icon={state.editor.mcpExcluded ? "unlock" : "lock"}

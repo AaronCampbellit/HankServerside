@@ -42,9 +42,11 @@ function renderPage() {
 describe("ProfileNotesPage", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    window.localStorage.clear();
     Reflect.deleteProperty(document, "execCommand");
   });
 
@@ -307,15 +309,21 @@ describe("ProfileNotesPage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Notes" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collapse notes rail" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New notebook" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New note" })).toBeInTheDocument();
+    const creationActions = screen.getByRole("group", { name: "Create note or notebook" });
+    const creationButtons = within(creationActions).getAllByRole("button");
+    expect(creationButtons.map((button) => button.getAttribute("aria-label"))).toEqual(["New notebook", "New note"]);
+    expect(creationButtons[0]).toHaveClass("notes-new-note");
+    expect(creationButtons[1]).toHaveClass("notes-new-note");
 
     const editorTools = screen.getByLabelText("Editor tools");
-    for (const label of ["Undo", "Redo", "Bold", "Italic", "Underline", "Smaller heading", "Heading", "Larger heading", "Bulleted list", "Numbered list", "Text page", "Kanban page", "Tag", "Link"]) {
+    for (const label of ["Delete note", "Undo", "Redo", "Bold", "Italic", "Underline", "Smaller heading", "Heading", "Larger heading", "Bulleted list", "Numbered list", "Text page", "Kanban page", "Tag", "Link"]) {
       expect(within(editorTools).getByRole("button", { name: label })).toBeInTheDocument();
     }
+    fireEvent.click(within(editorTools).getByRole("button", { name: "Delete note" }));
+    expect(await screen.findByRole("alertdialog", { name: "Delete note" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     const body = await screen.findByLabelText("Note body");
     expect(body).toHaveAttribute("contenteditable", "true");
@@ -370,6 +378,53 @@ describe("ProfileNotesPage", () => {
     expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
     expect(screen.getByLabelText("Note body")).toHaveTextContent("Roof Warranty");
     expect(profileNotesClient.fetchNote).toHaveBeenCalledWith("roof");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Roof Warranty" }));
+
+    expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
+    expect(screen.getByLabelText("Note body")).toHaveTextContent("Roof Warranty");
+  });
+
+  it("keeps root notes and recently opened notebook pages in the default navigation for 12 hours", async () => {
+    const now = Date.parse("2026-07-31T12:00:00Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    window.localStorage.clear();
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "house", title: "House Notebook", preview: "1 page", page_type: "notebook" },
+        { note_id: "roof", title: "Roof Warranty", preview: "Expires 2027", page_type: "text", parent_id: "house" },
+        { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "house" ? "House Notebook" : id === "roof" ? "Roof Warranty" : "Daily Notes",
+      body_markdown: id === "house" ? "" : id === "roof" ? "# Roof Warranty\nExpires in 2027." : "Remember milk",
+      revision: "1",
+      page_type: id === "house" ? "notebook" : "text",
+      parent_id: id === "roof" ? "house" : "",
+    }));
+
+    const page = renderPage();
+    const noteCards = await screen.findByLabelText("Note cards");
+    expect(within(noteCards).getByRole("button", { name: "Daily Notes" })).toBeInTheDocument();
+    expect(within(noteCards).queryByRole("button", { name: "Roof Warranty" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Roof Warranty" }));
+    expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
+
+    expect(within(screen.getByLabelText("Recently opened notes")).getByRole("button", { name: "Roof Warranty" })).toBeInTheDocument();
+
+    page.unmount();
+    nowSpy.mockReturnValue(now + 13 * 60 * 60 * 1000);
+    renderPage();
+
+    expect(await screen.findByLabelText("Note cards")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Recently opened notes")).not.toBeInTheDocument();
+    nowSpy.mockRestore();
+    window.localStorage.clear();
   });
 
   it("keeps notebooks and notes reachable from the collapsed rail", async () => {
@@ -390,6 +445,8 @@ describe("ProfileNotesPage", () => {
 
     renderPage();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Open Roof Warranty" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
     fireEvent.click(await screen.findByRole("button", { name: "Collapse notes rail" }));
 
     expect(screen.getByRole("button", { name: "Open notebook House Notebook" })).toBeInTheDocument();
