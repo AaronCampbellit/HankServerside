@@ -243,6 +243,17 @@ func canEditHomeQuickLinks(home domain.Home, membership domain.HomeMembership) b
 	return home.UserID != "" && membership.UserID != "" && home.UserID == membership.UserID
 }
 
+func isInternalDashboardQuickLink(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "" || parsed.Host != "" || parsed.User != nil {
+		return false
+	}
+	return parsed.Path == "/dashboard/file-server"
+}
+
 func normalizedQuickLink(body quickLinkRequest, existing domain.HomeQuickLink) (domain.HomeQuickLink, error) {
 	link := existing
 	link.Title = strings.TrimSpace(body.Title)
@@ -251,18 +262,27 @@ func normalizedQuickLink(body quickLinkRequest, existing domain.HomeQuickLink) (
 	if len(link.URL) > maxQuickLinkURLLength {
 		return domain.HomeQuickLink{}, fmt.Errorf("url is too long")
 	}
+	internalDashboardLink := isInternalDashboardQuickLink(link.URL)
 	parsed, err := url.Parse(link.URL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return domain.HomeQuickLink{}, fmt.Errorf("valid http or https url is required")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return domain.HomeQuickLink{}, fmt.Errorf("valid http or https url is required")
-	}
-	if parsed.User != nil {
-		return domain.HomeQuickLink{}, fmt.Errorf("url credentials are not allowed")
+	if internalDashboardLink {
+		// The helper above already rejects schemes, hosts, and credentials.
+	} else {
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return domain.HomeQuickLink{}, fmt.Errorf("valid http, https, or dashboard file-server url is required")
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return domain.HomeQuickLink{}, fmt.Errorf("valid http, https, or dashboard file-server url is required")
+		}
+		if parsed.User != nil {
+			return domain.HomeQuickLink{}, fmt.Errorf("url credentials are not allowed")
+		}
 	}
 	if link.Title == "" {
-		link.Title = parsed.Hostname()
+		if internalDashboardLink {
+			link.Title = "File Server"
+		} else {
+			link.Title = parsed.Hostname()
+		}
 	}
 	if len(link.Title) > maxQuickLinkTitleLength {
 		return domain.HomeQuickLink{}, fmt.Errorf("title is too long")
@@ -276,6 +296,9 @@ func normalizedQuickLink(body quickLinkRequest, existing domain.HomeQuickLink) (
 		healthEnabled = *body.HealthCheckEnabled
 	} else if existing.ID != "" {
 		healthEnabled = existing.HealthCheckEnabled
+	}
+	if internalDashboardLink {
+		healthEnabled = false
 	}
 	link.HealthCheckEnabled = healthEnabled
 	if !healthEnabled {

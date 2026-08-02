@@ -178,6 +178,11 @@ function isPDFFile(item: FileMeta): boolean {
   return fileName(item).toLowerCase().endsWith(".pdf");
 }
 
+function isHTMLFile(item: FileMeta): boolean {
+  const name = fileName(item).toLowerCase();
+  return name.endsWith(".html") || name.endsWith(".htm");
+}
+
 function isMarkdownFile(item: FileMeta): boolean {
   return [".md", ".markdown"].some((extension) => fileName(item).toLowerCase().endsWith(extension));
 }
@@ -227,10 +232,30 @@ function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Files could not be loaded.";
 }
 
-function initialPathFromLocation(): string {
-  const raw = new URLSearchParams(window.location.search).get("path") || "/";
+function normalizedDashboardPath(raw: string): string {
   const trimmed = raw.trim();
+  if (!trimmed || trimmed === ".") return "/";
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function initialLinkFromLocation(): { folderPath: string; previewPath: string; previewOpen: boolean } {
+  const params = new URLSearchParams(window.location.search);
+  const path = normalizedDashboardPath(params.get("path") || "/");
+  const previewOpen = params.get("preview") === "1";
+  return {
+    folderPath: previewOpen ? parentPath(path) : path,
+    previewPath: previewOpen ? path : "",
+    previewOpen,
+  };
+}
+
+function dashboardFileLink(item: FileMeta, sourceID: string, agentID: string): string {
+  const params = new URLSearchParams();
+  if (sourceID) params.set("source_id", sourceID);
+  if (agentID) params.set("agent_id", agentID);
+  params.set("path", item.path);
+  if (!item.is_directory) params.set("preview", "1");
+  return `${window.location.origin}/dashboard/file-server?${params.toString()}`;
 }
 
 function initialTargetKey(targets: FileTarget[]): string {
@@ -284,7 +309,8 @@ function Icon({ name }: { name: string }) {
 }
 
 export function FileServerPage() {
-  const [state, setState] = useState<State>({ status: "loading", path: initialPathFromLocation() });
+  const initialLink = initialLinkFromLocation();
+  const [state, setState] = useState<State>({ status: "loading", path: initialLink.folderPath });
   const [transferJobs, setTransferJobs] = useState<TransferJobsState>({ status: "loading", jobs: [] });
   const [activityOpen, setActivityOpen] = useState(false);
   const [targets, setTargets] = useState<FileTarget[]>([]);
@@ -295,7 +321,13 @@ export function FileServerPage() {
   const targetOptions = targets.length ? targets : [defaultFileTarget];
   const activeTarget = targetOptions.find((target) => target.key === activeTargetKey) || targetOptions[0];
 
-  async function load(path = state.path, message = "", targetKey = activeTargetKey) {
+  async function load(
+    path = state.path,
+    message = "",
+    targetKey = activeTargetKey,
+    requestedPreviewPath = "",
+    requestedPreviewOpen = false,
+  ) {
     const changingTarget = Boolean(targetKey && targetKey !== activeTargetKey);
     if (changingTarget) searchRequestRef.current++;
     setState((current) => current.status === "ready"
@@ -325,6 +357,9 @@ export function FileServerPage() {
       const payload = await fileServerClient.list(path, nextTarget.sourceID || undefined, nextTarget.agentID || undefined);
       const items = (payload.items || payload.entries || []) as FileMeta[];
       const defaultPreview = items.find((item) => !item.is_directory)?.path || items[0]?.path || "";
+      const requestedPreview = requestedPreviewPath && items.some((item) => item.path === requestedPreviewPath)
+        ? requestedPreviewPath
+        : "";
       setState((current) => ({
         status: "ready",
         path: payload.path || path,
@@ -334,8 +369,8 @@ export function FileServerPage() {
         message,
         viewMode: current.status === "ready" ? current.viewMode : "list",
         selectedPaths: current.status === "ready" ? current.selectedPaths.filter((selectedPath) => items.some((item) => item.path === selectedPath)) : [],
-        previewPath: current.status === "ready" && items.some((item) => item.path === current.previewPath) ? current.previewPath : defaultPreview,
-        previewOpen: current.status === "ready" ? current.previewOpen : shouldOpenPreviewByDefault(),
+        previewPath: requestedPreview || (current.status === "ready" && items.some((item) => item.path === current.previewPath) ? current.previewPath : defaultPreview),
+        previewOpen: requestedPreview ? true : current.status === "ready" ? current.previewOpen : requestedPreviewOpen || shouldOpenPreviewByDefault(),
         sharePickerOpen: false,
         menuPath: "",
         dialog: null,
@@ -360,11 +395,20 @@ export function FileServerPage() {
   }
 
   useEffect(() => {
-    void load(initialPathFromLocation());
+    void load(initialLink.folderPath, "", "", initialLink.previewPath, initialLink.previewOpen);
     void loadTransferJobs();
     // Initial load only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function copyDashboardLink(item: FileMeta) {
+    try {
+      await navigator.clipboard.writeText(dashboardFileLink(item, activeTarget.sourceID, activeTarget.agentID));
+      showToast(item.is_directory ? "Folder link copied." : "Preview link copied.");
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    }
+  }
 
   const searchQuery = state.status === "ready" ? state.query.trim() : "";
   useEffect(() => {
@@ -791,8 +835,12 @@ export function FileServerPage() {
                 <video src={previewURL(previewItem, commandSourceID, commandAgentID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
               ) : isAudioFile(previewItem) ? (
                 <audio src={previewURL(previewItem, commandSourceID, commandAgentID)} controls preload="metadata" aria-label={`Preview ${fileName(previewItem)}`} />
-              ) : isPDFFile(previewItem) || isMarkdownFile(previewItem) ? (
-                <iframe src={previewURL(previewItem, commandSourceID, commandAgentID)} title={`Preview ${fileName(previewItem)}`} />
+              ) : isPDFFile(previewItem) || isMarkdownFile(previewItem) || isHTMLFile(previewItem) ? (
+                <iframe
+                  sandbox={isHTMLFile(previewItem) ? "" : undefined}
+                  src={previewURL(previewItem, commandSourceID, commandAgentID)}
+                  title={`Preview ${fileName(previewItem)}`}
+                />
               ) : (
                 <span style={{ color: fileIconTone(previewItem) }}><Icon name={fileIcon(previewItem)} /></span>
               )}
@@ -842,6 +890,7 @@ export function FileServerPage() {
           onMove={(item) => openMoveDialog([item])}
           onOpen={(item) => setReady({ previewPath: item.path, previewOpen: true, menuPath: "" })}
           onRename={openRenameDialog}
+          onCopyLink={(item) => void copyDashboardLink(item)}
         />
       ) : null}
       {readyState.dialog ? (
@@ -926,6 +975,7 @@ function FileActionMenu({
   onMove,
   onOpen,
   onRename,
+  onCopyLink,
 }: {
   item?: FileMeta;
   onClose: () => void;
@@ -934,11 +984,13 @@ function FileActionMenu({
   onMove: (item: FileMeta) => void;
   onOpen: (item: FileMeta) => void;
   onRename: (item: FileMeta) => void;
+  onCopyLink: (item: FileMeta) => void;
 }) {
   if (!item) return null;
   return (
     <div className="file-context-menu" role="menu" aria-label="File actions">
       <button role="menuitem" type="button" onClick={() => { onOpen(item); onClose(); }}><Icon name="file" />Open</button>
+      <button role="menuitem" type="button" onClick={() => { onCopyLink(item); onClose(); }}><Icon name="file" />{item.is_directory ? "Copy link" : "Copy preview link"}</button>
       {!item.is_directory ? <button role="menuitem" type="button" onClick={() => { onDownload(item); onClose(); }}><Icon name="download" />Download</button> : null}
       <button role="menuitem" type="button" onClick={() => { onRename(item); onClose(); }}><Icon name="pencil" />Rename</button>
       <button role="menuitem" type="button" onClick={() => { onMove(item); onClose(); }}><Icon name="move" />Move</button>

@@ -1557,8 +1557,12 @@ func (s *Server) handleFilePreviewStream(w http.ResponseWriter, r *http.Request,
 		contentLength = byteRange.End - byteRange.Start + 1
 		w.Header().Set("Content-Range", "bytes "+int64ToString(byteRange.Start)+"-"+int64ToString(byteRange.End)+"/"+int64ToString(ready.Size))
 	}
+	contentType := previewContentType(path)
 	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Type", previewContentType(path))
+	w.Header().Set("Content-Type", contentType)
+	if policy := previewContentSecurityPolicy(contentType); policy != "" {
+		w.Header().Set("Content-Security-Policy", policy)
+	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filepath.Base(path)}))
 	if contentLength >= 0 {
 		w.Header().Set("Content-Length", int64ToString(contentLength))
@@ -1700,6 +1704,13 @@ func previewContentType(path string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+func previewContentSecurityPolicy(contentType string) string {
+	if strings.HasPrefix(contentType, "text/html") {
+		return "sandbox"
+	}
+	return ""
 }
 
 func (s *Server) sendFileTransferCancel(agentConn *agentConnection, homeID string, transferID string, reason string) {

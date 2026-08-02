@@ -370,15 +370,18 @@ export function DashboardHome() {
       glyph: "N",
     },
   ];
-  const quickLinkCards = quickLinks?.links.length ? quickLinks.links.map((link) => ({
-    id: link.id,
-    title: link.title,
-    detail: link.description || link.url,
-    href: link.url,
-    external: true,
-    status: statusLabel(link.status),
-    statusTone: quickLinkStatusTone(link.status),
-  })) : [];
+  const quickLinkCards = quickLinks?.links.length ? quickLinks.links.map((link) => {
+    const external = /^https?:\/\//i.test(link.url);
+    return {
+      id: link.id,
+      title: link.title,
+      detail: link.description || link.url,
+      href: link.url,
+      external,
+      status: statusLabel(link.status),
+      statusTone: quickLinkStatusTone(link.status),
+    };
+  }) : [];
 
   async function restartAgent() {
     try {

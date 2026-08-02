@@ -337,6 +337,85 @@ describe("FileServerPage", () => {
     expect(screen.getByRole("button", { name: /Studio Mac/i })).toBeInTheDocument();
   });
 
+  it("loads a folder deep link with its selected source", async () => {
+    window.history.pushState({}, "", "/dashboard/file-server?source_id=hankdemo2&path=%2FMedia%2FPhotos");
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({ path: "/Media/Photos", items: [] });
+
+    renderPage();
+
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenCalledWith("/Media/Photos", "hankdemo2", undefined));
+  });
+
+  it("opens a file preview deep link from its parent folder", async () => {
+    window.history.pushState({}, "", "/dashboard/file-server?source_id=hankdemo2&path=%2FMedia%2FPhotos%2Fsunset-beach.jpg&preview=1");
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({
+      path: "/Media/Photos",
+      items: [
+        { path: "/Media/Photos/first.jpg", name: "first.jpg", size: 10 },
+        { path: "/Media/Photos/sunset-beach.jpg", name: "sunset-beach.jpg", size: 20 },
+      ],
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(fileServerClient.list).toHaveBeenCalledWith("/Media/Photos", "hankdemo2", undefined));
+    const preview = await screen.findByRole("complementary", { name: "File preview" });
+    expect(within(preview).getByRole("img", { name: "Preview sunset-beach.jpg" })).toHaveAttribute(
+      "src",
+      "/v1/home/files/preview?source_id=hankdemo2&path=%2FMedia%2FPhotos%2Fsunset-beach.jpg",
+    );
+  });
+
+  it("copies file and folder dashboard links", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({
+      path: "/Media/Photos",
+      items: [
+        { path: "/Media/Photos/Albums", name: "Albums", is_directory: true },
+        { path: "/Media/Photos/sunset-beach.jpg", name: "sunset-beach.jpg", size: 20 },
+      ],
+    });
+
+    try {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole("button", { name: "More actions for Albums" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining(
+        "/dashboard/file-server?source_id=hankdemo&path=%2FMedia%2FPhotos%2FAlbums",
+      ));
+
+      fireEvent.click(screen.getByRole("button", { name: "More actions for sunset-beach.jpg" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy preview link" }));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining(
+        "/dashboard/file-server?source_id=hankdemo&path=%2FMedia%2FPhotos%2Fsunset-beach.jpg&preview=1",
+      ));
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+    }
+  });
+
+  it("renders html files in a sandboxed preview iframe", async () => {
+    window.history.pushState({}, "", "/dashboard/file-server?source_id=hankdemo2&path=%2FMedia%2FDocs%2Findex.html&preview=1");
+    mockDemoShares();
+    fileServerClient.list.mockResolvedValue({
+      path: "/Media/Docs",
+      items: [{ path: "/Media/Docs/index.html", name: "index.html", size: 120 }],
+    });
+
+    renderPage();
+
+    const preview = await screen.findByRole("complementary", { name: "File preview" });
+    const frame = within(preview).getByTitle("Preview index.html");
+    expect(frame).toHaveAttribute("src", "/v1/home/files/preview?source_id=hankdemo2&path=%2FMedia%2FDocs%2Findex.html");
+    expect(frame).toHaveAttribute("sandbox", "");
+  });
+
   it("keeps the file pane mounted while opening folders and hides the root sidebar row", async () => {
     mockDemoShares();
     let resolveFolder!: (value: { path: string; items: Array<{ path: string; name: string; is_directory?: boolean; size?: number }> }) => void;

@@ -1167,6 +1167,20 @@ describe("App routes", () => {
               updated_at: "2026-01-01T00:00:00Z",
               updated_by: "usr_1",
             },
+            {
+              id: "ql_4",
+              home_id: "home_1",
+              title: "Recipes",
+              url: "/dashboard/file-server?source_id=media&path=%2FRecipes&preview=1",
+              description: "Recipe index",
+              sort_order: 3,
+              health_check_enabled: false,
+              status: "disabled",
+              status_code: 0,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              updated_by: "usr_1",
+            },
           ],
         }), { headers: { "Content-Type": "application/json" } });
       }
@@ -1196,6 +1210,10 @@ describe("App routes", () => {
     expect(within(quickLinks).getByText("up")).toHaveClass("tone-up");
     expect(within(quickLinks).getByText("down")).toHaveClass("tone-down");
     expect(within(quickLinks).getByText("unchecked")).toHaveClass("tone-unknown");
+    const recipesLink = within(quickLinks).getByRole("link", { name: "Recipes" });
+    expect(recipesLink).toHaveAttribute("href", "/dashboard/file-server?source_id=media&path=%2FRecipes&preview=1");
+    expect(recipesLink).not.toHaveAttribute("target");
+    expect(recipesLink).not.toHaveAttribute("rel");
   });
 
   it("manages quick links from the settings route", async () => {
@@ -1260,17 +1278,17 @@ describe("App routes", () => {
     expect(screen.getByRole("heading", { name: "Quick Links" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Add quick link" }));
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "GitHub" } });
-    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "https://github.com" } });
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Code" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Recipes" } });
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "/dashboard/file-server?source_id=media&path=%2FRecipes&preview=1" } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Recipe index" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls).toContainEqual({
       path: "/v1/home/quick-links",
       method: "POST",
       body: {
-        title: "GitHub",
-        url: "https://github.com",
-        description: "Code",
+        title: "Recipes",
+        url: "/dashboard/file-server?source_id=media&path=%2FRecipes&preview=1",
+        description: "Recipe index",
         health_check_enabled: true,
       },
     }));

@@ -2341,6 +2341,17 @@ func TestPreviewContentTypeRecognizesMarkdown(t *testing.T) {
 	}
 }
 
+func TestFilePreviewHTMLUsesSandboxHeaders(t *testing.T) {
+	t.Parallel()
+
+	if got := previewContentSecurityPolicy(previewContentType("docs/index.html")); got != "sandbox" {
+		t.Fatalf("html preview CSP = %q, want sandbox", got)
+	}
+	if got := previewContentSecurityPolicy(previewContentType("docs/readme.pdf")); got != "" {
+		t.Fatalf("pdf preview CSP = %q, want empty", got)
+	}
+}
+
 func TestFileUploadTransferStreamsOverHTTP(t *testing.T) {
 	t.Parallel()
 

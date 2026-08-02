@@ -186,9 +186,10 @@ export function QuickLinksSettings() {
             <span>URL</span>
             <input
               maxLength={2048}
+              inputMode="url"
               onChange={(event) => setReady({ form: { ...form, url: event.target.value } })}
               required
-              type="url"
+              type="text"
               value={form.url}
             />
           </label>
