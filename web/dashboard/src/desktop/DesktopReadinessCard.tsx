@@ -27,7 +27,7 @@ export function DesktopReadinessCard({ readiness }: { readiness: DesktopAgentRea
   const complete = desktopReadinessComplete(readiness);
   return <section id="remote-desktop-setup" className="agent-info-card desktop-readiness-card" aria-label="Remote Desktop readiness">
     <div className="desktop-readiness-heading"><div><h3>Set up Remote Desktop</h3><p>Complete these checks before opening a session. Hank never bypasses missing trust or local permissions.</p></div><span className={`status-pill ${complete ? "status-online" : ""}`}>{complete ? "Ready" : "Setup needed"}</span></div>
-    {!complete ? <a className="button desktop-setup-button" href="#remote-desktop-settings">Set up Remote Desktop</a> : null}
+    {!complete ? <a className="button secondary desktop-setup-button" href="#remote-desktop-settings">Set up Remote Desktop</a> : null}
     {!readiness ? <p className="agent-hint">We cannot read this device’s setup status yet. Make sure the agent is online, then refresh this page.</p> : <ol className="desktop-setup-list">
       <li data-ready={readiness.online}><strong>1. Keep this device online</strong><span>{readiness.online ? "Connected to Hank." : "The agent is offline. Start the agent and wait for it to reconnect."}</span></li>
       <li data-ready={readiness.trusted}><strong>2. Approve this device</strong><span>{readiness.trusted ? "This device is approved." : <>Use the Remote Desktop setup below to approve this device, then return here.</>}</span></li>

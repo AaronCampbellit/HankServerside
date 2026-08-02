@@ -18,6 +18,7 @@ describe("DesktopReadinessCard", () => {
     expect(screen.getByText(/Approve this device/)).toBeInTheDocument();
     expect(screen.getByText(/Needs local permission.*Allow screen recording locally/i)).toBeInTheDocument();
     expect(screen.getByText(/Use the Remote Desktop setup below/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", {name: "Set up Remote Desktop"})).toHaveClass("secondary");
     expect(desktopReadinessComplete(readiness)).toBe(false);
   });
 

@@ -144,4 +144,31 @@ describe("dashboard stylesheet", () => {
     expect(mobileFileAction).toContain("gap: 0");
     expect(mobileFileAction).toContain("justify-content: center");
   });
+
+  it("keeps every mobile device workspace tab visible without horizontal scrolling", () => {
+    const mobileWorkspaceTabs = lastRuleBody(".agent-workspace-tabs");
+    const mobileWorkspaceLinks = lastRuleBody(".agent-workspace-tabs a");
+
+    expect(mobileWorkspaceTabs).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(mobileWorkspaceTabs).toContain("overflow-x: visible");
+    expect(mobileWorkspaceLinks).toContain("min-height: 44px");
+  });
+
+  it("wraps long device identity and Remote Desktop trust values on mobile", () => {
+    const mobileAgentValue = lastRuleBody(".agent-info-list dd");
+    const mobileTrustCode = lastRuleBody(".agent-security-workspace code");
+
+    expect(mobileAgentValue).toContain("white-space: normal");
+    expect(mobileAgentValue).toContain("overflow-wrap: anywhere");
+    expect(mobileTrustCode).toContain("white-space: normal");
+    expect(mobileTrustCode).toContain("overflow-wrap: anywhere");
+  });
+
+  it("preserves mobile-sized touch targets after feature-specific overrides", () => {
+    expect(lastRuleBody(".settings-page input:not([type=\"checkbox\"]):not([type=\"radio\"]):not([type=\"file\"])")).toContain("min-height: 44px");
+    expect(lastRuleBody(".checkbox-field")).toContain("min-height: 44px");
+    expect(lastRuleBody(".file-name-button")).toContain("min-height: 44px");
+    expect(lastRuleBody(".ha-entities-table button")).toContain("min-height: 44px");
+    expect(lastRuleBody(".home-mobile-services-toggle")).toContain("min-height: 44px");
+  });
 });
