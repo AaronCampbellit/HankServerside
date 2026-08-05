@@ -57,6 +57,7 @@ export function Shell({
   children,
   onLogout,
   userEmail,
+  userDisplayName,
   userRole,
   connectorOnline = true,
 }: {
@@ -67,6 +68,7 @@ export function Shell({
   onLogout: () => void;
   children: ReactNode;
   userEmail?: string;
+  userDisplayName?: string;
   userRole?: string;
   connectorOnline?: boolean;
 }) {
@@ -207,7 +209,7 @@ export function Shell({
   const current = navItems.find((item) => isActive(item.href));
   const crumbLabel = current && current.href !== "/dashboard" ? current.label : null;
   const showResults = searchOpen && query.trim().length > 0;
-  const footerName = footerNameFor(userEmail || "Aaron D.");
+  const footerName = userDisplayName?.trim() || footerNameFor(userEmail || "Aaron D.");
   const roleLabel = userRole || "admin";
   const initials = initialsFor(footerName);
   const mobilePrimaryItems = navItems.filter((item) => MOBILE_PRIMARY_HREFS.has(item.href));

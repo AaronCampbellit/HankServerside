@@ -137,6 +137,53 @@ func TestCreateHomeSeedsOwnerMembership(t *testing.T) {
 	}
 }
 
+func TestUserDisplayNameRoundTripsThroughUsersAndHomeMembers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	user := domain.User{
+		ID:           "usr_display_name",
+		Email:        "display@example.com",
+		DisplayName:  "Original Name",
+		PasswordHash: "hash",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	home := domain.Home{ID: "home_display_name", UserID: user.ID, Name: "Display Name Home", CreatedAt: now, UpdatedAt: now}
+	mustStore(t, db.CreateUser(ctx, user))
+	mustStore(t, db.CreateHome(ctx, home))
+
+	mustStore(t, db.UpdateUserDisplayName(ctx, user.ID, "Updated Name"))
+	stored, err := db.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if stored.DisplayName != "Updated Name" || stored.Email != user.Email {
+		t.Fatalf("stored user = %#v, want display name Updated Name and email %q", stored, user.Email)
+	}
+
+	members, err := db.ListHomeMembers(ctx, home.ID)
+	if err != nil {
+		t.Fatalf("ListHomeMembers: %v", err)
+	}
+	if len(members) != 1 || members[0].DisplayName != "Updated Name" || members[0].Email != user.Email {
+		t.Fatalf("members = %#v, want updated display name and unchanged email", members)
+	}
+
+	mustStore(t, db.UpdateUserDisplayName(ctx, user.ID, ""))
+	stored, err = db.GetUserByEmail(ctx, user.Email)
+	if err != nil {
+		t.Fatalf("GetUserByEmail after clear: %v", err)
+	}
+	if stored.DisplayName != "" || stored.Email != user.Email {
+		t.Fatalf("stored user after clear = %#v, want empty display name and email %q", stored, user.Email)
+	}
+}
+
 func TestNotificationSettingsAndAPNSDevices(t *testing.T) {
 	t.Parallel()
 

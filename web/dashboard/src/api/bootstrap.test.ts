@@ -7,6 +7,7 @@ describe("BootstrapClient", () => {
       user: {
         id: "usr_1",
         email: "hank@example.com",
+        display_name: "Hank User",
         password_change_required: false,
         created_at: "2026-06-27T00:00:00Z",
         updated_at: "2026-06-27T00:00:00Z",

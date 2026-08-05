@@ -159,6 +159,41 @@ func TestNotePinningMigrationDefinesSyncedChildOnlyPins(t *testing.T) {
 	}
 }
 
+func TestUserDisplayNameMigrationDefinesPresentationOnlyField(t *testing.T) {
+	t.Parallel()
+
+	migrations, err := All()
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+
+	var body strings.Builder
+	for _, migration := range migrations {
+		if migration.Version != 28 {
+			continue
+		}
+		for _, statement := range migration.Statements {
+			body.WriteString(statement)
+			body.WriteByte('\n')
+		}
+	}
+	text := body.String()
+	if text == "" {
+		t.Fatal("migration 28 missing")
+	}
+	for _, required := range []string{
+		"ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''",
+		"users_display_name_length_check",
+		"char_length(display_name) <= 80",
+		"users_display_name_trimmed_check",
+		"display_name = btrim(display_name)",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("migration 28 missing %q in:\n%s", required, text)
+		}
+	}
+}
+
 func TestAgentTypeMigrationEnforcesOnePrimaryPerHome(t *testing.T) {
 	t.Parallel()
 

@@ -165,6 +165,8 @@ func auditEventHelperText(event store.AuditEvent, metadata map[string]any) strin
 		return "User session was signed out or revoked."
 	case "password.changed":
 		return "User password was changed."
+	case "user.display_name_updated":
+		return "A member display name was updated."
 	case "invitation.created":
 		return "An admin created a one-time home invitation."
 	case "invitation.cancelled":

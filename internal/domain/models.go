@@ -38,6 +38,7 @@ const (
 type User struct {
 	ID                     string     `json:"id"`
 	Email                  string     `json:"email"`
+	DisplayName            string     `json:"display_name"`
 	PasswordHash           string     `json:"-"`
 	PasswordLoginEnabled   bool       `json:"password_login_enabled"`
 	PasswordChangeRequired bool       `json:"password_change_required"`
@@ -87,11 +88,12 @@ type HomeMembership struct {
 }
 
 type HomeMember struct {
-	UserID    string    `json:"user_id"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID      string    `json:"user_id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type HomeInvitation struct {

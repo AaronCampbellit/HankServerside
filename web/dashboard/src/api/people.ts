@@ -4,6 +4,7 @@ import { arrayFrom } from "./normalize";
 export type HomeMember = {
   user_id: string;
   email: string;
+  display_name: string;
   role: "admin" | "member" | string;
   created_at: string;
   updated_at: string;
@@ -76,6 +77,13 @@ export class PeopleClient {
     return this.api.request<{ ok: boolean }>(`/v1/home/members/${encodeURIComponent(userID)}/password`, {
       method: "PUT",
       body: input,
+    });
+  }
+
+  updateDisplayName(userID: string, displayName: string) {
+    return this.api.request<HomeMember>(`/v1/home/members/${encodeURIComponent(userID)}/display-name`, {
+      method: "PUT",
+      body: { display_name: displayName },
     });
   }
 }

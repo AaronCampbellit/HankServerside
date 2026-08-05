@@ -78,6 +78,8 @@ describe("Shell", () => {
         currentPath="/dashboard"
         onNavigate={vi.fn()}
         onLogout={vi.fn()}
+        userDisplayName="Aaron Campbell"
+        userEmail="owner@example.com"
       >
         <div>Dashboard content</div>
       </Shell>,
@@ -86,7 +88,8 @@ describe("Shell", () => {
     const footer = screen.getByLabelText("Session status");
     expect(footer).toHaveClass("nav-footer");
     expect(within(footer).getByText("Connector online")).toBeInTheDocument();
-    expect(within(footer).getByText("AD")).toBeInTheDocument();
+    expect(within(footer).getByText("AC")).toBeInTheDocument();
+    expect(within(footer).getByText("Aaron Campbell")).toHaveAttribute("title", "owner@example.com");
     expect(within(footer).getByText("admin")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toHaveClass("nav-footer-signout");
   });

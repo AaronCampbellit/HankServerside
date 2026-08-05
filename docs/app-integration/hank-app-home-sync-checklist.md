@@ -133,10 +133,17 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 
 - Load members from `GET /v1/home/members`.
 - Show:
-  - email
+  - `display_name` as the primary presentation label when non-empty
+  - email as the account identity and fallback label
   - user ID if currently shown in Hank Remote
   - role
   - current-user marker
+- Update display names with `PUT /v1/home/members/{userID}/display-name` and
+  `{"display_name":"Name"}`.
+- Allow admins to update any current home member and users to update
+  themselves. Other member-to-member updates return `403`.
+- Treat display names as non-unique presentation metadata only. Email remains
+  the login, invitation, recovery, rate-limit, and audit identity.
 - Add admin-only member removal with:
   - `DELETE /v1/home/members/{userID}`
 
@@ -349,6 +356,12 @@ Hank Remote is no longer a multi-home system. The app now needs to treat Remote 
 - Invite a second user.
 - Accept the invitation from a second Hank account.
 - Confirm the second user appears as `member`.
+- Confirm the second user can update their own display name but cannot update
+  another member's display name.
+- Confirm an admin can update the second user's display name and that clearing
+  it restores the email presentation fallback.
+- Confirm email login and recovery remain unchanged after a display-name
+  update.
 - Promote the second user to `admin`.
 - Demote back to `member`.
 - Confirm the server blocks removal or demotion of the last admin and Hank surfaces that clearly.

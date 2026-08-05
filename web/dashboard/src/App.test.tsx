@@ -344,7 +344,7 @@ describe("App routes", () => {
       calls.push(path);
       if (path === "/v1/ui/bootstrap") {
         return new Response(JSON.stringify({
-          user: { email: "owner@example.com" },
+          user: { email: "owner@example.com", display_name: "Aaron Campbell" },
           home: { id: "home_1", name: "Campbell Home", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
           membership: { role: "admin" },
           permissions: { is_admin: true },
@@ -402,8 +402,8 @@ describe("App routes", () => {
       if (path === "/v1/home/members") {
         return new Response(JSON.stringify({
           members: [
-            { user_id: "user_1", email: "owner@example.com", role: "admin", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
-            { user_id: "user_2", email: "member@example.com", role: "member", created_at: "2026-06-02T00:00:00Z", updated_at: "2026-06-02T00:00:00Z" },
+            { user_id: "user_1", email: "owner@example.com", display_name: "Aaron Campbell", role: "admin", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
+            { user_id: "user_2", email: "member@example.com", display_name: "Family Member", role: "member", created_at: "2026-06-02T00:00:00Z", updated_at: "2026-06-02T00:00:00Z" },
           ],
         }), { headers: { "Content-Type": "application/json" } });
       }
@@ -412,7 +412,7 @@ describe("App routes", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /Good/ })).toHaveTextContent("owner");
+    expect(await screen.findByRole("heading", { name: /Good/ })).toHaveTextContent("Aaron Campbell");
     expect(screen.getByText("Everything at Campbell Home is running smoothly.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Restart connector" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Create setup file" })).toHaveAttribute("href", "/dashboard/settings/home");
@@ -433,7 +433,7 @@ describe("App routes", () => {
     expect(screen.getByText("SMB shares")).toBeInTheDocument();
     expect(screen.getAllByText("Home Assistant").length).toBeGreaterThan(0);
     expect(screen.getByText("Backup completed")).toBeInTheDocument();
-    expect(screen.getByText("member@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Family Member")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "First Setup" })).not.toBeInTheDocument();
     expect(calls).toEqual(expect.arrayContaining([
       "/v1/ui/bootstrap",

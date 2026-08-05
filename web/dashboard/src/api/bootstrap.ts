@@ -4,6 +4,7 @@ import { arrayFrom, booleanFrom } from "./normalize";
 export type BootstrapUser = {
   id: string;
   email: string;
+  display_name: string;
   password_change_required: boolean;
   created_at: string;
   updated_at: string;
@@ -85,13 +86,16 @@ export class BootstrapClient {
 
 function normalizeBootstrapState(payload: Partial<BootstrapState>): BootstrapState {
   return {
-    user: payload.user || {
-      id: "",
-      email: "",
-      password_change_required: false,
-      created_at: "",
-      updated_at: "",
-    },
+    user: payload.user
+      ? { ...payload.user, display_name: payload.user.display_name || "" }
+      : {
+          id: "",
+          email: "",
+          display_name: "",
+          password_change_required: false,
+          created_at: "",
+          updated_at: "",
+        },
     session: payload.session || { id: "", expires_at: "" },
     home: payload.home || null,
     membership: payload.membership || null,

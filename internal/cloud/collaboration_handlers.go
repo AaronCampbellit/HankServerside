@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -276,6 +277,55 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 		return true
 	}
 
+	if len(parts) == 3 && parts[0] == "members" && parts[2] == "display-name" && r.Method == http.MethodPut {
+		targetUserID := parts[1]
+		if targetUserID != membership.UserID && membership.Role != domain.HomeRoleAdmin {
+			http.Error(w, "admin role required to rename another member", http.StatusForbidden)
+			return true
+		}
+		if _, err := s.store.GetHomeMembership(r.Context(), home.ID, targetUserID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return true
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		var body struct {
+			DisplayName string `json:"display_name"`
+		}
+		if err := parseJSON(w, r, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		displayName, err := normalizeUserDisplayName(body.DisplayName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		if err := s.store.UpdateUserDisplayName(r.Context(), targetUserID, displayName); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return true
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		updated, err := s.store.GetHomeMember(r.Context(), home.ID, targetUserID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				http.NotFound(w, r)
+				return true
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return true
+		}
+		s.audit(r.Context(), "user.display_name_updated", auditSeverityInfo, membership.UserID, "", home.ID, requestIDFromContext(r.Context()), "user", targetUserID, nil)
+		s.emitMembersChanged(r.Context(), map[string]any{"home_id": home.ID, "kind": "member_display_name_changed", "user_id": targetUserID})
+		writeJSON(w, http.StatusOK, updated)
+		return true
+	}
+
 	if len(parts) == 2 && parts[0] == "members" && r.Method == http.MethodDelete {
 		if membership.Role != domain.HomeRoleAdmin {
 			http.Error(w, errAdminRoleRequired.Error(), http.StatusForbidden)
@@ -450,6 +500,14 @@ func (s *Server) handleHomeMembers(w http.ResponseWriter, r *http.Request, home 
 	}
 
 	return false
+}
+
+func normalizeUserDisplayName(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if utf8.RuneCountInString(value) > 80 {
+		return "", errors.New("display name must be 80 characters or fewer")
+	}
+	return value, nil
 }
 
 func invitationJoinURL(r *http.Request, token string) string {

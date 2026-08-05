@@ -19,6 +19,7 @@ describe("PeopleClient", () => {
       temporary_password: "temporary-password",
       password_change_required: true,
     });
+    await client.updateDisplayName("usr_member", "Member Name");
 
     expect(calls).toEqual([
       { path: "/v1/home/members", method: undefined, body: undefined },
@@ -30,6 +31,11 @@ describe("PeopleClient", () => {
         path: "/v1/home/members/usr_member/password",
         method: "PUT",
         body: { temporary_password: "temporary-password", password_change_required: true },
+      },
+      {
+        path: "/v1/home/members/usr_member/display-name",
+        method: "PUT",
+        body: { display_name: "Member Name" },
       },
     ]);
   });

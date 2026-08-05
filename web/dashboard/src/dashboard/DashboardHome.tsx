@@ -300,6 +300,7 @@ export function DashboardHome() {
   const agentStatus = statusLabel(agent?.status);
   const online = agentStatus === "online";
   const userEmail = bootstrap.user?.email || "Unknown user";
+  const userDisplayName = bootstrap.user?.display_name?.trim() || displayName(userEmail);
   const activeTokens = tokens.tokens.filter((token) => !token.revoked_at);
   const profiles = sync?.profiles || {};
   const homeAssistantProfile = findProfile(profiles, ["homeassistant", "home_assistant", "ha"]);
@@ -318,7 +319,14 @@ export function DashboardHome() {
   const enabledApps = apps.apps.filter((app) => app.enabled);
   const people = members.members.length > 0
     ? members.members
-    : bootstrap.user?.email ? [{ user_id: bootstrap.user.id || "current", email: bootstrap.user.email, role: bootstrap.membership?.role || "admin", created_at: "", updated_at: "" }] : [];
+    : bootstrap.user?.email ? [{
+        user_id: bootstrap.user.id || "current",
+        email: bootstrap.user.email,
+        display_name: bootstrap.user.display_name || "",
+        role: bootstrap.membership?.role || "admin",
+        created_at: "",
+        updated_at: "",
+      }] : [];
   const healthLooksGood = online && !hasStorageFailure && !notesError;
   const activityItems = buildActivityItems(storage, sync, { members: people });
   const backupDetail = backup.last_successful_at
@@ -412,7 +420,7 @@ export function DashboardHome() {
       <header className="home-hero">
         <div>
           <p className="eyebrow">Hank Remote</p>
-          <h1 id="route-title">{greeting()}, {displayName(userEmail)}</h1>
+          <h1 id="route-title">{greeting()}, {userDisplayName}</h1>
           <p>{healthLooksGood ? `Everything at ${homeName} is running smoothly.` : `${homeName} has a few things that need attention.`}</p>
           <div className={`home-mobile-connection tone-${online ? "ok" : "bad"}`} role="status" aria-label="Home connection">
             <span className="activity-dot" aria-hidden="true" />
@@ -548,15 +556,18 @@ export function DashboardHome() {
               {bootstrap.permissions?.can_manage_people || bootstrap.permissions?.is_admin ? <a href="/dashboard/settings/people">Invite</a> : null}
             </div>
             <div className="people-list">
-              {people.slice(0, 4).map((person) => (
-                <article className="person-row" key={person.user_id || person.email}>
-                  <span className="person-avatar" aria-hidden="true">{initials(person.email)}</span>
-                  <span>
-                    <strong>{person.email}</strong>
-                    <small>{titleCase(person.role)}</small>
-                  </span>
-                </article>
-              ))}
+              {people.slice(0, 4).map((person) => {
+                const label = person.display_name?.trim() || person.email;
+                return (
+                  <article className="person-row" key={person.user_id || person.email}>
+                    <span className="person-avatar" aria-hidden="true">{initials(label)}</span>
+                    <span>
+                      <strong>{label}</strong>
+                      <small>{person.display_name ? `${person.email} · ` : ""}{titleCase(person.role)}</small>
+                    </span>
+                  </article>
+                );
+              })}
             </div>
           </section>
         </aside>

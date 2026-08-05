@@ -14,6 +14,11 @@ type ResetForm = {
   passwordChangeRequired: boolean;
 };
 
+type NameEdit = {
+  member: HomeMember;
+  value: string;
+};
+
 type State =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -25,6 +30,7 @@ type State =
       inviteEmail: string;
       createdInvitation: CreatedInvitation | null;
       resetForm: ResetForm | null;
+      nameEdit: NameEdit | null;
       message: string;
     };
 
@@ -36,10 +42,14 @@ function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
-function initials(email: string): string {
-  const local = email.split("@")[0] || email;
-  const parts = local.split(/[._-]+/).filter(Boolean);
+function initials(value: string): string {
+  const local = value.split("@")[0] || value;
+  const parts = local.split(/[\s._-]+/).filter(Boolean);
   return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : local.slice(0, 2)).toUpperCase();
+}
+
+function memberLabel(member: HomeMember): string {
+  return member.display_name?.trim() || member.email;
 }
 
 export function PeopleSettings() {
@@ -61,6 +71,7 @@ export function PeopleSettings() {
         inviteEmail: "",
         createdInvitation,
         resetForm,
+        nameEdit: null,
         message,
       });
     } catch (error) {
@@ -155,6 +166,24 @@ export function PeopleSettings() {
     }
   }
 
+  async function saveDisplayName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!readyState.nameEdit) return;
+    try {
+      const updated = await peopleClient.updateDisplayName(
+        readyState.nameEdit.member.user_id,
+        readyState.nameEdit.value.trim(),
+      );
+      setReady({
+        members: readyState.members.map((member) => member.user_id === updated.user_id ? updated : member),
+        nameEdit: null,
+        message: "Display name updated.",
+      });
+    } catch (error) {
+      setReady({ message: errorMessage(error) });
+    }
+  }
+
   return (
     <section className="settings-page" aria-labelledby="route-title">
       <header className="dashboard-header">
@@ -203,36 +232,67 @@ export function PeopleSettings() {
         <div aria-label="Home members" className="quick-links-list settings-list" role="list">
           {readyState.members.map((member) => {
             const isSelf = member.user_id === readyState.bootstrap.user.id;
+            const label = memberLabel(member);
+            const mayEditName = canManage || isSelf;
+            const editingName = readyState.nameEdit?.member.user_id === member.user_id;
             return (
               <article className="quick-link-row" key={member.user_id} role="listitem">
                 <div className="person-row-main">
-                  <span className="person-avatar" aria-hidden="true">{initials(member.email)}</span>
+                  <span className="person-avatar" aria-hidden="true">{initials(label)}</span>
                   <div className="quick-link-copy">
-                    <strong>{member.email}</strong>
-                    <span>{member.user_id}</span>
-                    <small>Joined {formatDate(member.created_at)}</small>
+                    <strong>{label}</strong>
+                    <span>{member.display_name ? member.email : member.user_id}</span>
+                    <small>{member.display_name ? `${member.user_id} · ` : ""}Joined {formatDate(member.created_at)}</small>
                   </div>
                 </div>
                 <span className="status-pill">{member.role}</span>
-                {canManage && !isSelf ? (
+                {mayEditName || (canManage && !isSelf) ? (
                   <div className="row-actions">
-                    <button
-                      className="secondary"
-                      onClick={() => setReady({
-                        resetForm: {
-                          member,
-                          temporaryPassword: "",
-                          passwordChangeRequired: true,
-                        },
-                      })}
-                      type="button"
-                    >
-                      Reset password for {member.email}
-                    </button>
-                    <button className="danger-link" onClick={() => void removeMember(member)} type="button">
-                      Remove {member.email}
-                    </button>
+                    {mayEditName ? (
+                      <button
+                        className="secondary"
+                        onClick={() => setReady({ nameEdit: { member, value: member.display_name || "" } })}
+                        type="button"
+                      >
+                        Edit display name for {label}
+                      </button>
+                    ) : null}
+                    {canManage && !isSelf ? (
+                      <>
+                        <button
+                          className="secondary"
+                          onClick={() => setReady({
+                            resetForm: {
+                              member,
+                              temporaryPassword: "",
+                              passwordChangeRequired: true,
+                            },
+                          })}
+                          type="button"
+                        >
+                          Reset password for {member.email}
+                        </button>
+                        <button className="danger-link" onClick={() => void removeMember(member)} type="button">
+                          Remove {member.email}
+                        </button>
+                      </>
+                    ) : null}
                   </div>
+                ) : null}
+                {editingName ? (
+                  <form className="inline-form person-name-form" onSubmit={saveDisplayName}>
+                    <label>
+                      <span>Display name for {member.email}</span>
+                      <input
+                        onChange={(event) => setReady({
+                          nameEdit: readyState.nameEdit ? { ...readyState.nameEdit, value: event.target.value } : null,
+                        })}
+                        value={readyState.nameEdit?.value || ""}
+                      />
+                    </label>
+                    <button type="submit">Save display name</button>
+                    <button className="secondary" onClick={() => setReady({ nameEdit: null })} type="button">Cancel</button>
+                  </form>
                 ) : null}
               </article>
             );

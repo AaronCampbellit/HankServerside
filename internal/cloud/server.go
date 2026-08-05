@@ -2332,6 +2332,7 @@ func sanitizeUser(user domain.User) map[string]any {
 	return map[string]any{
 		"id":                       user.ID,
 		"email":                    user.Email,
+		"display_name":             user.DisplayName,
 		"password_change_required": user.PasswordChangeRequired,
 		"password_login_enabled":   user.PasswordLoginEnabled,
 		"password_changed_at":      user.PasswordChangedAt,

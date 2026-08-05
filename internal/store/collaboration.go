@@ -15,7 +15,7 @@ func (s *Store) GetHomeMembership(ctx context.Context, homeID string, userID str
 }
 
 func (s *Store) ListHomeMembers(ctx context.Context, homeID string) ([]domain.HomeMember, error) {
-	rows, err := s.query(ctx, `SELECT u.id, u.email, hm.role, hm.created_at, hm.updated_at
+	rows, err := s.query(ctx, `SELECT u.id, u.email, u.display_name, hm.role, hm.created_at, hm.updated_at
 		FROM home_memberships hm
 		JOIN users u ON u.id = hm.user_id
 		WHERE hm.home_id = ?
@@ -34,6 +34,14 @@ func (s *Store) ListHomeMembers(ctx context.Context, homeID string) ([]domain.Ho
 		members = append(members, member)
 	}
 	return members, rows.Err()
+}
+
+func (s *Store) GetHomeMember(ctx context.Context, homeID string, userID string) (domain.HomeMember, error) {
+	row := s.queryRow(ctx, `SELECT u.id, u.email, u.display_name, hm.role, hm.created_at, hm.updated_at
+		FROM home_memberships hm
+		JOIN users u ON u.id = hm.user_id
+		WHERE hm.home_id = ? AND hm.user_id = ?`, homeID, userID)
+	return scanHomeMember(row)
 }
 
 func (s *Store) AddHomeMembership(ctx context.Context, membership domain.HomeMembership) error {
@@ -195,10 +203,11 @@ func (s *Store) CreateUserAndAcceptHomeInvitation(ctx context.Context, invitatio
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (
-			id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, email, display_name, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.ID,
 		user.Email,
+		user.DisplayName,
 		user.PasswordHash,
 		user.PasswordLoginEnabled,
 		user.PasswordChangeRequired,
@@ -243,7 +252,7 @@ func (s *Store) CreateExternalIdentity(ctx context.Context, identity domain.Exte
 }
 
 func (s *Store) GetUserByExternalIdentity(ctx context.Context, provider, tenantID, subjectID string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT u.id, u.email, u.password_hash, u.password_login_enabled, u.password_change_required, u.password_changed_at, u.password_reset_at, u.password_reset_by, u.created_at, u.updated_at
+	row := s.queryRow(ctx, `SELECT u.id, u.email, u.display_name, u.password_hash, u.password_login_enabled, u.password_change_required, u.password_changed_at, u.password_reset_at, u.password_reset_by, u.created_at, u.updated_at
 		FROM external_identities e JOIN users u ON u.id = e.user_id WHERE e.provider = ? AND e.tenant_id = ? AND e.subject_id = ?`, provider, tenantID, subjectID)
 	return scanUser(row)
 }
@@ -256,8 +265,8 @@ func (s *Store) CreateSSOUserAndAcceptHomeInvitation(ctx context.Context, invita
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at)
-		VALUES (?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`, user.ID, user.Email, user.PasswordHash, user.PasswordChangeRequired, user.PasswordChangedAt, user.PasswordResetAt, user.PasswordResetBy, user.CreatedAt, user.UpdatedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, display_name, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`, user.ID, user.Email, user.DisplayName, user.PasswordHash, user.PasswordChangeRequired, user.PasswordChangedAt, user.PasswordResetAt, user.PasswordResetBy, user.CreatedAt, user.UpdatedAt); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO external_identities (id, user_id, provider, tenant_id, subject_id, created_at, updated_at)
@@ -298,8 +307,8 @@ func (s *Store) CreateSSOUserAndBootstrapSingletonHome(ctx context.Context, user
 	if homes != 0 {
 		return domain.Home{}, ErrConflict
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at)
-		VALUES (?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`, user.ID, user.Email, user.PasswordHash, user.PasswordChangeRequired, user.PasswordChangedAt, user.PasswordResetAt, user.PasswordResetBy, user.CreatedAt, user.UpdatedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, email, display_name, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`, user.ID, user.Email, user.DisplayName, user.PasswordHash, user.PasswordChangeRequired, user.PasswordChangedAt, user.PasswordResetAt, user.PasswordResetBy, user.CreatedAt, user.UpdatedAt); err != nil {
 		return domain.Home{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO external_identities (id, user_id, provider, tenant_id, subject_id, created_at, updated_at)
@@ -491,7 +500,7 @@ func scanHomeMembership(scanner interface{ Scan(dest ...any) error }) (domain.Ho
 
 func scanHomeMember(scanner interface{ Scan(dest ...any) error }) (domain.HomeMember, error) {
 	var member domain.HomeMember
-	err := scanner.Scan(&member.UserID, &member.Email, &member.Role, &member.CreatedAt, &member.UpdatedAt)
+	err := scanner.Scan(&member.UserID, &member.Email, &member.DisplayName, &member.Role, &member.CreatedAt, &member.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.HomeMember{}, ErrNotFound
 	}

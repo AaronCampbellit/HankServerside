@@ -236,6 +236,7 @@ export function App() {
       onNavigate={navigateTo}
       onPrefetch={prefetchRoute}
       onLogout={() => void logout()}
+      userDisplayName={bootstrap?.user.display_name}
       userEmail={bootstrap?.user.email}
       userRole={bootstrap?.membership?.role}
       connectorOnline={bootstrap?.agent?.status?.toLowerCase() === "online"}

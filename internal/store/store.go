@@ -202,10 +202,11 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User) error {
 	_, err := s.exec(
 		ctx,
 		`INSERT INTO users (
-			id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				id, email, display_name, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.ID,
 		user.Email,
+		user.DisplayName,
 		user.PasswordHash,
 		user.PasswordLoginEnabled,
 		user.PasswordChangeRequired,
@@ -222,13 +223,28 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User) error {
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE email = ?`, email)
+	row := s.queryRow(ctx, `SELECT id, email, display_name, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE email = ?`, email)
 	return scanUser(row)
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (domain.User, error) {
-	row := s.queryRow(ctx, `SELECT id, email, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.queryRow(ctx, `SELECT id, email, display_name, password_hash, password_login_enabled, password_change_required, password_changed_at, password_reset_at, password_reset_by, created_at, updated_at FROM users WHERE id = ?`, id)
 	return scanUser(row)
+}
+
+func (s *Store) UpdateUserDisplayName(ctx context.Context, userID string, displayName string) error {
+	result, err := s.exec(ctx, `UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?`, displayName, time.Now().UTC(), userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateUserPassword(ctx context.Context, userID string, passwordHash string, passwordChangeRequired bool, resetBy string, revokeSessions bool, keepSessionID string) error {
@@ -755,6 +771,7 @@ func scanUser(scanner interface{ Scan(dest ...any) error }) (domain.User, error)
 	err := scanner.Scan(
 		&user.ID,
 		&user.Email,
+		&user.DisplayName,
 		&user.PasswordHash,
 		&user.PasswordLoginEnabled,
 		&user.PasswordChangeRequired,

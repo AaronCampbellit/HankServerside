@@ -624,6 +624,12 @@ button.secondary:hover {
   color: var(--muted);
 }
 
+.quick-link-row .person-name-form {
+  grid-column: 1 / -1;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .smb-share-list {
   margin-bottom: 14px;
 }
