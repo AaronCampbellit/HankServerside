@@ -252,6 +252,67 @@ func TestManagerLoadRestoresPersistedAppState(t *testing.T) {
 	}
 }
 
+func TestManagerActivateReplacementPreservesAppConfiguration(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	appsDir := filepath.Join(t.TempDir(), "apps")
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+	manager := NewManager(appsDir, stagingDir, Runner{MaxOutputBytes: 4096, MaxStderrBytes: 1024})
+
+	activate := func(stagingID string) {
+		t.Helper()
+		archivePath := writeManagerHermesPackage(t, t.TempDir(), hermesSecretEchoScript())
+		if _, err := manager.PreviewPackage(ctx, protocol.AppsPackagePreviewRequest{
+			StagingID:   stagingID,
+			DownloadURL: fileURL(t, archivePath),
+		}); err != nil {
+			t.Fatalf("PreviewPackage(%s) error: %v", stagingID, err)
+		}
+		if _, err := manager.ActivatePackage(ctx, protocol.AppsPackageActivateRequest{
+			StagingID: stagingID,
+			Enable:    true,
+		}); err != nil {
+			t.Fatalf("ActivatePackage(%s) error: %v", stagingID, err)
+		}
+	}
+
+	activate("stage_initial")
+	if _, err := manager.ConfigApply(ctx, protocol.AppsConfigApplyRequest{
+		AppID:        "hermes",
+		PublicConfig: json.RawMessage(`{"api_base_url":"https://hermes.local"}`),
+		Secrets:      json.RawMessage(`{"api_key":"preserved-secret"}`),
+	}); err != nil {
+		t.Fatalf("ConfigApply error: %v", err)
+	}
+
+	activate("stage_replacement")
+
+	status, err := manager.ConfigStatus(ctx, protocol.AppsConfigStatusRequest{AppID: "hermes"})
+	if err != nil {
+		t.Fatalf("ConfigStatus error: %v", err)
+	}
+	if len(status.Apps) != 1 {
+		t.Fatalf("ConfigStatus apps = %#v, want one app", status.Apps)
+	}
+	if string(status.Apps[0].PublicConfig) != `{"api_base_url":"https://hermes.local"}` {
+		t.Fatalf("PublicConfig = %s, want preserved config", status.Apps[0].PublicConfig)
+	}
+	if !status.Apps[0].SecretFieldsSet["api_key"] {
+		t.Fatalf("SecretFieldsSet = %#v, want api_key preserved", status.Apps[0].SecretFieldsSet)
+	}
+	response, err := manager.Invoke(ctx, protocol.AppsInvokeRequest{
+		AppID:     "hermes",
+		CommandID: "chat",
+		Input:     json.RawMessage(`{"prompt":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("Invoke after replacement error: %v", err)
+	}
+	if string(response.Output) != `{"api_key":"preserved-secret"}` {
+		t.Fatalf("Output = %s, want preserved secret", response.Output)
+	}
+}
+
 func TestManagerCapabilitiesOnlyIncludesEnabledApps(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

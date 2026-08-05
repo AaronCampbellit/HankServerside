@@ -235,16 +235,37 @@ func (m *Manager) ActivatePackage(ctx context.Context, request protocol.AppsPack
 		return protocol.AppsPackageActivateResponse{}, fmt.Errorf("%w: app install directory is not configured", ErrPermissionRefused)
 	}
 
+	m.mu.RLock()
+	existing, replacing := m.apps[preview.Manifest.ID]
+	var previous InstalledApp
+	if replacing {
+		previous = cloneInstalledApp(existing)
+	}
+	m.mu.RUnlock()
+
+	secretSet := secretSetDefaults(preview.Manifest)
+	var publicConfig json.RawMessage
+	var secrets json.RawMessage
+	if replacing {
+		publicConfig = cloneRawMessage(previous.PublicConfig)
+		secrets, secretSet, err = preserveDeclaredSecrets(previous, preview.Manifest)
+		if err != nil {
+			return protocol.AppsPackageActivateResponse{}, err
+		}
+	}
+
 	appPath, err := installArchive(m.appsDir, preview.Manifest.ID, stagePath)
 	if err != nil {
 		return protocol.AppsPackageActivateResponse{}, err
 	}
 	installed := &InstalledApp{
-		Manifest:  preview.Manifest,
-		Path:      appPath,
-		Enabled:   request.Enable,
-		SecretSet: secretSetDefaults(preview.Manifest),
-		Status:    "installed",
+		Manifest:     preview.Manifest,
+		Path:         appPath,
+		Enabled:      request.Enable,
+		PublicConfig: publicConfig,
+		Secrets:      secrets,
+		SecretSet:    secretSet,
+		Status:       "installed",
 	}
 	if err := writePersistedAppState(installed); err != nil {
 		return protocol.AppsPackageActivateResponse{}, err
@@ -857,6 +878,28 @@ func cloneSecretSet(secretSet map[string]bool) map[string]bool {
 		clone[key] = value
 	}
 	return clone
+}
+
+func preserveDeclaredSecrets(existing InstalledApp, manifest Manifest) (json.RawMessage, map[string]bool, error) {
+	stored, err := decodeSecretObject(existing.Secrets)
+	if err != nil {
+		return nil, nil, err
+	}
+	preserved := make(map[string]json.RawMessage, len(manifest.Config.SecretFields))
+	secretSet := secretSetDefaults(manifest)
+	for _, field := range manifest.Config.SecretFields {
+		value, ok := stored[field]
+		if !ok || isEmptySecretValue(value) {
+			continue
+		}
+		preserved[field] = cloneRawMessage(value)
+		secretSet[field] = true
+	}
+	encoded, err := encodeSecretObject(preserved)
+	if err != nil {
+		return nil, nil, err
+	}
+	return encoded, secretSet, nil
 }
 
 func applySecrets(app *InstalledApp, secrets json.RawMessage) error {
