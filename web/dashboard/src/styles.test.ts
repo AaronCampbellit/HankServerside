@@ -26,12 +26,11 @@ describe("dashboard stylesheet", () => {
 
   it("uses the full desktop workspace without an outer page card", () => {
     const routeCanvases = ruleBodies(".app-main > .route-cache-panel > .dashboard-page:not(.home-dashboard)");
-    const notesWorkspace = lastRuleBody(".notes-guide-layout");
+    const notesWorkspaces = ruleBodies(".notes-guide-layout");
 
     expect(styles).toContain("/* Productive edge-to-edge desktop workspace */");
     expect(routeCanvases.some((body) => body.includes("min-height: calc(100vh - 56px)") && body.includes("padding: 0") && body.includes("max-width: none"))).toBe(true);
-    expect(notesWorkspace).toContain("border: 0");
-    expect(notesWorkspace).toContain("border-radius: 0");
+    expect(notesWorkspaces.some((body) => body.includes("border: 0") && body.includes("border-radius: 0"))).toBe(true);
   });
 
   it("keeps the fixed dashboard shell scrollable inside the content pane", () => {

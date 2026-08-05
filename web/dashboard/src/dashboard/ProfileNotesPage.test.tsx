@@ -310,12 +310,14 @@ describe("ProfileNotesPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Notes" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse notes rail" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse notes rail" })).not.toBeInTheDocument();
     const creationActions = screen.getByRole("group", { name: "Create note or notebook" });
     const creationButtons = within(creationActions).getAllByRole("button");
     expect(creationButtons.map((button) => button.getAttribute("aria-label"))).toEqual(["New notebook", "New note"]);
     expect(creationButtons[0]).toHaveClass("notes-new-note");
     expect(creationButtons[1]).toHaveClass("notes-new-note");
+    const search = screen.getByPlaceholderText("Search notes").closest(".notes-search");
+    expect(search?.compareDocumentPosition(creationActions) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     const editorTools = screen.getByLabelText("Editor tools");
     for (const label of ["Delete note", "Undo", "Redo", "Bold", "Italic", "Underline", "Smaller heading", "Heading", "Larger heading", "Bulleted list", "Numbered list", "Text page", "Kanban page", "Tag", "Link"]) {
@@ -411,7 +413,7 @@ describe("ProfileNotesPage", () => {
     expect(within(noteCards).getByRole("button", { name: "Daily Notes" })).toBeInTheDocument();
     expect(within(noteCards).queryByRole("button", { name: "Roof Warranty" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Roof Warranty" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Roof Warranty" }));
     expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
 
@@ -427,7 +429,7 @@ describe("ProfileNotesPage", () => {
     window.localStorage.clear();
   });
 
-  it("keeps notebooks and notes reachable from the collapsed rail", async () => {
+  it("keeps notebooks and notes reachable without a collapsed rail control", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
         { note_id: "house", title: "House Notebook", preview: "1 page", page_type: "notebook" },
@@ -447,18 +449,15 @@ describe("ProfileNotesPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open Roof Warranty" }));
     fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Collapse notes rail" }));
-
+    expect(screen.queryByRole("button", { name: "Collapse notes rail" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open notebook House Notebook" })).toBeInTheDocument();
-    const note = screen.getByRole("button", { name: "Open note Roof Warranty" });
-    expect(note).toBeInTheDocument();
-    fireEvent.click(note);
+    fireEvent.click(screen.getByRole("button", { name: "Open Roof Warranty" }));
 
     expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
     expect(await screen.findByLabelText("Note body")).toHaveTextContent("Roof Warranty");
   });
 
-  it("shows a notebook section and notebook controls even when no notebooks exist", async () => {
+  it("keeps notebook organization in the navigation instead of duplicating it in the editor header", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
         { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text" },
@@ -477,7 +476,7 @@ describe("ProfileNotesPage", () => {
     expect(await screen.findByRole("heading", { name: "Notebooks" })).toBeInTheDocument();
     expect(screen.getByText("No notebooks yet.")).toBeInTheDocument();
     expect(screen.getByLabelText("Notebook filter")).toBeInTheDocument();
-    expect(screen.getByLabelText("Notebook")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Notebook")).not.toBeInTheDocument();
   });
 
   it("filters notes by notebook and creates child notes from the notebook panel", async () => {
@@ -508,7 +507,12 @@ describe("ProfileNotesPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New note in House Notebook" }));
 
     expect(screen.getByLabelText("Note title")).toHaveValue("");
-    expect(screen.getByLabelText("Notebook")).toHaveValue("house");
+    fireEvent.change(screen.getByLabelText("Note title"), { target: { value: "Paint colors" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Paint colors",
+      parent_id: "house",
+    })));
   });
 
   it("sorts pinned notebook notes first and synchronizes pin controls", async () => {
@@ -863,40 +867,6 @@ describe("ProfileNotesPage", () => {
     }));
   });
 
-  it("saves a notebook selection immediately instead of only changing the local editor state", async () => {
-    profileNotesClient.listNotes.mockResolvedValue({
-      notes: [
-        { note_id: "family", title: "Family", preview: "Notebook", page_type: "notebook" },
-        { note_id: "passwords", title: "Passwords", preview: "secret", page_type: "text", revision: "1" },
-      ],
-    });
-    profileNotesClient.fetchNote.mockResolvedValue({
-      note_id: "passwords",
-      title: "Passwords",
-      body_markdown: "secret",
-      revision: "1",
-      page_type: "text",
-      parent_id: "",
-    });
-    profileNotesClient.saveNote.mockResolvedValue({ note_id: "passwords", revision: "2" });
-
-    renderPage();
-
-    fireEvent.change(await screen.findByLabelText("Notebook"), { target: { value: "family" } });
-
-    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledWith({
-      note_id: "passwords",
-      title: "Passwords",
-      body_markdown: "secret",
-      expected_revision: "1",
-      page_type: "text",
-      parent_id: "family",
-      mcp_excluded: false,
-      pinned: false,
-      board: undefined,
-    }));
-  });
-
   it("toggles MCP exclusion from the editor toolbar and sends the lock state in save payloads", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
@@ -1000,48 +970,6 @@ describe("ProfileNotesPage", () => {
     await waitFor(() => expect(body).toHaveTextContent("Second edit"));
     expect(body).not.toHaveTextContent("First edit");
     expect(screen.getByRole("button", { name: "Save note" })).toHaveTextContent("Unsaved");
-  });
-
-  it("queues the latest notebook selection while a save is running", async () => {
-    profileNotesClient.listNotes.mockResolvedValue({
-      notes: [
-        { note_id: "family", title: "Family", preview: "Notebook", page_type: "notebook" },
-        { note_id: "work", title: "Work", preview: "Notebook", page_type: "notebook" },
-        { note_id: "daily", title: "Daily", preview: "Original", page_type: "text", revision: "1" },
-      ],
-    });
-    profileNotesClient.fetchNote.mockResolvedValue({
-      note_id: "daily",
-      title: "Daily",
-      body_markdown: "Original",
-      revision: "1",
-      page_type: "text",
-      parent_id: "",
-    });
-    let resolveFirst!: (value: { note_id: string; revision: string }) => void;
-    profileNotesClient.saveNote
-      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
-      .mockResolvedValueOnce({ note_id: "daily", revision: "3" });
-
-    renderPage();
-
-    const notebook = await screen.findByLabelText("Notebook");
-    fireEvent.change(notebook, { target: { value: "family" } });
-    fireEvent.change(notebook, { target: { value: "work" } });
-    resolveFirst({ note_id: "daily", revision: "2" });
-
-    await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledTimes(2));
-    expect(profileNotesClient.saveNote).toHaveBeenLastCalledWith({
-      note_id: "daily",
-      title: "Daily",
-      body_markdown: "Original",
-      expected_revision: "2",
-      page_type: "text",
-      parent_id: "work",
-      mcp_excluded: false,
-      pinned: false,
-      board: undefined,
-    });
   });
 
   it("autosaves the latest note body after 750ms of idle typing", async () => {

@@ -41,7 +41,6 @@ type ReadyState = {
   query: string;
   selectedNotebookID: string;
   message: string;
-  railOpen: boolean;
   notebookDialogOpen: boolean;
   notebookDraft: string;
   moveDialogNoteID: string;
@@ -396,7 +395,6 @@ export function ProfileNotesPage() {
         query: current.status === "ready" ? current.query : "",
         selectedNotebookID: current.status === "ready" ? current.selectedNotebookID : "",
         message,
-        railOpen: current.status === "ready" ? current.railOpen : true,
         notebookDialogOpen: current.status === "ready" ? current.notebookDialogOpen : false,
         notebookDraft: current.status === "ready" ? current.notebookDraft : "",
         moveDialogNoteID: current.status === "ready" ? current.moveDialogNoteID : "",
@@ -1166,30 +1164,26 @@ export function ProfileNotesPage() {
       {state.message ? <p className="notice-state">{state.message}</p> : null}
 
       <div
-        className={`notes-guide-layout${state.railOpen ? "" : " rail-closed"}`}
+        className="notes-guide-layout"
         data-mobile-pane={mobilePane}
         data-testid="notes-mobile-workspace"
       >
-        {state.railOpen ? (
-          <aside className="notes-guide-rail" aria-label="Notes list">
+        <aside className="notes-guide-rail" aria-label="Notes list">
             <header className="notes-rail-head">
               <div>
                 <p className="eyebrow">Hank Remote</p>
                 <h1 id="route-title">Notes</h1>
               </div>
-              <div className="notes-rail-actions">
-                <button className="icon-button" type="button" aria-label="Collapse notes rail" title="Collapse notes rail" onClick={() => setReady({ railOpen: false })}><Icon name="panel" /></button>
-              </div>
             </header>
-            <div className="notes-create-actions" role="group" aria-label="Create note or notebook">
-              <button className="notes-new-note" type="button" aria-label="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" />New notebook</button>
-              <button className="notes-new-note" type="button" aria-label="New note" onClick={newNote}><Icon name="plus" />New note</button>
-            </div>
             <label className="notes-search">
               <Icon name="search" />
               <span className="visually-hidden">Search notes</span>
               <input type="search" placeholder="Search notes" value={state.query} onChange={(event) => setReady({ query: event.target.value })} />
             </label>
+            <div className="notes-create-actions" role="group" aria-label="Create note or notebook">
+              <button className="notes-new-note" type="button" aria-label="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" />New notebook</button>
+              <button className="notes-new-note" type="button" aria-label="New note" onClick={newNote}><Icon name="plus" />New note</button>
+            </div>
             <section className="notes-notebooks-section" aria-labelledby="notebooks-heading">
               <div className="notes-section-head">
                 <h2 id="notebooks-heading">Notebooks</h2>
@@ -1261,24 +1255,6 @@ export function ProfileNotesPage() {
               </section>
             ) : null}
           </aside>
-        ) : (
-          <aside className="notes-rail-collapsed" aria-label="Notes rail">
-            <button className="icon-button" type="button" aria-label="Expand notes rail" title="Expand notes rail" onClick={() => setReady({ railOpen: true })}><Icon name="panel" /></button>
-            <button className="icon-button" type="button" aria-label="New notebook" title="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" /></button>
-            <button className="icon-button" type="button" aria-label="New note" title="New note" onClick={newNote}><Icon name="plus" /></button>
-            {visibleNotebookItems.map((note) => {
-              const id = noteID(note);
-              const title = noteTitle(note);
-              return <button className={id === state.selectedID ? "icon-button active" : "icon-button"} key={id} type="button" aria-label={`Open notebook ${title}`} title={title} onClick={() => void selectNote(id)}><Icon name="book" /></button>;
-            })}
-            {visibleNotebookItems.length && visibleNotes.length ? <span className="notes-rail-divider" aria-hidden="true" /> : null}
-            {visibleNotes.map((note) => {
-              const id = noteID(note);
-              const title = noteTitle(note);
-              return <button className={id === state.selectedID ? "icon-button active" : "icon-button"} key={id} type="button" aria-label={`Open note ${title}`} title={title} onClick={() => void selectNote(id)}><Icon name={noteIconName(note)} /></button>;
-            })}
-          </aside>
-        )}
 
         <section className="notes-guide-editor" aria-label="Note editor">
           <header className="notes-editor-header">
@@ -1295,29 +1271,6 @@ export function ProfileNotesPage() {
               onBlur={flushAutosave}
               onChange={(event) => updateEditor({ ...state.editor, title: event.target.value })}
             />
-            <label className="notes-editor-notebook">
-              <span>Notebook</span>
-              <select
-                aria-label="Notebook"
-                disabled={state.editor.pageType === "notebook"}
-                value={state.editor.pageType === "notebook" ? "" : state.editor.parentID}
-                onChange={(event) => {
-                  const parentID = event.target.value;
-                  const editor = {
-                    ...state.editor,
-                    parentID,
-                    pinned: Boolean(parentID && state.editor.pinned),
-                  };
-                  updateEditor(editor, false);
-                  void saveNote(editor, true);
-                }}
-              >
-                <option value="">No Notebook</option>
-                {notebookItems.map((note) => (
-                  <option key={noteID(note)} value={noteID(note)}>{noteTitle(note)}</option>
-                ))}
-              </select>
-            </label>
             <button className="notes-save-pill" type="button" aria-label="Save note" onClick={() => void saveNote()}>
               <span>{state.saving ? "Saving…" : state.editor.noteID && !editorChanged(state.editor, state.savedEditor) ? "Saved" : "Unsaved"}</span>
               <small>{selectedSummary ? updatedLabel(selectedSummary) : "Not saved"}</small>
