@@ -170,8 +170,8 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
     editor.focus();
     if (!selectionInDescription()) placeCaretAtEnd(editor);
 
-    if (command === "insertUnorderedList" && !(editor.textContent || "").trim()) {
-      const list = document.createElement("ul");
+    if ((command === "insertUnorderedList" || command === "insertOrderedList") && !(editor.textContent || "").trim()) {
+      const list = document.createElement(command === "insertOrderedList" ? "ol" : "ul");
       const item = document.createElement("li");
       item.append(document.createElement("br"));
       list.append(item);
@@ -196,8 +196,8 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
       }
       return;
     }
-    if (command === "insertUnorderedList") {
-      const list = document.createElement("ul");
+    if (command === "insertUnorderedList" || command === "insertOrderedList") {
+      const list = document.createElement(command === "insertOrderedList" ? "ol" : "ul");
       const item = document.createElement("li");
       item.append(document.createElement("br"));
       list.append(item);
@@ -345,7 +345,12 @@ export function KanbanCardModal(props: KanbanCardModalProps) {
             <div className="kanban-formatbar" aria-label="Description formatting">
               <button type="button" aria-label="Bold" disabled={!editingDescription} onClick={() => runRichCommand("bold")}><strong>B</strong></button>
               <button type="button" aria-label="Italic" disabled={!editingDescription} onClick={() => runRichCommand("italic")}><em>I</em></button>
+              <button type="button" aria-label="Underline" disabled={!editingDescription} onClick={() => runRichCommand("underline")}><u>U</u></button>
+              <button type="button" aria-label="Smaller heading" disabled={!editingDescription} onClick={() => runRichCommand("formatBlock", "p")}>A-</button>
+              <button type="button" aria-label="Heading" disabled={!editingDescription} onClick={() => runRichCommand("formatBlock", "h2")}>H</button>
+              <button type="button" aria-label="Larger heading" disabled={!editingDescription} onClick={() => runRichCommand("formatBlock", "h1")}>A+</button>
               <button type="button" aria-label="Bulleted list" disabled={!editingDescription} onClick={() => runRichCommand("insertUnorderedList")}>• List</button>
+              <button type="button" aria-label="Numbered list" disabled={!editingDescription} onClick={() => runRichCommand("insertOrderedList")}>1. List</button>
               <button type="button" aria-label="Link" disabled={!editingDescription} onClick={() => runRichCommand("createLink", "https://example.com")}>Link</button>
               <button className="kanban-description-mode" type="button" aria-label={editingDescription ? "Preview description" : "Edit description"} onClick={() => setEditingDescription((current) => !current)}>
                 {editingDescription ? "Preview" : "Edit"}

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { bootstrapClient, type BootstrapState } from "../api/bootstrap";
 import {
   peopleClient,
@@ -54,6 +54,8 @@ function memberLabel(member: HomeMember): string {
 
 export function PeopleSettings() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const targetedMember = useRef(new URLSearchParams(window.location.search).get("member") || "");
+  const targetedMemberRow = useRef<HTMLElement>(null);
   const dialog = useConfirmDialog();
 
   async function load(message = "", createdInvitation: CreatedInvitation | null = null, resetForm: ResetForm | null = null) {
@@ -82,6 +84,12 @@ export function PeopleSettings() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (state.status !== "ready" || !targetedMember.current) return;
+    targetedMemberRow.current?.focus();
+    targetedMemberRow.current?.scrollIntoView?.({ block: "center" });
+  }, [state]);
 
   if (state.status === "loading") {
     return (
@@ -235,8 +243,16 @@ export function PeopleSettings() {
             const label = memberLabel(member);
             const mayEditName = canManage || isSelf;
             const editingName = readyState.nameEdit?.member.user_id === member.user_id;
+            const isSearchTarget = targetedMember.current === member.email || targetedMember.current === member.user_id;
             return (
-              <article className="quick-link-row" key={member.user_id} role="listitem">
+              <article
+                aria-current={isSearchTarget ? "true" : undefined}
+                className={`quick-link-row${isSearchTarget ? " is-search-target" : ""}`}
+                key={member.user_id}
+                ref={isSearchTarget ? targetedMemberRow : undefined}
+                role="listitem"
+                tabIndex={isSearchTarget ? -1 : undefined}
+              >
                 <div className="person-row-main">
                   <span className="person-avatar" aria-hidden="true">{initials(label)}</span>
                   <div className="quick-link-copy">

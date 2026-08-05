@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Shell } from "./ui/Shell";
 import { primaryNav } from "./ui/navConfig";
 import { SettingsLayout, settingsLandingPath } from "./settings/SettingsLayout";
@@ -10,26 +10,27 @@ import { JoinPage } from "./auth/JoinPage";
 import { LoginPage } from "./auth/LoginPage";
 import { PasswordChangePage } from "./auth/PasswordChangePage";
 import { redirectTo } from "./browser/navigation";
-import { AgentsPage } from "./dashboard/AgentsPage";
-import { DashboardHome } from "./dashboard/DashboardHome";
-import { DeploymentGuide } from "./dashboard/DeploymentGuide";
-import { FileServerPage } from "./dashboard/FileServerPage";
-import { HankAIPage } from "./dashboard/HankAIPage";
-import { HomeAssistantPage } from "./dashboard/HomeAssistantPage";
-import { ProfileNotesPage } from "./dashboard/ProfileNotesPage";
 import { ensureBrowserDesktopIdentity } from "./desktop/autoEnrollment";
-import { AssistantSettings } from "./settings/AssistantSettings";
-import { AppsSettings } from "./settings/AppsSettings";
-import { AttachmentsSettings } from "./settings/AttachmentsSettings";
-import { BackupsSettings } from "./settings/BackupsSettings";
-import { ConnectionsSettings } from "./settings/ConnectionsSettings";
-import { HomeSettings } from "./settings/HomeSettings";
-import { JoinHomeSettings } from "./settings/JoinHomeSettings";
-import { LogsSettings } from "./settings/LogsSettings";
-import { PeopleSettings } from "./settings/PeopleSettings";
-import { QuickLinksSettings } from "./settings/QuickLinksSettings";
-import { RecoverySettings } from "./settings/RecoverySettings";
 import { agentWorkspaceForPath, routeCachePath, routeForPath, type RouteDefinition } from "./router";
+
+const AgentsPage = lazy(() => import("./dashboard/AgentsPage").then((module) => ({ default: module.AgentsPage })));
+const DashboardHome = lazy(() => import("./dashboard/DashboardHome").then((module) => ({ default: module.DashboardHome })));
+const DeploymentGuide = lazy(() => import("./dashboard/DeploymentGuide").then((module) => ({ default: module.DeploymentGuide })));
+const FileServerPage = lazy(() => import("./dashboard/FileServerPage").then((module) => ({ default: module.FileServerPage })));
+const HankAIPage = lazy(() => import("./dashboard/HankAIPage").then((module) => ({ default: module.HankAIPage })));
+const HomeAssistantPage = lazy(() => import("./dashboard/HomeAssistantPage").then((module) => ({ default: module.HomeAssistantPage })));
+const ProfileNotesPage = lazy(() => import("./dashboard/ProfileNotesPage").then((module) => ({ default: module.ProfileNotesPage })));
+const AssistantSettings = lazy(() => import("./settings/AssistantSettings").then((module) => ({ default: module.AssistantSettings })));
+const AppsSettings = lazy(() => import("./settings/AppsSettings").then((module) => ({ default: module.AppsSettings })));
+const AttachmentsSettings = lazy(() => import("./settings/AttachmentsSettings").then((module) => ({ default: module.AttachmentsSettings })));
+const BackupsSettings = lazy(() => import("./settings/BackupsSettings").then((module) => ({ default: module.BackupsSettings })));
+const ConnectionsSettings = lazy(() => import("./settings/ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })));
+const HomeSettings = lazy(() => import("./settings/HomeSettings").then((module) => ({ default: module.HomeSettings })));
+const JoinHomeSettings = lazy(() => import("./settings/JoinHomeSettings").then((module) => ({ default: module.JoinHomeSettings })));
+const LogsSettings = lazy(() => import("./settings/LogsSettings").then((module) => ({ default: module.LogsSettings })));
+const PeopleSettings = lazy(() => import("./settings/PeopleSettings").then((module) => ({ default: module.PeopleSettings })));
+const QuickLinksSettings = lazy(() => import("./settings/QuickLinksSettings").then((module) => ({ default: module.QuickLinksSettings })));
+const RecoverySettings = lazy(() => import("./settings/RecoverySettings").then((module) => ({ default: module.RecoverySettings })));
 
 function RouteStub({ route }: { route: RouteDefinition }) {
   return (
@@ -38,6 +39,23 @@ function RouteStub({ route }: { route: RouteDefinition }) {
         <p className="eyebrow">Hank Remote</p>
         <h1 id="route-title">{route.heading}</h1>
       </div>
+    </section>
+  );
+}
+
+function RouteLoadingPage({ route }: { route: RouteDefinition }) {
+  const heading = route.path === "/dashboard/profile-notes"
+    ? "Loading notes"
+    : route.path === "/dashboard/file-server"
+      ? "Loading files"
+      : route.path === "/docs/deployment"
+        ? "Setup Guide"
+        : route.heading;
+  return (
+    <section className={route.path.startsWith("/dashboard/settings") ? "settings-page" : "dashboard-page"} aria-labelledby="route-title">
+      <p className="eyebrow">Hank Remote</p>
+      <h1 id="route-title">{heading}</h1>
+      <p className="loading-state"><span className="spinner" aria-hidden="true" />Loading…</p>
     </section>
   );
 }
@@ -63,6 +81,10 @@ function currentPathname(): string {
   return window.location.pathname;
 }
 
+function currentLocationTarget(): string {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
 function initialMountedRoutePaths(): string[] {
   const route = routeForPath(currentPathname());
   return route.publicRoute ? [] : [routeCachePath(route)];
@@ -71,6 +93,11 @@ function initialMountedRoutePaths(): string[] {
 function initialMountedRouteTargets(): Record<string, string> {
   const route = routeForPath(currentPathname());
   return route.publicRoute ? {} : { [routeCachePath(route)]: route.path };
+}
+
+function initialMountedRouteLocations(): Record<string, string> {
+  const route = routeForPath(currentPathname());
+  return route.publicRoute ? {} : { [routeCachePath(route)]: currentLocationTarget() };
 }
 
 function appendMountedRoutePath(paths: string[], path: string): string[] {
@@ -110,11 +137,20 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
   const [mountedRoutePaths, setMountedRoutePaths] = useState<string[]>(initialMountedRoutePaths);
   const [mountedRouteTargets, setMountedRouteTargets] = useState<Record<string, string>>(initialMountedRouteTargets);
+  const [mountedRouteLocations, setMountedRouteLocations] = useState<Record<string, string>>(initialMountedRouteLocations);
   const route = routeForPath(pathname);
 
   useEffect(() => {
     function handlePopState() {
-      setPathname(currentPathname());
+      const nextPath = currentPathname();
+      const nextRoute = routeForPath(nextPath);
+      setPathname(nextPath);
+      if (!nextRoute.publicRoute) {
+        setMountedRouteLocations((locations) => ({
+          ...locations,
+          [routeCachePath(nextRoute)]: currentLocationTarget(),
+        }));
+      }
     }
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -156,11 +192,16 @@ export function App() {
     if (route.publicRoute) {
       setMountedRoutePaths([]);
       setMountedRouteTargets({});
+      setMountedRouteLocations({});
       return;
     }
     const cachePath = routeCachePath(route);
     setMountedRoutePaths((paths) => appendMountedRoutePath(paths, cachePath));
     setMountedRouteTargets((targets) => targets[cachePath] === route.path ? targets : { ...targets, [cachePath]: route.path });
+    setMountedRouteLocations((locations) => {
+      const target = currentLocationTarget();
+      return locations[cachePath] === target ? locations : { ...locations, [cachePath]: target };
+    });
   }, [route.path, route.publicRoute]);
 
   function navigateTo(href: string) {
@@ -170,6 +211,13 @@ export function App() {
       return;
     }
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    const nextRoute = routeForPath(nextPath);
+    if (!nextRoute.publicRoute) {
+      setMountedRouteLocations((locations) => ({
+        ...locations,
+        [routeCachePath(nextRoute)]: `${url.pathname}${url.search}${url.hash}`,
+      }));
+    }
     setPathname(nextPath);
   }
 
@@ -202,11 +250,18 @@ export function App() {
     const isSettingsRoot = cachedRoute.path === "/dashboard/settings";
     const resolvedRoute = isSettingsRoot && bootstrap ? routeForPath(settingsLandingPath(isAdmin)) : cachedRoute;
     const page = isSettingsRoot && !bootstrap ? <SettingsLoadingPage /> : pageForRoute(resolvedRoute, bootstrap);
-    return cachedRoute.path.startsWith("/dashboard/settings") ? (
+    const content = cachedRoute.path.startsWith("/dashboard/settings") ? (
       <SettingsLayout currentPath={cachedRoute.path} isAdmin={isAdmin} onPrefetch={prefetchRoute}>
         {page}
       </SettingsLayout>
     ) : page;
+    return (
+      <Fragment key={mountedRouteLocations[path] || cachedRoute.path}>
+        <Suspense fallback={<RouteLoadingPage route={resolvedRoute} />}>
+          {content}
+        </Suspense>
+      </Fragment>
+    );
   }
 
   const activeCachePath = routeCachePath(route);

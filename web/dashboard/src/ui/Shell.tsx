@@ -84,6 +84,7 @@ export function Shell({
   // --- global search state ---
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -99,12 +100,26 @@ export function Shell({
   // debounced search
   useEffect(() => {
     const q = query.trim();
-    if (!q) { setResults([]); return; }
+    if (!q) {
+      setResults([]);
+      setSearchStatus("idle");
+      return;
+    }
     const controller = new AbortController();
+    setResults([]);
+    setSearchStatus("loading");
     const handle = window.setTimeout(() => {
       searchClient.search(q, controller.signal)
-        .then((items) => { setResults(items); setActiveIdx(0); })
-        .catch(() => { /* aborted or failed — leave prior results */ });
+        .then((items) => {
+          setResults(items);
+          setActiveIdx(0);
+          setSearchStatus("ready");
+        })
+        .catch((error) => {
+          if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+          setResults([]);
+          setSearchStatus("error");
+        });
     }, 180);
     return () => { controller.abort(); window.clearTimeout(handle); };
   }, [query]);
@@ -170,6 +185,7 @@ export function Shell({
     setSearchOpen(false);
     setQuery("");
     setResults([]);
+    setSearchStatus("idle");
     if (result.external) {
       window.open(result.url, "_blank", "noopener");
     } else {
@@ -348,7 +364,11 @@ export function Shell({
               ) : null}
               {showResults ? (
                 <div className="search-results" role="listbox">
-                  {results.length === 0 ? (
+                  {searchStatus === "loading" ? (
+                    <div className="search-empty" role="status">Searching…</div>
+                  ) : searchStatus === "error" ? (
+                    <div className="search-empty" role="alert">Search is unavailable. Try again.</div>
+                  ) : results.length === 0 ? (
                     <div className="search-empty">No matches for “{query.trim()}”.</div>
                   ) : (
                     results.map((result, idx) => (

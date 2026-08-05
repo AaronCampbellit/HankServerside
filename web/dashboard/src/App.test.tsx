@@ -10,8 +10,17 @@ const homeAssistantClient = vi.hoisted(() => ({
   onStateChanged: vi.fn(),
 }));
 
+const searchClient = vi.hoisted(() => ({
+  search: vi.fn(),
+}));
+
 vi.mock("./browser/navigation", () => ({
   redirectTo: vi.fn(),
+}));
+
+vi.mock("./api/search", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./api/search")>()),
+  searchClient,
 }));
 
 vi.mock("./api/homeAssistant", async (importOriginal) => {
@@ -33,6 +42,7 @@ describe("App routes", () => {
     homeAssistantClient.callService.mockResolvedValue({});
     homeAssistantClient.fetchState.mockResolvedValue(null);
     homeAssistantClient.onStateChanged.mockReturnValue(() => {});
+    searchClient.search.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -117,6 +127,68 @@ describe("App routes", () => {
     expect(screen.queryByRole("heading", { name: "Loading notes" })).not.toBeInTheDocument();
     expect(calls.filter((path) => path === "/v1/me/notes")).toHaveLength(1);
     expect(calls.filter((path) => path === "/v1/me/notes/daily")).toHaveLength(1);
+  });
+
+  it("opens a global-search result inside an already mounted Notes tab", async () => {
+    window.history.pushState({}, "", "/dashboard/profile-notes");
+    searchClient.search.mockResolvedValue([{
+      type: "note",
+      title: "Roof Warranty",
+      subtitle: "Expires 2027",
+      url: "/dashboard/profile-notes?note=roof",
+    }]);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
+      const path = String(input);
+      if (path === "/v1/ui/bootstrap") {
+        return new Response(JSON.stringify({
+          user: { id: "usr_1", email: "owner@example.com" },
+          home: { id: "home_1", name: "Campbell Home" },
+          membership: { role: "admin" },
+          permissions: { is_admin: true, can_manage_settings: true },
+          agent: { agent_id: "agent_1", name: "Agent", status: "online" },
+          setup_status: { first_setup_visible: false },
+          features: {},
+          server: { version: "dev" },
+          navigation: [],
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      if (path === "/v1/me/notes") {
+        return new Response(JSON.stringify({
+          notes: [
+            { note_id: "daily", title: "Daily", preview: "Remember milk", page_type: "text", updated_at: "2026-08-04T12:00:00Z" },
+            { note_id: "roof", title: "Roof Warranty", preview: "Expires 2027", page_type: "text", updated_at: "2026-08-03T12:00:00Z" },
+          ],
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      if (path === "/v1/me/notes/daily") {
+        return new Response(JSON.stringify({
+          note_id: "daily",
+          title: "Daily",
+          body_markdown: "Remember milk",
+          revision: "1",
+          page_type: "text",
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      if (path === "/v1/me/notes/roof") {
+        return new Response(JSON.stringify({
+          note_id: "roof",
+          title: "Roof Warranty",
+          body_markdown: "Expires in 2027.",
+          revision: "1",
+          page_type: "text",
+        }), { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+
+    render(<App />);
+
+    expect(await screen.findByDisplayValue("Daily")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "Roof Warranty" } });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /Roof Warranty/i }));
+
+    expect(window.location.search).toBe("?note=roof");
+    expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
   });
 
   it("lands members on a permitted settings page from the generic Settings route", async () => {

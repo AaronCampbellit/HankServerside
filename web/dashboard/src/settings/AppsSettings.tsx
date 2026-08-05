@@ -28,6 +28,10 @@ function appName(app: AppSummary): string {
   return app.name || appID(app) || "App";
 }
 
+function targetedAppID(): string {
+  return new URLSearchParams(window.location.search).get("app") || "";
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Apps could not be loaded.";
 }
@@ -94,12 +98,15 @@ export function AppsSettings() {
     try {
       const [bootstrap, payload] = await Promise.all([bootstrapClient.load(), appsClient.listApps()]);
       const apps = payload.apps || [];
+      const requestedID = targetedAppID();
       setState((current) => ({
         status: "ready",
         bootstrap,
         apps,
         selectedID: current.status === "ready" && apps.some((app) => appID(app) === current.selectedID)
           ? current.selectedID
+          : requestedID && apps.some((app) => appID(app) === requestedID)
+            ? requestedID
           : appID(apps[0] || {}),
         configuringID: "",
         configValues: {},

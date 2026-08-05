@@ -64,6 +64,19 @@ describe("PeopleSettings display names", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/dashboard/settings/people");
+  });
+
+  it("focuses the exact member targeted by global search", async () => {
+    window.history.replaceState({}, "", "/dashboard/settings/people?member=member%40example.com");
+
+    renderSettings();
+
+    const members = await screen.findByRole("list", { name: "Home members" });
+    const memberRow = within(members).getByText("member@example.com").closest("article");
+    expect(memberRow).not.toBeNull();
+    await waitFor(() => expect(memberRow).toHaveFocus());
+    expect(memberRow).toHaveAttribute("aria-current", "true");
   });
 
   it("shows display names with email identity and lets an admin rename any member", async () => {

@@ -2,10 +2,72 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Shell } from "./Shell";
 
+const searchClient = vi.hoisted(() => ({
+  search: vi.fn(),
+}));
+
+vi.mock("../api/search", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/search")>()),
+  searchClient,
+}));
+
 describe("Shell", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it("shows search progress and navigates to the exact selected result", async () => {
+    let resolveSearch: (results: Array<{ type: string; title: string; url: string }>) => void = () => undefined;
+    searchClient.search.mockImplementation(() => new Promise((resolve) => {
+      resolveSearch = resolve;
+    }));
+    const onNavigate = vi.fn();
+    render(
+      <Shell
+        navItems={[{ href: "/dashboard/profile-notes", label: "Notes", group: "Main" }]}
+        currentPath="/dashboard/profile-notes"
+        onNavigate={onNavigate}
+        onLogout={vi.fn()}
+      >
+        <div>Notes content</div>
+      </Shell>,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "Roof Warranty" } });
+    expect(await screen.findByRole("status")).toHaveTextContent("Searching");
+    await waitFor(() => expect(searchClient.search).toHaveBeenCalledWith("Roof Warranty", expect.any(AbortSignal)));
+
+    resolveSearch([{
+      type: "note",
+      title: "Roof Warranty",
+      url: "/dashboard/profile-notes?note=roof",
+    }]);
+
+    const result = await screen.findByRole("option", { name: /Roof Warranty/i });
+    fireEvent.mouseDown(result);
+
+    expect(onNavigate).toHaveBeenCalledWith("/dashboard/profile-notes?note=roof");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes a failed global search from no matches", async () => {
+    searchClient.search.mockRejectedValue(new Error("offline"));
+    render(
+      <Shell
+        navItems={[{ href: "/dashboard", label: "Home", group: "Main" }]}
+        currentPath="/dashboard"
+        onNavigate={vi.fn()}
+        onLogout={vi.fn()}
+      >
+        <div>Dashboard content</div>
+      </Shell>,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "router" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Search is unavailable");
   });
 
   it("loads and renders notification feed items", async () => {

@@ -47,6 +47,7 @@ describe("ProfileNotesPage", () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
     window.localStorage.clear();
+    window.history.replaceState({}, "", "/dashboard/profile-notes");
     Reflect.deleteProperty(document, "execCommand");
   });
 
@@ -310,12 +311,15 @@ describe("ProfileNotesPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Notes" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Collapse notes rail" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse notes rail" })).toBeInTheDocument();
     const creationActions = screen.getByRole("group", { name: "Create note or notebook" });
     const creationButtons = within(creationActions).getAllByRole("button");
     expect(creationButtons.map((button) => button.getAttribute("aria-label"))).toEqual(["New notebook", "New note"]);
     expect(creationButtons[0]).toHaveClass("notes-new-note");
     expect(creationButtons[1]).toHaveClass("notes-new-note");
+    expect(creationButtons[0].querySelector('path[d="M12 5v14M5 12h14"]')).not.toBeNull();
+    expect(document.querySelector(".notes-title-kind")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Notebook filter")).not.toBeInTheDocument();
     const search = screen.getByPlaceholderText("Search notes").closest(".notes-search");
     expect(search?.compareDocumentPosition(creationActions) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
@@ -339,6 +343,16 @@ describe("ProfileNotesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Home Projects" }));
     expect(await screen.findByText("Re-caulk the bathroom")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add card" })).not.toBeInTheDocument();
+    const kanbanEditorTools = screen.getByLabelText("Editor tools");
+    for (const label of ["Bold", "Italic", "Underline", "Smaller heading", "Heading", "Larger heading", "Bulleted list", "Numbered list"]) {
+      expect(within(kanbanEditorTools).queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Open task Re-caulk the bathroom" }));
+    const cardFormatting = screen.getByLabelText("Description formatting");
+    for (const label of ["Bold", "Italic", "Underline", "Smaller heading", "Heading", "Larger heading", "Bulleted list", "Numbered list", "Link"]) {
+      expect(within(cardFormatting).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Close task details" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
     expect(await screen.findByText("No pages in this notebook yet.")).toBeInTheDocument();
@@ -429,7 +443,7 @@ describe("ProfileNotesPage", () => {
     window.localStorage.clear();
   });
 
-  it("keeps notebooks and notes reachable without a collapsed rail control", async () => {
+  it("keeps notebooks and notes reachable from the collapsible rail", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
         { note_id: "house", title: "House Notebook", preview: "1 page", page_type: "notebook" },
@@ -449,12 +463,18 @@ describe("ProfileNotesPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open Roof Warranty" }));
     fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
-    expect(screen.queryByRole("button", { name: "Collapse notes rail" })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("Recently opened notes")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse notes rail" }));
+
+    expect(screen.getByRole("button", { name: "Expand notes rail" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open notebook House Notebook" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open Roof Warranty" }));
+    expect(screen.getByRole("button", { name: "Open note Roof Warranty" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open note Roof Warranty" }));
 
     expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
     expect(await screen.findByLabelText("Note body")).toHaveTextContent("Roof Warranty");
+    fireEvent.click(screen.getByRole("button", { name: "Expand notes rail" }));
+    expect(screen.getByRole("button", { name: "Collapse notes rail" })).toBeInTheDocument();
   });
 
   it("keeps notebook organization in the navigation instead of duplicating it in the editor header", async () => {
@@ -475,11 +495,11 @@ describe("ProfileNotesPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Notebooks" })).toBeInTheDocument();
     expect(screen.getByText("No notebooks yet.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Notebook filter")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Notebook filter")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Notebook")).not.toBeInTheDocument();
   });
 
-  it("filters notes by notebook and creates child notes from the notebook panel", async () => {
+  it("creates child notes from the notebook panel without a duplicate notebook filter", async () => {
     profileNotesClient.listNotes.mockResolvedValue({
       notes: [
         { note_id: "house", title: "House Notebook", preview: "1 page", page_type: "notebook" },
@@ -498,12 +518,7 @@ describe("ProfileNotesPage", () => {
 
     renderPage();
 
-    fireEvent.change(await screen.findByLabelText("Notebook filter"), { target: { value: "house" } });
-    const noteTabs = screen.getByLabelText("Note cards");
-    expect(within(noteTabs).getByRole("button", { name: "Roof Warranty" })).toBeInTheDocument();
-    expect(within(noteTabs).queryByRole("button", { name: /Daily Notes/i })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open notebook House Notebook" }));
     fireEvent.click(await screen.findByRole("button", { name: "New note in House Notebook" }));
 
     expect(screen.getByLabelText("Note title")).toHaveValue("");
@@ -513,6 +528,28 @@ describe("ProfileNotesPage", () => {
       title: "Paint colors",
       parent_id: "house",
     })));
+  });
+
+  it("opens the exact note targeted by global search", async () => {
+    window.history.replaceState({}, "", "/dashboard/profile-notes?note=roof");
+    profileNotesClient.listNotes.mockResolvedValue({
+      notes: [
+        { note_id: "daily", title: "Daily Notes", preview: "Remember milk", page_type: "text" },
+        { note_id: "roof", title: "Roof Warranty", preview: "Expires 2027", page_type: "text" },
+      ],
+    });
+    profileNotesClient.fetchNote.mockImplementation(async (id: string) => ({
+      note_id: id,
+      title: id === "roof" ? "Roof Warranty" : "Daily Notes",
+      body_markdown: id === "roof" ? "Expires in 2027." : "Remember milk",
+      revision: "1",
+      page_type: "text",
+    }));
+
+    renderPage();
+
+    expect(await screen.findByDisplayValue("Roof Warranty")).toBeInTheDocument();
+    expect(profileNotesClient.fetchNote).toHaveBeenCalledWith("roof");
   });
 
   it("sorts pinned notebook notes first and synchronizes pin controls", async () => {
@@ -547,16 +584,8 @@ describe("ProfileNotesPage", () => {
       .map((button) => button.getAttribute("aria-label"))
       .filter((label) => ["Open Pinned Guide", "Open Alpha", "Open Beta"].includes(label || ""));
     expect(notebookPageOrder).toEqual(["Open Pinned Guide", "Open Alpha", "Open Beta"]);
-    fireEvent.change(screen.getByLabelText("Notebook filter"), { target: { value: "house" } });
-
-    const noteCards = screen.getByLabelText("Note cards");
-    const noteOrder = within(noteCards).getAllByRole("button")
-      .map((button) => button.getAttribute("aria-label"))
-      .filter((label) => ["Pinned Guide", "Alpha", "Beta"].includes(label || ""));
-    expect(noteOrder).toEqual(["Pinned Guide", "Alpha", "Beta"]);
-    expect(screen.getByRole("button", { name: "Unpin Pinned Guide" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Pin Beta" }));
+    fireEvent.click(within(notebookPages).getByRole("button", { name: "Open Beta" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pin note" }));
 
     await waitFor(() => expect(profileNotesClient.saveNote).toHaveBeenCalledWith(expect.objectContaining({
       note_id: "beta",
@@ -564,11 +593,12 @@ describe("ProfileNotesPage", () => {
       parent_id: "house",
       pinned: true,
     })));
-    const updatedOrder = within(noteCards).getAllByRole("button")
+    fireEvent.click(screen.getByRole("button", { name: "Open notebook House Notebook" }));
+    const updatedPages = await screen.findByLabelText("Notebook pages");
+    const updatedOrder = within(updatedPages).getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"))
-      .filter((label) => ["Pinned Guide", "Alpha", "Beta"].includes(label || ""));
-    expect(updatedOrder).toEqual(["Beta", "Pinned Guide", "Alpha"]);
-    expect(screen.getByRole("button", { name: "Unpin Beta" })).toBeInTheDocument();
+      .filter((label) => ["Open Pinned Guide", "Open Alpha", "Open Beta"].includes(label || ""));
+    expect(updatedOrder).toEqual(["Open Beta", "Open Pinned Guide", "Open Alpha"]);
   });
 
   it("keeps notebook ordering unchanged when pinning fails", async () => {
@@ -591,12 +621,13 @@ describe("ProfileNotesPage", () => {
     profileNotesClient.saveNote.mockRejectedValue(new Error("Pin save failed"));
 
     renderPage();
-    fireEvent.change(await screen.findByLabelText("Notebook filter"), { target: { value: "house" } });
-    fireEvent.click(screen.getByRole("button", { name: "Pin Roof Warranty" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open notebook House Notebook" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Roof Warranty" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pin note" }));
 
     expect(await screen.findByText("Pin save failed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pin Roof Warranty" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Unpin Roof Warranty" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pin note" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Unpin note" })).not.toBeInTheDocument();
   });
 
   it("lets people type into a text note and save the changed body", async () => {

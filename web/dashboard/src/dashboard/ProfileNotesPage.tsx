@@ -39,8 +39,8 @@ type ReadyState = {
   selectedID: string;
   editor: Editor;
   query: string;
-  selectedNotebookID: string;
   message: string;
+  railOpen: boolean;
   notebookDialogOpen: boolean;
   notebookDraft: string;
   moveDialogNoteID: string;
@@ -70,7 +70,6 @@ const emptyEditor: Editor = {
   shared: false,
 };
 
-const ROOT_NOTEBOOK_FILTER = "__root__";
 const NOTE_AUTOSAVE_DELAY_MS = 750;
 const NOTE_HISTORY_GROUP_DELAY_MS = 750;
 const NOTE_HISTORY_LIMIT = 50;
@@ -213,7 +212,6 @@ function noteEffectiveMcpExcluded(note: ProfileNoteSummary | Editor, notes: Prof
 }
 
 function activeNotebookForNewNote(state: ReadyState): string {
-  if (state.selectedNotebookID && state.selectedNotebookID !== ROOT_NOTEBOOK_FILTER) return state.selectedNotebookID;
   if (state.editor.pageType === "notebook" && state.editor.noteID) return state.editor.noteID;
   return "";
 }
@@ -383,7 +381,10 @@ export function ProfileNotesPage() {
       setProfileSettings({ revision: settings.revision || 0, settings: settings.settings || {} });
       const notes = sortNotes(payload.notes || []);
       const currentSelected = state.status === "ready" ? state.selectedID : "";
-      const selectedID = currentSelected && notes.some((note) => noteID(note) === currentSelected)
+      const requestedID = new URLSearchParams(window.location.search).get("note") || "";
+      const selectedID = requestedID && notes.some((note) => noteID(note) === requestedID)
+        ? requestedID
+        : currentSelected && notes.some((note) => noteID(note) === currentSelected)
         ? currentSelected
         : noteID(notes[0] || {});
       const editor = selectedID ? editorFromNote(await profileNotesClient.fetchNote(selectedID)) : emptyEditor;
@@ -393,8 +394,8 @@ export function ProfileNotesPage() {
         selectedID,
         editor,
         query: current.status === "ready" ? current.query : "",
-        selectedNotebookID: current.status === "ready" ? current.selectedNotebookID : "",
         message,
+        railOpen: current.status === "ready" ? current.railOpen : true,
         notebookDialogOpen: current.status === "ready" ? current.notebookDialogOpen : false,
         notebookDraft: current.status === "ready" ? current.notebookDraft : "",
         moveDialogNoteID: current.status === "ready" ? current.moveDialogNoteID : "",
@@ -436,23 +437,12 @@ export function ProfileNotesPage() {
   const navigationNotes = useMemo(() => {
     if (state.status !== "ready") return { primary: [], recent: [] };
     const query = state.query.trim().toLowerCase();
-    let primary: ProfileNoteSummary[];
+    const primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
     let recent: ProfileNoteSummary[] = [];
-    if (state.selectedNotebookID === ROOT_NOTEBOOK_FILTER) {
-      primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
-    } else if (state.selectedNotebookID) {
-      const children = state.notes.filter((note) => note.parent_id === state.selectedNotebookID);
-      primary = [
-        ...children.filter((note) => note.pinned),
-        ...children.filter((note) => !note.pinned),
-      ];
-    } else {
-      primary = state.notes.filter((note) => !note.parent_id && !isNotebook(note));
-      const cutoff = Date.now() - RECENT_NOTE_WINDOW_MS;
-      recent = state.notes
-        .filter((note) => Boolean(note.parent_id) && !isNotebook(note) && (recentNoteVisits[noteID(note)] || 0) >= cutoff)
-        .sort((left, right) => (recentNoteVisits[noteID(right)] || 0) - (recentNoteVisits[noteID(left)] || 0));
-    }
+    const cutoff = Date.now() - RECENT_NOTE_WINDOW_MS;
+    recent = state.notes
+      .filter((note) => Boolean(note.parent_id) && !isNotebook(note) && (recentNoteVisits[noteID(note)] || 0) >= cutoff)
+      .sort((left, right) => (recentNoteVisits[noteID(right)] || 0) - (recentNoteVisits[noteID(left)] || 0));
     return {
       primary: primary.filter((note) => noteMatchesQuery(note, state.notes, query)),
       recent: recent.filter((note) => noteMatchesQuery(note, state.notes, query)),
@@ -582,7 +572,6 @@ export function ProfileNotesPage() {
     latestEditorRef.current = editor;
     setReady({
       selectedID: "",
-      selectedNotebookID: parentID,
       editor,
       savedEditor: { ...emptyEditor, instanceKey: editor.instanceKey },
       message: "",
@@ -622,7 +611,6 @@ export function ProfileNotesPage() {
       setReady({
         notes: sortNotes([summary, ...readyState.notes.filter((note) => noteID(note) !== savedID)]),
         selectedID: savedID,
-        selectedNotebookID: "",
         editor: { ...emptyEditor, instanceKey: savedID, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
         savedEditor: { ...emptyEditor, instanceKey: savedID, noteID: savedID, title, revision: response.revision || "", pageType: "notebook", updatedAt: response.updated_at || "" },
         notebookDialogOpen: false,
@@ -1164,16 +1152,18 @@ export function ProfileNotesPage() {
       {state.message ? <p className="notice-state">{state.message}</p> : null}
 
       <div
-        className="notes-guide-layout"
+        className={`notes-guide-layout${state.railOpen ? "" : " rail-closed"}`}
         data-mobile-pane={mobilePane}
         data-testid="notes-mobile-workspace"
       >
-        <aside className="notes-guide-rail" aria-label="Notes list">
+        {state.railOpen ? (
+          <aside className="notes-guide-rail" aria-label="Notes list">
             <header className="notes-rail-head">
               <div>
                 <p className="eyebrow">Hank Remote</p>
                 <h1 id="route-title">Notes</h1>
               </div>
+              <button className="icon-button" type="button" aria-label="Collapse notes rail" title="Collapse notes rail" onClick={() => setReady({ railOpen: false })}><Icon name="panel" /></button>
             </header>
             <label className="notes-search">
               <Icon name="search" />
@@ -1181,26 +1171,12 @@ export function ProfileNotesPage() {
               <input type="search" placeholder="Search notes" value={state.query} onChange={(event) => setReady({ query: event.target.value })} />
             </label>
             <div className="notes-create-actions" role="group" aria-label="Create note or notebook">
-              <button className="notes-new-note" type="button" aria-label="New notebook" onClick={openNotebookDialog}><Icon name="book-plus" />New notebook</button>
+              <button className="notes-new-note" type="button" aria-label="New notebook" onClick={openNotebookDialog}><Icon name="plus" />New notebook</button>
               <button className="notes-new-note" type="button" aria-label="New note" onClick={newNote}><Icon name="plus" />New note</button>
             </div>
             <section className="notes-notebooks-section" aria-labelledby="notebooks-heading">
               <div className="notes-section-head">
                 <h2 id="notebooks-heading">Notebooks</h2>
-                <label className="notes-notebook-filter">
-                  <span className="visually-hidden">Notebook filter</span>
-                  <select
-                    aria-label="Notebook filter"
-                    value={state.selectedNotebookID}
-                    onChange={(event) => setReady({ selectedNotebookID: event.target.value })}
-                  >
-                    <option value="">All Notes</option>
-                    <option value={ROOT_NOTEBOOK_FILTER}>No Notebook</option>
-                    {notebookItems.map((note) => (
-                      <option key={noteID(note)} value={noteID(note)}>{noteTitle(note)}</option>
-                    ))}
-                  </select>
-                </label>
               </div>
               {visibleNotebookItems.length ? (
                 <div className="notes-notebook-list">
@@ -1232,7 +1208,7 @@ export function ProfileNotesPage() {
             </section>
             <section className="notes-navigation-section" aria-labelledby="notes-navigation-heading">
               <div className="notes-section-head">
-                <h2 id="notes-navigation-heading">{state.selectedNotebookID && state.selectedNotebookID !== ROOT_NOTEBOOK_FILTER ? notebookTitle(state.notes, state.selectedNotebookID) : "Notes"}</h2>
+                <h2 id="notes-navigation-heading">Notes</h2>
                 <span>{navigationNotes.primary.length}</span>
               </div>
               {navigationNotes.primary.length ? (
@@ -1255,13 +1231,30 @@ export function ProfileNotesPage() {
               </section>
             ) : null}
           </aside>
+        ) : (
+          <aside className="notes-rail-collapsed" aria-label="Notes rail">
+            <button className="icon-button" type="button" aria-label="Expand notes rail" title="Expand notes rail" onClick={() => setReady({ railOpen: true })}><Icon name="panel" /></button>
+            <button className="icon-button" type="button" aria-label="New notebook" title="New notebook" onClick={openNotebookDialog}><Icon name="plus" /></button>
+            <button className="icon-button" type="button" aria-label="New note" title="New note" onClick={newNote}><Icon name="plus" /></button>
+            {visibleNotebookItems.map((note) => {
+              const id = noteID(note);
+              const title = noteTitle(note);
+              return <button className={id === state.selectedID ? "icon-button active" : "icon-button"} key={id} type="button" aria-label={`Open notebook ${title}`} title={title} onClick={() => void selectNote(id)}><Icon name="book" /></button>;
+            })}
+            {visibleNotebookItems.length && visibleNotes.length ? <span className="notes-rail-divider" aria-hidden="true" /> : null}
+            {visibleNotes.map((note) => {
+              const id = noteID(note);
+              const title = noteTitle(note);
+              return <button className={id === state.selectedID ? "icon-button active" : "icon-button"} key={id} type="button" aria-label={`Open note ${title}`} title={title} onClick={() => void selectNote(id)}><Icon name={noteIconName(note)} /></button>;
+            })}
+          </aside>
+        )}
 
         <section className="notes-guide-editor" aria-label="Note editor">
           <header className="notes-editor-header">
             <button className="notes-mobile-back" type="button" aria-label="Back to notes" onClick={() => setMobilePane("browser")}>
               <span aria-hidden="true">‹</span> Notes
             </button>
-            <span className="notes-title-kind" aria-hidden="true"><Icon name={noteIconName(state.editor)} /></span>
             <label className="visually-hidden" htmlFor="noteTitle">Note title</label>
             <input
               id="noteTitle"
@@ -1303,10 +1296,6 @@ export function ProfileNotesPage() {
                 <span className="notes-toolbar-separator" aria-hidden="true" />
                 <ToolbarButton label="Undo" icon="undo" disabled={!history.past.length} onClick={() => applyEditorAction("undo")} />
                 <ToolbarButton label="Redo" icon="redo" disabled={!history.future.length} onClick={() => applyEditorAction("redo")} />
-                <span className="notes-toolbar-separator" aria-hidden="true" />
-                <ToolbarButton label="Bold" text="B" onClick={() => applyEditorAction("bold")} />
-                <ToolbarButton label="Italic" text="I" onClick={() => applyEditorAction("italic")} />
-                <ToolbarButton label="Underline" text="U" onClick={() => applyEditorAction("underline")} />
                 <button
                   className="notes-more-formatting-toggle"
                   type="button"
@@ -1318,11 +1307,19 @@ export function ProfileNotesPage() {
                   More
                 </button>
                 <div id="notes-more-formatting-controls" className={`notes-more-formatting-controls${moreFormattingOpen ? " is-open" : ""}`}>
-                  <ToolbarButton label="Smaller heading" text="A-" onClick={() => applyEditorAction("small")} />
-                  <ToolbarButton label="Heading" text="H" onClick={() => applyEditorAction("heading")} />
-                  <ToolbarButton label="Larger heading" text="A+" onClick={() => applyEditorAction("large")} />
-                  <ToolbarButton label="Bulleted list" icon="list" onClick={() => applyEditorAction("bullets")} />
-                  <ToolbarButton label="Numbered list" icon="ordered" onClick={() => applyEditorAction("numbers")} />
+                  {state.editor.pageType === "text" ? (
+                    <>
+                      <span className="notes-toolbar-separator" aria-hidden="true" />
+                    <ToolbarButton label="Bold" text="B" onClick={() => applyEditorAction("bold")} />
+                    <ToolbarButton label="Italic" text="I" onClick={() => applyEditorAction("italic")} />
+                    <ToolbarButton label="Underline" text="U" onClick={() => applyEditorAction("underline")} />
+                      <ToolbarButton label="Smaller heading" text="A-" onClick={() => applyEditorAction("small")} />
+                      <ToolbarButton label="Heading" text="H" onClick={() => applyEditorAction("heading")} />
+                      <ToolbarButton label="Larger heading" text="A+" onClick={() => applyEditorAction("large")} />
+                      <ToolbarButton label="Bulleted list" icon="list" onClick={() => applyEditorAction("bullets")} />
+                      <ToolbarButton label="Numbered list" icon="ordered" onClick={() => applyEditorAction("numbers")} />
+                    </>
+                  ) : null}
                   <span className="notes-toolbar-separator" aria-hidden="true" />
                   <ToolbarButton label="Text page" icon="note" pressed={state.editor.pageType === "text"} onClick={() => applyEditorAction("text")} />
                   <ToolbarButton label="Kanban page" icon="kanban" pressed={state.editor.pageType === "kanban"} onClick={() => applyEditorAction("kanban")} />

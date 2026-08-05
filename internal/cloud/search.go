@@ -17,11 +17,18 @@ package cloud
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/dropfile/hankremote/internal/domain"
 )
+
+func dashboardSearchURL(path string, key string, value string) string {
+	params := url.Values{}
+	params.Set(key, value)
+	return path + "?" + params.Encode()
+}
 
 const (
 	maxSearchResults = 24
@@ -103,7 +110,7 @@ func (s *Server) handleHomeSearch(w http.ResponseWriter, r *http.Request, home d
 					Type:     "note",
 					Title:    title,
 					Subtitle: noteSnippet(note),
-					URL:      "/dashboard/profile-notes?note=" + note.NoteID,
+					URL:      dashboardSearchURL("/dashboard/profile-notes", "note", note.NoteID),
 					score:    score + 10,
 				})
 			}
@@ -139,7 +146,7 @@ func (s *Server) handleHomeSearch(w http.ResponseWriter, r *http.Request, home d
 						Type:     "app",
 						Title:    app.Name,
 						Subtitle: "App - " + state,
-						URL:      "/dashboard/settings/apps",
+						URL:      dashboardSearchURL("/dashboard/settings/apps", "app", app.AppID),
 						score:    score,
 					})
 				}
@@ -152,7 +159,7 @@ func (s *Server) handleHomeSearch(w http.ResponseWriter, r *http.Request, home d
 						Type:     "member",
 						Title:    member.Email,
 						Subtitle: "Member - " + member.Role,
-						URL:      "/dashboard/settings/people",
+						URL:      dashboardSearchURL("/dashboard/settings/people", "member", member.Email),
 						score:    score,
 					})
 				}

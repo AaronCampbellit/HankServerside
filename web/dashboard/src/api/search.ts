@@ -32,10 +32,15 @@ export class SearchClient {
       this.searchCloud(q, signal),
       this.searchAgent(q),
     ]);
+    if (cloudResults.status === "rejected" && agentResults.status === "rejected") {
+      throw new Error("Search is unavailable.");
+    }
     return uniqueSearchResults([
       ...(cloudResults.status === "fulfilled" ? cloudResults.value : []),
       ...(agentResults.status === "fulfilled" ? agentResults.value : []),
-    ]).slice(0, 24);
+    ])
+      .sort((left, right) => searchResultScore(right, q) - searchResultScore(left, q))
+      .slice(0, 24);
   }
 
   private async searchCloud(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -51,6 +56,9 @@ export class SearchClient {
       this.files.search(query),
       this.homeAssistant.fetchStates(),
     ]);
+    if (fileResults.status === "rejected" && entities.status === "rejected") {
+      throw new Error("Agent search is unavailable.");
+    }
     return [
       ...(fileResults.status === "fulfilled" ? fileSearchResults(fileResults.value.items || fileResults.value.entries || []) : []),
       ...(entities.status === "fulfilled" ? homeAssistantSearchResults(entities.value, query) : []),
@@ -64,12 +72,13 @@ function fileSearchResults(items: FileEntry[]): SearchResult[] {
   return arrayFrom<FileEntry>(items).slice(0, 8).map((item) => {
     const title = fileName(item);
     const path = item.path || `/${title}`;
-    const targetPath = item.is_directory ? path : parentPath(path);
+    const params = new URLSearchParams({ path });
+    if (!item.is_directory) params.set("preview", "1");
     return {
       type: "file",
       title,
       subtitle: path,
-      url: `/dashboard/file-server?path=${encodeURIComponent(targetPath)}`,
+      url: `/dashboard/file-server?${params.toString()}`,
     };
   });
 }
@@ -103,12 +112,6 @@ function fileName(item: FileEntry): string {
   return item.name || item.path.split("/").filter(Boolean).pop() || "/";
 }
 
-function parentPath(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  parts.pop();
-  return parts.length ? `/${parts.join("/")}` : "/";
-}
-
 function uniqueSearchResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   const unique: SearchResult[] = [];
@@ -119,4 +122,28 @@ function uniqueSearchResults(results: SearchResult[]): SearchResult[] {
     unique.push(result);
   }
   return unique;
+}
+
+function searchResultScore(result: SearchResult, query: string): number {
+  const needle = query.trim().toLowerCase();
+  const title = result.title.toLowerCase();
+  const subtitle = (result.subtitle || "").toLowerCase();
+  const kindBonus: Record<string, number> = {
+    page: 40,
+    note: 30,
+    homeassistant: 20,
+    file: 10,
+  };
+  const matchScore = title === needle
+    ? 1000
+    : title.startsWith(needle)
+      ? 800
+      : title.includes(needle)
+        ? 600
+        : subtitle.startsWith(needle)
+          ? 400
+          : subtitle.includes(needle)
+            ? 200
+            : 0;
+  return matchScore + (kindBonus[result.type] || 0);
 }
