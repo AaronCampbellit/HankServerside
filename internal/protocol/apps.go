@@ -60,6 +60,7 @@ type AppSettingsField struct {
 	Secret      bool                `json:"secret,omitempty"`
 	SecretKey   string              `json:"secret_key,omitempty"`
 	Source      string              `json:"source,omitempty"`
+	SourceField string              `json:"source_field,omitempty"`
 	Placeholder string              `json:"placeholder,omitempty"`
 	Help        string              `json:"help,omitempty"`
 	Default     json.RawMessage     `json:"default,omitempty"`

@@ -42,7 +42,7 @@ Compatibility-sensitive surfaces include:
 - `apps.list`, `apps.package_preview`, `apps.package_activate`, `apps.config_status`, `apps.config_apply`, and `apps.invoke`
 - Settings > Apps schema rendering
 - `config.settings_schema`, `secret_fields`, and secret-preservation behavior
-- file-source bindings such as `source: "file_sources"` plus matching `permissions.files` entries
+- file-source bindings such as `source: "file_sources"`, path-field `source_field` dependencies, and matching `permissions.files` entries
 - access mode behavior for `admins_only` and `home_members`
 
 Breaking changes require all of the following:
@@ -105,6 +105,13 @@ runtime validation. The runtime validator remains authoritative because it also
 checks cross-field rules such as slash-command command references, reserved
 commands, package path containment, default/option compatibility, and supported
 permission semantics.
+
+A `path` settings field may declare `source_field` to reference a
+`select` field whose source is `file_sources`. Settings > Apps then renders an
+existing-directory picker scoped to that selected primary-agent file source.
+The picker supports the source root and arbitrary nested directories; it does
+not create directories. Changing the referenced source clears the dependent
+path. Path fields without `source_field` retain their text-input behavior.
 
 When using Codex to create or update an installable Hank app, use the
 `hank-create-app` skill, shown as "Hank App Builder" in the local skill list.

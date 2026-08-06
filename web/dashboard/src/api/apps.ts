@@ -9,6 +9,7 @@ export type AppSettingsField = {
   secret?: boolean;
   secret_key?: string;
   source?: string;
+  source_field?: string;
   placeholder?: string;
   help?: string;
   default?: unknown;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HomeAgentEntry } from "../api/agents";
 import type { ServiceProfile } from "../api/connections";
-import { fileTargetsFrom, loadFileTargets } from "./fileServerTargets";
+import { fileTargetsFrom, loadFileTargets, loadPrimaryFileTargets } from "./fileServerTargets";
 
 function profile(config: Record<string, unknown>): ServiceProfile {
   return {
@@ -65,6 +65,29 @@ describe("file server target discovery", () => {
 
     await expect(loadFileTargets(connections, agents)).resolves.toEqual([
       { key: "worker:mac-1", sourceID: "", agentID: "mac-1", name: "Studio Mac", detail: "Worker shared folders", kind: "worker" },
+    ]);
+  });
+
+  it("loads only configured primary-agent sources for installable apps", async () => {
+    const connections = {
+      listProfiles: vi.fn().mockResolvedValue({
+        profiles: [profile({
+          sources: [
+            { id: "movies", name: "Movies share", type: "smb", host: "nas.local", share: "movies" },
+            { id: "tv", name: "TV host folder", type: "local", root: "/srv/tv" },
+          ],
+        })],
+      }),
+    };
+    const agents = {
+      listAgents: vi.fn().mockResolvedValue([
+        { agent_id: "worker-1", name: "Worker", status: "online", agent_type: "worker", capabilities: ["files.list"] },
+      ]),
+    };
+
+    await expect(loadPrimaryFileTargets(connections, agents)).resolves.toEqual([
+      { key: "primary:movies", sourceID: "movies", agentID: "", name: "Movies share", detail: "//nas.local/movies", kind: "smb" },
+      { key: "primary:tv", sourceID: "tv", agentID: "", name: "TV host folder", detail: "/srv/tv", kind: "host" },
     ]);
   });
 });

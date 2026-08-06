@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { appsClient, type AppSettingsField, type AppSummary, type AppsPackagePreview } from "../api/apps";
 import { bootstrapClient, type BootstrapState } from "../api/bootstrap";
+import { loadPrimaryFileTargets, type FileTarget } from "../dashboard/fileServerTargets";
+import { AppFolderPicker } from "./AppFolderPicker";
 
 type State =
   | { status: "loading" }
@@ -9,6 +11,7 @@ type State =
       status: "ready";
       bootstrap: BootstrapState;
       apps: AppSummary[];
+      fileSources: FileTarget[];
       selectedID: string;
       configuringID: string;
       configValues: Record<string, string | boolean>;
@@ -68,7 +71,9 @@ function settingsFields(app: AppSummary): AppSettingsField[] {
 }
 
 function fieldValue(config: Record<string, unknown>, field: AppSettingsField): string | boolean {
-  const value = Object.prototype.hasOwnProperty.call(config, field.key) ? config[field.key] : field.default;
+  const value = Object.prototype.hasOwnProperty.call(config, field.key)
+    ? config[field.key]
+    : field.default ?? (field.type === "select" ? field.options?.[0]?.value : undefined);
   if (field.type === "boolean") return Boolean(value);
   return value == null ? "" : String(value);
 }
@@ -85,7 +90,12 @@ function configFromFields(fields: AppSettingsField[], values: Record<string, str
       if (trimmed) config[field.key] = Number(trimmed);
     } else {
       const trimmed = String(value || "").trim();
-      if (trimmed) config[field.key] = trimmed;
+      if (trimmed) {
+        const option = field.type === "select"
+          ? field.options?.find((candidate) => String(candidate.value) === trimmed)
+          : undefined;
+        config[field.key] = option ? option.value : trimmed;
+      }
     }
   }
   return config;
@@ -96,13 +106,18 @@ export function AppsSettings() {
 
   async function load(message = "") {
     try {
-      const [bootstrap, payload] = await Promise.all([bootstrapClient.load(), appsClient.listApps()]);
+      const [bootstrap, payload, fileSources] = await Promise.all([
+        bootstrapClient.load(),
+        appsClient.listApps(),
+        loadPrimaryFileTargets(),
+      ]);
       const apps = payload.apps || [];
       const requestedID = targetedAppID();
       setState((current) => ({
         status: "ready",
         bootstrap,
         apps,
+        fileSources,
         selectedID: current.status === "ready" && apps.some((app) => appID(app) === current.selectedID)
           ? current.selectedID
           : requestedID && apps.some((app) => appID(app) === requestedID)
@@ -152,6 +167,12 @@ export function AppsSettings() {
   const configuringApp = readyState.apps.find((app) => appID(app) === readyState.configuringID) || null;
   const fields = configuringApp ? settingsFields(configuringApp) : [];
   const secretState = configuringApp ? secretFieldsSet(configuringApp) : {};
+  const requiredValuesMissing = fields.some((field) => (
+    field.required
+    && !field.secret
+    && field.type !== "boolean"
+    && !String(readyState.configValues[field.key] ?? "").trim()
+  ));
 
   function setReady(next: Partial<Extract<State, { status: "ready" }>>) {
     setState((current) => current.status === "ready" ? { ...current, ...next } : current);
@@ -170,6 +191,16 @@ export function AppsSettings() {
       enabled: Boolean(app.enabled),
       userAccess: app.user_access === "home_members" ? "home_members" : "admins_only",
     });
+  }
+
+  function setConfigField(field: AppSettingsField, value: string | boolean) {
+    const configValues = { ...readyState.configValues, [field.key]: value };
+    if (field.type === "select") {
+      for (const dependent of fields) {
+        if (dependent.source_field === field.key) configValues[dependent.key] = "";
+      }
+    }
+    setReady({ configValues });
   }
 
   async function toggle(app: AppSummary) {
@@ -341,11 +372,44 @@ export function AppsSettings() {
                     <input
                       checked={Boolean(readyState.configValues[field.key])}
                       disabled={!canManage}
-                      onChange={(event) => setReady({ configValues: { ...readyState.configValues, [field.key]: event.target.checked } })}
+                      onChange={(event) => setConfigField(field, event.target.checked)}
                       type="checkbox"
                     />
                     <span>{label}</span>
                   </label>
+                );
+              }
+              if (field.type === "select") {
+                const options = field.source === "file_sources"
+                  ? readyState.fileSources.map((source) => ({ value: source.sourceID, label: source.name }))
+                  : (field.options || []).map((option) => ({ value: String(option.value), label: option.label || String(option.value) }));
+                return (
+                  <label key={field.key}>
+                    <span>{label}</span>
+                    <select
+                      aria-label={label}
+                      disabled={!canManage}
+                      onChange={(event) => setConfigField(field, event.target.value)}
+                      value={String(readyState.configValues[field.key] || "")}
+                    >
+                      {field.source === "file_sources" ? <option value="">Select a source</option> : null}
+                      {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                );
+              }
+              if (field.type === "path" && field.source_field) {
+                return (
+                  <div className="app-settings-field" key={field.key}>
+                    <span>{label}</span>
+                    <AppFolderPicker
+                      disabled={!canManage}
+                      label={label}
+                      onChange={(value) => setConfigField(field, value)}
+                      sourceID={String(readyState.configValues[field.source_field] || "")}
+                      value={String(readyState.configValues[field.key] || "")}
+                    />
+                  </div>
                 );
               }
               return (
@@ -353,14 +417,14 @@ export function AppsSettings() {
                   <span>{label}</span>
                   <input
                     disabled={!canManage}
-                    onChange={(event) => setReady({ configValues: { ...readyState.configValues, [field.key]: event.target.value } })}
+                    onChange={(event) => setConfigField(field, event.target.value)}
                     type={field.type === "number" || field.type === "url" ? field.type : "text"}
                     value={String(readyState.configValues[field.key] || "")}
                   />
                 </label>
               );
             })}
-            <button aria-label="Save app configuration" disabled={!canManage} type="submit">Save app</button>
+            <button aria-label="Save app configuration" disabled={!canManage || requiredValuesMissing} type="submit">Save app</button>
           </form>
         </section>
       ) : null}

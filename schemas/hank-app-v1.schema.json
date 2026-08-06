@@ -216,6 +216,9 @@
         "source": {
           "enum": ["file_sources"]
         },
+        "source_field": {
+          "$ref": "#/$defs/identifier"
+        },
         "placeholder": {
           "type": "string"
         },

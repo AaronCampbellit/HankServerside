@@ -424,6 +424,57 @@ select {
   letter-spacing: 0;
 }
 
+.app-folder-picker {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.app-settings-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.app-settings-field > span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.app-folder-picker > button {
+  justify-content: flex-start;
+  min-height: 2.75rem;
+  overflow-wrap: anywhere;
+  text-align: left;
+  width: 100%;
+}
+
+.app-folder-dialog {
+  max-width: 42rem;
+}
+
+.app-folder-dialog > header,
+.app-folder-dialog > footer {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.app-folder-breadcrumbs,
+.app-folder-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.app-folder-list {
+  align-content: start;
+  min-height: 8rem;
+}
+
+.app-folder-list button {
+  text-align: left;
+}
+
 .settings-actions,
 .form-actions,
 .row-actions,

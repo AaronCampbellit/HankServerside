@@ -80,7 +80,7 @@ func neutralContractManifestFixtures() map[string]Manifest {
 		{Key: "api_base_url", Label: "API URL", Type: "url", Required: true, Default: json.RawMessage(`"https://example.test"`), Order: 20},
 		{Key: "api_key", Label: "API key", Type: "password", Secret: true, SecretKey: "api_key", Order: 30},
 		{Key: "source_id", Label: "File source", Type: "select", Source: "file_sources", Order: 40},
-		{Key: "destination_path", Label: "Destination", Type: "path", Placeholder: "Inbox", Order: 50},
+		{Key: "destination_path", Label: "Destination", Type: "path", SourceField: "source_id", Placeholder: "Inbox", Order: 50},
 		{Key: "mode", Label: "Mode", Type: "select", Default: json.RawMessage(`"standard"`), Options: []SettingsOption{
 			{Value: json.RawMessage(`"standard"`), Label: "Standard"},
 			{Value: json.RawMessage(`"advanced"`), Label: "Advanced"},
@@ -135,6 +135,12 @@ func TestValidateManifestAcceptsTypedSettingsAndFileSourcePermission(t *testing.
 				Label:  "Media source",
 				Type:   "select",
 				Source: "file_sources",
+			},
+			{
+				Key:         "destination_path",
+				Label:       "Destination folder",
+				Type:        "path",
+				SourceField: "source_id",
 			},
 		},
 	}
@@ -199,6 +205,58 @@ func TestValidateManifestRejectsSecretAndPermissionFieldDrift(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			manifest := validContractManifest()
 			tt.mutate(&manifest)
+			err := ValidateManifest(manifest)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateManifest error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateManifestRejectsInvalidPathSourceFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		fields []SettingsField
+		want   string
+	}{
+		{
+			name: "source field on non path",
+			fields: []SettingsField{
+				{Key: "source_id", Type: "select", Source: "file_sources"},
+				{Key: "destination_path", Type: "text", SourceField: "source_id"},
+			},
+			want: "path type",
+		},
+		{
+			name: "missing source field",
+			fields: []SettingsField{
+				{Key: "destination_path", Type: "path", SourceField: "missing_source"},
+			},
+			want: "missing_source",
+		},
+		{
+			name: "source field references non select",
+			fields: []SettingsField{
+				{Key: "source_id", Type: "text"},
+				{Key: "destination_path", Type: "path", SourceField: "source_id"},
+			},
+			want: "select",
+		},
+		{
+			name: "source field references static select",
+			fields: []SettingsField{
+				{Key: "source_id", Type: "select", Options: []SettingsOption{{Value: json.RawMessage(`"local"`)}}},
+				{Key: "destination_path", Type: "path", SourceField: "source_id"},
+			},
+			want: "file_sources",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := validContractManifest()
+			manifest.Config.Settings = SettingsSchema{Fields: tt.fields}
+			manifest.Permissions.Network = nil
 			err := ValidateManifest(manifest)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("ValidateManifest error = %v, want containing %q", err, tt.want)

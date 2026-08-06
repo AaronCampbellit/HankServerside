@@ -107,3 +107,10 @@ export async function loadFileTargets(
   const agentEntries = agentsResult.status === "fulfilled" ? agentsResult.value : [];
   return fileTargetsFrom(profiles, agentEntries);
 }
+
+export async function loadPrimaryFileTargets(
+  connections: ConnectionsSource = connectionsClient,
+  agents: AgentsSource = agentsClient,
+): Promise<FileTarget[]> {
+  return (await loadFileTargets(connections, agents)).filter((target) => !target.agentID);
+}

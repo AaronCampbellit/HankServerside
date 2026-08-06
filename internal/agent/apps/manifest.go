@@ -254,6 +254,24 @@ func ValidateManifest(manifest Manifest) error {
 			}
 		}
 	}
+	for i, field := range manifest.Config.Settings.Fields {
+		if field.SourceField == "" {
+			continue
+		}
+		if field.Type != "path" {
+			return fmt.Errorf("settings field %d source_field requires path type", i)
+		}
+		sourceField, ok := settingsFields[field.SourceField]
+		if !ok {
+			return fmt.Errorf("settings field %d source_field references unknown field %q", i, field.SourceField)
+		}
+		if sourceField.Type != "select" {
+			return fmt.Errorf("settings field %d source_field %q must reference a select field", i, field.SourceField)
+		}
+		if sourceField.Source != "file_sources" {
+			return fmt.Errorf("settings field %d source_field %q must reference a file_sources select field", i, field.SourceField)
+		}
+	}
 	for i, permission := range manifest.Permissions.Network {
 		if permission.Kind != networkPermissionConfiguredBaseURL {
 			return fmt.Errorf("network permission %d kind %q is not supported", i, permission.Kind)
